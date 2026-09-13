@@ -1,0 +1,46 @@
+/* agents.css — domain styles for this surface's owner. */
+.metric-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:17px;margin-bottom:22px}
+.section-title{display:flex;gap:13px;align-items:flex-start;margin-bottom:22px}
+.section-title>svg{color:var(--accent)}
+.section-title h2{font-size:16px}
+.section-title p{font-size:11px;color:var(--muted);margin-top:7px}
+.agent-fields{border:0;padding:0;margin:20px 0;display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.agent-setup{max-width:1000px}
+.connection-confirm{padding:20px;border:1px solid var(--teal);border-radius:8px;margin:18px 0}
+.connection-confirm p,.agent-setup>p{line-height:1.7;margin:10px 0}
+.usage-unavailable{display:flex;gap:36px;margin:22px 0;color:var(--muted)}
+.metric progress{width:100%;accent-color:var(--teal)}
+.log-table-wrap{overflow:auto;margin:20px 0}
+.token-table{width:100%;border-collapse:collapse;font-size:12px}
+.token-table th,.token-table td{padding:12px;text-align:right;border-bottom:1px solid var(--border);white-space:nowrap}
+.token-table th:first-child{text-align:left}
+.token-table thead{color:var(--muted)}
+.work-log-entry{border:1px solid var(--border);background:var(--panel);padding:18px;border-radius:8px;margin:12px 0}
+.work-log-entry small{display:block;color:var(--muted);margin:10px 0;overflow-wrap:anywhere}
+.work-log-entry pre,.agent-detail pre{white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.7 ui-monospace,monospace;margin:14px 0}
+.effort-control{display:flex;align-items:end;gap:12px;margin:20px 0;flex-wrap:wrap}
+.effort-control .field{margin:0}
+.agent-detail .activity-view{margin-top:25px;padding-top:20px;border-top:1px solid var(--border)}
+.agent-detail .section-toolbar{flex-wrap:wrap;gap:12px}
+.agent-detail .log-filters{grid-template-columns:repeat(2,minmax(0,1fr))}
+.agent-detail .log-filters .field:last-child{grid-column:1/-1}
+.agent-detail p,.activity-view p,.settings-card>p{font-size:12px;line-height:1.65;margin:10px 0}
+.agent-detail .log-filters{grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:12px 0}
+.agent-detail .log-filters .field:last-child{grid-column:1/-1}
+.agent-detail .section-toolbar h2{font-size:18px}
+.agent-detail .effort-control{margin:14px 0}
+.dialog.wide:has(.agent-detail){width:min(1080px,calc(100vw - 60px))}
+.agent-detail .activity-view{margin-top:16px;padding-top:14px}
+.activity-view>.section-toolbar{margin-bottom:10px}
+.work-log-entry pre{font-size:12px}
+.activity-view .section-toolbar{flex-wrap:wrap;gap:10px}
+@media(max-width:900px){.agent-fields{grid-template-columns:1fr}}
+.evidence-list{list-style:none;margin:6px 0;padding:0;display:grid;gap:4px;font-size:12px}
+.evidence-list i{opacity:.7}
+.connection-row details summary{cursor:pointer;font-size:12px;margin:4px 0}
+.profile-tabs{display:grid;gap:10px}
+.tab-row{display:flex;gap:6px;flex-wrap:wrap;border-bottom:1px solid var(--line,#2b3333);padding-bottom:6px}
+.tab{background:none;border:1px solid transparent;border-radius:8px;padding:4px 10px;font-size:13px;cursor:pointer;color:inherit;opacity:.7}
+.tab.active{opacity:1;border-color:var(--line,#2b3333)}
+.tab-panel{display:grid;gap:10px}
+.assignment-row{display:grid;gap:2px;padding:8px 0;border-bottom:1px solid var(--line,#2b3333)}

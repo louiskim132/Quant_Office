@@ -2,6 +2,7 @@ import React, {useState} from 'react';
 import type {AppState,Experiment,Command,Request} from '../shared/types';
 import {queueScope,type QueueFilter} from '../shared/queue';
 import {RequestDispatch} from './dispatch';
+import './queue.css';
 import './office.css';
 
 export function WorkQueue({state,busy,onNew,onOpen,onCancel,onAction,onState}:{state:AppState;onAction:(command:Command)=>void;busy:boolean;onNew:()=>void;onOpen:(e:Experiment)=>void;onCancel:(id:string)=>void;onState:(s:AppState)=>void}){

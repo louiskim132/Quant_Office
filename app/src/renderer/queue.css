@@ -1,0 +1,10 @@
+/* queue.css — domain styles for this surface's owner. */
+.task-list{display:grid;gap:13px}
+.task-card{background:var(--panel);border:1px solid var(--border);border-radius:9px;padding:20px}
+.task-prompt{white-space:pre-wrap;font-size:13px;line-height:1.65;margin-top:16px;overflow-wrap:anywhere}
+.task-meta{font-size:10px;color:var(--subtle);display:flex;gap:8px;margin:13px 0}
+.task-card>.text-button{margin-top:6px}
+.dispatch-card{border-top:1px solid var(--line,#2b3333);margin-top:12px;padding-top:12px;display:grid;gap:8px}
+.dispatch-card h3{margin:0;font-size:13px;letter-spacing:.04em;text-transform:uppercase;opacity:.8}
+.command-preview{background:rgba(0,0,0,.25);border-radius:8px;padding:8px 10px;font-size:12px;overflow-x:auto;white-space:pre;margin:0}
+.link-session{display:grid;gap:6px;padding:8px 0}

@@ -5,6 +5,7 @@ import type {StageFunction} from '../shared/research';
 import {SPEC_SECTIONS,STAGE_FUNCTIONS,STAGES} from '../shared/research';
 import {BranchStanding} from './review';
 import {EvidencePanel} from './evidence';
+import './pipeline.css';
 
 export function ResearchPipeline({state,projectId}:{state:AppState;projectId:string}){
  const [branchId,setBranchId]=useState(''),[subject,setSubject]=useState(''),[requestId,setRequestId]=useState('');

@@ -4,6 +4,7 @@ import { suggestedEfforts } from '../shared/effort';
 import { providerReadiness } from '../shared/readiness';
 import { LocalConsumption } from './activity';
 import {TRANSPORT_PROBE_CONTAINMENT} from '../shared/transport';
+import './agents.css';
 const roleNames:Record<Role,string>={DIRECTOR:'Director',PM_A:'PM · Implementation',PM_B:'PM · Verification',PM_C:'PM · Findings',PM_D:'PM · Falsification',WORKER:'Worker'};
 let setupDraft:AgentDraft|undefined;
 export function AgentSetup({onAdded}:{onAdded:(state:AppState)=>void}){

@@ -2,6 +2,7 @@ import React,{useState} from 'react';
 import {ArrowUpRight,Folder,FolderPlus,Plus,Settings2} from 'lucide-react';
 import type {AppState,Project,ProjectLocation} from '../shared/types';
 import {Empty,SearchField} from './components';
+import './projects.css';
 
 function ProjectLocationPanel({project,saved,location,onState}:{project:Project;saved:ProjectLocation|undefined;location:string;onState:(s:AppState)=>void}){
  const [folder,setFolder]=useState(location);

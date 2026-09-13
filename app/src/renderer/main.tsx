@@ -9,14 +9,19 @@ import { WorkQueue } from './queue';
 import { AgentSetup, ProviderConnections, SubscriptionUsage } from './agents';
 import { ProjectsView } from './projects';
 import { HistoryView } from './history';
-import { ResearchPipeline } from './pipeline';
+import { ResearchView } from './research';
 import { ProfileTabs } from './profile';
 import { AgentDetails } from './activity';
-import { Empty } from './components';
+import { Empty, label } from './components';
 
 type Page = 'Agents' | 'Office' | 'Projects' | 'Tasks' | 'Research' | 'Reviews' | 'Artifacts' | 'History' | 'Usage' | 'Settings' | 'Add Agent';
 type CommandInput = Command extends infer C ? C extends Command ? Omit<C, 'idempotencyKey'> : never : never;
-const nav = [ ['Office', LayoutDashboard], ['Agents', Users], ['Projects', Folder], ['Tasks', ListTodo], ['Research', BookOpen], ['Reviews', ShieldCheck], ['Artifacts', Box], ['History', History], ['Usage', Wallet], ['Settings', Settings2], ['Add Agent', Plus] ] as const;
+const navSections = [
+ ['WORKSPACE', [['Office', LayoutDashboard], ['Agents', Users], ['Projects', Folder], ['Tasks', ListTodo]]],
+ ['RESEARCH', [['Research', BookOpen], ['Reviews', ShieldCheck], ['Artifacts', Box]]],
+ ['RECORDS', [['History', History]]],
+ ['SYSTEM', [['Usage', Wallet], ['Settings', Settings2]]],
+] as const;
 const roles: { role: Role; label: string; title: string; scope: string; color: string }[] = [
  { role: 'DIRECTOR', label: 'Director', title: 'Research direction', scope: 'Defines research contracts, priorities, and final decisions.', color: 'amber' },
  { role: 'PM_A', label: 'PM · A', title: 'Implementation', scope: 'Owns implementation and integration of research work.', color: 'teal' },
@@ -26,33 +31,8 @@ const roles: { role: Role; label: string; title: string; scope: string; color: s
  { role: 'WORKER', label: 'Worker · 01', title: 'Research execution', scope: 'Completes bounded tasks under a project manager.', color: 'neutral' },
  { role: 'WORKER', label: 'Worker · 02', title: 'Research execution', scope: 'Completes bounded tasks under a project manager.', color: 'neutral' },
 ];
-const contractFields: [keyof ResearchContract, string, string][] = [
- ['objective', 'Research objective', 'What question will this experiment answer? Define the target and output meaning.'],
- ['dataPolicy', 'Data & leakage policy', 'Data sources, time splits, availability, leakage controls, and permitted use.'],
- ['modelFamilies', 'Model families', 'Candidate methods, baselines, and the comparison you want to make.'],
- ['evaluation', 'Evaluation protocol', 'Metrics, validation design, holdouts, and success / failure criteria.'],
- ['economics', 'Economic assumptions', 'Costs, slippage, capacity, exposures, and any economic constraints.'],
- ['protectedRegions', 'Protected regions', 'Untouched data, protected code, and boundaries requiring an amendment.'],
- ['requiredChecks', 'Required checks', 'Required evidence, reproducibility checks, and falsification tests.'],
- ['limitations', 'Limitations & open questions', 'Known uncertainty, missing inputs, assumptions, and unresolved decisions.'],
-];
 const date = (d: string) => new Date(d).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-const label = (s: string) => s.replaceAll('_', ' ').toLowerCase();
 const savedId = (key: string) => { try { return localStorage.getItem(key) || ''; } catch { return ''; } };
-interface ContractDraft { draft: ResearchContract; revision: number; saved: string; }
-const contractDrafts = new Map<string, ContractDraft>();
-function readContractDraft(experiment: Experiment): ContractDraft {
- const memory = contractDrafts.get(experiment.id);
- if (memory) return memory;
- try {
-  const stored: unknown = JSON.parse(localStorage.getItem(`quant-contract-draft:${experiment.id}`) || 'null');
-  if (stored && typeof stored === 'object') {
-   const entry = stored as ContractDraft;
-   if (Number.isSafeInteger(entry.revision) && entry.revision >= 0 && typeof entry.saved === 'string' && entry.draft && contractFields.every(([key]) => typeof entry.draft[key] === 'string' && entry.draft[key].length <= 12000)) return entry;
-  }
- } catch {}
- return { draft: { ...experiment.contract }, revision: experiment.revision, saved: JSON.stringify(experiment.contract) };
-}
 
 function App() {
  const [state, setState] = useState<AppState | null>(null);
@@ -118,9 +98,8 @@ function App() {
  return <div className="app-shell">
   <aside className="sidebar">
    <div className="brand"><div className="brand-mark"><Box size={22}/></div><div>QUANT<span>RESEARCH OFFICE</span></div></div>
-   <div className="sidebar-section-label">WORKSPACE</div>
-   <nav aria-label="Main navigation">{nav.map(([name, Icon], i) => <React.Fragment key={name}>{name === 'Settings' && <div className="nav-divider"/>}<button className={`nav-item ${page === name ? 'active' : ''}`} aria-current={page === name ? 'page' : undefined} onClick={() => setPage(name)}><Icon size={18}/><span>{name}</span>{name === 'Tasks' && blockedRequests > 0 && <b>{blockedRequests}</b>}{name === 'Add Agent' && <span className="later-dot"/>}</button></React.Fragment>)}</nav>
-   <div className="sidebar-footer"><div className="environment"><span className="status-dot"/>Local workspace</div><p>Research runs on provider infrastructure.</p><span className="version">DESKTOP · {info?.version || 'INITIAL RELEASE'}</span></div>
+   <nav aria-label="Main navigation">{navSections.map(([section, items]) => <React.Fragment key={section}><div className="sidebar-section-label">{section}</div>{items.map(([name, Icon]) => <button key={name} className={`nav-item ${page === name ? 'active' : ''}`} aria-current={page === name ? 'page' : undefined} onClick={() => setPage(name)}><Icon size={18}/><span>{name}</span>{name === 'Tasks' && blockedRequests > 0 && <b>{blockedRequests}</b>}</button>)}</React.Fragment>)}</nav>
+   <div className="sidebar-footer"><button className={`sidebar-action ${page === 'Add Agent' ? 'active' : ''}`} onClick={() => setPage('Add Agent')}><Plus size={15}/>Add agent</button><div className="environment"><span className="status-dot"/>Local workspace</div><p>Research runs on provider infrastructure.</p><span className="version">DESKTOP · {info?.version || 'INITIAL RELEASE'}</span></div>
   </aside>
   <div className="workspace">
    <header className="topbar"><div className="context-selector"><Folder size={16}/><select aria-label="Current project" value={project?.id || ''} onChange={e => chooseProject(e.target.value)}><option value="">Select a project</option>{state.projects.map(p => <option key={p.id} value={p.id}>{p.name}{p.archived ? ' (archived)' : ''}</option>)}</select><ChevronRight size={14}/><select aria-label="Current experiment" disabled={!project} value={experiment?.id || ''} onChange={e => setExperimentId(e.target.value)}><option value="">All experiments</option>{experiments.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}</select></div><div className="topbar-right"><span className="provider-status"><span className="status-dot off"/>{state.agents.filter(a=>!a.removedAt).length} agents registered</span><button className="spend-pill" onClick={() => setPage('Usage')}><Wallet size={14}/>Subscription usage</button></div></header>
@@ -132,7 +111,7 @@ function App() {
     {page === 'Agents' && <AgentRoster state={state} busy={busy} onAgent={setAgentDetailId} onAdd={()=>setPage('Add Agent')} onRemove={(id,removed)=>void command({type:'agent.remove',agentId:id,removed})}/>}
     {page === 'Projects' && <ProjectsView state={state} project={project} projectId={projectId} onState={acceptState} onOpenProject={id=>{chooseProject(id);setPage('Research');}} onNewProject={()=>setModal('project')} onError={fail}/>}
     {page === 'Tasks' && <WorkQueue onState={acceptState} onAction={c=>void command(c)} state={state} busy={busy} onNew={()=>project&&!project.archived?setModal('experiment'):setModal('project')} onOpen={e=>{setProjectId(e.projectId);setExperimentId(e.id);setPage('Research');}} onCancel={id=>void command({type:'task.cancel',taskId:id},'Request and linked research canceled.')}/>}
-    {page === 'Research' && needProject(<><ResearchPipeline key={projectId} state={state} projectId={projectId}/><div className="research-overview"><div><span className="mini-label">PROJECT MANDATE</span><h2>{project?.name}</h2><p>{project?.mandate || 'Add a mandate to describe the scope of this project.'}</p></div><div className="button-row"><button className="secondary" onClick={() => setModal('edit-project')}>Edit project</button><button className="text-button" disabled={busy} onClick={() => void command({ type: 'project.archive', projectId, archived: !project?.archived }, project?.archived ? 'Project restored.' : 'Project archived.')}>{project?.archived ? 'Restore project' : 'Archive project'}</button></div></div>{experiments.length > 0 && <div className="experiment-tabs" aria-label="Experiments">{experiments.map(e => <button aria-pressed={experimentId === e.id} className={experimentId === e.id ? 'selected' : ''} onClick={() => setExperimentId(e.id)} key={e.id}>{e.name}<span>{label(e.stage)}</span></button>)}</div>}{experiment ? <ContractEditor key={experiment.id} experiment={experiment} disabled={busy || !!project?.archived} command={command}/> : <Empty icon={BookOpen} title={experiments.length ? 'Choose an experiment' : 'Define your first experiment'} description="Open research details from the work queue, or create a new request." action={<button className="primary" disabled={project?.archived} onClick={() => setModal('experiment')}><Plus size={15}/>New request</button>}/>}</>)}
+    {page === 'Research' && needProject(<ResearchView state={state} project={project!} projectId={projectId} experiments={experiments} experiment={experiment} experimentId={experimentId} busy={busy} command={command} onSelectExperiment={setExperimentId} onBack={() => { chooseProject(''); setPage('Projects'); }} onEditProject={() => setModal('edit-project')} onNewRequest={() => setModal('experiment')}/>)}
     {page === 'Reviews' && needProject(<><div className="review-gates">{['Independent evidence', 'One rebuttal round', 'Director decision'].map((s, i) => <div key={s}><span className="gate-number">0{i + 1}</span><strong>{s}</strong><span className="quiet-badge small">Pending</span></div>)}</div>{!scopedReviews.length ? <Empty icon={ShieldCheck} title="Evidence before approval" description="No review reports have been submitted. Independent provider agents must be configured before a research contract or code package can be reviewed."/> : <div className="task-list">{scopedReviews.filter(r => !experiment || r.experimentId === experiment.id).map(r => <article className="task-card" key={r.id}><div className="card-heading"><h3>{roles.find(role => role.role === r.role)?.label}</h3><span className="quiet-badge">{r.disclosed ? r.verdict : 'Awaiting disclosure'}</span></div><p>{r.disclosed ? r.content : 'Independent report remains sealed until the disclosure gate is satisfied.'}</p><code className="hash">Bundle {r.bundleHash}</code></article>)}</div>}</>)}
     {page === 'Artifacts' && needProject(<><div className="section-toolbar artifact-toolbar"><span>{scopedArtifacts.length} files stored</span><div className="button-row"><button className="secondary" disabled={busy || project?.archived} onClick={() => void files(() => window.office.importFiles({ projectId, experimentId: experiment?.id || null, kind: 'REFERENCE' }))}><ArrowDownToLine size={15}/>Import references</button><button className="secondary" disabled={busy || project?.archived} onClick={() => void files(() => window.office.importFiles({ projectId, experimentId: experiment?.id || null, kind: 'RESULT' }))}><ArrowDownToLine size={15}/>Import my results</button><button className="primary" disabled={busy} onClick={() => void files(() => window.office.exportProject(projectId))}><ArrowUpFromLine size={15}/>Export project</button></div></div><div className="inline-note"><LockKeyhole size={16}/><span>Files are stored as evidence. Imported results await provider verification. Finalized ML code runs manually in your own Colab session; this app never connects to it.</span></div>{!scopedArtifacts.length ? <Empty icon={Box} title="A cabinet for your evidence" description="Import reference code, datasets, or results you produced yourself. Nothing you import is executed by this app."/> : <div className="table-wrap"><table><thead><tr><th>Artifact</th><th>Type / state</th><th>Integrity</th><th>Added</th><th/></tr></thead><tbody>{scopedArtifacts.filter(a => !experiment || a.experimentId === experiment.id).map(a => <tr key={a.id}><td><strong>{a.name}</strong><small>{a.size.toLocaleString()} bytes · {a.mediaType}</small></td><td><span className="quiet-badge small">{label(a.kind)}</span><small>{label(a.status)} · {label(a.classification)}</small></td><td><code title={a.sha256}>{a.sha256.slice(0, 12)}…</code></td><td>{date(a.createdAt)}</td><td><button className="secondary" disabled={busy} onClick={async () => { setBusy(true); try { setPreview({ name: a.name, ...await window.office.previewArtifact(a.id) }); } catch (e) { fail(e); } finally { setBusy(false); } }}>Preview</button></td></tr>)}</tbody></table></div>}<p className="footnote">Project export includes the current local record and stored files. It does not certify code as approved.</p></>)}
     {page === 'History' && <HistoryView state={state} projectId={projectId||null} label={label} date={date}/>}
@@ -148,37 +127,7 @@ function App() {
  </div>;
 }
 
-function ContractEditor({ experiment, disabled, command }: { experiment: Experiment; disabled: boolean; command: (c: CommandInput, n?: string) => Promise<AppState | null> }) {
- const [initial] = useState(() => readContractDraft(experiment));
- const [draft, setDraft] = useState<ResearchContract>(initial.draft);
- const [baseRevision, setBaseRevision] = useState(initial.revision);
- const [saved, setSaved] = useState(initial.saved);
- const dirty = JSON.stringify(draft) !== saved;
- const conflict = experiment.revision !== baseRevision;
- const editable = experiment.stage === 'DRAFT' || experiment.stage === 'CONTRACT_REVIEW';
- useEffect(() => {
-  const key = `quant-contract-draft:${experiment.id}`;
-  if (dirty) {
-   const snapshot = { draft, revision: baseRevision, saved };
-   contractDrafts.set(experiment.id, snapshot);
-   try { localStorage.setItem(key, JSON.stringify(snapshot)); } catch {}
-  } else {
-   contractDrafts.delete(experiment.id);
-   try { localStorage.removeItem(key); } catch {}
-  }
- }, [draft, baseRevision, saved, dirty, experiment.id]);
- useEffect(() => {
-  if (!dirty && experiment.revision !== baseRevision) {
-   setDraft({ ...experiment.contract }); setBaseRevision(experiment.revision); setSaved(JSON.stringify(experiment.contract));
-  }
- }, [experiment.revision, experiment.contract, baseRevision, dirty]);
- const reload = () => { setDraft({ ...experiment.contract }); setBaseRevision(experiment.revision); setSaved(JSON.stringify(experiment.contract)); };
- async function save() { const next = await command({ type: 'contract.save', experimentId: experiment.id, expectedRevision: baseRevision, contract: draft }, 'Research contract saved as a new version.'); const updated = next?.experiments.find(e => e.id === experiment.id); if (updated) { setBaseRevision(updated.revision); setSaved(JSON.stringify(updated.contract)); setDraft({ ...updated.contract }); } }
- async function submit() { const next = await command({ type: 'contract.submit', experimentId: experiment.id, expectedRevision: baseRevision }, 'Contract submitted. Review remains blocked until agents are configured.'); const updated = next?.experiments.find(e => e.id === experiment.id); if (updated) { setBaseRevision(updated.revision); setSaved(JSON.stringify(updated.contract)); setDraft({ ...updated.contract }); } }
- return <section className="contract-editor"><div className="contract-heading"><div><div className="eyebrow">RESEARCH CONTRACT · VERSION {baseRevision}</div><h2>{experiment.name}</h2><p>{experiment.hypothesis}</p></div><span className="status-badge">{label(experiment.stage)}</span></div>{conflict && <div className="notice error"><span>A newer contract revision is available. Reload the current version before saving; your unsaved edits will be replaced.</span><button className="secondary" onClick={reload}>Discard edits &amp; reload</button></div>}{!editable && <div className="inline-note"><LockKeyhole size={16}/>{experiment.stage==='CANCELED'?'This request was canceled. Its research details are read-only.':'This contract is frozen for its current stage.'}</div>}<div className="contract-fields">{contractFields.map(([key, title, placeholder], i) => <label className="field contract-field" key={key}><span><b>{String(i + 1).padStart(2, '0')}</b>{title}</span><textarea value={draft[key]} disabled={disabled || !editable} rows={3} maxLength={12000} placeholder={placeholder} onChange={e => setDraft(d => ({ ...d, [key]: e.target.value }))}/></label>)}</div><div className="contract-actions"><span className="muted">{dirty ? 'Unsaved changes · draft retained' : 'Saved version'} · Reviews require configured provider agents</span><div className="button-row"><button className="secondary" disabled={disabled || !editable || !dirty || conflict} onClick={() => void save()}>Save contract</button><button className="primary" disabled={disabled || !editable || dirty || conflict || experiment.stage === 'CONTRACT_REVIEW' || !draft.objective.trim()} onClick={() => void submit()}><ShieldCheck size={15}/>{experiment.stage === 'CONTRACT_REVIEW' ? 'Awaiting review' : 'Submit for review'}</button></div></div></section>;
-}
-
-function Metric({ label, value, detail }: { label: string; value: string; detail: string }) { return <div className="metric-card"><span className="mini-label">{label}</span><strong>{value}</strong><p>{detail}</p></div>; }
+function Metric({ label: metricLabel, value, detail }: { label: string; value: string; detail: string }) { return <div className="metric-card"><span className="mini-label">{metricLabel}</span><strong>{value}</strong><p>{detail}</p></div>; }
 function Dialog({ title, onClose, children, wide }: { title: string; onClose: () => void; children: React.ReactNode; wide?: boolean }) {
  const ref = useRef<HTMLDialogElement>(null);
  useEffect(() => { const dialog = ref.current; if (!dialog) return; const previous = document.activeElement as HTMLElement | null; dialog.showModal(); return () => { dialog.close(); previous?.focus(); }; }, []);
