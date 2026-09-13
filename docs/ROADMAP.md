@@ -2404,4 +2404,53 @@ Remaining defects and exact next item: the History count line totals events plus
   rows hidden under the 'all' view; the per-card 'Open folder' shortcut was dropped (the location is visible in
   the row and editable in the settings panel); ProjectsView still accepts unused project/onError props. Next
   item: human review and merge of parallel/prepared-20260912/organizer; workers 5-7 were IDLE this round.
+
+Date / item / status: 2026-09-13 / D2 round ui-refresh-001 — app-wide presentation polish and Research
+  back-to-projects navigation / VERIFIED_LOCAL
+Problem and resulting behavior: after list-views-001 the renderer still presented as crude and messy, and
+  opening a project into Research left no route back to the Projects list. The organizer prerequisite (0ba42d8)
+  extracted ResearchView and ContractEditor from main.tsx into research.tsx with a pre-wired onBack prop the
+  shell routes to the Projects page, split the 39KB monolithic styles.css into per-domain files
+  (office/agents/projects/queue/research/pipeline/history.css) so worker CSS ownership is disjoint, dropped
+  ~120 dead rules including the orphaned .pixel-office scene and location.tsx, grouped the flat sidebar into
+  WORKSPACE/RESEARCH/RECORDS/SYSTEM sections and demoted Add agent to a sidebar footer action. A shared visual
+  contract applied to every packet: warm-dark tokens only, 8px rhythm, one right-aligned primary action per
+  region, shared Empty component for zero-content surfaces, and verbatim preservation of honesty copy.
+  Worker 1 (32a3fdc) gave the Agents roster a uniform row rhythm, replaced the no-match strip with the shared
+  Empty component, hid pagination unless more than one page exists, regrouped provider readiness into
+  Account/Operations badge groups and right-aligned the setup primary action. Worker 2 (c314d86) rendered an
+  unconditional 'Back to projects' control (ArrowLeft + .back-link) at the top of ResearchView calling onBack,
+  restyled the overview header with an Active/Archived badge and right-aligned action group including a primary
+  New request button, and turned experiment-tabs into an underline strip. Worker 3 (6f6d3ec) normalized the
+  queue filter bar, replaced the inline empty note with the shared Empty component, added right-aligned
+  .task-actions footers and the canceled status-badge variant, and wrapped the request editor and dispatch
+  panel in bordered sub-panels. Worker 4 (09cd023) replaced the shared .tab-row stage list with a scoped
+  .stage-steps progression (done/current/pending markers, canonical S0-S10 titles, STAGE_GATES gate text),
+  classified pipeline buttons primary/secondary, divided BranchStanding sections, aligned EvidencePanel line
+  numbers and hashes, and gave History an Empty state plus a normalized filter bar.
+Changed source/test files: app/src/renderer/research.tsx (new), app/src/renderer/research.css (new),
+  app/src/renderer/agents.css (new), app/src/renderer/pipeline.css (new), app/src/renderer/projects.css (new),
+  app/src/renderer/queue.css (new), app/src/renderer/office.tsx, app/src/renderer/office.css,
+  app/src/renderer/agents.tsx, app/src/renderer/profile.tsx, app/src/renderer/queue.tsx,
+  app/src/renderer/dispatch.tsx, app/src/renderer/pipeline.tsx, app/src/renderer/review.tsx,
+  app/src/renderer/evidence.tsx, app/src/renderer/history.tsx, app/src/renderer/history.css,
+  app/src/renderer/components.tsx, app/src/renderer/main.tsx, app/src/renderer/styles.css;
+  app/src/renderer/location.tsx deleted (dead code).
+Migration and compatibility impact: none — presentation only. No command, store schema, shared type, IPC,
+  preload or dependency change; every command payload, disabled condition and honesty string is verbatim.
+Commands actually run, exit codes and dated log paths: node tools/desktop.mjs review + accept per exact SHA
+  (32a3fdc, c314d86, 6f6d3ec, 09cd023) onto base 0ba42d8 — all ancestry/scope PASS with clean in-scope diffs;
+  merges 41e1d45, f9a3869, ee67ec9, ee12123. node_modules/.bin/tsc --noEmit — exit 0 after each merge and on
+  the combined HEAD. node_modules/.bin/tsx --test tests/task-delete.test.ts — exit 0.
+  node_modules/.bin/tsx --test --test-concurrency=4 tests/*.test.ts — exit 0, 384/384 on merged HEAD ee12123.
+  node app/scripts/build.mjs — exit 0 (0.5.0). node app/test-output/ui-tour.mjs — exit 0; live Electron tour
+  across all 12 pages plus explicit navigation assertions: BACK_LINK_VISIBLE=1 on an opened project's Research
+  page and BACK_ON_PROJECTS=1 after activating it (screenshots in app/test-output/ui-tour/).
+Local fixture evidence versus live provider evidence: all local. No provider session was created, observed or
+  cancelled; the packaged agents.e2e.ts provider-catalog fixture was not rerun this round and remains
+  environment-blocked as recorded in the list-views-001 entry.
+Known unresolved external IDs/operations: none new; provider model-catalog and effort reads stay external.
+Remaining defects and exact next item: none functional reported; the merged History count line still totals
+  events plus all logs including hidden OFFICE_EVENT rows. Next item: human review and merge of
+  parallel/prepared-20260912/organizer; workers 5-7 were IDLE this round.
 ~~~
