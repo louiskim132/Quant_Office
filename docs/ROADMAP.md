@@ -1,6 +1,6 @@
 # Quant Research Office — single implementation roadmap
 
-Updated 2026-09-12 after the complete locally actionable C4–C7 revision, static review, consolidated verification with targeted repairs, and fresh packaged/native acceptance. This is the sole active roadmap. Sections 11 and 12 distinguish VERIFIED_LOCAL implementation from BLOCKED_EXTERNAL live capability evidence. Earlier slice reports are historical. Section 3.1 remains a proposal, not an enabled provider route.
+Updated 2026-09-13 after the fixed eight-session desktop coordination layer was implemented and exercised. The complete locally actionable C4–C7 revision, static review, consolidated verification with targeted repairs, and fresh packaged/native acceptance remain the application baseline. This is the sole active roadmap. Sections 11 and 12 distinguish VERIFIED_LOCAL implementation from BLOCKED_EXTERNAL live capability evidence. Earlier slice reports are historical. Section 3.1 remains a proposal, not an enabled provider route.
 
 ## 1. Start here: scope, priority and execution rules
 
@@ -135,6 +135,48 @@ D1 implementation, only as a separate bounded developer-tooling slice after R1-A
 5. Keep the tool only if evidence supports its usefulness without missed dependencies, stale writes or unsupported access. Otherwise remove the trial configuration and retain the native map/search workflow. Do not create a custom cross-client orchestrator for this trial.
 
 Acceptance: both clients locate the same current symbol/callers on the same source version; edits invalidate index/map entries; generated data is excluded by default yet explicitly accessible when relevant; all task regressions remain valid; sequential writing enforced by task ownership. D1 is developer convenience, not a condition for R2–R5 or product cloud readiness.
+
+### 1.5 Parallel coding: organizer and up to seven workers (D2)
+
+This is developer coordination for changing this application. It does not enable the application's R5 research transport. User requested one organizer plus 5–7 concurrent SWE-2 coding sessions on 2026-09-12. The worker runtime is selectable in the actual coding client; no specific model access or account concurrency has been verified here.
+
+**Organizer owns the outcome.** Freeze objective, interfaces, file ownership and acceptance before dispatch. Keep main stable. Workers each get an isolated local worktree or hosted clone, a unique branch, the same frozen base SHA, and one bounded task. Workers propose; organizer reviews exact SHAs, rejects out-of-scope changes, resolves integration conflicts, tests the combined application and opens one PR to main. Session 8 may merge that integration PR only after every worker is resolved, the round is closed, the exact PR head contains current `origin/main`, the required `verify` check succeeds for that same head, and required conversations are resolved. Direct pushes to `main` remain prohibited; workers never merge into `main`. Git and instructions coordinate changes; they do not share conversations or automatically create model sessions.
+
+Shared types (`app/src/shared/`), `core/store.ts`, `main/main.ts`, `main/preload.ts`, dependencies/lockfiles, CI, agent instructions and this roadmap are organizer-owned. An interface or layer restructure is a prerequisite when other workers depend on it: land the contract first, then start a new batch at that commit. Do not simultaneously ask one worker to redesign the layers and six others to code against the old layers. Assign disjoint tests along with implementation files. Workers propose roadmap changes in their PR body; organizer updates section 11 once, preventing seven edits of this file.
+
+Suggested planning lanes (not active feature authorizations): UI shell/styles; office/dispatch UI; research/evidence UI; prompt construction; isolated service refactor; targeted regression tests; independent review. Give each a concrete acceptance packet and non-overlapping paths before starting it. The reviewer can stay read-only; five well-scoped writers are preferable to seven overlapping writers. Prompts embedded in shared types/controllers may require an organizer contract change first.
+
+**Fixed local desktop batch.** The executable [desktop session manual](DESKTOP-SESSIONS.md) defines the prepared Session 1–7 worker plus Session 8 organizer workflow. `tools/desktop.mjs` binds each checkout to one role, publishes all seven slots atomically from the organizer's clean `HEAD`, gives each worker only its own immutable packet on `start`, records submissions by exact commit SHA, refuses stale/out-of-scope results and reviews, and merges accepted commits only into the organizer checkout. A round closes only after every slot is resolved and the organizer records actual combined unit, typecheck and build outcomes plus the canonical roadmap update. This coordination metadata is an execution log, not a competing product plan. It cannot authenticate a model, make two desktop applications respect one-writer ownership, independently prove a self-reported check, create provider sessions or connect an isolated hosted clone to the local mailbox.
+
+From repository root, with Node 24 and Git installed:
+
+~~~powershell
+git fetch origin
+node tools/parallel.mjs init ui-round-1 7
+# Use the absolute batch directory printed by init in place of <batch-dir>.
+node tools/parallel.mjs status <batch-dir>
+node tools/parallel.mjs assign <batch-dir> worker-1 <task.json>
+node tools/parallel.mjs check <batch-dir> worker-1
+~~~
+
+Task JSON has `objective` (string), `allowedPaths` (array of exact relative files or directory prefixes ending in `/`) and `acceptance` (nonempty array of strings). Example shape: `{"objective":"Implement the organizer-approved office spacing specification","allowedPaths":["app/src/renderer/office.css"],"acceptance":["No label overlap at the specified viewports","Attach before/after screenshots"]}`. This example does not itself assign a feature. The organizer writes the actual spec before assignment. `assign` refuses duplicate assignment, overlap, traversal and organizer-owned paths, then emits the worker prompt and saves its packet under the batch's `assignments` directory. Only the organizer uses assignment commands; issue them sequentially. The local batch manifest is execution metadata, not a second roadmap. It is not committed or copied into remote sessions automatically.
+
+`init` defaults to the fetched `origin/main`, accepts 1–7 workers, creates an organizer plus workers under a sibling sessions directory, and preserves a manifest before creating worktrees. It refuses an existing batch/branch and a dirty source checkout. If creation fails halfway, inspect `status` and the retained paths; it never deletes existing work. No dependencies, credentials, node_modules, app data or historical logs are copied. For a reviewed setup pilot before main merge, its third argument can be an explicit setup branch/commit; report this deviation and start production batches from main after review.
+
+Local clients: open each exact worker directory in Codex/Claude Code/Windsurf and paste its generated packet. Select the model in that client. Codex's currently saved `Agent Team` project points to the parent folder, so add the actual `quant-team` repository or individual worker directories as projects. Codex managed worktrees also work, but record their actual branch/base in the task packet. Separate clients must never write the same checkout. Each worker installs its own locked dependencies in `app` (`pnpm install --frozen-lockfile`, Node 24.19.0, pnpm 11.19.0); native Electron tests require the supported Windows environment. Do not share writable node_modules or production app-data across sessions. Existing ignored test-output evidence stays in the original checkout; it is not available in a fresh clone.
+
+Devin hosted: first connect `louiskim132/Quant_Office` in Devin's GitHub connection and configure its repository environment. Each session uses a fresh hosted clone, the packet's exact frozen commit/branch and its objective. The packet's local Windows path is only for local clients. Push the organizer branch before creating worker PRs; workers target that branch. `AGENTS.md` is supported by Devin. No Devin login, repo grant, SWE-2 selection or 5–7 live sessions can be inferred from a successful local Git push. Current browser inspection reached the signed-out Devin site. Complete sign-in/connection in the provider's own interface; do not paste tokens into task packets.
+
+Organizer review procedure:
+
+1. Obtain worker commit SHA, actual tests/screenshots, unresolved defects, interface/migration impact and proposed roadmap entry. Fetch the worker branch (or PR head) from GitHub into this repository for hosted workers.
+2. Run `node tools/parallel.mjs check <batch-dir> worker-N <exact-fetched-SHA>` for hosted work, or omit SHA to check the local worker's clean checkout/branch. This checks ancestry, whitespace and final file scope only; it does not certify behavior or tests. Never infer independent review from a worker self-report.
+3. In a clean organizer checkout, review the exact diff and merge only the approved SHA, one worker at a time. If a merge conflicts, stop integration and resolve or request a narrow repair; never use blanket ours/theirs conflict resolution. Existing worker work stays isolated. Repeat affected checks after each meaningful integration and the full unit/typecheck/build checks on the final combined result. Desktop and packaged acceptance are still required before a release.
+4. Update the roadmap and open the organizer-to-main PR. Fetch `origin/main`; require it to be an ancestor of the exact PR head, require `verify` success for that same SHA, and require resolved conversations. If main advanced, merge current `origin/main` into the organizer branch, resolve narrowly, rerun combined verification, push, and wait for the replacement check. Session 8 may then merge through the protected PR. It never uses `git push origin HEAD:main`, and it never requests a raw token as a workaround when authenticated PR access is unavailable. Keep worker branches until their accepted changes are merged. Cleanup is explicit and only after checking uncommitted work and unmerged commits.
+
+Organizer kickoff prompt: "Read AGENTS.md and ROADMAP sections 1, 1.5 and 11. Organize the requested change into up to seven bounded packets from one frozen base. Define shared interfaces first, give workers disjoint file/test ownership, record dependencies and acceptance, then review their exact commits and test the combined result in your organizer checkout. Close the round, push one integration PR, verify its exact head contains current origin/main and has a successful required verify check, then merge it through GitHub if authenticated PR access is available. Never push directly to main or request a raw token. Do not claim workers were launched without actual session IDs."
+
+Primary references: [Codex worktrees](https://learn.chatgpt.com/docs/environments/git-worktrees), [Devin GitHub connection](https://docs.devin.ai/integrations/gh), [Devin AGENTS.md](https://docs.devin.ai/onboard-devin/agents-md), [Devin environment setup](https://docs.devin.ai/onboard-devin/environment).
 
 ## 2. Evaluation of the proposed research architecture
 
@@ -917,6 +959,7 @@ Status vocabulary: NOT_STARTED, IMPLEMENTED_FOUNDATION, IN_PROGRESS, PARTIALLY_V
 | R1-A | VERIFIED_LOCAL | Done 2026-09-08. Main handler refuses office:verify-transport before tool-path lookup, account observation, adapter construction or directory creation; the Settings live-create flow and its state are removed; bridge regression proves repeated direct calls reject with no connection, capability or event change. |
 | R1-B | VERIFIED_LOCAL, action still contained | Done 2026-09-08. Real one-commit fixture through the ordinary R2 route, durable intent written before any provider contact, receipts persisted immediately, unresolved attempts refusing duplicates across restart with staging retained for reconciliation, framed receipt contract re-derived from section 13, honest model scope and classified failure metadata. R1 step 6 remains external. The Verify action stays contained pending R5. |
 | D0 developer map | VERIFIED_LOCAL documentation | Section 1.3 map/fingerprints and selective-read protocol added after inspecting R0 source/log. |
+| D2 parallel coding setup | VERIFIED_LOCAL tooling; desktop/provider sessions NOT_STARTED | 2026-09-13: the fixed local desktop state machine and detailed Session 1–7/Session 8 manual supplement the general worktree protocol. Four coordination tests pass, including seven simultaneous starts, atomic publication, role/path binding, immutable round hashes, stale review/head refusal, exact-SHA submission, scope enforcement, rejection, integration, close and next-round preservation. The eight prepared local worktrees under `quant-team-sessions/prepared-20260912` were fast-forwarded to setup commit `236ccda4817fcf5320e4ee95389af34bcb92dd46`; setup was run twice, all role/status checks returned the correct clean checkout and `NOT_READY`, and no product round was published. Installing ignored role files does not launch or authenticate a session. The merge policy now authorizes Session 8 to merge only its closed-round integration PR after current-main ancestry, exact-head `verify` success and conversation-resolution checks; direct main pushes and raw-token workarounds remain prohibited. The prior fresh locked install, typecheck, 382/382 application units and build passed in the setup worktree. GitHub main protection requires a strict `verify` check, PR, resolved conversations and admin enforcement, with no force-push/deletion. CI results are on [setup PR #1](https://github.com/louiskim132/Quant_Office/pull/1). Claude Code 2.1.270 reported a signed-in subscription; Codex saved-project path remains the parent folder; Devin browser was signed out and its repository grant/model choice remain unverified. No SWE-2 or other worker sessions were launched. |
 | D1 optional Serena trial | PARTIALLY_IMPLEMENTED, nonblocking | Project-local AGENTS.md and CLAUDE.md pointers plus the Git/worktree policy were added during repository setup on 2026-09-12. The optional Serena comparison and client configuration remain NOT_STARTED; no navigation plugin was installed. |
 | OmniRoute routing extension | NOT_STARTED implementation; architecture reviewed 2026-09-11 | Section 3.1 proposes operation-specific model/session/research contracts and an optional bounded free-worker route. Current subscription-only runtime policy remains unchanged; no gateway installation, provider transfer or live compatibility test occurred. Integrate with C2/C4/C7 and retain R5/custody requirements. |
 | R2 | VERIFIED_LOCAL within documented limits | Snapshot/output inventory is shared by backup and restore; both formats restore actual bytes into a new root. OutputService reserves real destinations on prepare/launch and stores versioned verified bytes. Required missing objects refuse backup. Snapshot identity rejects null/wrong request revisions. Remaining constraints: source swap races, recorded-platform Git reconstruction and R5 transport limits. |
@@ -947,6 +990,35 @@ Commands actually run, exit codes and dated log paths:
 Local fixture evidence versus live provider evidence:
 Known unresolved external IDs/operations:
 Remaining defects and exact next item:
+~~~
+
+~~~text
+Date / item / status: 2026-09-13 / D2 fixed desktop coordination / VERIFIED_LOCAL tooling; sessions NOT_STARTED
+Problem and resulting behavior: Independent desktop chats could not communicate, and the original helper generated isolated
+  checkouts and one-off prompts but had no atomic current-round mailbox, fixed role binding, immutable submission record or
+  organizer integration state. tools/desktop.mjs now binds eight prepared worktrees to Sessions 1–8, publishes exactly seven
+  disjoint CODE/IDLE slots from one frozen organizer HEAD, serializes concurrent starts, refuses stale/tampered/out-of-scope
+  results and reviews, preserves blocked/rejected commits, and allows only Session 8 to merge and close. The detailed operating
+  manual makes the human interaction request -> WORK READY -> start in Sessions 1–7 -> review in Session 8 explicit.
+Changed source/test files: tools/desktop.mjs and tools/desktop.test.mjs added; tools/parallel.mjs protected-path/export support;
+  .github/workflows/verify.yml runs both coordination suites; AGENTS.md, CLAUDE.md, README.md, .gitignore, this roadmap and
+  docs/DESKTOP-SESSIONS.md document the roles and commands. Ignored .session.json/SESSION.md and shared batch records are local
+  execution metadata, not product source or a second roadmap.
+Migration and compatibility impact: no application schema, IPC, dependency, package, product data or runtime behavior changed.
+  The general tools/parallel.mjs hosted/PR workflow remains available. Existing branches and worktrees are preserved.
+Commands actually run, exit codes and dated log paths: node --test tools/parallel.test.mjs tools/desktop.test.mjs — exit 0,
+  4 tests passed, 0 failed in the implementation worktree. The committed setup revision was fast-forwarded without resets into
+  all eight prepared worktrees; setup ran twice; role/status checks in every checkout returned clean, correct Session 1–8
+  identities and NOT_READY. No application suite was rerun because product source and dependencies did not change.
+Local fixture evidence versus live provider evidence: disposable local Git repositories only. The regression launched seven
+  local start processes concurrently and exercised publish/start/finish/block/review/accept/reject/close. It did not launch,
+  authenticate or select any Devin, Codex or Claude model and did not verify hosted shared-filesystem access.
+Known unresolved external IDs/operations: Devin repository grant, SWE-2 availability and desktop concurrency are unverified;
+  Codex's saved Agent Team project still names the parent folder rather than these exact eight local checkouts.
+Remaining defects and exact next item: the user must open each exact folder listed in the generated START-HERE.md in a
+  local-filesystem-capable desktop session and paste the one-time bootstrap. The first product round remains NOT_READY until
+  Session 8 receives, decomposes and successfully publishes a concrete feature request. Provider sign-in/grant/model checks
+  remain external to this local tooling.
 ~~~
 
 ~~~text

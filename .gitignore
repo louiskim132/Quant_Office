@@ -5,3 +5,5 @@ test-output/
 .pnpm-store/
 nul
 *.log
+/.session.json
+/SESSION.md
