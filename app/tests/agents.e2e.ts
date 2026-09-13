@@ -37,7 +37,7 @@ try{
  assert.equal(await page.evaluate(()=>Boolean((window as any).injected)),false);
  await page.screenshot({path:path.join(root,'test-output','agent-work-log.png')});
  await detail.getByRole('button',{name:'Close dialog',exact:true}).click();
- await page.getByRole('button',{name:'Logs',exact:true}).click();await page.getByLabel('Log agent',{exact:true}).selectOption(state.agents[1].id);await page.getByLabel('Other participant',{exact:true}).selectOption(state.agents[0].id);await page.getByLabel('Log view',{exact:true}).selectOption('between');await page.getByText('Fixture review request <script>window.injected=true</script>',{exact:true}).waitFor();
+ await page.getByRole('button',{name:'History',exact:true}).click();await page.getByLabel('Subject',{exact:true}).selectOption(state.agents[1].id);await page.getByLabel('Other participant',{exact:true}).selectOption(state.agents[0].id);await page.getByLabel('Record view',{exact:true}).selectOption('between');await page.getByText('Fixture review request <script>window.injected=true</script>',{exact:true}).waitFor();
  await page.getByRole('button',{name:'Usage',exact:true}).click();
  const transcripts=path.join(data,'transcripts');await mkdir(transcripts);const record={type:'assistant',sessionId:'fixture-session',timestamp:new Date().toISOString(),message:{id:'fixture-message',model:'fixture-opus',usage:{input_tokens:123,output_tokens:45,cache_read_input_tokens:6,cache_creation_input_tokens:7}}};await writeFile(path.join(transcripts,'session.jsonl'),JSON.stringify(record)+'\n'+JSON.stringify(record)+'\n');
  await app.evaluate(({dialog},folder)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[folder]});},transcripts);

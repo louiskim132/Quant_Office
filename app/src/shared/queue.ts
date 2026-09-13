@@ -8,6 +8,8 @@ export interface QueueEntry {
  request?: Request;
  active: boolean;
  canCancel: boolean;
+ /** Removal from the queue is a view change on a terminal record; the record itself is retained. */
+ deletable: boolean;
  /** Every job on this request, in record order. A request can carry several authorized jobs. */
  jobs?: RequestJobSummary[];
  /** What the interface may offer, derived once here so buttons and store guards cannot disagree. */
@@ -77,15 +79,16 @@ export function requestQueue(state: Pick<AppState, 'tasks' | 'experiments' | 'pr
   const group = groups.get(key) ?? [];
   group.push(task); groups.set(key, group);
  }
- const legacy:QueueEntry[] = [...groups.values()].map(tasks => {
+ const legacy:QueueEntry[] = [...groups.values()].filter(tasks=>!tasks.every(t=>t.removedAt)).map(tasks => {
   const root = tasks[0];
   const experiment = state.experiments.find(e => e.id === root.experimentId);
   const status = experiment?.stage === 'CANCELED' ? 'CANCELED' : root.status;
   const active = !['CANCELED', 'ACCEPTED', 'SUPERSEDED'].includes(status);
   return {id: root.id, root, tasks, status, active,
-   canCancel: active && !state.projects.find(p => p.id === root.projectId)?.archived};
+   canCancel: active && !state.projects.find(p => p.id === root.projectId)?.archived,
+   deletable: status === 'ACCEPTED' || status === 'CANCELED'};
  });
- const current:QueueEntry[]=(state.requests??[]).map(request=>{
+ const current:QueueEntry[]=(state.requests??[]).filter(request=>!request.removedAt).map(request=>{
   const archived=Boolean(state.projects.find(p=>p.id===request.projectId)?.archived);
   const jobs=requestJobs(state,request.id);
   return {
@@ -95,6 +98,9 @@ export function requestQueue(state: Pick<AppState, 'tasks' | 'experiments' | 'pr
    // work in view rather than letting a later completed job settle the whole request.
    active:request.status!=='CANCELED'||jobs.some(job=>job.unresolved),
    canCancel:request.status!=='CANCELED'&&!archived,
+   // Only a terminal record leaves the queue, and an unresolved provider job outcome never does:
+   // an unknown attempt is exactly what must stay in view until it is reconciled.
+   deletable:request.status==='CANCELED'&&!jobs.some(job=>job.unresolved),
    jobs,actions:requestActions(request,jobs,archived),
   };
  });

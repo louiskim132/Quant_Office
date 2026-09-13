@@ -1,0 +1,45 @@
+/* queue.css — domain styles for this surface's owner. */
+.task-list{display:grid;gap:13px}
+.task-card{background:var(--panel);border:1px solid var(--border);border-radius:9px;padding:20px}
+.task-prompt{white-space:pre-wrap;font-size:13px;line-height:1.65;overflow-wrap:anywhere}
+.task-meta{font-size:10px;color:var(--subtle);display:flex;gap:8px;margin:13px 0}
+.task-card>.text-button{margin-top:6px}
+
+/* Tasks page: one uniform filter bar with muted labels and equal-height controls. */
+.work-queue .log-filters{align-items:end;margin:16px 0 8px}
+.work-queue .log-filters .field{color:var(--muted);font-size:10px;letter-spacing:.04em}
+.work-queue .log-filters .queue-filter{max-width:none}
+.work-queue .log-filters .field select,.work-queue .log-filters .field input{width:100%;max-width:none;min-height:34px;padding:6px 12px;font-size:11px}
+
+/* Queue rows: aligned title/meta lines, actions right-aligned in a footer. */
+.work-queue .task-card{display:grid;gap:10px;padding:18px 20px}
+.work-queue .task-card>*{margin:0}
+.work-queue .card-heading{align-items:flex-start}
+.work-queue .card-heading h3{margin:0;line-height:1.4}
+.work-queue .task-card details{display:grid;gap:8px}
+.work-queue .task-card details>*{margin:0}
+.work-queue .task-card summary{cursor:pointer;font-size:11px;color:var(--muted)}
+.work-queue .task-actions{justify-content:flex-end;border-top:1px solid var(--border);padding-top:14px;margin-top:2px}
+
+/* Request editor: a contained sub-panel inside the row details. */
+.request-editor fieldset{min-width:0;display:grid;gap:12px;padding:14px;border:1px solid var(--border);border-radius:8px;background:var(--panel-2)}
+.request-editor .field{margin:0}
+.request-editor button{justify-self:start}
+
+/* Provider dispatch: one readable panel with right-aligned actions. */
+.dispatch-card{border:1px solid var(--border);border-radius:9px;margin-top:10px;padding:14px;display:grid;gap:10px;background:var(--panel-2)}
+.dispatch-card h3{margin:0;font-size:13px;letter-spacing:.04em;text-transform:uppercase;opacity:.8}
+.dispatch-card>.field,.dispatch-card>p{margin:0}
+.dispatch-card .readiness-list{margin:0}
+.dispatch-card .button-row{justify-content:flex-end;border-top:1px solid var(--border);padding-top:12px}
+.dispatch-card details{display:grid;gap:8px}
+.dispatch-card details>*{margin:0}
+.dispatch-card summary{cursor:pointer;font-size:11px;color:var(--muted)}
+.command-preview{background:rgba(0,0,0,.25);border-radius:8px;padding:8px 10px;font-size:12px;overflow-x:auto;white-space:pre;margin:0}
+div.command-preview{white-space:normal}
+.command-preview p,.command-preview ul{margin:0}
+.command-preview ul{padding-left:18px;display:grid;gap:4px}
+.evidence-list{margin:0;padding-left:18px;display:grid;gap:6px;font-size:11px;color:var(--muted)}
+.link-session{display:grid;gap:8px;padding:8px 0}
+.link-session .field{margin:0}
+.link-session button{justify-self:start}
