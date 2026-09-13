@@ -9,3 +9,13 @@
 .binding-facts>div{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;font-size:13px}
 .binding-facts dt{opacity:.7;margin:0}
 .binding-facts dd{margin:0;text-align:right;word-break:break-word}
+
+/* Agents roster rows keep the project-card class for the recorded DOM contract; only the presentation is a list. */
+.agent-rows{display:flex;flex-direction:column;border:1px solid var(--border);border-radius:9px;background:var(--panel);overflow-x:auto}
+.agent-rows .agent-row{display:grid;grid-template-columns:minmax(150px,1.3fr) minmax(130px,1fr) minmax(180px,1.2fr) minmax(150px,1fr) minmax(170px,1.1fr) auto;column-gap:18px;align-items:center;padding:11px 16px;border:0;border-bottom:1px solid var(--border);border-radius:0;min-width:920px}
+.agent-rows .agent-row:last-child{border-bottom-width:0}
+.agent-rows .agent-head{padding-top:9px;padding-bottom:9px;font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--subtle);background:var(--panel-2)}
+.agent-head>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.agent-cell{display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--muted)}
+.agent-cell.agent-name{color:var(--text);font-weight:500;font-size:12px}
+.agent-actions{justify-content:flex-end}
