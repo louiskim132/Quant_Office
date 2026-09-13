@@ -31,7 +31,7 @@ jobs:
         run: pnpm typecheck
       - name: Unit tests
         working-directory: app
-        run: pnpm test
+        run: pnpm exec tsx --test --test-concurrency=4 tests/*.test.ts
       - name: Build
         working-directory: app
         run: pnpm build

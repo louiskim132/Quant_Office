@@ -20,13 +20,14 @@ const protectedPaths = ['AGENTS.md', 'CLAUDE.md', 'docs/ROADMAP.md', '.github/',
   'app/package.json', 'app/pnpm-lock.yaml', 'app/pnpm-workspace.yaml', 'app/.npmrc',
   'app/src/shared/', 'app/src/core/store.ts', 'app/src/main/main.ts', 'app/src/main/preload.ts'];
 export function overlaps(a, b) {
+  a = a.toLowerCase(); b = b.toLowerCase();
   const contains = (x, y) => x.endsWith('/') ? y.startsWith(x) : y === x;
   return contains(a, b) || contains(b, a);
 }
 function pathRule(value) {
   if (typeof value !== 'string' || !value || value.startsWith('/') || value.includes('\\') ||
       /[:*?\[\]\x00-\x1f]/.test(value) || value.split('/').some(x => x === '..' || x === '.') ||
-      value.includes('//') || value.startsWith('.git/') || value === '.git') {
+      value.includes('//') || value.toLowerCase().startsWith('.git/') || value.toLowerCase() === '.git') {
     throw Error(`Invalid repo-relative file or directory prefix: ${value}`);
   }
   return value;
@@ -64,6 +65,7 @@ export function init(repo, batch, count = 7, base = 'origin/main') {
   write(join(root, 'batch.json'), { version: 1, repo, batch, base: sha, entries });
   mkdirSync(join(root, 'assignments'));
   for (const entry of entries) git(repo, 'worktree', 'add', '-b', entry.branch, entry.path, sha);
+  writeFileSync(join(root, 'ORGANIZER.md'), `You are the sole organizer for batch ${batch}.\nRepository: louiskim132/Quant_Office\nCheckout: ${entries[0].path}\nBranch: ${entries[0].branch}\nFrozen base: ${sha}\n\nRead AGENTS.md and docs/ROADMAP.md sections 1, 1.5 and 11. All ${count} workers are UNASSIGNED and no model sessions have been launched. Turn the user's requested changes into concrete acceptance packets and disjoint file ownership before calling assign. Keep shared interface changes in the organizer; land those prerequisites before dependent workers start. Publish the organizer branch before worker draft PRs target it. Verify exact worker SHAs with check, independently review behavior, integrate sequentially, and run the combined unit/typecheck/build checks. Return one integration PR to main for human review.\n`, { flag: 'wx' });
   return root;
 }
 function load(root) {

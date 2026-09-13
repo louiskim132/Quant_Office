@@ -7,10 +7,11 @@ import { git, init, assign, check, status, validateTask } from './parallel.mjs';
 
 const task = { objective: 'Update a fixture', allowedPaths: ['ui/'], acceptance: ['Fixture behaves as specified.'] };
 test('ownership refuses protected paths, traversal and overlapping prefixes', () => {
-  for (const p of ['app/src/', 'app/src/shared/types.ts', 'docs/ROADMAP.md', '../x', 'C:/x', 'ui/*', '.git/config']) {
+  for (const p of ['app/src/', 'app/src/shared/types.ts', 'APP/SRC/SHARED/types.ts', 'docs/ROADMAP.md', '../x', 'C:/x', 'ui/*', '.git/config', '.GIT/config']) {
     assert.throws(() => validateTask({ ...task, allowedPaths: [p] }));
   }
   assert.throws(() => validateTask(task, [{ allowedPaths: ['ui/components/'] }]));
+  assert.throws(() => validateTask(task, [{ allowedPaths: ['UI/components/'] }]));
   assert.doesNotThrow(() => validateTask(task, [{ allowedPaths: ['ui-other/'] }]));
   assert.throws(() => validateTask({ ...task, acceptance: [] }));
 });
