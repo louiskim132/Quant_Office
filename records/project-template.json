@@ -1,0 +1,29 @@
+{
+  "schema_version": "0.3.0-draft",
+  "record_type": "project_template",
+  "status": "DRAFT_TEMPLATE_NOT_EXECUTABLE",
+  "project_id": null,
+  "mandate": null,
+  "claim_level": null,
+  "owner": "USER",
+  "model_families": [],
+  "data_manifest_hash": null,
+  "research_package_hash": null,
+  "evaluation_design": null,
+  "scientific_policy_refs": [],
+  "economic_policy_applicability": "UNRESOLVED_PER_PROJECT",
+  "holdout_policy": "UNRESOLVED_PER_PROJECT",
+  "required_check_definition_hashes": [],
+  "expected_result_schema_hash": null,
+  "budget": null,
+  "execution": {
+    "agent_inference_domains": ["OPENAI_HOSTED", "ANTHROPIC_HOSTED"],
+    "agent_execution_domains": ["OPENAI_HOSTED", "ANTHROPIC_HOSTED"],
+    "user_final_runtime": "COLAB_OUTSIDE_TEAM",
+    "launch_actor": "USER",
+    "agent_colab_interaction": "FORBIDDEN",
+    "external_results": "USER_SELECTED_FILE_IMPORT_ONLY"
+  },
+  "active_experiments": [],
+  "approvals": []
+}

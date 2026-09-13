@@ -1,0 +1,101 @@
+{
+  "record_type": "design_package_inventory",
+  "architecture_version": "0.3",
+  "revision": "independent-review-resolutions",
+  "created_at": "2026-09-06T16:03:25.0777379Z",
+  "validation_scope": "documentation links, file identity and draft JSON syntax only",
+  "reference_source_unchanged": true,
+  "draft_json_files_parsed": 4,
+  "valid_local_document_links": 12,
+  "independent_document_review_record": "docs/reviews/architecture-review-0.3.md",
+  "research_code_executed": false,
+  "tests_run": false,
+  "executable_built": false,
+  "files": [
+    {
+      "path": "README.md",
+      "size_bytes": 3233,
+      "sha256": "0dbbfc94fb7b568414a588279366e8de0e4913cbb4130a3ae1f06e7645812eda"
+    },
+    {
+      "path": "docs/architecture.md",
+      "size_bytes": 20123,
+      "sha256": "8cc3a00f8d8a200281a2d154abf5e8f3b9499f3db262d6a9896e7988231c5265"
+    },
+    {
+      "path": "docs/decisions.md",
+      "size_bytes": 4805,
+      "sha256": "ce9d81143ffaf5888154fd5f125994e1cd1c3d4931777b06c505b62bd8db8e30"
+    },
+    {
+      "path": "docs/desktop-ui.md",
+      "size_bytes": 10248,
+      "sha256": "5fdf7600075f375acb7bf07425a36feaef06e02915ed07d6fa79051af4b89321"
+    },
+    {
+      "path": "docs/increment-1.md",
+      "size_bytes": 9718,
+      "sha256": "e98b08481d7d1bc5711d71b42280d12280ed53cf0cfc08bd1b238f4d88e3b60e"
+    },
+    {
+      "path": "docs/provider-execution.md",
+      "size_bytes": 11745,
+      "sha256": "61bf757135700c9a93597ef75ae089fa3a8dfff309b57808eadabc3ceeb08abf"
+    },
+    {
+      "path": "docs/records.md",
+      "size_bytes": 15754,
+      "sha256": "cbb761cf94bcbcb857863e81c817671200c4d56c52fbafd4a7d10fb66285a6a3"
+    },
+    {
+      "path": "docs/team-protocol.md",
+      "size_bytes": 9231,
+      "sha256": "93c4047dddbb051a61f919d68786e44100be7d8356f67cf091df3c4c462fe2f5"
+    },
+    {
+      "path": "docs/workflow.md",
+      "size_bytes": 11316,
+      "sha256": "9f07d74b57a467b3e0bed88831d6f8ae057f3a148b442a48317bf3c070dbaad3"
+    },
+    {
+      "path": "docs/examples/catboost-packaging.md",
+      "size_bytes": 8914,
+      "sha256": "8ed535ab8ddde8b120527d9bfbad965a8192b70a9aecdee8d7990e394f8bd7f0"
+    },
+    {
+      "path": "docs/reviews/architecture-review-0.3.md",
+      "size_bytes": 5153,
+      "sha256": "f7e7e598553ac5f26b95d48aa53e297ad3cfde4745dfec22f96ccd018c4d55c9"
+    },
+    {
+      "path": "records/bootstrap.json",
+      "size_bytes": 4939,
+      "sha256": "8853944faca8e1a8dbb8c750878e26d81d09b09c86d5e135c5da4a08286fefe1"
+    },
+    {
+      "path": "records/execution-policy.json",
+      "size_bytes": 2555,
+      "sha256": "059681e29a030602b9659d6d58484997df9396200642449960e1046434b5ae63"
+    },
+    {
+      "path": "records/project-template.json",
+      "size_bytes": 943,
+      "sha256": "1ef2dd029c3012956d20caeb348d124439acbe10d9ff71f021e7041241d75afc"
+    },
+    {
+      "path": "records/reviews/architecture-input-inventory-0.3.json",
+      "size_bytes": 3130,
+      "sha256": "4f08afea0683da698f8e855d2799f3113088ecf745c3fc70d9c563d6efb390e8"
+    },
+    {
+      "path": "reference/catboostv2.py",
+      "size_bytes": 191923,
+      "sha256": "9e92837a1ebd860fe5c7bdafcd878369c5c83e7527152daa86fed6375d4b1b8d"
+    },
+    {
+      "path": "reference/handoff-v1.0.txt",
+      "size_bytes": 30176,
+      "sha256": "0621c65b3d51b96f81db4bf27552629001bba608efbd37f8cb99f4f56cf99506"
+    }
+  ]
+}

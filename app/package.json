@@ -1,0 +1,42 @@
+{
+  "name": "quant-research-office",
+  "productName": "Quant Research Office",
+  "version": "0.5.0",
+  "description": "A private desktop workspace for provider-hosted quant research teams.",
+  "private": true,
+  "type": "module",
+  "author": "Quant Research Office",
+  "license": "UNLICENSED",
+  "main": "dist/main/main.cjs",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts",
+    "start": "electron .",
+    "package": "node scripts/package.mjs",
+    "test:desktop": "tsx tests/desktop.e2e.ts",
+    "test:revision-desktop": "tsx tests/revision.desktop.ts"
+  },
+  "dependencies": {
+    "fflate": "0.8.3",
+    "lucide-react": "1.41.0",
+    "node-pty": "1.1.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "zod": "4.5.4"
+  },
+  "devDependencies": {
+    "@electron/packager": "20.3.0",
+    "@electron/windows-sign": "2.0.6",
+    "@types/node": "^24.13.3",
+    "@types/pngjs": "6.0.5",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.7",
+    "electron": "44.2.0",
+    "esbuild": "0.28.2",
+    "playwright": "1.63.0",
+    "pngjs": "7.0.0",
+    "tsx": "4.23.13",
+    "typescript": "7.0.2"
+  }
+}

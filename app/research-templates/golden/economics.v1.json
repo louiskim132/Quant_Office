@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "version": "1.0.0",
+  "purpose": "Hand-computed period economics. Every expected number below was worked out on paper first, so a change in cost.v1.py or core/research-gates.ts that quietly alters the arithmetic fails here rather than in a backtest that still looks plausible.",
+  "costs": {
+    "schemaVersion": 1,
+    "commissionBps": 2,
+    "halfSpreadBps": 3,
+    "slippageBps": 5,
+    "borrowBpsPerPeriod": 4,
+    "financingBpsPerPeriod": 1
+  },
+  "cases": [
+    {
+      "name": "long only, one full rotation",
+      "period": {
+        "period": "2024-01",
+        "weightsBefore": { "AAA": 0.0, "BBB": 0.0 },
+        "weightsAfter": { "AAA": 0.6, "BBB": 0.4 },
+        "assetReturns": { "AAA": 0.02, "BBB": -0.01 }
+      },
+      "working": "gross = 0.6*0.02 + 0.4*(-0.01) = 0.012 - 0.004 = 0.008. turnover = |0.6-0| + |0.4-0| = 1.0. trading = 1.0*(2+3+5)/10000 = 0.001. short = 0 so borrow = 0. gross exposure = 1.0 so financing = 1.0*1/10000 = 0.0001. cost = 0.0011. net = 0.008 - 0.0011 = 0.0069.",
+      "expected": { "gross": 0.008, "turnover": 1.0, "cost": 0.0011, "net": 0.0069 }
+    },
+    {
+      "name": "market neutral, borrow applies to the short leg only",
+      "period": {
+        "period": "2024-02",
+        "weightsBefore": { "AAA": 0.5, "BBB": -0.5 },
+        "weightsAfter": { "AAA": 0.5, "BBB": -0.5 },
+        "assetReturns": { "AAA": 0.04, "BBB": 0.01 }
+      },
+      "working": "gross = 0.5*0.04 + (-0.5)*0.01 = 0.02 - 0.005 = 0.015. turnover = 0 so trading = 0. short exposure = 0.5 so borrow = 0.5*4/10000 = 0.0002. gross exposure = 1.0 so financing = 0.0001. cost = 0.0003. net = 0.015 - 0.0003 = 0.0147.",
+      "expected": { "gross": 0.015, "turnover": 0.0, "cost": 0.0003, "net": 0.0147 }
+    },
+    {
+      "name": "a real signal eaten entirely by turnover",
+      "period": {
+        "period": "2024-03",
+        "weightsBefore": { "AAA": 1.0, "BBB": -1.0 },
+        "weightsAfter": { "AAA": -1.0, "BBB": 1.0 },
+        "assetReturns": { "AAA": -0.001, "BBB": 0.0 }
+      },
+      "working": "gross = (-1.0)*(-0.001) + 1.0*0.0 = 0.001. turnover = |-1-1| + |1-(-1)| = 4.0. trading = 4.0*10/10000 = 0.004. short exposure = 1.0 so borrow = 0.0004. gross exposure = 2.0 so financing = 0.0002. cost = 0.0046. net = 0.001 - 0.0046 = -0.0036.",
+      "expected": { "gross": 0.001, "turnover": 4.0, "cost": 0.0046, "net": -0.0036 }
+    },
+    {
+      "name": "a held asset with no realised return cannot be priced",
+      "period": {
+        "period": "2024-04",
+        "weightsBefore": { "AAA": 0.0 },
+        "weightsAfter": { "AAA": 0.5, "CCC": 0.5 },
+        "assetReturns": { "AAA": 0.01 }
+      },
+      "working": "CCC is held at 0.5 and has no return. Treating the missing return as zero would report a positive gross of 0.005 from AAA alone. The period is unpriceable instead.",
+      "expected": { "unpriced": ["CCC"] }
+    }
+  ]
+}

@@ -1,0 +1,216 @@
+# Quant multi-agent team: Codex implementation handoff
+
+Version 1.0 — 2026-09-06
+
+Build a local UI and controller for a remote agent team that develops and verifies a CatBoost research pipeline. Begin with approximately 10 assets. The pilot establishes that execution, evidence, and controls work; it does not establish profitability or validate the eventual 330-asset strategy.
+
+The user manually starts ML runs in Colab. Model inference, generated code execution, and statistical calculations run in provider-hosted environments or Colab. The local device performs UI, routing, validation of handoff metadata, file transfer, and durable workflow bookkeeping.
+
+## 1. Scope and baseline
+
+Source reviewed: uploaded `catboostv2.py`, available during review as `upload/01-catboostv2.py`.
+
+SHA-256: `9e92837a1ebd860fe5c7bdafcd878369c5c83e7527152daa86fed6375d4b1b8d`.
+
+Review performed: source inspection, successful AST parsing, and isolated execution of selected functions against synthetic data. The complete module was not imported or executed. No master data, historical run output, original preregistration, or original Corwin–Schultz simulation was supplied. Claims about actual coverage dates, assembly counts, historical fees, and measured spreads remain reported claims until artifacts verify them.
+
+The draft already contains regular-grid assembly, epoch-aware features, first-passage labels, wall-clock purging, null/canary and truncation audits, pooled and per-asset model arms, checkpoints, and a lineage register. Reuse and harden these components. Do not restart the model implementation from scratch.
+
+The existing M1 experiment differs from the longer-term objective. Arm P uses 13 OHLCV features and excludes categorical asset identity; P+id is diagnostic. The current labels concern barrier outcomes, and the asset-specific multiplier is derived from an admissible window. This is not yet the complete system that selects one bullish and one bearish asset and learns their move magnitudes. Keep orchestration hardening, pilot expansion, and later scientific redesign as distinct changes with distinct versions.
+
+Preserve the reference file. First repair packaging and controls with behavior-preserving changes where possible. Treat modifications to costs, targets, universe selection, statistical thresholds, or model arms as scientific amendments. Obtain the original M1 preregistration and referenced test suite when available; comments and historical agent narratives are evidence inputs, not automatically authoritative specifications.
+
+## 2. Findings that determine the design
+
+| ID | Established finding | Evidence and practical consequence |
+| --- | --- | --- |
+| F01 | The module has import-time work despite its import-safety description. | Colab mount/install logic executes at module scope. The appended scratch diagnostic calls `assemble()` and inspects later spread data outside the main guard. Syntax parsing passes; a safe import must be a separate acceptance test after packaging. |
+| F02 | The stored spread simulation evidence has a factor-of-ten unit contradiction. | `CS_WITHDRAWAL_EVIDENCE.true_spread_pct` is `0.00004`, while notes say 4 bp. In the fractional convention used by the cost functions, this is 0.4 bp. The original generator/output is needed to determine whether the number or narrative is wrong. |
+| F03 | Missing tick-width evidence can bypass the tick check. | `load_asset()` creates NaN optional columns. `derive_spreads()` checks width only when its median is finite. An isolated synthetic frame with valid percentage spreads and all-NaN tick widths was accepted. |
+| F04 | Per-asset warm-up does not enforce the global test boundary. | `warmup_slice()` takes 365 days from each asset's first row. A synthetic asset beginning in 2023 was accepted by `derive_spreads()` although the configured first test begins in 2022. Actual leakage depends on supplied asset histories, but this boundary is not enforced here. |
+| F05 | Expanding the universe can cause a threshold lookup failure. | `BH_T_BY_FAMILY` contains only 4 and 6. The gate computes `2 * n_survivors`, and `main()` directly indexes the lookup. Four or more survivors exceed its supported keys. The existing `bh_adjust()` helper is more general; the power/threshold path still needs a coherent specification. |
+| F06 | Several audit failures do not stop the subsequent walk-forward loop. | `audits_passed` is computed, then the walk-forward arms execute. It influences the final verdict. Structural failures should stop before costly production fits; statistically inconclusive detector results need their own status. |
+| F07 | An invalid audit outcome can be reported as a research null. | An isolated call to `m1_verdict(empty_frame, False)` returns `M1 NULL RESULT`. Invalid evidence and a valid negative finding must be different states. |
+| F08 | Checkpoint identity is incomplete. | The fingerprint payload includes many settings but omits source-code and data-content hashes and several material settings, including fees and the holdout boundary. Arm-named files can survive subsequent runs. Prevent stale or partial reuse with complete dependency identities and artifact verification. |
+| F09 | Spread-source descriptions contradict each other. | `derive_spreads()` and the R17 amendment claim 2020 coverage; the appended diagnostic says 2023-05-16. `main()` still prints Corwin–Schultz after calling measured-spread derivation. Generate source descriptions from structured provenance. |
+| F10 | The current fee arithmetic is clear; the intended fee policy is unresolved. | `FEE_PER_TXN=0.0005` means 5 bp per transaction and 10 bp for entry plus exit. With the configured spread fraction, round-trip modeled cost is `10 bp + spread_bp`. This does not verify the appropriate venue/account/historical fee. |
+| F11 | Diagnostic evaluation data can influence later choices through the human/agent loop. | The appended probe says evaluation-period data cannot derive constants, but later suggests deriving a tick multiplier from that same window. Record exposure and require a new research version for choices influenced by these observations. |
+
+The reported XRP arithmetic is consistent with a 4.2481 bp spread: modeled round-trip cost 14.2481 bp, three-times cost floor 42.7443 bp, and spread share about 29.815%. These are arithmetic checks on supplied numbers, not validation of the spread source or execution model.
+
+The statement that tick-width behavior is validated is not established by this attachment. Ratios of aggregate prices and spread medians do not recover the distribution of paired quote widths. A one-tick spread is a hypothesis or minimum quoting increment under an applicable tick rule, not an observed spread or a guaranteed execution cost. Verify historical tick metadata and aligned observations if this hypothesis is evaluated.
+
+## 3. Team and authority
+
+Use one Director, four PM roles, and at most two concurrent worker tasks initially. These are independent role contexts invoked as needed, not always-running conversations.
+
+| Role | Initial model assignment | Mandate | Authority and output |
+| --- | --- | --- | --- |
+| Director | GPT-6 Astra | Freeze research contracts, resolve competing positions, choose the next bounded experiment. | Approve a versioned specification and run package; decide revise, retire, or advance. Cannot turn missing evidence or failed hard checks into a pass. |
+| PM-A: implementation | GPT-5.6 Sol | Deliver the approved behavior faithfully. | Own integration and task decomposition. Submit code, acceptance mapping, execution evidence, and known limitations. |
+| PM-B: verification | Claude Opus 5 | Find spec divergence, leakage, schema defects, unit defects, and insufficient checks. | Own independent verification. Block release on a demonstrated hard failure or missing required evidence. |
+| PM-C: findings | Claude Opus 5 | Establish exactly what the results support. | Own the statistical analysis proposal, metric definitions, uncertainty reporting, and findings report. |
+| PM-D: falsification and economics | GPT-5.6 Sol | Find artifact explanations and verify cost arithmetic independently. | Own the economic policy proposal and reference calculations. Block research promotion under the frozen economic rules. |
+| Workers | Configurable lower-cost models | Produce bounded patches, fixtures, calculations, or tables. | No authority to change scientific contracts, certify their own work, or approve runs. |
+
+Use separate provider/model configuration from role definitions; verify API access and hosted-runtime capabilities during setup. Preserve the requested model targets unless the user changes them. Evaluate assignments on the project's defect fixtures rather than assuming role prompts or vendor diversity guarantee reliability.
+
+PM-A owns executable data-integrity checks within the coding team. PM-B challenges and verifies those checks. PM-D specifies the independent cost oracle; coding workers may implement it under review. No third data-integrity team is required.
+
+Workers attach their output to their supervising PM's task. They do not send unreviewed deliverables straight to the Director. Reserve separate artifact namespaces and contexts for implementation and independent verification, even when a worker slot is reused.
+
+The user owns goals, budget limits, and missing real-world facts. Routine repairs within an approved contract proceed autonomously. Escalate to the user when a required external fact is unavailable or a proposal changes the accepted research scope or spending boundary. A reviewer must state a concrete reason; speculative objections do not create unlimited vetoes.
+
+## 4. Independent review protocol
+
+1. Freeze the input bundle and its hash for a review round.
+2. PM-A submits an implementation position. PM-B receives the specification, patch, test definitions, and raw execution artifacts, but forms its first assessment without PM-A's conclusion.
+3. After a verified Colab run, PM-C and PM-D assess the same evidence independently before seeing each other's conclusions.
+4. Persist both first reports before sharing them. Allow one rebuttal from each side.
+5. Send original reports, rebuttals, unresolved objections, and evidence links to the Director. The Director records a decision and its reopening condition.
+
+Require an active attempt to find counterexamples. Permit `NO_DEFECT_FOUND` with a clear statement of what was tested and what remains untested. Do not reward an objection count. Save submitted reports and tool evidence; hidden model reasoning is not a required artifact.
+
+Resolve disagreements by class: a deterministic violation requires a fix; missing evidence requires collection or an explicitly narrower claim; a statistical/economic disagreement requires a specified calculation or experiment. A policy amendment creates a new contract and invalidates dependent approvals. It must not retroactively rescue a failed run.
+
+## 5. Deployment and controller
+
+Suggested first implementation: a small local Python service using FastAPI, SQLite for workflow state, and a minimal local web UI. Keep provider adapters behind a common interface. These are design choices, not dependencies of the scientific method.
+
+The controller manages job creation, durable task state, artifact transfer, schema validation, review sequencing, approval binding, timeouts, retry limits, and cost accounting. It does not execute generated shell commands or ML/statistical workloads on the user's device.
+
+OpenAI workers use a verified hosted execution option; Claude workers use a verified Anthropic-hosted option. If a runtime lacks a necessary package, route the calculation to an approved compatible hosted runtime or produce a Colab task. Never silently fall back to local execution. Inference access alone does not provide code execution.
+
+Use remote Git for code/contracts and Drive for data/results. Persist controller events and handoff records remotely as recoverable snapshots. Provider sandboxes are workspaces, not the authoritative project history. Export completed artifacts before environment expiration. When the bridge is offline, further coordination waits until it resumes.
+
+Useful UI fields: active experiment, current stage, approved code/data/config identities, pending facts, blockers, independent PM reports, unresolved objections, run-package download, result import, and spend. A chat pane is secondary to the experiment record.
+
+## 6. Workflow and Colab modes
+
+Use the following state progression:
+
+`DRAFT -> CONTRACT_REVIEW -> CONTRACT_FROZEN -> IMPLEMENTING -> REMOTE_VERIFIED -> PREFLIGHT_READY -> WAITING_FOR_PREFLIGHT -> PREFLIGHT_REVIEW -> RUN_APPROVED -> WAITING_FOR_PILOT -> RESULT_VALIDATION -> INDEPENDENT_ANALYSIS -> DIRECTOR_DECISION`
+
+Every state can enter a clearly identified blocked/failed state. Every transition records actor, timestamp, input/output hashes, and reason. Model-generated prose cannot set an execution gate to PASS; the controller consumes a result linked to an actual executor job and validated artifacts.
+
+**Colab preflight mode:** manually launched by the user. Read metadata and the frozen pilot data; report actual columns, units where verifiable, coverage dates, warm-up availability, grid accounting, gaps/epochs, and effective tick metadata. Collect all predictable asset-specific defects in a structured report. Do not train models. Metadata collection can proceed while the fee decision remains open, but cost-dependent feasibility and pilot approval cannot.
+
+**Colab pilot mode:** manually launched only for an approved run package. Revalidate package/data identities and cheap prerequisites in a fresh process. Run required feature/label/geometry checks and a small smoke segment before entering the longer fit loop. A structural failure stops progression and saves a failure bundle. Detector insufficiency becomes INCONCLUSIVE and blocks evidential promotion. A separately approved diagnostic job may investigate a failed detector without being mistaken for an accepted pilot run.
+
+Provide one fixed launcher notebook with a mode and experiment ID. It loads the exact code commit/archive and configuration. Changes to an approved notebook or package produce a new hash and require renewed review of the affected parts. The user transfers an archive or manifest-linked bundle instead of copying a large evolving script and console transcript.
+
+Keep terminal outcomes separate:
+
+| Status | Meaning |
+| --- | --- |
+| BLOCKED_DATA / BLOCKED_POLICY | A required data source or decision is missing. |
+| EXECUTION_FAILED | The job failed to execute or complete. |
+| INVALID | Integrity, leakage, provenance, or another validity gate failed. |
+| INCONCLUSIVE | Execution may be correct but evidence, sample size, or detector power is insufficient. |
+| VALID_NO_EDGE | A valid evaluation did not meet its economic/statistical criteria. |
+| PILOT_COMPLETE | The engineering pilot met its acceptance criteria, regardless of whether it found edge. |
+| CANDIDATE_FOR_NEXT_STAGE | Valid evidence met the separately specified advancement rules. |
+
+Do not collapse these outcomes into M1 NULL RESULT. Pilot completion alone does not authorize strategy promotion or a holdout unlock.
+
+## 7. Contracts and evidence formats
+
+Implement these versioned records before adding autonomous delegation:
+
+| Record | Required contents |
+| --- | --- |
+| Research contract | Hypothesis, branch/parent, claim level, asset-selection rule, targets, horizons, features/arms, cost policy, chronological regions, diagnostic exposure, statistics/multiplicity rules, hard gates, budget. |
+| Data manifest | Explicit asset list, each file's content hash, schema, units, bar timing/timezone, row counts, actual coverage, data version, historical metadata provenance, approved exclusion reasons. |
+| Cost policy | Fee per side and its source/effective dates, spread definition and units, derivation versus diagnostic periods, tick schedule, coverage requirements, uncertainty scenarios, included/excluded cost components, advancement rule. |
+| Task contract | Task/experiment IDs, exact input hashes, goal, allowed files and tools, output schema, acceptance checks, time/token budget, escalation rule. |
+| Review report | Role, input-bundle hash, verdict, claims, evidence references, executed checks, objections with severity, uncertainties, rebuttal, requested next action. |
+| Run manifest | Run/experiment IDs, source/config/data/test-definition/environment hashes, package versions, hardware, seeds, actual fold/asset schedule, start/end times, status, checkpoints and artifact hashes. |
+| Lineage event | Event ID, parent/experiment, actor, original positions, decisions, evidence, exposure record, supersession/invalidation references, reopening condition, usage/cost. |
+
+Use explicit units such as `spread_fraction` and `spread_bps`; define `1 bp = 0.0001` fractional return. Keep display conversions in one tested formatting layer. Preserve absence separately from a column that exists but has no valid rows. Distinguish optional diagnostics from inputs required by the active cost-policy mode.
+
+Every scientific claim gets an evidence class: CODE_OBSERVED, SYNTHETIC_REPRODUCED, DATA_MEASURED, RUN_MEASURED, USER_REPORTED, or ASSUMPTION. Include the artifact and calculation that support it. A handwritten evidence table is a historical claim until its generating procedure and inputs are available.
+
+An approval binds specification, source, data, configuration, test definitions, and verified results as applicable. Any material dependency change invalidates the affected approval. Appending newly downloaded assets does not modify an active pilot's universe or data snapshot.
+
+## 8. Checks required before expensive fits
+
+| Check | Expected behavior | Accountable roles |
+| --- | --- | --- |
+| Import and startup | Importing core modules neither mounts Drive, installs packages, reads masters, nor runs diagnostics. | A implements; B verifies. |
+| Coverage and warm-up | All derivation windows are explicit and end before the first evaluation in which those constants are used. Label-dependent derivations respect their full forward horizon. Insufficient warm-up is a blocker, not a silently shortened window. | A/B. |
+| Column presence | Missing required measured spread/tick evidence is a named failure. If a different policy permits a proxy, that policy is explicitly versioned. | A/B, D defines cost needs. |
+| Units and arithmetic | Reference examples check fractions, percent, bp, fees per side, round trip, spread share, and cost-floor propagation into feasibility. | D owns independent oracle; B verifies. |
+| Row accounting | Reconcile raw rows, duplicates/rejections, resampling mappings, stable-range exclusions, grid rows, observed rows, and missing bars per asset. | A/B. |
+| Epochs and rolling state | Gaps cause exactly the specified resets. Short gaps and long gaps both receive fixtures. Features and labels cannot cross forbidden boundaries. | A/B. |
+| Tick metadata | Effective-time tick rules and scale match the observations. Unknown historical metadata is visible and blocks claims that require it. | A/B/D. |
+| Family size | Explicit supported behavior for 2, 3, approximately 10 assets and every permitted survivor count; no extrapolated t-threshold defaults. | C proposes; D challenges; B verifies implementation. |
+| Leakage and alignment | Shared wall-clock fold boundaries; purging independent of asset count; causal features; correct feature/label/entry alignment; protected holdout. | A/B. |
+| Failure propagation | Deliberately failing a required structural check prevents production fits and writes INVALID/blocked status. | A/B. |
+| Resume identity | Changes to code, fees, spreads, data bytes, dates, features, labels, folds, test definitions, or environment invalidate affected cached stages. Partial/mismatched artifacts cannot resume. | A/B. |
+| Reporting | Source labels and numeric prose agree with the manifest and tables; invalid or incomplete execution cannot be presented as a valid null. | C/D, with mechanical validation. |
+
+Use explicit runtime exceptions for non-negotiable production checks. Do not allow a worker to remove or weaken a required check while fixing the implementation it tests. Review test-definition changes against the contract.
+
+Calculate checks with executable code. PM-D's reference arithmetic must not simply call the production `round_trip_cost()` function, because that would reproduce its mistakes. Statistical workers compute statistics in a remote runtime and attach code, inputs, and outputs.
+
+Mutation fixtures should include a factor-of-ten spread error, missing tick column, all-NaN tick column, late-listed asset, duplicate/resampled row loss, reset boundary, next-bar feature leak, stacked-row purge, missing exit fee, changed fee with an old checkpoint, interrupted output write, and audit failure. Include valid control fixtures so an always-blocking system fails the suite.
+
+## 9. Decisions to resolve before a real pilot is approved
+
+| Decision | Required resolution |
+| --- | --- |
+| Meaning of the older approximately 7 bp number | Determine whether it meant fees only, all-in cost, a different account/market, or a historical assumption. Do not average it with the current 10 bp fee-only figure. |
+| Correct fee policy | Establish instrument/venue, order type, account tier or explicitly assumed tier, effective dates, and evidence. Until supplied, mark unresolved. |
+| Spread source before evaluation | Verify actual master coverage. If the registered measured-warm-up method has no data, retain its failure. Choose an evidence-backed revised experiment, collect suitable earlier data, or narrow the pilot to a clearly labeled engineering sensitivity exercise. |
+| XRP spread candidate | Do not choose 2.0 or 4.2481 bp by whichever yields favorable evaluation behavior. Treat candidate values as labeled assumptions until supported by the accepted derivation policy. |
+| Corwin–Schultz withdrawal evidence | Recover the synthetic generator, seeds, units, and outputs. The attachment supports a unit contradiction, not a definitive diagnosis of the estimator's general behavior. |
+| Approximately 10-asset universe | Freeze named assets and their data hashes. Define insufficient-history and eligibility rules before inspecting predictive performance; log exclusions without selecting profitable survivors. |
+| Statistical policy for the enlarged family | Freeze a coherent multiplicity and power policy suitable for the new branch. Do not reuse the 4/6-family lookup by default. |
+| Scope of cost claims | The current M1 code excludes funding and depth effects. Retain that limitation in pilot reports; extending the economic model is a separately reviewed amendment. |
+
+The later bookTicker window has already been inspected according to the supplied history. It can provide useful diagnostic evidence, but choices influenced by it are part of the research search. Calling a table DIAGNOSTIC_ONLY does not erase that exposure. Do not claim that the period remains an untouched confirmation set.
+
+Keep the configured 2026-01-01 holdout boundary protected under the current contract. Inspecting how the file implements that boundary is not verification that every historical run respected it.
+
+## 10. Artifacts and recovery
+
+Each run writes to an immutable run-specific directory. Save manifest, preflight report, execution logs, data-integrity results, fold metrics, predictions with asset/time/fold keys, trade or selection records, cost decomposition, and review inputs. Include model files when required for a later stage.
+
+Write artifact hashes and a terminal manifest only after all expected files are finalized. A file arriving in Drive is not sufficient evidence of completion. Validate expected schemas, row/key counts, fold coverage, and hashes before analysis starts.
+
+Replace shared arm-name cache slots with content-addressed stage keys. Initially prefer conservative invalidation across material changes. Later, stage-specific dependency hashes can avoid unnecessary recomputation. Validate output counts and hashes on resume; stale metadata cannot certify a partially overwritten file set. Store adequate numeric precision for reproducible downstream costs and threshold decisions.
+
+The controller is the single writer of workflow/lineage events. Preserve original reviews and append corrections or invalidation records; do not overwrite old dissent. Register experiment creation, failures, retries, and abandoned runs, including those that never reach the current script's completion append.
+
+## 11. Bounded operation
+
+- Two worker tasks concurrently by default; increase only after measuring useful defect detection and task completion.
+- Two repair attempts per bounded task, then Director escalation with evidence.
+- Independent first reviews plus one rebuttal round; additional computation needs a concrete unresolved question and budget.
+- Per-task and per-experiment token, hosted-runtime, and Colab budgets. Record estimated and actual usage separately. Do not invent provider prices or claim that a consumer chat subscription covers API usage.
+- No model calls while waiting for the user's Colab run.
+- Retry transient provider failures within a bounded policy. Idempotency keys prevent duplicate task creation, artifacts, decisions, and charges caused by replay where the provider supports them.
+- Preserve useful output on timeout; keep the task incomplete until its acceptance contract is satisfied.
+
+## 12. Build sequence and acceptance
+
+**Increment 1: package and test the current draft.** Separate Colab setup and appended diagnostics from importable core functions. Preserve the baseline hash. Create the contract skeleton, known-defect register, unit formatting, and independent fixture suite. Do not silently resolve fees or replace the spread estimator. Acceptance: safe imports; fixtures expose the current failure classes; required missing inputs produce explicit blockers.
+
+**Increment 2: build the controller using mock provider adapters.** Implement SQLite state, job IDs, artifact schemas, hashes, review sequencing, append-only events, restart/resume, and a minimal UI. Acceptance: a synthetic task completes the entire review cycle, preserves original dissent, and refuses wrong-version results. This development occurs in an approved remote coding environment even though the finished controller will run locally.
+
+**Increment 3: connect hosted agents.** Add provider adapters and capability checks for inference, execution, files, dependencies, and usage accounting. Install the role instructions and tool boundaries. Acceptance: one implementation worker produces a patch, an independent worker tests it, both PM positions persist, and the Director decides on the exact bundle.
+
+**Increment 4: perform data preflight in Colab.** Use the fixed launcher and approximately 10-asset manifest. Return evidence for actual coverage, columns, warm-up, ticks, gaps, and unresolved policy items. Acceptance: all blockers are displayed before training; new downloads cannot mutate the run; correct blocking is treated as successful preflight behavior.
+
+**Increment 5: run a small smoke experiment, then the frozen pilot.** The smoke uses explicitly labeled reduced folds/seeds to test wiring and runtime. The pilot uses its separately declared schedule; report inadequate statistical power when applicable. Acceptance: an approved bundle produces complete results, all hard gates pass, cached data are compatible, C/D independently reconstruct findings, and the Director receives both positions.
+
+**Increment 6: evaluate later modeling changes.** Only after the workflow works, specify the distinct top-bullish/top-bearish selection policy, abstention/eligibility, and learned magnitude model. Verify that current barrier-hit probabilities are not relabeled as simple probability of a positive return. Cross-asset feature design, specialist models, position sizing, and expanded execution costs belong to separately registered experiments.
+
+Definition of done for the first implementation: the system catches seeded defects before costly fits, blocks absent required evidence, preserves original disagreement, survives interrupted handoffs without mixing versions, distinguishes invalid/inconclusive/valid negative findings, and supports one complete approximately 10-asset pilot through the user's manual Colab boundary.
+
+## 13. Initial instruction to Codex
+
+Implement this handoff incrementally, starting with Increment 1. Read the uploaded source and any supplied authoritative M1 specification. Preserve the reference and current scientific choices while isolating import-time side effects. Create the controller contracts and regression fixtures grounded in findings F01–F11. Keep fee policy, spread derivation, and enlarged-family statistics visibly unresolved until their specified evidence or decisions are available. Develop and test in remote execution environments; the finished local application must only perform UI, orchestration, and transfer. Do not launch a full training run, silently unlock a holdout, or convert diagnostic observations into frozen constants. Produce each increment as a reviewable code change with machine-generated evidence and separately recorded implementation and verification positions.
+
+Provider capability references, checked in the preceding planning discussion: [OpenAI hosted shell](https://developers.openai.com/api/docs/guides/tools-shell), [Anthropic Managed Agents](https://platform.claude.com/docs/en/managed-agents/overview), [Anthropic code execution](https://platform.claude.com/docs/en/agents-and-tools/tool-use/code-execution-tool), and [Colab runtime behavior](https://research.google.com/colaboratory/faq.html). Verify account access and required runtime capabilities during implementation.

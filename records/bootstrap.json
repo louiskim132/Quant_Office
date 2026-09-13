@@ -1,0 +1,175 @@
+{
+  "schema_version": "0.4.0",
+  "record_type": "architecture_bootstrap",
+  "record_id": "quant-architecture-2026-09-06",
+  "status": "DESKTOP_AND_SUBSCRIPTION_SETUP_IMPLEMENTED_HOSTED_RESEARCH_PENDING",
+  "claim_level": "tested_desktop_and_codex_metadata",
+  "platform_scope": "generalized_quant_model_research_team",
+  "scope_authority": "Generalized quant research team; graphical local Windows EXE; all agent work on OpenAI/Anthropic infrastructure; zero agent/controller interaction with user-operated Colab.",
+  "active_project_id": null,
+  "reference_example": {
+    "name": "CatBoost M1",
+    "active": false,
+    "used_as_platform_default": false,
+    "path": "reference/catboostv2.py",
+    "expected_sha256": "9e92837a1ebd860fe5c7bdafcd878369c5c83e7527152daa86fed6375d4b1b8d",
+    "observed_sha256": "9e92837a1ebd860fe5c7bdafcd878369c5c83e7527152daa86fed6375d4b1b8d",
+    "size_bytes": 191923,
+    "identity_verified": true,
+    "inspection": "TEXT_ONLY",
+    "imported": false,
+    "executed": false
+  },
+  "handoff": {
+    "path": "reference/handoff-v1.0.txt",
+    "sha256": "0621c65b3d51b96f81db4bf27552629001bba608efbd37f8cb99f4f56cf99506",
+    "version": "1.0"
+  },
+  "execution_boundaries": {
+    "local": [
+      "ui",
+      "routing",
+      "metadata_validation",
+      "file_transfer",
+      "durable_bookkeeping",
+      "official_provider_authentication",
+      "subscription_usage_metadata"
+    ],
+    "agent_inference_domains": [
+      "OPENAI_HOSTED",
+      "ANTHROPIC_HOSTED"
+    ],
+    "agent_execution_domains": [
+      "OPENAI_HOSTED",
+      "ANTHROPIC_HOSTED"
+    ],
+    "development_and_tests": "LOCAL_DESKTOP_BUILD_AND_TESTS_AUTHORIZED_BY_USER",
+    "user_final_research_runtime": "COLAB_OUTSIDE_TEAM",
+    "colab_launch_actor": "USER",
+    "automatic_colab_launch": false,
+    "colab_connector": false,
+    "colab_browser_control": false,
+    "colab_api_access": false,
+    "colab_credentials": false,
+    "colab_polling": false,
+    "colab_live_file_access": false,
+    "colab_callbacks": false,
+    "external_result_entry": "USER_SELECTED_FILE_IMPORT_ONLY",
+    "local_research_execution": false
+  },
+  "desktop": {
+    "product_name": "Quant Research Office",
+    "target_os": "WINDOWS",
+    "distribution": "PORTABLE_EXE",
+    "shell": "ELECTRON",
+    "language": "TYPESCRIPT",
+    "panels": "REACT",
+    "office_scene": "CSS_PIXEL_ART",
+    "local_state": "SQLITE",
+    "packaging": "ELECTRON_PACKAGER",
+    "transport": "TYPED_PRELOAD_IPC",
+    "terminal_required": false,
+    "local_http_server_required": false,
+    "ui_reference": "https://github.com/dandacompany/deskrpg"
+  },
+  "requested_model_targets": {
+    "director": "GPT-6 Astra",
+    "pm_a": "GPT-5.6 Sol",
+    "pm_b": "Claude Opus 5",
+    "pm_c": "Claude Opus 5",
+    "pm_d": "GPT-5.6 Sol",
+    "workers": null
+  },
+  "provider_access": "CODEX_METADATA_VERIFIED_CLAUDE_SIGNIN_PENDING",
+  "resolved_api_model_ids": null,
+  "limits": {
+    "concurrent_worker_tasks": null,
+    "repair_attempts_per_task": 2,
+    "rebuttals_per_role_per_round": 1,
+    "token_budget": null,
+    "hosted_runtime_budget": null,
+    "colab_budget": null,
+    "currency_budget": null,
+    "paid_dispatch_enabled": false,
+    "agents_per_role": null,
+    "total_agents": null
+  },
+  "project_contract_fields": [
+    "mandate_and_hypothesis",
+    "model_families_and_baselines",
+    "dataset_and_selection_rules",
+    "target_and_output_definitions",
+    "evaluation_design",
+    "applicable_scientific_and_economic_policies",
+    "holdout_and_exposure_policy",
+    "required_checks",
+    "budgets"
+  ],
+  "projects": [],
+  "approvals": [],
+  "open_inputs": [
+    {
+      "id": "PROVIDER_HOSTED_BUILD_TEST_PROFILE",
+      "blocks": [
+        "implementation_execution",
+        "executed_verification",
+        "windows_release"
+      ],
+      "status": "UNVERIFIED"
+    },
+    {
+      "id": "GIT_AND_DEDICATED_ARCHIVE",
+      "blocks": [
+        "remote_recovery",
+        "durable_artifact_exports"
+      ],
+      "status": "NOT_CONFIGURED",
+      "live_colab_access": false
+    },
+    {
+      "id": "PROVIDER_ACCESS_AND_BUDGET",
+      "blocks": [
+        "paid_agent_dispatch"
+      ],
+      "status": "UNVERIFIED"
+    },
+    {
+      "id": "FIRST_RESEARCH_MANDATE",
+      "blocks": [
+        "first_real_experiment"
+      ],
+      "status": "NOT_SELECTED",
+      "blocks_platform_build": false
+    }
+  ],
+  "reference_example_open_inputs": [
+    "M1_PREREGISTRATION",
+    "M1_TEST_SUITE",
+    "PILOT_UNIVERSE_AND_DATA",
+    "FEES_AND_OLD_7BP_MEANING",
+    "SPREAD_COVERAGE_AND_TICK_PROVENANCE",
+    "CS_GENERATOR_AND_OUTPUTS",
+    "ENLARGED_FAMILY_POLICY"
+  ],
+  "review_status": {
+    "architecture_version": "0.3",
+    "architecture_specification_complete": true,
+    "architecture_document_review": {
+      "reviewer": "SEPARATE_CODEX_SUBAGENT",
+      "scope": "DOCUMENT_CONSISTENCY_ONLY",
+      "original_findings_preserved": 3,
+      "original_findings_resolved_in_specification": 3,
+      "additional_primary_record_corrections": 3,
+      "followup_verdict": "NO_DEFECT_FOUND_IN_REVIEWED_RESOLUTIONS",
+      "record": "docs/reviews/architecture-review-0.3.md",
+      "production_pm_b_verification": false,
+      "runtime_certification": false
+    },
+    "implementation_position": "DESIGN_ONLY",
+    "independent_verification_position": "NOT_SUBMITTED",
+    "executed_test_results": [],
+    "executable_built": false,
+    "increment_1_complete": false
+  },
+  "model_selection": "USER_SELECTED_PER_AGENT"
+}

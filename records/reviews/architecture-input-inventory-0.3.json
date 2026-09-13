@@ -1,0 +1,93 @@
+{
+  "record_type": "design_package_inventory",
+  "architecture_version": "0.3",
+  "created_at": "2026-09-06T10:21:53.1334998Z",
+  "validation_scope": "documentation links, file identity, draft JSON syntax and boundary metadata only",
+  "reference_source_unchanged": true,
+  "copied_handoff_hash_matches": true,
+  "draft_json_files_parsed": 3,
+  "valid_local_document_links": 11,
+  "desktop_exe_specified": true,
+  "provider_only_agent_execution_specified": true,
+  "no_colab_connector_specified": true,
+  "research_code_executed": false,
+  "tests_run": false,
+  "executable_built": false,
+  "files": [
+    {
+      "path": "README.md",
+      "size_bytes": 3084,
+      "sha256": "6584d1cc7a30ed068099477512c494eedf62f61bd297d907590299206a9b0a41"
+    },
+    {
+      "path": "docs/architecture.md",
+      "size_bytes": 18885,
+      "sha256": "329b3bac69863b00001dec1aafe0acf989a03a8d1069d01f95766b6b75a15530"
+    },
+    {
+      "path": "docs/decisions.md",
+      "size_bytes": 4000,
+      "sha256": "e8e9cc4fcfba735680bff1bf5c0f24ab65998e9ab8eacc9427996f260dc5f978"
+    },
+    {
+      "path": "docs/desktop-ui.md",
+      "size_bytes": 10248,
+      "sha256": "5fdf7600075f375acb7bf07425a36feaef06e02915ed07d6fa79051af4b89321"
+    },
+    {
+      "path": "docs/increment-1.md",
+      "size_bytes": 8805,
+      "sha256": "832f27a7f0770f136027ad63073f77618f6b118f4601d0147a3041e1d86faad9"
+    },
+    {
+      "path": "docs/provider-execution.md",
+      "size_bytes": 9663,
+      "sha256": "80132cd0acbf3c4152c67d0e70e7e808d1736edf2fd5f884a62baf025080e658"
+    },
+    {
+      "path": "docs/records.md",
+      "size_bytes": 13194,
+      "sha256": "7a4a494821291848e57812ff819fc26f41b12142d6bf426c5341844c8b39f433"
+    },
+    {
+      "path": "docs/team-protocol.md",
+      "size_bytes": 9231,
+      "sha256": "93c4047dddbb051a61f919d68786e44100be7d8356f67cf091df3c4c462fe2f5"
+    },
+    {
+      "path": "docs/workflow.md",
+      "size_bytes": 9272,
+      "sha256": "f4685b41d1a2fa3583e02b280fea5a5f786a5ca51ca1a78a931513c2559a48dd"
+    },
+    {
+      "path": "docs/examples/catboost-packaging.md",
+      "size_bytes": 8914,
+      "sha256": "8ed535ab8ddde8b120527d9bfbad965a8192b70a9aecdee8d7990e394f8bd7f0"
+    },
+    {
+      "path": "records/bootstrap.json",
+      "size_bytes": 4449,
+      "sha256": "7310f859633f5f910c539a70d5d01f03c2fc81a26c7acb9628cca85f2069b5e7"
+    },
+    {
+      "path": "records/execution-policy.json",
+      "size_bytes": 1937,
+      "sha256": "e732b6a0012e9c36430843d237929dd7c8524f506b78e7939681cf13efacef8b"
+    },
+    {
+      "path": "records/project-template.json",
+      "size_bytes": 943,
+      "sha256": "1ef2dd029c3012956d20caeb348d124439acbe10d9ff71f021e7041241d75afc"
+    },
+    {
+      "path": "reference/catboostv2.py",
+      "size_bytes": 191923,
+      "sha256": "9e92837a1ebd860fe5c7bdafcd878369c5c83e7527152daa86fed6375d4b1b8d"
+    },
+    {
+      "path": "reference/handoff-v1.0.txt",
+      "size_bytes": 30176,
+      "sha256": "0621c65b3d51b96f81db4bf27552629001bba608efbd37f8cb99f4f56cf99506"
+    }
+  ]
+}

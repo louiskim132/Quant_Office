@@ -1,0 +1,90 @@
+{
+  "schema_version": "0.4.0",
+  "record_type": "architecture_execution_policy",
+  "status": "SPECIFICATION_NOT_RUNTIME_ENFORCEMENT",
+  "agent_inference_domains": [
+    "OPENAI_HOSTED",
+    "ANTHROPIC_HOSTED"
+  ],
+  "agent_executable_work_domains": [
+    "OPENAI_HOSTED",
+    "ANTHROPIC_HOSTED"
+  ],
+  "local_allowed_operations": [
+    "RENDER_UI",
+    "CAPTURE_USER_INPUT",
+    "ROUTE_STRUCTURED_REQUESTS",
+    "VALIDATE_METADATA",
+    "HASH_BYTES",
+    "TRANSFER_FILES",
+    "PERSIST_EVENTS",
+    "ENFORCE_AUTHORITY_AND_BUDGET",
+    "RENDER_RETURNED_RESULTS",
+    "OFFICIAL_PROVIDER_AUTHENTICATION",
+    "SUBSCRIPTION_USAGE_METADATA",
+    "PROVIDER_MODEL_CATALOG"
+  ],
+  "agent_forbidden_operations": [
+    "LOCAL_INFERENCE",
+    "LOCAL_SHELL",
+    "LOCAL_SCRIPT_EXECUTION",
+    "LOCAL_RESEARCH_MODULE_IMPORT",
+    "LOCAL_TEST_EXECUTION",
+    "LOCAL_SCIENTIFIC_CALCULATION",
+    "DESKTOP_CONTROL",
+    "COLAB_CONNECT",
+    "COLAB_OPEN",
+    "COLAB_LOGIN",
+    "COLAB_LAUNCH",
+    "COLAB_POLL",
+    "COLAB_API",
+    "COLAB_LIVE_FILE_ACCESS",
+    "COLAB_CALLBACK",
+    "REMOTE_NOTEBOOK_CONTROL",
+    "REMOTE_JUPYTER_CONNECT"
+  ],
+  "team_colab_connector": null,
+  "colab_credentials_stored": false,
+  "network_rule": "Task-scoped allowlist must be enforced by the hosted profile; Colab and remote notebook control destinations are excluded.",
+  "capability_failure": "BLOCK_OR_ROUTE_TO_APPROVED_OPENAI_ANTHROPIC_PROFILE",
+  "allow_local_fallback": false,
+  "allow_colab_fallback": false,
+  "user_handoff": {
+    "outbound": "STATIC_APPROVED_ARCHIVE_EXPORT",
+    "inbound": "EXPLICIT_USER_SELECTED_FILE_IMPORT",
+    "external_origin": "USER_ATTESTED",
+    "live_session_access": false,
+    "waiting_experiment_model_calls": 0
+  },
+  "capacity": {
+    "agent_count_limit": null,
+    "agents_per_role_limit": null,
+    "global_worker_tasks": null,
+    "provider_concurrency": "HONOR_REPORTED_LIMITS",
+    "unregistered_nested_workers": false
+  },
+  "spending": {
+    "mode": "SUBSCRIPTION_ONLY",
+    "pay_as_you_go_api": false,
+    "automatic_paid_fallback": false
+  },
+  "protected_artifacts": {
+    "mixed_or_unclassified": "BLOCK_ORDINARY_GRANT",
+    "derived_artifacts_inherit_exposure": true,
+    "protected_access": "EXPLICIT_USER_DECISION_AND_PRETRANSFER_EXPOSURE_EVENT",
+    "local_scientific_partitioning": false
+  },
+  "full_run_smoke_gate": "ACCEPTED_COMPATIBLE_EVIDENCE_OR_REVIEWED_ENFORCING_LAUNCHER",
+  "required_controls": [
+    "VERIFY_PROVIDER_EXECUTION_LOCATION",
+    "VERIFY_NETWORK_AND_TOOL_BOUNDARIES",
+    "BIND_EXACT_INPUTS_AND_OUTPUTS",
+    "PERSIST_INDEPENDENT_FIRST_REPORTS",
+    "PRESERVE_EXTERNAL_RESULT_ORIGIN",
+    "ENFORCE_REGION_AND_EXPOSURE_GRANTS",
+    "REQUIRE_FULL_RUN_SMOKE_GATE",
+    "RECONCILE_UNKNOWN_SUBMISSION_BEFORE_RETRY",
+    "VERIFY_SUBSCRIPTION_AUTHENTICATION",
+    "HONOR_ACCOUNT_USAGE_LIMITS"
+  ]
+}
