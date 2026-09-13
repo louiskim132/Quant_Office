@@ -1,0 +1,4 @@
+/* History page: merged event/work-log stream filter bar. */
+.history-filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin:0 0 20px}
+.history-filters .field{margin:0;font-size:11px;gap:6px}
+.history-filters select,.history-filters input{width:100%;min-width:0}
