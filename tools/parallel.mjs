@@ -16,7 +16,7 @@ const write = (file, data) => writeFileSync(file, JSON.stringify(data, null, 2) 
 const clean = cwd => {
   if (git(cwd, 'status', '--porcelain')) throw Error(`Commit or preserve unfinished changes first: ${cwd}`);
 };
-const protectedPaths = ['AGENTS.md', 'CLAUDE.md', 'docs/ROADMAP.md', '.github/', 'tools/',
+const protectedPaths = ['AGENTS.md', 'CLAUDE.md', 'SESSION.md', '.session.json', '.gitignore', 'docs/DESKTOP-SESSIONS.md', 'docs/ROADMAP.md', '.github/', 'tools/',
   'app/package.json', 'app/pnpm-lock.yaml', 'app/pnpm-workspace.yaml', 'app/.npmrc',
   'app/src/shared/', 'app/src/core/store.ts', 'app/src/main/main.ts', 'app/src/main/preload.ts'];
 export function overlaps(a, b) {

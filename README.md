@@ -10,11 +10,11 @@ The [single roadmap](docs/ROADMAP.md) contains current readiness, the ordered re
 
 ## Parallel development
 
-Use one organizer plus 5–7 isolated coding workers. The organizer reviews and combines worker PRs, tests the combined result, and submits one integration PR to `main`. The [operating protocol](docs/ROADMAP.md#15-parallel-coding-organizer-and-up-to-seven-workers-d2) covers ownership, dependencies, Devin setup and exact commands.
+Use one organizer plus up to seven isolated coding workers. The organizer reviews and combines exact worker commits, tests the combined result, and submits one integration PR to `main`. The governing [roadmap protocol](docs/ROADMAP.md#15-parallel-coding-organizer-and-up-to-seven-workers-d2) covers ownership and GitHub/hosted clients. The detailed [desktop session manual](docs/DESKTOP-SESSIONS.md) covers the fixed Session 1–7 workers plus Session 8 organizer workflow.
 
 ```powershell
 git fetch origin
 node tools/parallel.mjs init ui-round-1 7
 ```
 
-The command creates eight checkouts under the sibling `quant-team-sessions/ui-round-1` folder, all pinned to one commit. It creates no model sessions. Use `assign` to validate each task's file ownership and generate its prompt; use `check` to inspect its final committed diff. Shared rules are in [AGENTS.md](AGENTS.md); Claude Code starts with [CLAUDE.md](CLAUDE.md). GitHub connection and model sign-in are separate from launching workers.
+The general command creates isolated checkouts under the sibling `quant-team-sessions/ui-round-1` folder, all pinned to one commit. It creates no model sessions. Use `assign` to validate a task's ownership and `check` to inspect its committed diff. A prepared fixed eight-session batch is configured with `node tools/desktop.mjs setup <batch-directory>` and then operated only through the desktop manual. Shared rules are in [AGENTS.md](AGENTS.md); Claude Code starts with [CLAUDE.md](CLAUDE.md). GitHub connection and model sign-in are separate from launching workers.

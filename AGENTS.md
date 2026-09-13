@@ -1,6 +1,6 @@
 # Repository agent instructions
 
-This repository supports one organizer and up to seven Codex, Claude Code, or Devin coding workers. Read the operating protocol in `docs/ROADMAP.md` section 1.5.
+This repository supports one organizer and up to seven Codex, Claude Code, or Devin coding workers. Read the governing protocol in `docs/ROADMAP.md` section 1.5. For the fixed eight-session local desktop workflow, also follow the executable role recipe in `docs/DESKTOP-SESSIONS.md` and the checkout's ignored `SESSION.md`.
 
 - Before changing code, read `docs/ROADMAP.md` section 1, the progress table in section 11, and the exact current task packet. The roadmap is the single source of truth; do not create a competing plan or continuation file.
 - Record `git status --short --branch`, the current commit, branch, and worktree before editing. Treat stale roadmap hashes as navigation hints, not proof.
@@ -11,3 +11,4 @@ This repository supports one organizer and up to seven Codex, Claude Code, or De
 - Workers return a proposed roadmap entry with changed files, commands, results and blockers in their PR. Only the organizer writes the canonical roadmap after integration. Do not claim tests or provider operations that did not run.
 - Run application commands from `app`. If `node` is not on `PATH`, use `C:\Program Files\nodejs\node.exe` as recorded in the roadmap. Do not run live-provider fixtures unless the current task explicitly authorizes them.
 - Worker PRs target the batch organizer branch. The organizer filters proposals, reviews exact commit SHAs, checks ownership, integrates one at a time and tests the combined result. Finish with branch/commit, checks, blockers and likely merge conflicts. A human reviews and merges the final integration PR into `main`; worker agents never merge.
+- In a configured desktop batch, do not infer work from chat or the roadmap. Session 8 publishes with `node tools/desktop.mjs publish`; Sessions 1–7 act only on the packet returned by `node tools/desktop.mjs start`, then submit with `finish` or `block`. Only Session 8 accepts, rejects, updates the roadmap and closes the round.
