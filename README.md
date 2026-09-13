@@ -10,11 +10,11 @@ The [single roadmap](docs/ROADMAP.md) contains current readiness, the ordered re
 
 ## Parallel development
 
-`main` is the integration branch. Start each Codex or Claude Code implementation task in its own Git worktree and feature branch; never run two writing sessions in the same checkout. Codex desktop can create a managed worktree from `main`. For a manual Claude Code checkout, use a unique sibling folder and branch, for example:
+Use one organizer plus 5–7 isolated coding workers. The organizer reviews and combines worker PRs, tests the combined result, and submits one integration PR to `main`. The [operating protocol](docs/ROADMAP.md#15-parallel-coding-organizer-and-up-to-seven-workers-d2) covers ownership, dependencies, Devin setup and exact commands.
 
 ```powershell
 git fetch origin
-git worktree add ..\quant-team-my-task -b claude/my-task origin/main
+node tools/parallel.mjs init ui-round-1 7
 ```
 
-Open the new folder in Claude Code and merge through a reviewed pull request. Project-wide agent rules are in [AGENTS.md](AGENTS.md); Claude Code starts with [CLAUDE.md](CLAUDE.md).
+The command creates eight checkouts under the sibling `quant-team-sessions/ui-round-1` folder, all pinned to one commit. It creates no model sessions. Use `assign` to validate each task's file ownership and generate its prompt; use `check` to inspect its final committed diff. Shared rules are in [AGENTS.md](AGENTS.md); Claude Code starts with [CLAUDE.md](CLAUDE.md). GitHub connection and model sign-in are separate from launching workers.
