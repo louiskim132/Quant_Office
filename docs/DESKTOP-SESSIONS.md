@@ -409,7 +409,15 @@ Counts above are examples; record only the current actual outputs. Close:
 node tools/desktop.mjs close C:/absolute/shared/drafts/organizer/ui-shell-001-close.json
 ```
 
-Only `CLOSED` is a completed round. Session 8 then pushes its integration branch, opens or updates one PR into protected `main`, reports branch/commit/checks/blockers/conflict risk, and leaves the final merge to the human. Workers never push or merge directly to `main`. Preserve round records and worker branches until the accepted integration is safely merged.
+Only `CLOSED` is a completed round. Session 8 then pushes its integration branch and opens or updates one PR into protected `main`. Before merging it, Session 8 must perform this final gate against the exact PR-head SHA:
+
+1. Fetch the remote and record `git rev-parse HEAD` and `git rev-parse origin/main`.
+2. Run `git merge-base --is-ancestor origin/main HEAD`. Exit 0 means the organizer branch contains current main. If it does not, merge `origin/main` into the organizer branch, resolve narrowly, rerun combined verification, update the close evidence as required, push, and wait for replacement CI.
+3. Confirm the PR targets `main`, its head is the recorded organizer SHA, every required conversation is resolved, GitHub reports it mergeable, and the required `verify` check completed successfully for that exact SHA. A green check on an older SHA is stale and does not authorize a merge.
+4. Session 8 may merge the integration PR through the authenticated GitHub PR interface. Direct pushes such as `git push origin HEAD:main` remain prohibited. Sessions 1–7 never merge into `main`.
+5. If Session 8 cannot inspect or perform the protected PR merge through an authenticated GitHub route, it reports the PR URL and exact blocker to the user. It never asks for, prints or stores a raw GitHub token and never substitutes a direct push.
+
+After the PR merge, Session 8 reports the merged PR URL, merge commit, exact checks and any remaining local-sync/package step. Preserve round records and worker branches until the accepted integration is safely merged.
 
 The next user request may reuse the same eight desktop sessions. Session 8 publishes a unique new round from its accepted clean `HEAD`; the helper switches each clean worker checkout to a new branch. The user again types `start` in Sessions 1–7.
 
@@ -438,4 +446,4 @@ The next user request may reuse the same eight desktop sessions. Session 8 publi
 
 The helper enforces role/folder binding, one immutable current packet, seven complete slots, disjoint declared write scope, protected integration files, frozen base commits, clean preconditions, exact submitted SHAs, stale-review refusal, atomic result records and organizer-only merging. Its regression suite launches seven simultaneous `start` commands.
 
-It cannot prove that a human did not open the same folder in two applications, authenticate a model/provider, independently verify the truth of a reported test, make a hosted clone see local files, or guarantee semantic compatibility. GitHub protection and human review remain separate controls. Session 8 must independently review and test; the user retains the final merge to `main`.
+It cannot prove that a human did not open the same folder in two applications, authenticate a model/provider, independently verify the truth of a reported test, make a hosted clone see local files, or guarantee semantic compatibility. GitHub protection remains a separate control. Session 8 must independently review and test and may merge only through the protected exact-head PR gate above.

@@ -268,7 +268,7 @@ export function close(cwd, report) {
     if (existsSync(closeFile)) must(json(closeFile).sha === sha, 'Previous close attempt names a different HEAD. Inspect before recovery.');
     else fresh(closeFile, { ...report, sha, at: now(), provenance: 'ORGANIZER_REPORTED_COMBINED_VERIFICATION' });
     atomic(join(m.root, 'current.json'), { id: c.id, hash: c.hash, phase: 'CLOSED' });
-    return { state: 'CLOSED', round: c.id, sha, instruction: 'Preserve branches/reports. Open or update the integration PR to main for human review, or prepare the next round from this accepted organizer HEAD.' };
+    return { state: 'CLOSED', round: c.id, sha, instruction: 'Preserve branches/reports. Push the integration branch and open or update its PR to main. Merge only through that PR after its exact head contains current origin/main, the required verify check succeeds for that head, and required conversations are resolved. Never push directly to main or request a raw token.' };
   });
 }
 export function status(cwd) {

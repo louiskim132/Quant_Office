@@ -74,7 +74,7 @@ test('seven concurrent starts, immutable submissions, exact review, integration 
       checks: ['unit', 'typecheck', 'build'].map(kind => ({ kind, command: 'node --check ui/1.js', exitCode: 0, result: 'Synthetic syntax fixture; no product validation claimed.' })) };
     execFileSync(process.execPath, ['--check', 'ui/1.js'], { cwd: f.organizer });
     assert.throws(() => close(f.organizer, { ...combined, head: before }), /current round and organizer HEAD/);
-    close(f.organizer, combined); assert.equal(start(f.w(1)).state, 'CLOSED');
+    const closed = close(f.organizer, combined); assert.match(closed.instruction, /Merge only through that PR/); assert.match(closed.instruction, /Never push directly to main/); assert.equal(start(f.w(1)).state, 'CLOSED');
     const next = publish(f.organizer, plan('round-002', 1)); assert.equal(next.base, head);
     assert.equal(git(f.w(2), 'show', `${sha2}:ui/2.js`), 'module.exports = 2;', 'rejected work remains recoverable in Git');
     assert.equal(start(f.w(1)).round, 'round-002');

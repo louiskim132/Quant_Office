@@ -10,7 +10,7 @@ The [single roadmap](docs/ROADMAP.md) contains current readiness, the ordered re
 
 ## Parallel development
 
-Use one organizer plus up to seven isolated coding workers. The organizer reviews and combines exact worker commits, tests the combined result, and submits one integration PR to `main`. The governing [roadmap protocol](docs/ROADMAP.md#15-parallel-coding-organizer-and-up-to-seven-workers-d2) covers ownership and GitHub/hosted clients. The detailed [desktop session manual](docs/DESKTOP-SESSIONS.md) covers the fixed Session 1–7 workers plus Session 8 organizer workflow.
+Use one organizer plus up to seven isolated coding workers. The organizer reviews and combines exact worker commits, tests the combined result, and submits one integration PR to `main`. Session 8 may merge that PR only after the round is closed, its branch is current with `main`, and the required `verify` check succeeds for the exact PR head; direct pushes to `main` remain prohibited. The governing [roadmap protocol](docs/ROADMAP.md#15-parallel-coding-organizer-and-up-to-seven-workers-d2) covers ownership and GitHub/hosted clients. The detailed [desktop session manual](docs/DESKTOP-SESSIONS.md) covers the fixed Session 1–7 workers plus Session 8 organizer workflow.
 
 ```powershell
 git fetch origin

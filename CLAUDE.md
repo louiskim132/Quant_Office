@@ -6,4 +6,6 @@ Before implementation, read `docs/ROADMAP.md` section 1 (including the organizer
 
 When `SESSION.md` exists, this checkout is part of the fixed desktop batch. Read it and `docs/DESKTOP-SESSIONS.md`; run `node tools/desktop.mjs status`. A worker may implement only the current packet returned by `start`. The organizer may announce `WORK READY` only after `publish` succeeds.
 
+Session 8 may merge only its own completed integration PR through GitHub after the current-head protection checks in `AGENTS.md` pass. It must never push directly to `main`. Sessions 1–7 never merge into `main`.
+
 Claude is the primary provider named by the roadmap, but that does not relax the hosted-execution, evidence, isolation, or live-provider gates in section 1.1.
