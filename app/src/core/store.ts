@@ -4,6 +4,7 @@ import { resolve, isAbsolute } from 'node:path';
 import { DatabaseSync, backup as sqliteBackup } from 'node:sqlite';
 import { z } from 'zod';
 import { independenceClaimBlocker } from '../shared/cooperation.js';
+import { requestJobs } from '../shared/queue.js';
 import type { AccountConnection, ProviderCapabilitySnapshot, ProjectLocation, InputSnapshot, Assignment, ProviderJob, JobEvent, JobEvidence, JobState, Team, TeamMembership, Message, ReviewDecision, RequestGrant, ProbeAttempt, ResearchBranch, FrozenResearchSpec, PredictionRecord, TrialLedgerEntry, StageAttempt, GateReceipt, FunctionAssignment, SealedReviewReport, Agent, AgentLog, WorkLog, Effort, AppState, Artifact, Command, Experiment, LineageEvent, Project, ResearchContract, ResearchTask, Request, Settings } from '../shared/types.js';
 import { canonical, canonicalHash, sha256 } from './canonical.js';
 import { parseStrictJson } from './strict-json.js';
@@ -71,18 +72,19 @@ export const commandSchema = z.discriminatedUnion('type', [
   z.object({ ...common, type: z.literal('contract.submit'), experimentId: id, expectedRevision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER - 1) }).strict(),
   z.object({ ...common, type: z.literal('task.create'), projectId: id, experimentId: id.nullable(), prompt: z.string().trim().min(1).max(30000), recipient: role }).strict(),
   z.object({ ...common, type: z.literal('task.cancel'), taskId: id }).strict(),
+  z.object({ ...common, type: z.literal('task.delete'), taskId: id, expectedRevision: z.number().int().nonnegative().optional() }).strict(),
   z.object({ ...common, type: z.literal('settings.update'), settings: settingsSchema }).strict(),
 ]);
 const projectSchema = z.object({ id, name: title, mandate: text(30000), localFolder:text(32000).optional(),cloudWorkspace:text(1000).optional(), budgetCents: cents, archived: z.boolean(), createdAt: timestamp, updatedAt: timestamp }).strict();
 const experimentSchema = z.object({ id, projectId: id, name: title, hypothesis: text(30000), stage: z.enum(['DRAFT', 'CONTRACT_REVIEW', 'CANCELED']), revision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER), contract: contractSchema, createdAt: timestamp, updatedAt: timestamp }).strict();
-const taskSchema = z.object({ id, projectId: id, experimentId: id.nullable(), prompt: text(30000), recipient: role, status: z.enum(['BLOCKED', 'CANCELED', 'SUPERSEDED']), blocker: text(1000).nullable(), createdAt: timestamp, updatedAt: timestamp }).strict();
+const taskSchema = z.object({ id, projectId: id, experimentId: id.nullable(), prompt: text(30000), recipient: role, status: z.enum(['BLOCKED', 'CANCELED', 'SUPERSEDED']), blocker: text(1000).nullable(), removedAt: timestamp.optional(), createdAt: timestamp, updatedAt: timestamp }).strict();
 const artifactSchema = z.object({ id, projectId: id, experimentId: id.nullable(), name: z.string().min(1).max(255).refine(value => !/[\\/\x00-\x1f]/.test(value), 'Artifact name must be a basename'), sha256: hash, size: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER), kind: z.enum(['REFERENCE','RESULT']), classification: z.enum(['UNCLASSIFIED','USER_ATTESTED']), status: z.enum(['STORED','QUARANTINED']), createdAt: timestamp, mediaType: text(160), note: text(4000) }).strict();
 export const effortSchema=z.enum(['default','none','minimal','low','medium','high','xhigh','max','ultra']);
 export const agentDraftSchema = z.object({ name: title, provider: z.enum(['openai','claude']), model: z.string().trim().min(1).max(160), team: title, role, instructions: text(12000), effort: effortSchema.optional() }).strict();
 // `account` stays the historical setup identity. `connectionId` is a durable binding fact and is never writable through a profile edit.
 const agentSchema = agentDraftSchema.extend({revision:z.number().int().nonnegative().optional(),removedAt:timestamp.optional(),id, account: title, setupAccount: title.optional(), createdAt: timestamp, connectionVerifiedAt: timestamp, connectionId:id.optional(), bindingVerifiedAt:timestamp.optional(), execution: z.literal('HOSTED_SETUP_REQUIRED')}).strict();
 const logSchema=z.object({id,conversationId:z.string().min(1).max(200),from:z.string().min(1).max(100),to:z.string().min(1).max(100),kind:z.enum(['MESSAGE','TOOL','STATUS']),text:text(64000),timestamp,sourceHash:hash,externalId:z.string().min(1).max(200),provenance:z.literal('USER_IMPORTED')}).strict();
-const requestSchema=z.object({migratedFromTaskId:id.optional(),teamId:id.optional(),roleSlots:z.array(z.object({role,count:z.number().int().min(1).max(64)}).strict()).max(16).optional(),id,projectId:id,experimentId:id.nullable(),name:title,objective:text(12000),workType:z.enum(['QUESTION','ANALYSIS','IMPLEMENTATION','CODE_REVIEW','EXPERIMENT']),mode:z.enum(['SINGLE','GROUP','TEAM']),leadAgentId:id.nullable(),participantIds:z.array(id),acceptanceCriteria:text(12000),revision:z.number().int().nonnegative(),status:z.enum(['DRAFT','READY','CANCELED']),blockers:z.array(z.object({code:text(100),message:text(1000),action:text(200)}).strict()),delegation:z.boolean(),createdAt:timestamp,updatedAt:timestamp,sourceRequestId:id.optional()}).strict();
+const requestSchema=z.object({migratedFromTaskId:id.optional(),teamId:id.optional(),roleSlots:z.array(z.object({role,count:z.number().int().min(1).max(64)}).strict()).max(16).optional(),id,projectId:id,experimentId:id.nullable(),name:title,objective:text(12000),workType:z.enum(['QUESTION','ANALYSIS','IMPLEMENTATION','CODE_REVIEW','EXPERIMENT']),mode:z.enum(['SINGLE','GROUP','TEAM']),leadAgentId:id.nullable(),participantIds:z.array(id),acceptanceCriteria:text(12000),revision:z.number().int().nonnegative(),status:z.enum(['DRAFT','READY','CANCELED']),removedAt:timestamp.optional(),blockers:z.array(z.object({code:text(100),message:text(1000),action:text(200)}).strict()),delegation:z.boolean(),createdAt:timestamp,updatedAt:timestamp,sourceRequestId:id.optional()}).strict();
 const providerEnum=z.enum(['openai','claude']);
 /** Defence in depth: durable records must never carry provider secrets, even in free-text fields. */
 const secretFree=(maximum:number)=>text(maximum).refine(value=>!/\b(sk-[A-Za-z0-9_-]{8,}|Bearer\s+[A-Za-z0-9._-]{12,}|eyJ[A-Za-z0-9._-]{16,})/.test(value),'Durable records must not contain credentials');
@@ -1315,6 +1317,31 @@ export class OfficeStore {
           if (['CANCELED','ACCEPTED','SUPERSEDED'].includes(task.status)) throw new Error('Terminal task cannot be canceled');
           for(const linked of state.tasks.filter(t=>t.id===task.id||(experimentId&&t.experimentId===experimentId&&t.status!=='CANCELED'&&t.status!=='ACCEPTED'&&t.status!=='SUPERSEDED')))changes.push({collection:'tasks',value:{...linked,status:'CANCELED',blocker:null,updatedAt:now}});
           if(experimentId){const experiment=state.experiments.find(e=>e.id===experimentId)!;changes.push({collection:'experiments',value:{...experiment,stage:'CANCELED',revision:experiment.revision+1,updatedAt:now}});} reason = 'Canceled research request'; break;
+        }
+        case 'task.delete': {
+          // Removal only hides a terminal row in the work queue. The request/task records and every
+          // lineage event are retained, so history and evidence are never rewritten.
+          const request=state.requests?.find(item=>item.id===command.taskId);
+          if(request){
+            projectId=request.projectId;experimentId=request.experimentId;
+            this.activeProject(state,request.projectId);
+            if(request.removedAt)throw new Error('This request is already removed from the list');
+            if(request.status!=='CANCELED')throw new Error('Only a completed or canceled request can be removed from the list');
+            if(command.expectedRevision!==undefined&&command.expectedRevision!==request.revision)throw new Error('This request changed while it was being reviewed. Reload before removing it.');
+            if(requestJobs(state,request.id).some(job=>job.unresolved))throw new Error('A provider job outcome is still unresolved; reconcile it before removing this request');
+            changes.push({collection:'requests',value:{...request,revision:request.revision+1,removedAt:now,updatedAt:now}});
+            reason=`Removed canceled request "${request.name}" from the work queue; record and history retained`;break;
+          }
+          const task=state.tasks.find(item=>item.id===command.taskId);
+          if(!task)throw new Error('Request not found');
+          this.activeProject(state,task.projectId);projectId=task.projectId;experimentId=task.experimentId;
+          if(task.removedAt)throw new Error('This request is already removed from the list');
+          if(experimentId&&state.requests?.some(r=>r.experimentId===experimentId))throw new Error('Remove the parent request using its request ID');
+          const experiment=experimentId?state.experiments.find(e=>e.id===experimentId):undefined;
+          const status=experiment?.stage==='CANCELED'?'CANCELED':task.status;
+          if(status!=='ACCEPTED'&&status!=='CANCELED')throw new Error('Only a completed or canceled request can be removed from the list');
+          for(const linked of state.tasks.filter(item=>item.id===task.id||(experimentId&&item.experimentId===experimentId)))changes.push({collection:'tasks',value:{...linked,status:linked.status as z.infer<typeof taskSchema>['status'],removedAt:now,updatedAt:now}});
+          reason='Removed completed/canceled request from the work queue; record and history retained';break;
         }
         case 'settings.update': {
           changes.push({ collection: 'settings', value: command.settings }); reason = 'Updated desktop preferences and global spending ceiling'; break;

@@ -1,12 +1,13 @@
 import React,{useCallback,useEffect,useState} from 'react';
-import type {LineageEvent} from '../shared/types';
+import type {AppState,LineageEvent} from '../shared/types';
 
 /**
  * History reads one page at a time from the indexed event log.
  * The workspace can hold far more events than the window ever renders, so nothing here loads the
  * whole log to show the top of it.
  */
-export function HistoryPager({projectId,search,label,date}:{projectId:string|null;search:string;label:(value:string)=>string;date:(value:string)=>string}){
+export function HistoryView({state,projectId,label,date}:{state:AppState;projectId:string|null;label:(value:string)=>string;date:(value:string)=>string}){
+ const [search]=useState('');
  const [entries,setEntries]=useState<LineageEvent[]>([]);
  const [cursor,setCursor]=useState<number|null>(null);
  const [total,setTotal]=useState(0);

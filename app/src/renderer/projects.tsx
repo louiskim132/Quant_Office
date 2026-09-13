@@ -1,0 +1,13 @@
+import React,{useState} from 'react';
+import {ArrowUpRight,Folder,FolderPlus,Plus} from 'lucide-react';
+import type {AppState,Project} from '../shared/types';
+import {Empty,SearchField} from './components';
+import {ProjectLocationEditor} from './location';
+
+export function ProjectsView({state,project,projectId,onState,onOpenProject,onNewProject,onError}:{state:AppState;project:Project|undefined;projectId:string;onState:(s:AppState)=>void;onOpenProject:(id:string)=>void;onNewProject:()=>void;onError:(e:unknown)=>void}){
+ const [projectLifecycle,setProjectLifecycle]=useState('active');
+ const [search,setSearch]=useState('');
+ const activeProjects=state.projects.filter(p=>!p.archived);
+ return <><div className="section-toolbar"><span>{activeProjects.length} active projects · {state.projects.filter(p => p.archived).length} archived</span><label className="field">Project lifecycle<select value={projectLifecycle} onChange={e=>setProjectLifecycle(e.target.value)}><option value="active">Active</option><option value="archived">Archived</option><option value="all">All</option></select></label><SearchField value={search} onChange={setSearch} placeholder="Find a project"/></div>{!state.projects.length ? <Empty icon={FolderPlus} title="Every discovery starts with a question" description="Create a project for a research question, strategy family, or model comparison. No model family is assumed." action={<button className="primary" onClick={onNewProject}><Plus size={16}/>Create first project</button>}/> : <div className="project-grid">{state.projects.filter(p=>projectLifecycle==='all'||(projectLifecycle==='archived')===p.archived).filter(p => `${p.name} ${p.mandate}`.toLowerCase().includes(search.toLowerCase())).map(p => <article className={`project-card ${p.id === projectId ? 'chosen' : ''}`} key={p.id}><div className="card-heading"><span className="folder-emblem"><Folder size={22}/></span><span className="quiet-badge small">{p.archived ? 'Archived' : p.id === projectId ? 'Selected' : 'Active'}</span></div><h2>{p.name}</h2><p>{p.mandate || 'No mandate recorded.'}</p><p className="path-text">{p.localFolder||'Folder not selected'}</p><p>Cloud workspace: {p.cloudWorkspace||'Not selected'} · Unverified</p>{p.localFolder&&<button onClick={()=>void window.office.openProjectFolder(p.id).catch(onError)}>Open folder</button>}<div className="project-stats"><span><strong>{state.experiments.filter(e => e.projectId === p.id).length}</strong> experiments</span><span>Subscription only</span></div><button className="card-link" onClick={() => onOpenProject(p.id)}>Open project<ArrowUpRight size={17}/></button></article>)}</div>}
+ {project&&<ProjectLocationEditor key={project.id} project={project} state={state} onState={onState}/>}</>;
+}
