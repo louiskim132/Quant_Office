@@ -1,5 +1,7 @@
 import React,{useCallback,useEffect,useRef,useState} from 'react';
+import {History} from 'lucide-react';
 import type {AgentLog,AppState,LineageEvent} from '../shared/types';
+import {Empty} from './components';
 import './history.css';
 
 type RecordView='all'|'yours'|'messages'|'work'|'between';
@@ -78,7 +80,8 @@ export function HistoryView({state,projectId,label,date}:{state:AppState;project
    <label className="field">Search<input aria-label="Search records" value={search} onChange={e=>setSearch(e.target.value)}/></label>
   </div>
   {error&&<p className="notice error" role="alert">{error}</p>}
-  <div className="timeline">{visible.map(row=>row.event?<article key={row.id}>
+  {visible.length===0?<Empty icon={History} title="No matching records" description={entries.length+logs.length===0?'No events or work-log records have been recorded in this scope yet.':'No loaded records match the current filters. Load older events or widen the filters.'}/>
+  :<div className="timeline">{visible.map(row=>row.event?<article key={row.id}>
    <span className="timeline-dot"/>
    <div className="card-heading"><h3>{label(row.event.kind.replaceAll('.',' '))}</h3><time>{date(row.event.createdAt)}</time></div>
    <p>{row.event.reason}</p>
@@ -90,7 +93,7 @@ export function HistoryView({state,projectId,label,date}:{state:AppState;project
    <p>{row.log!.text}</p>
    <div className="event-meta"><span>{row.log!.kind.toLowerCase()} · {row.log!.conversationId} · {row.log!.provenance==='OFFICE_EVENT'?'Office event':'Imported transcript'}</span>
     <details><summary>Record integrity</summary><code className="hash">{row.log!.externalId}<br/>{row.log!.provenance==='OFFICE_EVENT'?'Event':'Source file'} SHA-256: {row.log!.sourceHash}</code></details></div>
-  </article>)}</div>
+  </article>)}</div>}
   <div className="button-row">
    {cursor!==null&&<button className="secondary" disabled={busy} onClick={()=>void load(cursor,false)}>{busy?'Loading…':'Load older events'}</button>}
    {cursor===null&&entries.length>0&&<p className="muted">The whole recorded history for this scope is shown.</p>}

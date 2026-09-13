@@ -40,7 +40,7 @@ export function EvidencePanel({agentId,projectId}:{agentId:string;projectId:stri
 
  return <section className="evidence">
   <div className="section-toolbar">
-   <input value={pattern} placeholder="Search permitted evidence" aria-label="Search permitted evidence"
+   <input className="evidence-search" value={pattern} placeholder="Search permitted evidence" aria-label="Search permitted evidence"
     onChange={event=>setPattern(event.target.value)} onKeyDown={event=>{if(event.key==='Enter'&&pattern.trim())void search();}}/>
    <button className="secondary" disabled={busy||!pattern.trim()} onClick={()=>void search()}>{busy?'Searching…':'Search'}</button>
   </div>
@@ -65,7 +65,7 @@ export function EvidencePanel({agentId,projectId}:{agentId:string;projectId:stri
    <p className="muted">{expanded.description.provenance} Attested {expanded.description.evidence}.</p>
    <pre>{expanded.read.lines.map((line,index)=>{
     const number=expanded.read.from+index;
-    return <span key={number} className={number===expanded.match.line?'evidence-hit':undefined}>{number}  {line}{'\n'}</span>;
+    return <span key={number} className={number===expanded.match.line?'evidence-hit':undefined}><span className="line-no">{number}</span>{'  '}{line}{'\n'}</span>;
    })}</pre>
    <details><summary>Object identity</summary><code className="hash">{expanded.description.sha256}</code></details>
   </article>}
