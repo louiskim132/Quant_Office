@@ -1,19 +1,26 @@
 /* research.css — domain styles for this surface's owner. */
+.back-link{display:inline-flex;align-items:center;gap:8px;color:var(--muted);font-size:11px;padding:0;margin:0 0 16px}
+.back-link:hover{color:var(--accent)}
 .research-overview{border:1px solid var(--border);border-radius:9px;background:var(--panel);padding:22px;display:flex;justify-content:space-between;gap:30px;align-items:center;margin-bottom:19px}
-.research-overview h2{margin:8px 0;font-size:19px}
+.research-overview-body{min-width:0}
+.research-overview h2{margin:0;font-size:19px}
+.research-overview-title{display:flex;align-items:center;gap:10px;margin:8px 0}
 .research-overview p{font-size:11px;color:var(--muted);max-width:680px;white-space:pre-wrap}
-.experiment-tabs{display:flex;gap:8px;margin:0 0 19px;overflow:auto;padding-bottom:5px}
-.experiment-tabs button{padding:11px 15px;border:1px solid var(--border);border-radius:7px;font-size:11px;background:var(--panel);text-align:left;white-space:nowrap}
+.research-overview .button-row{justify-content:flex-end;flex-wrap:wrap;flex-shrink:0}
+.experiment-tabs{display:flex;gap:4px;margin:0 0 19px;overflow-x:auto;border-bottom:1px solid var(--border)}
+.experiment-tabs button{padding:10px 14px;border-bottom:2px solid transparent;font-size:11px;text-align:left;white-space:nowrap;color:var(--muted)}
 .experiment-tabs button span{display:block;font-size:8px;color:var(--subtle);text-transform:capitalize;margin-top:5px}
-.experiment-tabs button.selected{border-color:#b79a6166;background:var(--accent-bg);color:var(--accent)}
+.experiment-tabs button.selected{border-bottom-color:var(--accent);color:var(--accent)}
 .contract-editor{border:1px solid var(--border);border-radius:9px;background:var(--panel);padding:24px}
 .contract-heading{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;margin-bottom:23px}
 .contract-heading h2{font-size:20px}
 .contract-heading p{font-size:11px;color:var(--muted);margin-top:8px;white-space:pre-wrap}
-.contract-fields{display:grid;grid-template-columns:1fr 1fr;column-gap:22px;row-gap:3px}
+.contract-fields{display:grid;grid-template-columns:1fr 1fr;column-gap:22px;row-gap:16px}
+.contract-fields .field{margin:0}
 .contract-field>span{display:flex;align-items:center;gap:9px}
 .contract-field b{font-size:9px;color:var(--subtle);font-weight:500}
 .contract-field textarea{font-size:11px;min-height:113px}
 .contract-actions{border-top:1px solid var(--border);padding-top:20px;margin-top:5px;display:flex;align-items:center;justify-content:space-between;gap:15px}
+.contract-actions .button-row{justify-content:flex-end;flex-wrap:wrap}
 @media(max-width:1200px){.contract-actions{flex-wrap:wrap}}
-@media(max-width:1040px){.contract-fields{column-gap:15px}.research-overview{gap:15px;align-items:flex-start}}
+@media(max-width:1040px){.contract-fields{column-gap:15px}.research-overview{gap:15px;align-items:flex-start;flex-wrap:wrap}}
