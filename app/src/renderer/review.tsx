@@ -29,22 +29,26 @@ export function BranchStanding({branchId,subjectHash,mode,label}:{branchId:strin
    <span className="quiet-badge small">{status.canPromote?'All gates for this subject are earned':'Blocked'}</span>
   </div>
 
-  {blockers.length>0&&<>
-   <p className="muted">This branch does not advance until each of these is resolved. Nothing here can be waived from this view.</p>
-   <ul className="blockers">{blockers.map(reason=><li key={reason}>{reason}</li>)}</ul>
-  </>}
-  {!blockers.length&&<p className="muted">Every gate this stage requires has a passing receipt for this exact subject.</p>}
+  <div className="standing-section">
+   {blockers.length>0&&<>
+    <p className="muted">This branch does not advance until each of these is resolved. Nothing here can be waived from this view.</p>
+    <ul className="blockers">{blockers.map(reason=><li key={reason}>{reason}</li>)}</ul>
+   </>}
+   {!blockers.length&&<p className="muted">Every gate this stage requires has a passing receipt for this exact subject.</p>}
+  </div>
 
-  <h4>Functions this stage needs</h4>
-  <ul className="functions">{status.functions.map(item=>
-   <li key={item.function}>
-    <b>{label(item.function.replaceAll('_',' '))}</b>
-    {item.blockers.length
-     ?<span className="unassigned">{item.blockers.join(' ')}</span>
-     :<span>assigned at profile revision {item.agentRevision}</span>}
-   </li>)}</ul>
+  <div className="standing-section">
+   <h4>Functions this stage needs</h4>
+   <ul className="functions">{status.functions.map(item=>
+    <li key={item.function}>
+     <b>{label(item.function.replaceAll('_',' '))}</b>
+     {item.blockers.length
+      ?<span className="unassigned">{item.blockers.join(' ')}</span>
+      :<span>assigned at profile revision {item.agentRevision}</span>}
+    </li>)}</ul>
+  </div>
 
-  {status.tasks.length>0&&<>
+  {status.tasks.length>0&&<div className="standing-section">
    <h4>Next work this stage would create</h4>
    <ul className="functions">{status.tasks.map(task=>
     <li key={task.contextHash}>
@@ -52,6 +56,6 @@ export function BranchStanding({branchId,subjectHash,mode,label}:{branchId:strin
      <span>output {task.outputSchema}{task.dependsOn.length?` · after ${task.dependsOn.length} worker task${task.dependsOn.length===1?'':'s'}`:''}</span>
      <details><summary>Frozen context</summary><code className="hash">{task.contextHash}</code></details>
     </li>)}</ul>
-  </>}
+  </div>}
  </section>;
 }
