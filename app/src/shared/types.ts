@@ -3,11 +3,11 @@ export type Stage = 'CANCELED' | 'DRAFT' | 'CONTRACT_REVIEW' | 'CONTRACT_FROZEN'
 export type TaskStatus = 'BLOCKED' | 'QUEUED' | 'RUNNING' | 'ACCEPTED' | 'CANCELED' | 'SUPERSEDED';
 export type WorkType = 'QUESTION' | 'ANALYSIS' | 'IMPLEMENTATION' | 'CODE_REVIEW' | 'EXPERIMENT';
 export type WorkMode = 'SINGLE' | 'GROUP' | 'TEAM';
-export interface Request { migratedFromTaskId?:string; teamId?:string; roleSlots?:RoleSlot[]; id:string; projectId:string; experimentId:string|null; name:string; objective:string; workType:WorkType; mode:WorkMode; leadAgentId:string|null; participantIds:string[]; acceptanceCriteria:string; revision:number; status:'DRAFT'|'READY'|'CANCELED'; blockers:{code:string;message:string;action:string}[]; delegation:boolean; createdAt:string; updatedAt:string; sourceRequestId?:string; }
+export interface Request { migratedFromTaskId?:string; teamId?:string; roleSlots?:RoleSlot[]; id:string; projectId:string; experimentId:string|null; name:string; objective:string; workType:WorkType; mode:WorkMode; leadAgentId:string|null; participantIds:string[]; acceptanceCriteria:string; revision:number; status:'DRAFT'|'READY'|'CANCELED'; removedAt?:string; blockers:{code:string;message:string;action:string}[]; delegation:boolean; createdAt:string; updatedAt:string; sourceRequestId?:string; }
 export interface Project { localFolder?:string; cloudWorkspace?:string; id: string; name: string; mandate: string; createdAt: string; updatedAt: string; archived: boolean; budgetCents: number; }
 export interface Experiment { id: string; projectId: string; name: string; hypothesis: string; stage: Stage; revision: number; createdAt: string; updatedAt: string; contract: ResearchContract; }
 export interface ResearchContract { objective: string; dataPolicy: string; modelFamilies: string; evaluation: string; economics: string; protectedRegions: string; requiredChecks: string; limitations: string; }
-export interface ResearchTask { id: string; projectId: string; experimentId: string | null; prompt: string; recipient: Role; status: TaskStatus; blocker: string | null; createdAt: string; updatedAt: string; }
+export interface ResearchTask { id: string; projectId: string; experimentId: string | null; prompt: string; recipient: Role; status: TaskStatus; blocker: string | null; removedAt?: string; createdAt: string; updatedAt: string; }
 export interface Artifact { id: string; projectId: string; experimentId: string | null; name: string; sha256: string; size: number; kind: 'REFERENCE' | 'RESULT'; classification: 'UNCLASSIFIED' | 'USER_ATTESTED'; status: 'STORED' | 'CONTENT_VERIFIED' | 'QUARANTINED'; createdAt: string; mediaType: string; note: string; }
 export interface ReviewReport { id: string; projectId: string; experimentId: string; role: Role; bundleHash: string; verdict: string; content: string; disclosed: boolean; createdAt: string; }
 export interface LineageEvent { sequence: number; id: string; kind: string; projectId: string | null; experimentId: string | null; actor: string; reason: string; createdAt: string; previousHash: string; hash: string; }
@@ -222,6 +222,7 @@ export type Command =
  | { type: 'contract.submit'; idempotencyKey: string; experimentId: string; expectedRevision: number }
  | { type: 'task.create'; idempotencyKey: string; projectId: string; experimentId: string | null; prompt: string; recipient: Role }
  | { type: 'task.cancel'; idempotencyKey: string; taskId: string }
+ | { type: 'task.delete'; idempotencyKey: string; taskId: string; expectedRevision?: number }
  | { type: 'settings.update'; idempotencyKey: string; settings: Settings };
 export interface FileActionResult { canceled: boolean; count: number; message: string; state: AppState; }
 export interface AppInfo { version: string; dataDirectory: string; platform: string; packaged: boolean; transportModule: boolean; transportDetail: string; }

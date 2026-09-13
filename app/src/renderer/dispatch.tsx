@@ -83,7 +83,7 @@ export function RequestDispatch({request,state,onState}:{request:Request;state:A
    <button className="secondary" disabled={!!busy||!sessionId}>Link session</button>
   </form>}
   {events.length>0&&<details><summary>Provider events ({events.length})</summary><ul className="evidence-list">{events.map(event=><li key={event.id}><b>{event.kind.toLowerCase()}</b> {new Date(event.occurredAt).toLocaleString()} — {event.text}</li>)}</ul>
-    {eventCursor&&job&&<button onClick={()=>void window.office.jobEventPage({jobId:job.id,limit:50,cursor:eventCursor}).then(page=>{setEvents(current=>[...current,...page.entries]);setEventCursor(page.nextCursor);}).catch(e=>setError((e as Error).message))}>More provider events</button>}
+    {eventCursor&&job&&<button className="secondary" onClick={()=>void window.office.jobEventPage({jobId:job.id,limit:50,cursor:eventCursor}).then(page=>{setEvents(current=>[...current,...page.entries]);setEventCursor(page.nextCursor);}).catch(e=>setError((e as Error).message))}>More provider events</button>}
   </details>}
   {gate&&gate.blockers.length>0&&<details><summary>Why automatic start is blocked</summary><ul className="evidence-list">{gate.blockers.map(blocker=><li key={blocker}>{blocker}</li>)}</ul></details>}
  </section>;

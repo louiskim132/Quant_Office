@@ -46,7 +46,7 @@ export function ProfileTabs({agent,state,children,onState:_onState}:{agent:Agent
   <div className="tab-row" role="tablist">{tabs.map(name=>
    <button key={name} role="tab" aria-selected={tab===name} className={`tab ${tab===name?'active':''}`} onClick={()=>setTab(name)}>{name}</button>)}</div>
   {error&&<p className="notice error" role="alert">{error}</p>}
-  {tab==='Profile'&&<div>{children}</div>}
+  {tab==='Profile'&&<div className="tab-panel">{children}</div>}
   {tab==='Assignments'&&<div className="tab-panel">
    {jobs.length>0&&<label>Assignment event scope<select aria-label="Assignment event scope" value={selectedJob?.id??''} onChange={e=>setSelectedJobId(e.target.value)}>{jobs.map(job=><option key={job.id} value={job.id}>{job.assignmentId.slice(0,8)} · {job.state}</option>)}</select></label>}
    <p className="muted">{assignments.length} assignment{assignments.length===1?'':'s'} · dispatch {gate.canStart?'available':'blocked'}</p>
