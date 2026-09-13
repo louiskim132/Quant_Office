@@ -2358,3 +2358,50 @@ Evidence links point to the 0.4 source. Priorities: P0 = required before live di
 | F22 | P1 | Existing tests do not establish scientific or hosted correctness. | All 56 unit tests passed again during this review, while F03–F05 reproduced. Existing packaged checks cover local flows; they do not prove live Claude execution, cross-provider handoffs, activity transitions, cancellation acknowledgement, or exact model/effort application. |
 
 Reproduction evidence: [isolated audit results](../app/test-output/structure-review-reproductions.json). The audit used an in-memory fixture and no user research data or provider prompts. Production source and the packaged application were not changed during this review.
+
+~~~text
+Date / item / status: 2026-09-13 / D2 round list-views-001 — Drive-style agent rows, project rows with per-row
+  location settings, terminal task removal, merged History+Logs stream / VERIFIED_LOCAL
+Problem and resulting behavior: Agents and Projects rendered boxed card grids, the Tasks queue retained terminal
+  rows forever, and activity was split between a paged History event view and a separate Logs view. The organizer
+  prerequisite (29778ec) added a task.delete command with removedAt tombstones and a QueueEntry.deletable
+  projection (terminal status plus no unresolved provider job; records and lineage events retained), and split
+  renderer ownership into components.tsx/queue.tsx/projects.tsx plus a HistoryView contract with the Logs nav
+  item removed. Worker 1 (359aa44) converted AgentRoster to a header row plus one row per agent with
+  right-aligned Profile & logs / Archive-or-Restore controls, retaining the project-card class for the recorded
+  revision.desktop.ts DOM contract. Worker 2 (8dd3f65) converted Projects to rows carrying the resolved location,
+  experiment count and status badge, with a labelled settings toggle opening one inline panel that shows the
+  current folder, a Location input, Choose folder via chooseProjectFolder, and Save dispatching location.save
+  with expected revision and passthrough inputPaths/outputFolder; archived rows are read-only. Worker 3
+  (801036f) appended a Remove button rendered only when row.deletable is true, dispatching task.delete with
+  expectedRevision for request rows. Worker 4 (f2128d6) merged the work-log index into the paged History
+  timeline: Subject/Other participant/Record view/Search filters (Subject covers You/Office/Tool/each agent),
+  OFFICE_EVENT log projections deduplicated against their underlying events unless a subject is selected,
+  deterministic descending-time ordering, and agents.e2e.ts repointed to the renamed controls.
+Changed source/test files: app/src/shared/types.ts, app/src/shared/queue.ts, app/src/core/store.ts,
+  app/src/renderer/components.tsx (new), app/src/renderer/queue.tsx (new), app/src/renderer/projects.tsx (new),
+  app/src/renderer/office.tsx, app/src/renderer/office.css, app/src/renderer/main.tsx,
+  app/src/renderer/history.tsx, app/src/renderer/history.css (new), app/src/renderer/styles.css,
+  app/tests/task-delete.test.ts (new), app/tests/agents.e2e.ts.
+Migration and compatibility impact: request and task records gained an optional removedAt tombstone; deletion
+  hides terminal queue rows but retains records, history and lineage events. No schema version bump; IPC surface
+  unchanged except the new task.delete command; no dependencies added; archived-project read-only rules
+  preserved.
+Commands actually run, exit codes and dated log paths: node tools/desktop.mjs review + check + accept per exact
+  SHA (359aa44, 8dd3f65, 801036f, f2128d6) onto frozen base 29778ec — all ancestry/scope PASS with clean diffs;
+  merges 0d76cec, 83c9bc4, 11d27e6, 485e110. node_modules/.bin/tsc --noEmit — exit 0 after each merge and on the
+  combined HEAD. node_modules/.bin/tsx --test --test-concurrency=4 tests/*.test.ts — exit 0, 384/384 on the
+  merged tree. node app/scripts/build.mjs — exit 0 (0.5.0). node_modules/.bin/tsx tests/agents.e2e.ts — exit 1,
+  attempted and blocked: the pre-existing provider-catalog step "Options read from the provider model catalog."
+  timed out at line 29, before any repointed selector; this fixture reuses an installed Codex subscription login
+  and this environment does not currently return a model catalog (last PASS was 2026-09-07, packaged mode,
+  app/test-output/agents-report.json).
+Local fixture evidence versus live provider evidence: all local. No provider session was created, observed or
+  cancelled; the desktop fixture failure is a missing local Codex catalog, not a regression in the merged code.
+Known unresolved external IDs/operations: the repointed agents.e2e.ts History assertions (line 40) remain
+  unexercised until run in a Codex-signed-in environment; provider model-catalog and effort reads stay external.
+Remaining defects and exact next item: the History count line totals events plus all logs including OFFICE_EVENT
+  rows hidden under the 'all' view; the per-card 'Open folder' shortcut was dropped (the location is visible in
+  the row and editable in the settings panel); ProjectsView still accepts unused project/onError props. Next
+  item: human review and merge of parallel/prepared-20260912/organizer; workers 5-7 were IDLE this round.
+~~~
