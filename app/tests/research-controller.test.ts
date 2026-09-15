@@ -48,8 +48,8 @@ function passingReceipts(target: ResearchBranch, stage: Stage): GateReceipt[] {
 
 test('a stage schedules only its own next assignments, resolved to live profile revisions', () => {
   const principal = agent('Principal', 'PM_A');
-  const assignments = [assign('S3', 'PRINCIPAL', principal)];
-  const target = branch('S3');
+  const assignments = [assign('S4', 'PRINCIPAL', principal)];
+  const target = branch('S4');
   const result = scheduleStage({ state: state([principal]), records: { branches: [target] }, assignments, branch: target,
     subjectHash: SUBJECT, mode: 'GROUP', outputSchema: 'run-report@1' });
   assert.equal(result.tasks.length, 1);
@@ -94,7 +94,7 @@ test('a single-agent request never recruits an independent reviewer by inference
   assert.match(solo.blockers.join(' '), /Change the request's mode if the scope really is wider/);
 
   // A single-agent request is not broken; it simply stays solo where the stage allows it.
-  const working = scheduleStage({ state: state([principal, reviewer]), records: {}, assignments, branch: branch('S3'),
+  const working = scheduleStage({ state: state([principal, reviewer]), records: {}, assignments: [assign('S4', 'PRINCIPAL', principal)], branch: branch('S4'),
     subjectHash: SUBJECT, mode: 'SINGLE', outputSchema: 'run-report@1' });
   assert.deepEqual(working.tasks.map(task => task.function), ['PRINCIPAL']);
 });
@@ -208,11 +208,13 @@ test('adjudication refuses an undeclared or unexplained NOT_APPLICABLE mandatory
   assert.deepEqual(recheckMandatoryGates({ ...records, specs: [spec], receipts: receipts.map(r => r.gate === 'G-FIT' ? { ...r, rationale: '' } : r) }, target, SUBJECT), ['G-FIT']);
 });
 
-test('every stage declares the functions it needs, and mandatory gates are a closed list', () => {
+test('agent stages declare their functions; user-run and office stages schedule nobody', () => {
   const stages: Stage[] = ['S0', 'S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8', 'S9', 'S10'];
-  for (const stage of stages) assert.ok(STAGE_FUNCTIONS_REQUIRED[stage].length >= 1, `${stage} declares no function`);
+  for (const stage of stages.filter(s => ['S0', 'S1', 'S2', 'S4', 'S7'].includes(s)))
+    assert.ok(STAGE_FUNCTIONS_REQUIRED[stage].length >= 1, `${stage} declares no function`);
   assert.equal(STAGE_FUNCTIONS_REQUIRED.S2[0], 'CORRECTNESS_REVIEWER');
-  assert.deepEqual(STAGE_FUNCTIONS_REQUIRED.S8, ['CUSTODIAN']);
+  for (const stage of ['S3', 'S5', 'S6', 'S8', 'S9', 'S10'] as const)
+    assert.deepEqual(STAGE_FUNCTIONS_REQUIRED[stage], [], `${stage} is user-run or office validation — no agent is scheduled`);
   for (const gate of MANDATORY_GATES) assert.ok(stages.some(stage => STAGE_GATES[stage].includes(gate)), `${gate} belongs to no stage`);
 });
 

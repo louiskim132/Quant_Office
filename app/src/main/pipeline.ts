@@ -10,11 +10,10 @@ import { pipelineActionSchema, stageContextHash, stageReportSchema, type Pipelin
 import type { AppState, Assignment, InputSnapshot } from '../shared/types.js';
 import type { HoldoutReservation } from '../shared/holdout.js';
 import type {SignedResearchClaim} from '../shared/research-admission';
+import type {RunPackageBuilder,RunReturnInspector} from '../shared/run-package';
 import {buildBlindedPacket,buildAdversarialPackets} from './context-policy';
 import {z} from 'zod';
 import type {Holdout} from '../shared/holdout';
-
-/** A separately maintained harness/custodian transport. It never receives keys from candidate code. */
 export interface ResearchRuntime {
   prepareReview(input:{operationId:string;state:AppState;branchId:string;tasks:ReturnType<typeof scheduleStage>['tasks']}):Promise<{proof:SignedResearchClaim;snapshots:InputSnapshot[];body:unknown}>;
   reconcileReview?(operationId:string):Promise<{proof:SignedResearchClaim;snapshots:InputSnapshot[];body:unknown}|null>;
@@ -27,6 +26,8 @@ export interface PipelineIO {
   selectHoldout:()=>Promise<Uint8Array|null>;
   exportHoldout:(bytes:Uint8Array)=>Promise<void>;
   writeObject:(bytes:Uint8Array)=>Promise<{sha256:string;bytes:number}>;
+  /** Writes the frozen run package where the user can take it to Colab. Returns where it went. */
+  exportPackage?:(bytes:Uint8Array,packageId:string)=>Promise<string|null>;
 }
 
 /**
@@ -67,7 +68,19 @@ export class PipelineService {
     private readonly now: () => string = () => new Date().toISOString(),
     private readonly runtime:ResearchRuntime|null=null,
     private readonly io:PipelineIO|null=null,
+    /** The manual-run seams (section 1.6): package authoring and bound-return inspection. */
+    private readonly packages:{build?:RunPackageBuilder;inspect?:RunReturnInspector}={},
   ) {}
+
+  /** Which stronger-evidence and manual-run capabilities this build actually carries. */
+  capabilities(){
+    return {
+      packageExport:!!this.packages.build,
+      returnValidation:!!this.packages.inspect,
+      independentRuntime:!!this.runtime,
+      custody:!!this.custody,
+    };
+  }
 
   async run(input: unknown): Promise<PipelineResult> {
     const action = pipelineActionSchema.parse(input);
@@ -87,6 +100,10 @@ export class PipelineService {
       }
       case 'adjudicate': return this.adjudicate(action);
       case 'rebuttal': return this.rebuttal(action);
+      case 'exportRunPackage': return this.exportRunPackage(action);
+      case 'importRunReturn': return this.importRunReturn(action);
+      case 'importStageReport': return this.importStageReport(action);
+      case 'validateReturn': return this.validateReturn(action);
       case 'shadowPolicy': return this.shadowPolicy(action);
       case 'shadowIngest': return this.shadowIngest(action);
       case 'monitor': return this.shadowIngest(action);
@@ -163,12 +180,17 @@ export class PipelineService {
       throw new Error(schedule.blockers[0] ?? `${branch.stage} produces no stage work to prepare.`);
 
     let review:Awaited<ReturnType<ResearchRuntime['prepareReview']>>|null=null;
+    // The separated pilot tier: the office freezes the same context bindings as a durable record
+    // instead of an independent signature (section 1.6). Its reports admit as
+    // SEPARATE_SESSION_UNVERIFIED and are never promoted past that label.
+    let separated:{roundId:string;contexts:{agentId:string;contextId:string;snapshotId:string}[];snapshots:InputSnapshot[]}|null=null;
     if(['S2','S7'].includes(branch.stage)){
-      if(!this.runtime)throw new Error('Independent isolation transport is not configured.');
       const intent=this.store.beginReview(branch.id,branch.revision,canonicalHash(schedule.tasks));
       const saved=state.pipeline?.find(r=>r.kind==='REVIEW_ROUND'&&r.branchId===branch.id&&r.proof.claim.branchRevision===branch.revision);
+      const savedSeparated=state.pipeline?.find(r=>r.kind==='SEPARATED_REVIEW'&&r.branchId===branch.id&&r.branchRevision===branch.revision);
       if(saved&&saved.kind==='REVIEW_ROUND')review={proof:saved.proof,snapshots:state.snapshots??[],body:null};
-      else {
+      else if(savedSeparated&&savedSeparated.kind==='SEPARATED_REVIEW')separated={roundId:savedSeparated.id,contexts:savedSeparated.contexts,snapshots:state.snapshots??[]};
+      else if(this.runtime){
       review=(intent.existing?await this.runtime.reconcileReview?.(intent.operationId):await this.runtime.prepareReview({operationId:intent.operationId,state,branchId:branch.id,tasks:schedule.tasks}))??null;
       if(!review)throw new Error('Isolated context preparation is unresolved. Reconcile the existing operation; new contexts will not be created.');
       const verified=this.store.verifyResearchClaim(review.proof),claim=verified.signed.claim;
@@ -186,8 +208,30 @@ export class PipelineService {
       for(const snapshot of review.snapshots)this.store.recordInputSnapshot(snapshot);
       this.store.recordPipeline({id:claim.roundId,kind:'REVIEW_ROUND',projectId:branch.projectId,branchId:branch.id,createdAt:this.now(),proof:review.proof,verification:verified.environment});
       }
+      else {
+      if(!this.io)throw new Error('Review evidence storage is not configured in this build.');
+      const spec=state.specs?.find(s=>s.id===branch.specId);
+      const body={kind:'OFFICE_REVIEW_EVIDENCE',stage:branch.stage,subjectHash:link.subjectHash,specId:branch.specId,specHash:spec?.contentHash??'',requestRevision:request.revision,objective:request.objective};
+      const object=await this.io.writeObject(Buffer.from(JSON.stringify(body)));
+      const snapshots:InputSnapshot[]=[];
+      for(const task of schedule.tasks){
+        const base=await this.stageInputs({projectId:branch.projectId,requestId:request.id,requestRevision:request.revision,objective:request.objective});
+        snapshots.push({...base,id:randomUUID(),files:[...base.files,{path:'review-evidence.json',sha256:object.sha256,bytes:object.bytes}],totalBytes:base.totalBytes+object.bytes});
+      }
+      const objectHashes=[...new Set(snapshots.flatMap(s=>[...s.files,...s.generated??[]].map(f=>f.sha256)))].sort();
+      const evidenceHash=branch.stage==='S2'
+        ?createHash('sha256').update(JSON.stringify({subjectId:link.subjectHash,hashes:[...objectHashes].sort(),body})).digest('hex')
+        :buildAdversarialPackets({subjectId:link.subjectHash,objectHashes,body,
+          advocateAgentId:schedule.tasks.find(t=>t.function==='ADVOCATE')!.agentId,skepticAgentId:schedule.tasks.find(t=>t.function==='SKEPTIC')!.agentId}).evidenceHash;
+      if(branch.stage==='S2')buildBlindedPacket({stage:'S2',subjectId:link.subjectHash,reviewerAgentId:schedule.tasks[0].agentId,objectHashes,body});
+      for(const snapshot of snapshots)this.store.recordInputSnapshot(snapshot);
+      const contexts=schedule.tasks.map((task,index)=>({agentId:task.agentId,contextId:randomUUID(),snapshotId:snapshots[index].id}));
+      const round=this.store.beginSeparatedReview({branchId:branch.id,expectedRevision:branch.revision,scheduleHash:canonicalHash(schedule.tasks),
+        contexts,objectHashes,evidenceHash,expiresAt:new Date(Date.now()+3600000).toISOString(),correctnessBlinded:branch.stage==='S2'});
+      separated={roundId:round.roundId,contexts,snapshots};
+      }
     }
-    const ordinarySnapshot = review?null:await this.stageInputs({
+    const ordinarySnapshot = review||separated?null:await this.stageInputs({
       projectId: branch.projectId, requestId: request.id, requestRevision: request.revision, objective: request.objective,
     });
     const assignments: Assignment[] = [];
@@ -195,11 +239,11 @@ export class PipelineService {
       const existing=state.assignments?.find(a=>a.research?.branchId===branch.id&&a.research.branchRevision===branch.revision&&a.research.stage===branch.stage&&a.research.function===task.function&&a.agentId===task.agentId);
       if(existing){assignments.push(existing);continue;}
       const claim=review?.proof.claim;
-      const context=claim?.kind==='ISOLATION'?claim.contexts.find(c=>c.agentId===task.agentId):null;
-      const snapshot=ordinarySnapshot??review!.snapshots.find(s=>s.id===context?.snapshotId);
-      if(!snapshot)throw new Error('Isolated snapshot for the appointed reviewer is missing.');
+      const context=claim?.kind==='ISOLATION'?claim.contexts.find(c=>c.agentId===task.agentId):separated?separated.contexts.find(c=>c.agentId===task.agentId)??null:null;
+      const snapshot=separated?separated.snapshots.find(s=>s.id===context?.snapshotId):ordinarySnapshot??review!.snapshots.find(s=>s.id===context?.snapshotId);
+      if(!snapshot)throw new Error('The reviewer snapshot for the appointed reviewer is missing.');
       const objectHashes=[...snapshot.files,...snapshot.generated??[]].map(f=>f.sha256);
-      const isolated=context&&claim?.kind==='ISOLATION'?{reviewRoundId:claim.roundId,isolatedContextId:context.contextId}:{};
+      const isolated=context?{reviewRoundId:separated?separated.roundId:claim&&claim.kind==='ISOLATION'?claim.roundId:'',isolatedContextId:context.contextId}:{};
       const research: StageContext = {
         branchId: branch.id, branchRevision: branch.revision, specId: branch.specId,
         subjectHash: link.subjectHash, stage: branch.stage, function: task.function,
@@ -286,11 +330,11 @@ export class PipelineService {
     this.store.recordResearchGates({
       branchId: branch.id, expectedRevision: branch.revision, assignmentId: assignment.id,
       completion: { reportHash: sha256, bytes,harness },
+      // Outcomes are recorded verbatim. A harness receipt promotes receipts to SIGNED_HARNESS;
+      // without one they stay REVIEWER_ASSERTED — the tier is labelled, never rewritten (section 1.6).
       receipts: (harnessGates??report.gates).map(gate => ({
         id: randomUUID(), branchId: branch.id, stage: research.stage, gate: gate.gate, outcome: gate.outcome,
-        subjectHash: research.subjectHash, specId: research.specId,
-        ...(!harnessGates&&['PASS', 'NOT_APPLICABLE'].includes(gate.outcome) ? { outcome: 'BLOCKED' as const,
-          detail: `Provider reported ${gate.outcome}; independent gate harness verification is unavailable. The raw report is retained, not an approval.` } : { detail: gate.detail }),
+        subjectHash: research.subjectHash, specId: research.specId, detail: gate.detail,
         rationale: gate.rationale,
         evidenceRef: sha256, createdAt: this.now(),
       })),
@@ -313,10 +357,20 @@ export class PipelineService {
   }
 
   private async rebuttal(action:Extract<PipelineAction,{type:'rebuttal'}>):Promise<PipelineResult>{
-    if(!this.runtime?.rebuttal||!this.io)throw new Error('Independent post-disclosure review transport is unavailable.');
     const state=this.store.snapshot({history:false}),assignment=state.assignments?.find(a=>a.id===action.assignmentId);
     if(!assignment)throw new Error('Reviewer assignment not found.');
     if(state.pipeline?.some(r=>r.kind==='REBUTTAL'&&r.assignmentId===assignment.id))return {state,detail:'The bounded rebuttal is already recorded.'};
+    if(action.artifactId){
+      // Separated tier: the bounded response arrives as imported bytes and binds the durable intent.
+      this.store.beginRebuttal(assignment.id);
+      const artifact=state.artifacts.find(a=>a.id===action.artifactId&&a.projectId===assignment.projectId);
+      if(!artifact)throw new Error('Import the bounded response artifact into this project first.');
+      const bytes=await this.readObject(artifact.sha256);
+      if(!bytes||createHash('sha256').update(bytes).digest('hex')!==artifact.sha256||bytes.byteLength>20000)throw new Error('Rebuttal bytes are unavailable, corrupt or exceed the bounded size.');
+      this.store.recordResearchRebuttal({assignmentId:assignment.id,reportHash:artifact.sha256,bytes,proof:null});
+      return {state:this.store.snapshot({history:false}),detail:'Recorded the bounded rebuttal for this exact round, labelled office-bound rather than independently attested.'};
+    }
+    if(!this.runtime?.rebuttal||!this.io)throw new Error('Independent post-disclosure review transport is unavailable. Import the bounded response artifact instead.');
     const intent=this.store.beginRebuttal(assignment.id),firstReports=[];
     for(const hash of intent.firstReportHashes){const bytes=await this.readObject(hash);if(!bytes||createHash('sha256').update(bytes).digest('hex')!==hash)throw new Error('First report bytes are unavailable or corrupt.');firstReports.push({hash,bytes});}
     const result=intent.existing?await this.runtime.reconcileRebuttal?.(intent.operationId):await this.runtime.rebuttal({operationId:intent.operationId,assignment,firstReports,maximumCharacters:4000});
@@ -326,6 +380,78 @@ export class PipelineService {
     this.store.recordResearchRebuttal({assignmentId:assignment.id,reportHash:stored.sha256,bytes:result.bytes,proof:result.proof});
     return {state:this.store.snapshot({history:false}),detail:'Recorded the bounded rebuttal for this exact round.'};
   }
+
+  /**
+   * S3: freezes the run package and opens the durable user-wait. The builder is a build seam — the
+   * office does not run the experiment, connect to Colab, or poll anything; it hands the user a
+   * package whose identity the return must name byte-for-byte.
+   */
+  private async exportRunPackage(action:Extract<PipelineAction,{type:'exportRunPackage'}>):Promise<PipelineResult>{
+    const state=this.store.snapshot({history:false});
+    const branch=this.branch(state,action.branchId,action.expectedRevision);
+    if(branch.stage!=='S3')throw new Error('Run-package export belongs to S3.');
+    const link=this.branchLink(state,branch.id);
+    const spec=state.specs?.find(s=>s.id===branch.specId);
+    if(!spec?.frozen)throw new Error('A frozen specification is required before export.');
+    if(!this.io)throw new Error('Package object storage is not configured in this build.');
+    if(!this.packages.build)throw new Error('Run-package authoring is not configured in this build.');
+    const built=await this.packages.build.build({state,branch,link,spec,readObject:this.readObject});
+    const object=await this.io.writeObject(built.bytes);
+    const result=this.store.recordRunPackage({branchId:branch.id,expectedRevision:branch.revision,manifest:built.manifest,objectHash:object.sha256});
+    const destination=await this.io.exportPackage?.(built.bytes,built.manifest.packageId);
+    return {state:this.store.snapshot({history:false}),
+      detail:(result.existing?'This exact run package is already exported; the branch is still waiting for its return.':`Exported run package ${built.manifest.packageId}. The branch now waits for the manual user run; no execution job exists anywhere.`)
+        +(destination?` Written to ${destination}.`:'')};
+  }
+
+  /**
+   * S3: binds an imported returned bundle to the awaiting package. The inspector parses and hashes
+   * the archive; the store re-checks the binding, completeness and duplicates before admitting it
+   * as user-run evidence — never provider-reported, never independently attested.
+   */
+  private async importRunReturn(action:Extract<PipelineAction,{type:'importRunReturn'}>):Promise<PipelineResult>{
+    if(!this.io||!this.packages.inspect)throw new Error('Return-bundle validation is not configured in this build.');
+    const state=this.store.snapshot({history:false});
+    const branch=this.branch(state,action.branchId,action.expectedRevision);
+    const pkg=(state.pipeline??[]).filter(r=>r.kind==='RUN_PACKAGE'&&r.branchId===branch.id&&r.branchRevision===branch.revision).at(-1);
+    // A RETURNED package still accepts imports: the store makes the identical manifest idempotent
+    // and refuses a conflicting one — the duplicate check must not be pre-empted by the wait state.
+    if(!pkg||pkg.kind!=='RUN_PACKAGE'||pkg.state==='SUPERSEDED')throw new Error('No awaiting run package exists for this branch revision.');
+    const artifact=state.artifacts.find(a=>a.id===action.artifactId&&a.projectId===branch.projectId);
+    if(!artifact)throw new Error('Import the returned bundle into this project first.');
+    const bytes=await this.readObject(artifact.sha256);
+    if(!bytes||createHash('sha256').update(bytes).digest('hex')!==artifact.sha256)throw new Error('Returned bundle identity mismatch.');
+    const inspection=this.packages.inspect.inspect({bytes,expect:{packageId:pkg.packageId,packageHash:pkg.packageHash}});
+    for(const object of inspection.objects)await this.io.writeObject(object.bytes);
+    this.store.admitRunReturn({branchId:branch.id,expectedRevision:branch.revision,artifactId:artifact.id,
+      manifest:inspection.manifest,manifestHash:inspection.manifestHash,outputHashes:inspection.objects.map(o=>o.sha256)});
+    return {state:this.store.snapshot({history:false}),detail:inspection.summary};
+  }
+
+  /**
+   * The manual counterpart of `collect`: a stage report the user carried back, admitted against the
+   * exact assignment context with USER_IMPORTED provenance rather than a provider observation.
+   */
+  private async importStageReport(action:Extract<PipelineAction,{type:'importStageReport'}>):Promise<PipelineResult>{
+    const state=this.store.snapshot({history:false});
+    const assignment=(state.assignments??[]).find(a=>a.id===action.assignmentId);
+    if(!assignment?.research)throw new Error('This assignment carries no research context.');
+    const artifact=state.artifacts.find(a=>a.id===action.artifactId&&a.projectId===assignment.projectId);
+    if(!artifact)throw new Error('Import the stage report into this project first.');
+    const bytes=await this.readObject(artifact.sha256);
+    if(!bytes||createHash('sha256').update(bytes).digest('hex')!==artifact.sha256)throw new Error('Imported report identity mismatch.');
+    this.store.admitImportedStageReport({assignmentId:assignment.id,reportHash:artifact.sha256,bytes});
+    return {state:this.store.snapshot({history:false}),detail:'Admitted the imported stage report for this exact context with user-imported provenance.'};
+  }
+
+  /** Office stages validate the bound evidence already admitted — return, custody, monitoring. */
+  private validateReturn(action:Extract<PipelineAction,{type:'validateReturn'}>):PipelineResult{
+    this.store.validateOfficeStage({branchId:action.branchId,expectedRevision:action.expectedRevision});
+    const state=this.store.snapshot({history:false});
+    const branch=(state.branches??[]).find(b=>b.id===action.branchId);
+    return {state,detail:`${branch?.stage??'The stage'} validated against the bound admitted evidence and completed with office-validated provenance.`};
+  }
+
   /** Shadow thresholds are committed before the specification freezes, never after. */
   private shadowPolicy(action: Extract<PipelineAction, { type: 'shadowPolicy' }>): PipelineResult {
     const state = this.store.snapshot({history:false});

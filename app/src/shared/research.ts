@@ -9,9 +9,17 @@ import type { Effort } from './types.js';
 export const STAGES = ['S0', 'S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8', 'S9', 'S10'] as const;
 export type Stage = typeof STAGES[number];
 
-export function pipelineStageBlocker(stage: Stage): string | null {
-  return stage === 'S0' || stage === 'S1' ? null
-    : `${stage} execution and advancement are blocked: independent gate harness verification, blinded/sealed review delivery and custody are not integrated.`;
+/**
+ * Whether a stage is universally unrunnable in this build.
+ *
+ * Contract correction 2026-09-14 (section 1.6): the manual user-run path is the default experiment
+ * route, so no stage is blanket-blocked for want of hosted execution. Per-capability limits are
+ * enforced at the admission points instead — a frozen spec that declares signed-harness evidence,
+ * a route that cannot carry an isolated context, a custody path with no evaluator each refuse at
+ * the exact operation, with the reason, rather than blocking the whole pipeline up front.
+ */
+export function pipelineStageBlocker(_stage: Stage): string | null {
+  return null;
 }
 
 /** Deterministic checks with stable identifiers, so a receipt refers to a check and not to prose. */
@@ -70,6 +78,12 @@ export interface FrozenResearchSpec {
   thresholds: { gate: GateId; rule: string }[];
   /** Gates deliberately declared inapplicable at freeze time, each with its reason. */
   notApplicable: { gate: GateId; rationale: string }[];
+  /**
+   * Gates the specification requires the stronger signed-harness evidence tier for (section 1.6).
+   * Undeclared gates accept any admitted receipt provenance — office validation, reviewer-asserted
+   * or user-run — each recorded under its own label, never promoted.
+   */
+  gateEvidence?: { gate: GateId; tier: 'SIGNED_HARNESS' }[];
   maxSelectionTrials: number;
   frozen: boolean; contentHash: string; createdAt: string; frozenAt: string;
 }
@@ -123,6 +137,12 @@ export interface GateReceipt {
   detail: string; rationale: string;
   /** Where the deterministic evidence lives. A receipt with no evidence reference is not evidence. */
   evidenceRef: string;
+  /**
+   * Who produced this evidence (section 1.6 tier): OFFICE validation, REVIEWER_ASSERTED in an
+   * admitted stage report, USER_RUN inside the bound returned package, or SIGNED_HARNESS under the
+   * separately scoped stronger contract. Absent on receipts recorded before 2026-09-14.
+   */
+  provenance?: 'OFFICE' | 'REVIEWER_ASSERTED' | 'USER_RUN' | 'SIGNED_HARNESS';
   createdAt: string;
 }
 

@@ -6,7 +6,7 @@ export const harnessGateSchema=z.object({gate:z.enum(GATES),outcome:z.enum(['PAS
 const common={version:z.literal(1),keyId:z.string().min(1).max(120),harnessHash:hash,issuedAt:z.string().datetime(),
  projectId:id,branchId:id,branchRevision:z.number().int().nonnegative(),requestId:id,requestRevision:z.number().int().nonnegative(),
  specId:id,specHash:hash,subjectHash:hash,stage:z.enum(STAGES)};
-export const isolationClaimSchema=z.object({...common,kind:z.literal('ISOLATION'),operationId:id,roundId:id,subjectAssignmentId:id,
+export const isolationClaimSchema=z.object({...common,kind:z.literal('ISOLATION'),operationId:id,roundId:id,subjectAssignmentId:id.nullable(),
  evidenceHash:hash,objectHashes:z.array(hash).min(1).max(256),
  contexts:z.array(z.object({agentId:id,contextId:z.string().min(1).max(240),snapshotId:id}).strict()).min(1).max(2),
  // These are independently signed assertions, never provider report fields or renderer intent.

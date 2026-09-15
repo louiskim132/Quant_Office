@@ -15,6 +15,7 @@ import { TerminalHandoffAdapter } from '../../src/main/handoff';
 import { stageContextHash, stageReportSchema, type StageContext } from '../../src/shared/pipeline';
 import type { Agent, CapabilityEvidence, CapabilityOperation, InputSnapshot, ProviderJob } from '../../src/shared/types';
 import type {ResearchTrustPin} from '../../src/shared/research-admission';
+import type {GateId} from '../../src/shared/research';
 
 export const key = () => randomUUID();
 export const at = (minutes: number) => new Date(Date.UTC(2026, 8, 8, 10, 0, 0) + minutes * 60000).toISOString();
@@ -60,7 +61,7 @@ export const SECTIONS = { estimand: 'e', splitPlan: 's', searchPlan: 'se', costC
  * specification is frozen far enough to register a trial. The whole C4(a) path runs against the real
  * store, the real controller and the real object store; only the provider is a double.
  */
-export async function fixture(t: Pick<TestContext, 'after'>, observe?: (job: ProviderJob) => Promise<ObserveResult>, appoint = true,options:{researchTrust?:ResearchTrustPin[];clock?:()=>string;shadowPolicy?:boolean}={}) {
+export async function fixture(t: Pick<TestContext, 'after'>, observe?: (job: ProviderJob) => Promise<ObserveResult>, appoint = true,options:{researchTrust?:ResearchTrustPin[];clock?:()=>string;shadowPolicy?:boolean;gateEvidence?:{gate:GateId;tier:'SIGNED_HARNESS'}[]}={}) {
   const root = mkdtempSync(path.join(tmpdir(), 'qro-pipeline-'));
   const file = path.join(root, 'workspace.sqlite');
   const store = new OfficeStore(file,{researchTrust:options.researchTrust});
@@ -86,7 +87,7 @@ export async function fixture(t: Pick<TestContext, 'after'>, observe?: (job: Pro
     workType: 'ANALYSIS', mode: 'GROUP', leadAgentId: principal.id, participantIds: [second.id] }).requests![0];
 
   // S0 as far as it can go without a candidate: draft, freeze with a prediction, register the trial.
-  store.execute({ type: 'research.draftSpec', idempotencyKey: key(), projectId: project.id, name: 'Lineage A', sections: SECTIONS, thresholds: [], notApplicable: [], maxSelectionTrials: 4 });
+  store.execute({ type: 'research.draftSpec', idempotencyKey: key(), projectId: project.id, name: 'Lineage A', sections: SECTIONS, thresholds: [], notApplicable: [], ...(options.gateEvidence ? { gateEvidence: options.gateEvidence } : {}), maxSelectionTrials: 4 });
   const branch = () => store.snapshot().branches![0];
   const specId = () => branch().specId!;
   if(options.shadowPolicy){
@@ -112,13 +113,18 @@ export async function fixture(t: Pick<TestContext, 'after'>, observe?: (job: Pro
   const stageInputs = (input: { projectId: string; requestId: string; requestRevision: number; objective: string }): Promise<InputSnapshot> =>
     prepareInputSnapshot({ store, objectRoot: root, stagingRoot: path.join(root, 'staging'), gitExecutable: 'qro-no-such-git', ...input });
   const readObject = async (hash: string) => { const target = snapshotObjectPath(root, hash); return existsSync(target) ? readFileSync(target) : null; };
-  const service = (custody: HoldoutCustody | null = null) => new PipelineService(store, controller, custody, stageInputs, readObject, clock);
+  const io = {
+    writeObject: async (bytes: Uint8Array) => { const sha = sha256(bytes), file = snapshotObjectPath(root, sha); mkdirSync(path.dirname(file), { recursive: true }); writeFileSync(file, bytes); return { sha256: sha, bytes: bytes.byteLength }; },
+    selectHoldout: async () => null,
+    exportHoldout: async () => {},
+  };
+  const service = (custody: HoldoutCustody | null = null) => new PipelineService(store, controller, custody, stageInputs, readObject, clock, null, io);
 
   const linked = async () => {
     await service().run({ type: 'link', branchId: branch().id, requestId: request.id, subjectHash, expectedRevision: branch().revision });
     return branch();
   };
-  return { root, store, project, principal, second, request, branch, specId, subjectHash, controller, adapter, stageInputs, readObject, service, linked,makeAgent,clock };
+  return { root, store, project, principal, second, request, branch, specId, subjectHash, controller, adapter, stageInputs, readObject, service, linked,makeAgent,clock,io };
 }
 
 /** Exercise S1 through the same durable provider/output/collection path as application work. */

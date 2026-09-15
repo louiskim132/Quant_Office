@@ -136,12 +136,13 @@ test('a completed stage report retains exact-subject evidence, but only the offi
   const collected = await f.service().run({ type: 'collect', assignmentId: assignment.id });
   const receipt = collected.state.receipts!.find(item => item.branchId === f.branch().id)!;
   assert.equal(receipt.gate, 'G-SPEC');
-  assert.equal(receipt.outcome, 'BLOCKED');
+  assert.equal(receipt.outcome, 'PASS', 'outcomes are recorded verbatim — the tier lives in provenance, not a rewritten outcome');
+  assert.equal(receipt.provenance, 'REVIEWER_ASSERTED');
   assert.equal(receipt.subjectHash, f.subjectHash, 'the receipt belongs to this subject and no other');
   assert.equal(receipt.specId, f.specId());
   assert.equal(receipt.evidenceRef, job.outputs[0].sha256, 'the receipt names the bytes it was earned from');
 
-  await assert.rejects(f.service().run({ type: 'advance', branchId: f.branch().id, expectedRevision: f.branch().revision }), /blocked/);
+  await assert.rejects(f.service().run({ type: 'advance', branchId: f.branch().id, expectedRevision: f.branch().revision }), /office-verified/);
   recordSpecGate(f);
   const advanced = await f.service().run({ type: 'advance', branchId: f.branch().id, expectedRevision: f.branch().revision });
   assert.equal(advanced.state.branches![0].stage, 'S1');
@@ -257,25 +258,32 @@ test('the submitted payload carries the exact research context and frozen specif
   assert.match(payload.text, /research-stage-report@1/);
 });
 
-test('provider-written PASS is retained as BLOCKED and cannot authorize advancement', async t => {
+test('provider-written PASS is stored verbatim as reviewer-asserted and cannot authorize advancement', async t => {
   const f = await completedReport(t);
   await f.service().run({ type: 'collect', assignmentId: f.assignment.id });
   const receipts = f.store.snapshot().receipts!;
   assert.equal(receipts.length, 1);
-  assert.equal(receipts[0].outcome, 'BLOCKED');
-  assert.match(receipts[0].detail, /independent.*harness/i);
-  await assert.rejects(f.service().run({ type: 'advance', branchId: f.branch().id, expectedRevision: f.branch().revision }), /blocked/i);
+  assert.equal(receipts[0].outcome, 'PASS');
+  assert.equal(receipts[0].provenance, 'REVIEWER_ASSERTED', 'the claim is kept, labelled as what it is — never rewritten and never promoted');
+  await assert.rejects(f.service().run({ type: 'advance', branchId: f.branch().id, expectedRevision: f.branch().revision }), /office-verified/);
 });
 
-test('gate storage independently refuses provider claims of PASS or NOT_APPLICABLE', async t => {
+test('gate storage keeps provider claims verbatim and still requires frozen NOT_APPLICABLE declarations', async t => {
   const f = await completedReport(t);
-  for (const outcome of ['PASS', 'NOT_APPLICABLE'] as const) assert.throws(() => f.store.recordResearchGates({
+  f.store.recordResearchGates({
     branchId: f.branch().id, expectedRevision: f.branch().revision, assignmentId: f.assignment.id,
-    receipts: [{ id: key(), branchId: f.branch().id, stage: 'S0', gate: 'G-SPEC', outcome,
+    receipts: [{ id: key(), branchId: f.branch().id, stage: 'S0', gate: 'G-SPEC', outcome: 'PASS',
       subjectHash: f.subjectHash, specId: f.specId(), detail: 'Unchecked', rationale: 'Claim',
       evidenceRef: f.store.snapshot().jobs![0].outputs[0].sha256, createdAt: at(3) }],
-  }), /independent.*harness/i);
-  assert.equal(f.store.snapshot().receipts?.length ?? 0, 0);
+  });
+  assert.equal(f.store.snapshot().receipts!.at(-1)!.outcome, 'PASS');
+  assert.equal(f.store.snapshot().receipts!.at(-1)!.provenance, 'REVIEWER_ASSERTED');
+  assert.throws(() => f.store.recordResearchGates({
+    branchId: f.branch().id, expectedRevision: f.branch().revision, assignmentId: f.assignment.id,
+    receipts: [{ id: key(), branchId: f.branch().id, stage: 'S0', gate: 'G-SPEC', outcome: 'NOT_APPLICABLE',
+      subjectHash: f.subjectHash, specId: f.specId(), detail: 'Unchecked', rationale: 'Claim',
+      evidenceRef: f.store.snapshot().jobs![0].outputs[0].sha256, createdAt: at(3) }],
+  }), /prospectively|inapplicability/i);
 });
 
 test('a stage cannot write gates owned by a different stage', async t => {
@@ -315,7 +323,7 @@ test('launch rechecks that the prepared agent still holds its stage function', a
   assert.equal(f.adapter.submissions.length, 0);
 });
 
-test('review stages remain contained before any input staging or assignment creation', async t => {
+test('a separated S2 round opens without a configured runtime, durably bound to its prepared contexts', async t => {
   const f = await fixture(t);
   await f.linked();
   recordSpecGate(f);
@@ -324,12 +332,20 @@ test('review stages remain contained before any input staging or assignment crea
   await f.service().run({ type: 'advance', branchId: f.branch().id, expectedRevision: f.branch().revision });
   f.store.appendFunctionAssignment({ id: key(), projectId: f.project.id, stage: 'S2', function: 'CORRECTNESS_REVIEWER',
     agentId: f.second.id, agentRevision: 0, appendedAt: at(3), supersededById: null, origin: 'EXPLICIT', note: 'Reviewer' });
-  const before = f.store.snapshot();
-  await assert.rejects(f.service().run({ type: 'prepare', branchId: f.branch().id, expectedRevision: f.branch().revision }), /not integrated/);
-  assert.deepEqual(f.store.snapshot().events, before.events);
+  const prepared = await f.service().run({ type: 'prepare', branchId: f.branch().id, expectedRevision: f.branch().revision });
+  assert.equal(prepared.assignments!.length, 1, 'the separated tier still assigns the appointed correctness reviewer');
+  const round = f.store.snapshot().pipeline!.find(r => r.kind === 'SEPARATED_REVIEW');
+  assert.ok(round && round.kind === 'SEPARATED_REVIEW', 'the office freezes its own separation intent as a durable record');
+  assert.equal(round.branchId, f.branch().id);
+  assert.equal(round.branchRevision, f.branch().revision);
+  assert.equal(round.correctnessBlinded, true, 'S2 blinding is a scheduling contract, not a runtime claim');
+  assert.equal(round.contexts.length, 1);
+  assert.equal(round.contexts[0].agentId, f.second.id);
+  assert.ok(prepared.assignments![0].research!.isolatedContextId, 'the assignment is still bound to a separated context');
+  assert.equal(prepared.assignments![0].research!.reviewRoundId, round.id);
 });
 
-test('research context and blocked gate evidence survive store reopen without rewriting history', async t => {
+test('research context and reviewer-asserted gate evidence survive store reopen without rewriting history', async t => {
   const f = await completedReport(t);
   await f.service().run({ type: 'collect', assignmentId: f.assignment.id });
   const before = f.store.snapshot();
@@ -339,7 +355,7 @@ test('research context and blocked gate evidence survive store reopen without re
     assert.deepEqual(reopened.snapshot().events, before.events);
     assert.deepEqual(reopened.snapshot().assignments, before.assignments);
     assert.deepEqual(reopened.snapshot().receipts, before.receipts);
-    assert.throws(() => reopened.advanceResearch(f.assignment.research!.branchId, f.assignment.research!.branchRevision), /blocked/);
+    assert.throws(() => reopened.advanceResearch(f.assignment.research!.branchId, f.assignment.research!.branchRevision), /office-verified/);
   } finally { reopened.close(); }
 });
 

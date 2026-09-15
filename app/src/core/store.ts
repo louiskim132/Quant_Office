@@ -10,7 +10,7 @@ import { canonical, canonicalHash, sha256 } from './canonical.js';
 import { parseStrictJson } from './strict-json.js';
 import {ResearchAdmission} from './research-admission';
 import {adjudicate,recheckMandatoryGates} from './adjudication';
-import type {ResearchTrustPin,SignedResearchClaim,IsolationClaim} from '../shared/research-admission';
+import type {ResearchTrustPin,SignedResearchClaim} from '../shared/research-admission';
 import type {HoldoutReservation,EvaluatorResult} from '../shared/holdout';
 import {shadowBatchSchema} from '../shared/shadow';
 import {replayShadow} from './shadow-ledger';
@@ -18,7 +18,8 @@ import { nextJob } from './jobs.js';
 import { MAX_BUDGET_CENTS } from './guards.js';
 import {pipelineRecordSchema,stageContextHash,stageContextSchema,stageReportSchema,type PipelineRecord} from '../shared/pipeline';
 import {evidenceRecordSchema,type EvidenceRecord} from '../shared/evidence';
-import {nextActions,pipelineStageBlocker,STAGES,STAGE_GATES} from '../shared/research';
+import {nextActions,STAGES,STAGE_GATES} from '../shared/research';
+import {runPackageHash,runPackageId,STAGE_DELIVERY,type RunPackageManifest,type RunReturnManifest} from '../shared/run-package';
 
 export { canonical, canonicalHash, sha256 } from './canonical.js';
 const ZERO_HASH = '0'.repeat(64);
@@ -52,6 +53,7 @@ export const commandSchema = z.discriminatedUnion('type', [
       portfolioContract:text(12000),metricsAndGates:text(12000),holdoutPolicy:text(12000)}).strict(),
     thresholds: z.array(z.object({gate:gateEnum,rule:text(2000)}).strict()).max(64),
     notApplicable: z.array(z.object({gate:gateEnum,rationale:text(2000)}).strict()).max(32),
+    gateEvidence: z.array(z.object({gate:gateEnum,tier:z.literal('SIGNED_HARNESS')}).strict()).max(32).optional(),
     maxSelectionTrials: z.number().int().min(0).max(100000) }).strict(),
   z.object({ ...common, type: z.literal('research.freezeSpec'), specId: id, expectedRevision: z.number().int().nonnegative(),
     prediction: z.object({outcomeName:title,sign:z.enum(['POSITIVE','NEGATIVE','NONE']),expectedLow:z.number(),expectedHigh:z.number(),
@@ -146,6 +148,7 @@ const specSchema=z.object({id,branchId:id,
     portfolioContract:text(12000),metricsAndGates:text(12000),holdoutPolicy:text(12000)}).strict(),
   thresholds:z.array(z.object({gate:gateEnum,rule:text(2000)}).strict()).max(64),
   notApplicable:z.array(z.object({gate:gateEnum,rationale:text(2000)}).strict()).max(32),
+  gateEvidence:z.array(z.object({gate:gateEnum,tier:z.literal('SIGNED_HARNESS')}).strict()).max(32).optional(),
   maxSelectionTrials:z.number().int().min(0).max(100000),
   frozen:z.boolean(),contentHash:hash,createdAt:timestamp,frozenAt:z.string().max(40)}).strict();
 const predictionSchema=z.object({id,branchId:id,specId:id,outcomeName:title,sign:z.enum(['POSITIVE','NEGATIVE','NONE']),
@@ -168,7 +171,8 @@ const functionAssignmentSchema=z.object({id,projectId:id,stage:stageEnum,
   origin:z.enum(['EXPLICIT','MIGRATED_FROM_ROLE']),note:text(2000)}).strict();
 const receiptSchema=z.object({id,branchId:id,stage:stageEnum,gate:gateEnum,
   outcome:z.enum(['PASS','FAIL','NOT_APPLICABLE','BLOCKED']),subjectHash:hash,specId:id,
-  detail:text(4000),rationale:text(4000),evidenceRef:text(2000),createdAt:timestamp}).strict();
+  detail:text(4000),rationale:text(4000),evidenceRef:text(2000),
+  provenance:z.enum(['OFFICE','REVIEWER_ASSERTED','USER_RUN','SIGNED_HARNESS']).optional(),createdAt:timestamp}).strict();
 const grantSchema=z.object({id,requestId:id,projectId:id,agentId:id,capacity:z.enum(['REVIEW','WORKER','DIRECTOR','DELEGATE']),grantedAt:timestamp,revokedAt:timestamp.optional()}).strict();
 const messageSchema=z.object({id,projectId:id,requestId:id,assignmentId:id.nullable(),fromAgentId:id,toAgentId:id,
   kind:z.enum(['HANDOFF','QUESTION','ANSWER','REVIEW_REQUEST','REVIEW_RESULT']),body:secretFree(64000),
@@ -189,7 +193,7 @@ const decisionSchema=z.object({id,projectId:id,requestId:id,requestRevision:z.nu
  * content hash at the time of sealing, which is what makes an edit between sealing and opening
  * visible rather than merely unlikely.
  */
-const sealedReportSchema=z.object({id,projectId:id,subjectAssignmentId:id,reviewerAgentId:id,
+const sealedReportSchema=z.object({id,projectId:id,subjectAssignmentId:id.nullable(),reviewerAgentId:id,
   phase:z.literal('FIRST'),contentHash:hash,sealedAt:timestamp,openedAt:timestamp.nullable()}).strict();
 const changeSchema = z.discriminatedUnion('collection', [
   z.object({collection:z.literal('pipeline'),value:pipelineRecordSchema}).strict(),
@@ -271,6 +275,8 @@ function applyChanges(current: Projection, changes: Change[]): Projection {
           const before=old as PipelineRecord,after=change.value;
           if(before.kind==='HARNESS_INTENT'&&after.kind==='HARNESS_INTENT')lifecycle=before.status==='OPEN'&&after.status==='COMPLETED'&&canonical({...before,status:after.status})===canonical(after);
           if(before.kind==='REVIEW_REPORT'&&after.kind==='REVIEW_REPORT')lifecycle=!before.opened&&after.opened&&canonical({...before,opened:true})===canonical(after);
+          if(before.kind==='RUN_PACKAGE'&&after.kind==='RUN_PACKAGE')lifecycle=before.state==='AWAITING_RETURN'&&after.state==='RETURNED'&&!!after.returnManifestHash
+            &&canonical({...before,state:'RETURNED',returnManifestHash:after.returnManifestHash})===canonical(after);
         }
         if(change.collection==='trials'){
           const before=old as TrialLedgerEntry,after=change.value;
@@ -473,11 +479,17 @@ export class OfficeStore {
     if(index<2)return;
     const link=state.pipeline?.filter(r=>r.kind==='LINK'&&r.branchId===branch.id).at(-1);
     if(!link||link.kind!=='LINK')throw new Error('Exact candidate link is missing.');
-    this.assertHarnessHistory(state,{...branch,stage:STAGES[index-1]},link.subjectHash);
+    this.assertGateEvidence(state,{...branch,stage:STAGES[index-1]},link.subjectHash);
     for(const stage of STAGES.slice(1,index))if(!state.pipeline?.some(r=>r.kind==='STAGE_COMPLETION'&&r.branchId===branch.id&&r.specId===branch.specId&&r.subjectHash===link.subjectHash&&r.stage===stage))throw new Error('Historical stage '+stage+' lacks admitted completion. Amend the branch before continuing.');
   }
-  researchStageBlocker(stage:typeof STAGES[number]):string|null {
-    return this.researchAdmission.configured?null:pipelineStageBlocker(stage);
+  /**
+   * Per the corrected contract (section 1.6) no stage is universally blocked: the manual user-run
+   * path is built in. Capability limits surface at the exact admission point that needs them — a
+   * spec-declared signed gate without a trust anchor, an isolation route check, a custody path with
+   * no evaluator — rather than as one blanket block.
+   */
+  researchStageBlocker(_stage:typeof STAGES[number]):string|null {
+    return null;
   }
   verifyResearchClaim(input:unknown){return this.researchAdmission.verify(input);}
   private assertResearchClaimScope(state:Projection,claim:SignedResearchClaim['claim']):void {
@@ -490,32 +502,71 @@ export class OfficeStore {
       ||!request||request.revision!==claim.requestRevision||request.status==='CANCELED')throw new Error('Independent receipt scope is stale or belongs to different research.');
     this.activeProject(state,claim.projectId);
   }
-  private isolatedResearchContext(state:Projection,assignment:Assignment):IsolationClaim|null {
+  /**
+   * A review round's context contract, whichever tier produced it.
+   *
+   * SIGNED rounds carry an independently signed ISOLATION claim; SEPARATED rounds carry the same
+   * bindings recorded by the office (the controller-enforced pilot tier). Every consumer — launch,
+   * report admission, rebuttal, adjudication — resolves through this one shape so the checks the
+   * two tiers share (context membership, object inventory, scope, expiry) run identically.
+   */
+  private reviewRound(state:Projection,roundId:string){
+    const signed=state.pipeline?.find(r=>r.id===roundId&&r.kind==='REVIEW_ROUND');
+    if(signed&&signed.kind==='REVIEW_ROUND'){
+      const verified=this.researchAdmission.verify(signed.proof),claim=verified.signed.claim;
+      if(claim.kind!=='ISOLATION')throw new Error('Review round proof is not an isolation claim.');
+      this.assertResearchClaimScope(state,claim);
+      return {source:'SIGNED' as const,roundId:claim.roundId,stage:claim.stage,contexts:claim.contexts,objectHashes:claim.objectHashes,
+        subjectAssignmentId:claim.subjectAssignmentId as string|null,correctnessBlinded:claim.correctnessBlinded,expiresAt:claim.expiresAt,
+        route:claim.route,verification:verified.environment as 'LOCAL_FIXTURE'|'HOSTED',subjectHash:claim.subjectHash,specId:claim.specId,branchRevision:claim.branchRevision};
+    }
+    const separated=state.pipeline?.find(r=>r.id===roundId&&r.kind==='SEPARATED_REVIEW');
+    if(!separated||separated.kind!=='SEPARATED_REVIEW')return null;
+    const branch=state.branches?.find(b=>b.id===separated.branchId),spec=state.specs?.find(s=>s.id===separated.specId);
+    const link=state.pipeline?.filter(r=>r.kind==='LINK'&&r.branchId===separated.branchId).at(-1);
+    const request=state.requests?.find(r=>r.id===separated.requestId);
+    if(!branch||branch.projectId!==separated.projectId||branch.revision!==separated.branchRevision||branch.specId!==separated.specId||branch.stage!==separated.stage
+      ||branch.outcome!=='IN_PROGRESS'||!spec?.frozen||spec.contentHash!==separated.specHash||!link||link.kind!=='LINK'
+      ||link.subjectHash!==separated.subjectHash||link.requestId!==separated.requestId||link.requestRevision!==separated.requestRevision
+      ||!request||request.revision!==separated.requestRevision||request.status==='CANCELED')throw new Error('Separated review round scope is stale or belongs to different research.');
+    return {source:'SEPARATED' as const,roundId:separated.id,stage:separated.stage,contexts:separated.contexts,objectHashes:separated.objectHashes,
+      subjectAssignmentId:separated.subjectAssignmentId,correctnessBlinded:separated.correctnessBlinded,expiresAt:separated.expiresAt,
+      route:null as string|null,verification:'SEPARATED' as const,subjectHash:separated.subjectHash,specId:separated.specId,branchRevision:separated.branchRevision};
+  }
+  private isolatedResearchContext(state:Projection,assignment:Assignment){
     const research=assignment.research;
     if(!research||!['S2','S7'].includes(research.stage))return null;
-    const round=state.pipeline?.find(r=>r.id===research.reviewRoundId&&r.kind==='REVIEW_ROUND');
-    if(!round||round.kind!=='REVIEW_ROUND')throw new Error('Review assignment requires a frozen isolated round.');
-    const verified=this.researchAdmission.verify(round.proof),claim=verified.signed.claim;
-    this.assertResearchClaimScope(state,claim);
-    if(claim.kind!=='ISOLATION'||Date.parse(claim.expiresAt)<=Date.now()||!claim.contexts.some(c=>c.agentId===assignment.agentId&&c.snapshotId===assignment.snapshotId&&c.contextId===research.isolatedContextId)
-      ||canonical([...claim.objectHashes].sort())!==canonical([...research.objectHashes].sort()))throw new Error('Review context or disclosure inventory differs from its independent isolation receipt.');
-    return claim;
+    const round=this.reviewRound(state,research.reviewRoundId??'');
+    if(!round)throw new Error('Review assignment requires a frozen review round.');
+    if(Date.parse(round.expiresAt)<=Date.now()||!round.contexts.some(c=>c.agentId===assignment.agentId&&c.snapshotId===assignment.snapshotId&&c.contextId===research.isolatedContextId)
+      ||canonical([...round.objectHashes].sort())!==canonical([...research.objectHashes].sort()))throw new Error('Review context or disclosure inventory differs from its frozen round record.');
+    return round;
   }
   assertIsolatedLaunch(assignmentId:string,route:string):void {
     const state=this.readProjection(),assignment=state.assignments?.find(a=>a.id===assignmentId);
     if(!assignment)throw new Error('Assignment not found.');
-    const claim=this.isolatedResearchContext(state,assignment);
-    if(claim&&claim.route!==route)throw new Error('The provider route cannot deliver this isolated context.');
+    const round=this.isolatedResearchContext(state,assignment);
+    // A signed isolation claim names the route that may carry it; a separated round's context is a
+    // document the user carries, so no provider route constraint applies to it.
+    if(round&&round.source==='SIGNED'&&round.route!==route)throw new Error('The provider route cannot deliver this isolated context.');
   }
-  private assertHarnessHistory(state:Projection,branch:ResearchBranch,subjectHash:string):void {
+  /**
+   * Every reached stage's gates must hold a passing receipt for this exact subject. A gate the
+   * frozen spec declares `SIGNED_HARNESS` additionally requires the independently signed receipt —
+   * the stronger evidence tier is per-gate declared, not universal (section 1.6).
+   */
+  private assertGateEvidence(state:Projection,branch:ResearchBranch,subjectHash:string):void {
+    const spec=state.specs?.find(s=>s.id===branch.specId);
+    const signed=new Set((spec?.gateEvidence??[]).filter(g=>g.tier==='SIGNED_HARNESS').map(g=>g.gate));
     for(const gate of new Set(STAGES.slice(0,STAGES.indexOf(branch.stage)+1).flatMap(s=>STAGE_GATES[s]))){
       if(gate==='G-SPEC')continue;
       const receipt=(state.receipts??[]).filter(r=>r.branchId===branch.id&&r.specId===branch.specId&&r.subjectHash===subjectHash&&r.gate===gate).at(-1);
-      if(!receipt||!['PASS','NOT_APPLICABLE'].includes(receipt.outcome))throw new Error(gate+' has no passing independent evidence.');
+      if(!receipt||!['PASS','NOT_APPLICABLE'].includes(receipt.outcome))throw new Error(gate+' has no passing admitted evidence.');
+      if(!signed.has(gate))continue;
       const proof=(state.pipeline??[]).find(r=>r.kind==='HARNESS_RECEIPT'&&r.proof.claim.kind==='HARNESS'&&r.proof.claim.branchId===branch.id
         &&r.proof.claim.specId===branch.specId&&r.proof.claim.subjectHash===subjectHash&&r.proof.claim.reportHash===receipt.evidenceRef
         &&r.proof.claim.gates.some(g=>g.gate===gate&&g.outcome===receipt.outcome&&g.detail===receipt.detail&&g.rationale===receipt.rationale));
-      if(!proof||proof.kind!=='HARNESS_RECEIPT')throw new Error(gate+' has no independently admitted harness receipt. Historical provider approval is insufficient.');
+      if(!proof||proof.kind!=='HARNESS_RECEIPT')throw new Error(gate+' is declared signed-harness evidence by the frozen specification and has no independently admitted harness receipt.');
       this.researchAdmission.verify(proof.proof);
     }
   }
@@ -524,21 +575,22 @@ export class OfficeStore {
       const state=this.readProjection(),branch=state.branches?.find(b=>b.id===input.branchId);
       if(!branch||branch.revision!==input.expectedRevision||branch.stage!=='S7')throw new Error('Adjudication belongs to S7 and requires its current branch revision.');
       this.activeProject(state,branch.projectId);
-      const round=(state.pipeline??[]).find(r=>r.kind==='REVIEW_ROUND'&&r.branchId===branch.id&&r.proof.claim.branchRevision===branch.revision);
-      if(!round||round.kind!=='REVIEW_ROUND'||round.proof.claim.kind!=='ISOLATION')throw new Error('No exact isolated S7 round exists.');
-      const claim=round.proof.claim;
-      this.assertResearchClaimScope(state,claim);this.researchAdmission.verify(round.proof);
-      const prior=state.pipeline?.find(r=>r.kind==='ADJUDICATION'&&r.roundId===round.id);
+      const roundRecord=(state.pipeline??[]).find(r=>(r.kind==='REVIEW_ROUND'&&r.proof.claim.branchId===branch.id&&r.proof.claim.branchRevision===branch.revision)
+        ||(r.kind==='SEPARATED_REVIEW'&&r.branchId===branch.id&&r.branchRevision===branch.revision));
+      if(!roundRecord)throw new Error('No exact S7 review round exists.');
+      const claim=this.reviewRound(state,roundRecord.id);
+      if(!claim)throw new Error('No exact S7 review round exists.');
+      const prior=state.pipeline?.find(r=>r.kind==='ADJUDICATION'&&r.roundId===roundRecord.id);
       if(prior)return;
-      const reports=(state.pipeline??[]).filter((r):r is Extract<PipelineRecord,{kind:'REVIEW_REPORT'}>=>r.kind==='REVIEW_REPORT'&&r.roundId===round.id&&r.opened);
+      const reports=(state.pipeline??[]).filter((r):r is Extract<PipelineRecord,{kind:'REVIEW_REPORT'}>=>r.kind==='REVIEW_REPORT'&&r.roundId===roundRecord.id&&r.opened);
       const get=(role:string)=>reports.find(r=>state.assignments?.find(a=>a.id===r.assignmentId)?.research?.function===role);
       const advocate=get('ADVOCATE'),skeptic=get('SKEPTIC');
       if(!advocate||!skeptic||reports.length!==2)throw new Error('Both immutable first reports from this exact round are required.');
       const outcome=adjudicate({records:state,branch,subjectHash:claim.subjectHash,advocate,skeptic,requestedFollowUp:input.followUp});
-      if(outcome.outcome==='UPHELD'||outcome.outcome==='FOLLOW_UP_GRANTED')this.assertHarnessHistory(state,branch,claim.subjectHash);
+      if(outcome.outcome==='UPHELD'||outcome.outcome==='FOLLOW_UP_GRANTED')this.assertGateEvidence(state,branch,claim.subjectHash);
       const decision=outcome.outcome==='UPHELD'?'PROMOTE':outcome.outcome==='FOLLOW_UP_GRANTED'?'DECISIVE_TEST'
         :advocate.verdict==='OPPOSES'&&skeptic.verdict==='OPPOSES'?'RETIRE':'INCONCLUSIVE';
-      const now=new Date().toISOString(),changes:Change[]=[{collection:'pipeline',value:{id:randomUUID(),kind:'ADJUDICATION',roundId:round.id,decision,projectId:branch.projectId,branchId:branch.id,
+      const now=new Date().toISOString(),changes:Change[]=[{collection:'pipeline',value:{id:randomUUID(),kind:'ADJUDICATION',roundId:roundRecord.id,decision,projectId:branch.projectId,branchId:branch.id,
         createdAt:now,subjectHash:claim.subjectHash,specId:claim.specId,outcome:outcome.outcome,reportIds:[advocate.id,skeptic.id],detail:outcome.detail}}];
       if(outcome.outcome==='LINEAGE_SUSPENDED'){
         for(const affected of state.branches??[])if(affected.lineageId===branch.lineageId&&affected.outcome!=='RETIRED')changes.push({collection:'branches',value:{...affected,outcome:'SUSPENDED',revision:affected.revision+1,updatedAt:now}});
@@ -569,25 +621,41 @@ export class OfficeStore {
     });
     return result;
   }
-  recordResearchRebuttal(input:{assignmentId:string;reportHash:string;bytes:Uint8Array;proof:SignedResearchClaim}):void {
+  /**
+   * A signed REBUTTAL claim binds operation, reports and context with independent attestation. The
+   * separated pilot tier carries no signature: the same bindings are enforced against the office's
+   * frozen intent and round record, and the record stores `proof:null` so the evidence label stays
+   * honest.
+   */
+  recordResearchRebuttal(input:{assignmentId:string;reportHash:string;bytes:Uint8Array;proof:SignedResearchClaim|null}):void {
     this.transaction(()=>{
       const state=this.readProjection(),assignment=state.assignments?.find(a=>a.id===input.assignmentId);
       if(!assignment?.research?.reviewRoundId||assignment.research.stage!=='S7')throw new Error('Rebuttal belongs to an exact S7 reviewer context.');
-      this.isolatedResearchContext(state,assignment);
-      const verified=this.researchAdmission.verify(input.proof),claim=verified.signed.claim;
-      this.assertResearchClaimScope(state,claim);
-      const intent=state.pipeline?.find(r=>r.kind==='REBUTTAL_INTENT'&&r.id===('operationId' in claim?claim.operationId:''));
-      const job=state.jobs?.find(j=>j.assignmentId===assignment.id);
-      if(claim.kind!=='REBUTTAL'||!intent||intent.kind!=='REBUTTAL_INTENT'||intent.assignmentId!==assignment.id||claim.assignmentId!==assignment.id
-        ||claim.roundId!==assignment.research.reviewRoundId||claim.contextId!==assignment.research.isolatedContextId||verified.route!==job?.route
-        ||canonical(claim.firstReportHashes)!==canonical(intent.firstReportHashes)||claim.reportHash!==input.reportHash||sha256(input.bytes)!==input.reportHash)throw new Error('Rebuttal must bind the exact post-disclosure operation, first reports and isolated context.');
+      const round=this.isolatedResearchContext(state,assignment);
       const prior=state.pipeline?.find(r=>r.kind==='REBUTTAL'&&r.assignmentId===assignment.id);
       if(prior){if(prior.kind!=='REBUTTAL'||prior.reportHash!==input.reportHash)throw new Error('Conflicting rebuttal.');return;}
-      if(state.pipeline?.some(r=>r.kind==='ADJUDICATION'&&r.roundId===claim.roundId))throw new Error('The round is already adjudicated.');
       const body=z.object({phase:z.literal('REBUTTAL'),contextHash:hash,detail:text(4000)}).strict().parse(parseStrictJson(Buffer.from(input.bytes).toString('utf8')));
       if(body.contextHash!==assignment.research.contextHash)throw new Error('Rebuttal context mismatch.');
-      this.append(state,[{collection:'pipeline',value:{id:randomUUID(),kind:'REBUTTAL',roundId:assignment.research.reviewRoundId,assignmentId:assignment.id,reportHash:input.reportHash,reportBytes:input.bytes.byteLength,proof:verified.signed,detail:body.detail,
-        projectId:assignment.projectId,branchId:assignment.research.branchId,createdAt:new Date().toISOString()}}],{kind:'RESEARCH_REBUTTAL',projectId:assignment.projectId,experimentId:null,reason:'Recorded one independently attested bounded response after both first reports became immutable.'},null);
+      if(sha256(input.bytes)!==input.reportHash)throw new Error('Rebuttal bytes do not match their declared hash.');
+      if(input.proof){
+        const verified=this.researchAdmission.verify(input.proof),claim=verified.signed.claim;
+        this.assertResearchClaimScope(state,claim);
+        const intent=state.pipeline?.find(r=>r.kind==='REBUTTAL_INTENT'&&r.id===('operationId' in claim?claim.operationId:''));
+        const job=state.jobs?.find(j=>j.assignmentId===assignment.id);
+        if(claim.kind!=='REBUTTAL'||!intent||intent.kind!=='REBUTTAL_INTENT'||intent.assignmentId!==assignment.id||claim.assignmentId!==assignment.id
+          ||claim.roundId!==assignment.research.reviewRoundId||claim.contextId!==assignment.research.isolatedContextId||verified.route!==job?.route
+          ||canonical(claim.firstReportHashes)!==canonical(intent.firstReportHashes)||claim.reportHash!==input.reportHash)throw new Error('Rebuttal must bind the exact post-disclosure operation, first reports and isolated context.');
+        if(state.pipeline?.some(r=>r.kind==='ADJUDICATION'&&r.roundId===claim.roundId))throw new Error('The round is already adjudicated.');
+        this.append(state,[{collection:'pipeline',value:{id:randomUUID(),kind:'REBUTTAL',roundId:assignment.research.reviewRoundId,assignmentId:assignment.id,reportHash:input.reportHash,reportBytes:input.bytes.byteLength,proof:verified.signed,detail:body.detail,
+          projectId:assignment.projectId,branchId:assignment.research.branchId,createdAt:new Date().toISOString()}}],{kind:'RESEARCH_REBUTTAL',projectId:assignment.projectId,experimentId:null,reason:'Recorded one independently attested bounded response after both first reports became immutable.'},null);
+        return;
+      }
+      if(round?.source!=='SEPARATED')throw new Error('An unsigned rebuttal is admissible only for a separated (office-bound) review round.');
+      const intent=state.pipeline?.find(r=>r.kind==='REBUTTAL_INTENT'&&r.assignmentId===assignment.id&&r.roundId===assignment.research!.reviewRoundId);
+      if(!intent||intent.kind!=='REBUTTAL_INTENT')throw new Error('Rebuttal must follow the authorized post-disclosure intent.');
+      if(state.pipeline?.some(r=>r.kind==='ADJUDICATION'&&r.roundId===assignment.research!.reviewRoundId))throw new Error('The round is already adjudicated.');
+      this.append(state,[{collection:'pipeline',value:{id:randomUUID(),kind:'REBUTTAL',roundId:assignment.research!.reviewRoundId,assignmentId:assignment.id,reportHash:input.reportHash,reportBytes:input.bytes.byteLength,proof:null,detail:body.detail,
+        projectId:assignment.projectId,branchId:assignment.research!.branchId,createdAt:new Date().toISOString()}}],{kind:'RESEARCH_REBUTTAL',projectId:assignment.projectId,experimentId:null,reason:'Recorded one bounded response after both first reports became immutable (office-bound, unsigned).'},null);
     });
   }
   assertHoldoutPrerequisites(branchId:string,expectedRevision:number,refitHash:string):void {
@@ -599,11 +667,13 @@ export class OfficeStore {
     const request=state.requests?.find(r=>r.id===link.requestId);
     if(!request||request.revision!==link.requestRevision||request.status==='CANCELED')throw new Error('Linked request changed before custody admission.');
     const prior={...branch,stage:'S7' as const};
-    this.assertHarnessHistory(state,prior,link.subjectHash);
+    this.assertGateEvidence(state,prior,link.subjectHash);
     if(recheckMandatoryGates(state,prior,link.subjectHash).length)throw new Error('Mandatory prerequisites block holdout exposure.');
     if(!state.pipeline?.some(r=>r.kind==='ADJUDICATION'&&r.branchId===branchId&&r.specId===branch.specId&&r.subjectHash===link.subjectHash&&r.decision==='PROMOTE'))throw new Error('The exact candidate has no admitted S7 promotion.');
-    if(!state.pipeline?.some(r=>r.kind==='HARNESS_RECEIPT'&&r.proof.claim.kind==='HARNESS'&&r.proof.claim.branchId===branch.id
-      &&r.proof.claim.specId===branch.specId&&r.proof.claim.subjectHash===link.subjectHash&&r.proof.claim.outputHashes.includes(refitHash)))throw new Error('Refit identity is not a harness-verified artifact of this candidate.');
+    const signedRefit=state.pipeline?.some(r=>r.kind==='HARNESS_RECEIPT'&&r.proof.claim.kind==='HARNESS'&&r.proof.claim.branchId===branch.id
+      &&r.proof.claim.specId===branch.specId&&r.proof.claim.subjectHash===link.subjectHash&&r.proof.claim.outputHashes.includes(refitHash));
+    const returnedRefit=state.pipeline?.some(r=>r.kind==='RUN_RETURN'&&r.branchId===branch.id&&r.specId===branch.specId&&r.subjectHash===link.subjectHash&&r.outputHashes.includes(refitHash));
+    if(!signedRefit&&!returnedRefit)throw new Error('Refit identity is not an admitted artifact of this candidate (signed harness receipt or bound user-run return).');
   }
   recordHoldoutResult(input:{branchId:string;expectedRevision:number;reservation:HoldoutReservation;queryHash:string;object:{sha256:string;bytes:number};result:EvaluatorResult;verification:'LOCAL_FIXTURE'|'HOSTED'|'USER_IMPORTED'}):void {
     this.transaction(()=>{
@@ -688,7 +758,7 @@ export class OfficeStore {
     const record=pipelineRecordSchema.parse(input);
     if(record.kind==='STAGE_COMPLETION')throw new Error('Stage completion requires atomic report admission.');
     if(record.kind==='REVIEW_INTENT')throw new Error('Review intents require atomic service admission.');
-    if(['REBUTTAL_INTENT','HARNESS_INTENT','HARNESS_RECEIPT','REVIEW_REPORT','ADJUDICATION','REBUTTAL','HOLDOUT_RESULT','SHADOW_BATCH','MONITOR_VERDICT','FORECAST_OUTCOME'].includes(record.kind))throw new Error('This research record requires atomic service admission.');
+    if(['REBUTTAL_INTENT','HARNESS_INTENT','HARNESS_RECEIPT','REVIEW_REPORT','ADJUDICATION','REBUTTAL','HOLDOUT_RESULT','SHADOW_BATCH','MONITOR_VERDICT','FORECAST_OUTCOME','RUN_PACKAGE','RUN_RETURN','SEPARATED_REVIEW'].includes(record.kind))throw new Error('This research record requires atomic service admission.');
     this.transaction(()=>{
       const state=this.readProjection();
       this.activeProject(state,record.projectId);
@@ -702,13 +772,19 @@ export class OfficeStore {
         if(claim.roundId!==record.id||!['S2','S7'].includes(branch.stage)||Date.parse(claim.expiresAt)<=Date.now())throw new Error('Review isolation scope or expiry is invalid.');
         const request=state.requests!.find(r=>r.id===claim.requestId)!;
         if(request.mode==='SINGLE')throw new Error('A single-agent request cannot open independent reviews.');
-        const subject=state.assignments?.find(a=>a.id===claim.subjectAssignmentId&&a.research?.branchId===branch.id&&a.research.specId===branch.specId&&a.research.subjectHash===claim.subjectHash);
-        if(!subject||!state.pipeline?.some(r=>r.kind==='STAGE_COMPLETION'&&r.assignmentId===subject.id))throw new Error('Review subject must be a completed exact-subject run.');
+        // The subject is the prior stage's completion: an agent assignment (S2 reviews S1) or an
+        // office-completed stage (S7 reviews S6), in which case the claim names no assignment.
+        const subjectStage=branch.stage==='S2'?'S1':'S6';
+        const subjectCompletion=(state.pipeline??[]).find(r=>r.kind==='STAGE_COMPLETION'&&r.branchId===branch.id&&r.specId===branch.specId&&r.subjectHash===claim.subjectHash&&r.stage===subjectStage);
+        if(!subjectCompletion||subjectCompletion.kind!=='STAGE_COMPLETION')throw new Error('Review subject must be a completed exact-subject stage.');
+        const subject=claim.subjectAssignmentId===null?null
+          :state.assignments?.find(a=>a.id===claim.subjectAssignmentId&&a.research?.branchId===branch.id&&a.research.specId===branch.specId&&a.research.subjectHash===claim.subjectHash)??null;
+        if(claim.subjectAssignmentId!==null&&(!subject||subjectCompletion.assignmentId!==subject.id))throw new Error('Review subject must be a completed exact-subject run.');
         const contexts=claim.contexts;
         if(contexts.length!==(branch.stage==='S7'?2:1)||new Set(contexts.map(c=>c.agentId)).size!==contexts.length
-          ||new Set(contexts.map(c=>c.contextId)).size!==contexts.length||contexts.some(c=>c.agentId===subject.agentId))throw new Error('Reviewers must be distinct from each other and the author.');
+          ||new Set(contexts.map(c=>c.contextId)).size!==contexts.length||contexts.some(c=>c.agentId===subject?.agentId))throw new Error('Reviewers must be distinct from each other and the author.');
         if(branch.stage==='S2'&&!claim.correctnessBlinded)throw new Error('S2 requires a blinded context.');
-        if(state.pipeline?.some(r=>r.kind==='REVIEW_ROUND'&&r.branchId===branch.id&&r.proof.claim.branchRevision===branch.revision))throw new Error('A review round is already frozen for this branch revision.');
+        if(state.pipeline?.some(r=>r.kind==='REVIEW_ROUND'&&r.branchId===branch.id&&r.proof.claim.branchRevision===branch.revision)||state.pipeline?.some(r=>r.kind==='SEPARATED_REVIEW'&&r.branchId===branch.id&&r.branchRevision===branch.revision))throw new Error('A review round is already frozen for this branch revision.');
         for(const context of contexts){
           if((state.pipeline??[]).some(r=>r.kind==='REVIEW_ROUND'&&r.proof.claim.kind==='ISOLATION'&&r.proof.claim.contexts.some(c=>c.contextId===context.contextId)))throw new Error('An isolated reviewer context cannot be reused.');
           const snapshot=state.snapshots?.find(s=>s.id===context.snapshotId&&s.requestId===request.id&&s.requestRevision===request.revision);
@@ -753,6 +829,7 @@ export class OfficeStore {
       this.activeProject(state,branch.projectId);
       const spec=state.specs?.find(s=>s.id===branch.specId);
       if(!spec?.frozen)throw new Error('Gate receipts require a frozen specification.');
+      const signedDeclared=new Set((spec.gateEvidence??[]).filter(g=>g.tier==='SIGNED_HARNESS').map(g=>g.gate));
       const link=(state.pipeline??[]).filter(r=>r.kind==='LINK'&&r.branchId===branch.id).at(-1);
       if(!link||link.kind!=='LINK')throw new Error('Link the branch to an exact candidate first.');
       const request=state.requests?.find(r=>r.id===link.requestId);
@@ -808,7 +885,7 @@ export class OfficeStore {
           verifiedHarness=true;
           completionChanges.push({collection:'pipeline',value:{id:randomUUID(),kind:'HARNESS_RECEIPT',projectId:branch.projectId,branchId:branch.id,createdAt:new Date().toISOString(),proof:verified.signed,verification:verified.environment}});
         }
-        if(branch.stage!=='S0'&&branch.stage!=='S1'&&!verifiedHarness)throw new Error('This stage requires an independent harness receipt, including gate-free stage completion.');
+        if(STAGE_GATES[branch.stage].some(g=>signedDeclared.has(g))&&!verifiedHarness)throw new Error('This stage has gates the frozen specification declares signed-harness evidence; completion requires an independent harness receipt.');
         const previous=(state.pipeline??[]).find(r=>r.kind==='STAGE_COMPLETION'&&r.assignmentId===assignment.id);
         if(previous){
           if(previous.kind!=='STAGE_COMPLETION'||previous.reportHash!==input.completion.reportHash)throw new Error('Conflicting stage completion report.');
@@ -816,8 +893,9 @@ export class OfficeStore {
         }
         const attempt=(state.attempts??[]).find(a=>a.assignmentId===assignment.id&&a.state==='OPEN');
         if(!attempt)throw new Error('Stage completion requires a durable open attempt.');
+        // Unsigned reports keep their verbatim outcomes; provenance labels, not rewrites, carry the tier.
         if(!verifiedHarness&&(values.length!==report.gates.length||report.gates.some(g=>!values.some(r=>r.gate===g.gate
-          &&r.outcome===(['PASS','NOT_APPLICABLE'].includes(g.outcome)?'BLOCKED':g.outcome)&&r.evidenceRef===input.completion!.reportHash)))
+          &&r.outcome===g.outcome&&r.evidenceRef===input.completion!.reportHash)))
           )
           throw new Error('Stage gate claims do not match the stored report.');
         const now=new Date().toISOString();
@@ -835,13 +913,14 @@ export class OfficeStore {
             branchRevision:research.branchRevision,requestRevision:research.requestRevision})});
         if(research.stage==='S2'||research.stage==='S7'){
           const isolation=this.isolatedResearchContext(state,assignment)!;
-          if(job.externalId!==research.isolatedContextId||report.verdict===undefined||report.defectFound===undefined)throw new Error('The completed review did not run in the independently isolated context.');
-          const round=state.pipeline!.find(r=>r.kind==='REVIEW_ROUND'&&r.id===isolation.roundId)! as Extract<PipelineRecord,{kind:'REVIEW_ROUND'}>;
+          if(isolation.source==='SIGNED'&&job.externalId!==research.isolatedContextId)throw new Error('The completed review did not run in the independently isolated context.');
+          if(report.verdict===undefined||report.defectFound===undefined)throw new Error('A review report must carry a verdict and defect finding.');
           const reports=(state.pipeline??[]).filter((r):r is Extract<PipelineRecord,{kind:'REVIEW_REPORT'}>=>r.kind==='REVIEW_REPORT'&&r.roundId===isolation.roundId);
           if(reports.some(r=>r.assignmentId===assignment.id||state.assignments?.find(a=>a.id===r.assignmentId)?.agentId===assignment.agentId))throw new Error('This reviewer has already committed its first report.');
           const review:Extract<PipelineRecord,{kind:'REVIEW_REPORT'}>={id:randomUUID(),kind:'REVIEW_REPORT',roundId:isolation.roundId,projectId:branch.projectId,branchId:branch.id,createdAt:now,
             assignmentId:assignment.id,subjectHash:research.subjectHash,specId:research.specId,reportHash:input.completion.reportHash,expectedReviewerIds:isolation.contexts.map(c=>c.agentId),stage:research.stage,
-            verdict:report.verdict,defectFound:report.defectFound,detail:report.detail,opened:false,independence:round.verification==='HOSTED'?'VERIFIED_INDEPENDENT':'VERIFIED_LOCAL'};
+            verdict:report.verdict,defectFound:report.defectFound,detail:report.detail,opened:false,
+            independence:isolation.source==='SEPARATED'?'SEPARATE_SESSION_UNVERIFIED':isolation.verification==='HOSTED'?'VERIFIED_INDEPENDENT':'VERIFIED_LOCAL'};
           const sealed:SealedReviewReport={id:randomUUID(),projectId:branch.projectId,subjectAssignmentId:isolation.subjectAssignmentId,reviewerAgentId:assignment.agentId,phase:'FIRST',contentHash:input.completion.reportHash,sealedAt:now,openedAt:null};
           const all=[...reports,review];
           const complete=isolation.contexts.every(c=>all.some(r=>state.assignments?.find(a=>a.id===r.assignmentId)?.agentId===c.agentId));
@@ -857,7 +936,7 @@ export class OfficeStore {
         if(r.branchId!==branch.id||r.specId!==branch.specId||r.stage!==branch.stage||r.subjectHash!==link.subjectHash||!r.evidenceRef.trim())throw new Error('Gate receipt scope or evidence mismatch.');
         if(!STAGE_GATES[branch.stage].includes(r.gate))throw new Error(`${r.gate} does not belong to ${branch.stage}.`);
         if(input.assignmentId){
-          if((r.outcome==='PASS'||r.outcome==='NOT_APPLICABLE')&&!verifiedHarness)throw new Error('Provider claims require independent gate harness verification before approval.');
+          if((r.outcome==='PASS'||r.outcome==='NOT_APPLICABLE')&&!verifiedHarness&&signedDeclared.has(r.gate))throw new Error('Provider claims cannot approve a gate the frozen specification declares signed-harness evidence.');
           if(r.outcome==='NOT_APPLICABLE'&&(!r.rationale.trim()||!spec.notApplicable.some(n=>n.gate===r.gate&&n.rationale.trim())))throw new Error('Gate inapplicability must be prospectively frozen.');
           if(!job?.outputs.some(output=>output.stored&&output.sha256===r.evidenceRef))throw new Error('Gate evidence must name stored bytes from this assignment.');
         }else{
@@ -871,7 +950,8 @@ export class OfficeStore {
       const previous=(state.receipts??[]).filter(r=>r.branchId===branch.id&&r.specId===branch.specId&&r.subjectHash===link.subjectHash);
       const fresh=values.filter(r=>!previous.some(p=>p.evidenceRef===r.evidenceRef&&p.stage===r.stage&&p.gate===r.gate&&p.outcome===r.outcome&&p.detail===r.detail&&p.rationale===r.rationale));
       if(!fresh.length&&!completionChanges.length)return;
-      this.append(state,[...fresh.map(value=>({collection:'receipts' as const,value})),...completionChanges],{kind:'RESEARCH_GATES_RECORDED',projectId:branch.projectId,experimentId:null,reason:'Atomically admitted exact stage evidence; provider claims do not authorize approval.'},null);
+      const provenance:GateReceipt['provenance']=verifiedHarness?'SIGNED_HARNESS':input.assignmentId?'REVIEWER_ASSERTED':'OFFICE';
+      this.append(state,[...fresh.map(value=>({collection:'receipts' as const,value:{...value,provenance}})),...completionChanges],{kind:'RESEARCH_GATES_RECORDED',projectId:branch.projectId,experimentId:null,reason:'Atomically admitted exact stage evidence; provenance labels carry the evidence tier.'},null);
     });
   }
   advanceResearch(branchId:string,expectedRevision:number):AppState {
@@ -899,12 +979,15 @@ export class OfficeStore {
       }
       const next=nextActions(state,branch,link.subjectHash).nextStage;
       if(!next)throw new Error('The final stage has no successor.');
-      if(STAGES.indexOf(branch.stage)>=2)this.assertHarnessHistory(state,branch,link.subjectHash);
+      if(STAGES.indexOf(branch.stage)>=2)this.assertGateEvidence(state,branch,link.subjectHash);
       if(branch.stage==='S2'||branch.stage==='S7'){
-        const round=state.pipeline?.find(r=>r.kind==='REVIEW_ROUND'&&r.proof.claim.branchId===branch.id&&r.proof.claim.branchRevision===branch.revision);
-        if(!round||round.kind!=='REVIEW_ROUND'||round.proof.claim.kind!=='ISOLATION')throw new Error('This stage has no isolated review round.');
-        const reports=(state.pipeline??[]).filter(r=>r.kind==='REVIEW_REPORT'&&r.roundId===round.id&&r.opened);
-        if(reports.length!==round.proof.claim.contexts.length)throw new Error('Every independently completed first review must be sealed before advancement.');
+        const roundRecord=state.pipeline?.find(r=>(r.kind==='REVIEW_ROUND'&&r.proof.claim.branchId===branch.id&&r.proof.claim.branchRevision===branch.revision)
+          ||(r.kind==='SEPARATED_REVIEW'&&r.branchId===branch.id&&r.branchRevision===branch.revision));
+        if(!roundRecord)throw new Error('This stage has no frozen review round.');
+        const round=this.reviewRound(state,roundRecord.id);
+        if(!round)throw new Error('This stage has no frozen review round.');
+        const reports=(state.pipeline??[]).filter(r=>r.kind==='REVIEW_REPORT'&&r.roundId===roundRecord.id&&r.opened);
+        if(reports.length!==round.contexts.length)throw new Error('Every completed first review in the frozen round must be sealed before advancement.');
       }
       if(branch.stage==='S7'&&!(state.pipeline??[]).some(r=>r.kind==='ADJUDICATION'&&r.branchId===branch.id&&r.specId===branch.specId&&r.subjectHash===link.subjectHash&&r.outcome==='UPHELD'))throw new Error('S7 requires recorded adjudication for this subject.');
       if(branch.stage==='S8'&&!(state.pipeline??[]).some(r=>r.kind==='RESERVATION'&&r.branchId===branch.id&&r.reservation.candidateHash===link.subjectHash&&r.reservation.state==='EXPOSED'&&r.reservation.reportHash))throw new Error('S8 requires a completed isolated custody receipt.');
@@ -954,6 +1037,320 @@ export class OfficeStore {
       result={operationId:record.id,existing:false};
     });
     return result;
+  }
+
+  /**
+   * The controller-separated review tier (section 1.6). The office freezes the same bindings a signed
+   * isolation claim would carry — the reviewer set, their snapshot objects, the disclosure inventory,
+   * the expiry — as a durable record instead of an independent signature. `scheduleHash` binds the
+   * round to its preparation intent exactly as a signed claim binds its operationId. Reports admitted
+   * against this round are labelled SEPARATE_SESSION_UNVERIFIED and never promoted.
+   */
+  beginSeparatedReview(input:{branchId:string;expectedRevision:number;scheduleHash:string;contexts:{agentId:string;contextId:string;snapshotId:string}[];objectHashes:string[];evidenceHash:string;expiresAt:string;correctnessBlinded:boolean}):{roundId:string;existing:boolean}{
+    let result={roundId:'',existing:false};
+    this.transaction(()=>{
+      const state=this.readProjection(),branch=state.branches?.find(b=>b.id===input.branchId);
+      if(!branch||branch.revision!==input.expectedRevision||!['S2','S7'].includes(branch.stage)||branch.outcome!=='IN_PROGRESS')throw new Error('Separated review requires the current review stage.');
+      this.activeProject(state,branch.projectId);
+      const spec=state.specs?.find(s=>s.id===branch.specId);
+      if(!spec?.frozen)throw new Error('Review requires a frozen specification.');
+      const link=state.pipeline?.filter(r=>r.kind==='LINK'&&r.branchId===branch.id).at(-1);
+      if(!link||link.kind!=='LINK')throw new Error('Exact candidate link is missing.');
+      const request=state.requests?.find(r=>r.id===link.requestId);
+      if(!request||request.revision!==link.requestRevision||request.status==='CANCELED')throw new Error('Linked request changed before review preparation.');
+      if(request.mode==='SINGLE')throw new Error('A single-agent request cannot open independent reviews.');
+      const intent=state.pipeline?.find(r=>r.kind==='REVIEW_INTENT'&&r.branchId===branch.id&&r.branchRevision===branch.revision);
+      if(!intent||intent.kind!=='REVIEW_INTENT'||intent.scheduleHash!==input.scheduleHash)throw new Error('Separated review must follow the durable preparation intent for this exact schedule.');
+      const subjectStage=branch.stage==='S2'?'S1':'S6';
+      const subject=(state.pipeline??[]).find(r=>r.kind==='STAGE_COMPLETION'&&r.branchId===branch.id&&r.specId===branch.specId&&r.subjectHash===link.subjectHash&&r.stage===subjectStage);
+      if(!subject||subject.kind!=='STAGE_COMPLETION')throw new Error('Review subject must be a completed exact-subject stage.');
+      const subjectAgent=subject.assignmentId?state.assignments?.find(a=>a.id===subject.assignmentId)?.agentId:null;
+      const contexts=input.contexts;
+      if(contexts.length!==(branch.stage==='S7'?2:1)||new Set(contexts.map(c=>c.agentId)).size!==contexts.length
+        ||new Set(contexts.map(c=>c.contextId)).size!==contexts.length||contexts.some(c=>c.agentId===subjectAgent))throw new Error('Reviewers must be distinct from each other and the author.');
+      if(branch.stage==='S2'&&!input.correctnessBlinded)throw new Error('S2 requires a blinded context.');
+      if(Date.parse(input.expiresAt)<=Date.now())throw new Error('Review round expiry must be in the future.');
+      const existingRound=(state.pipeline??[]).find(r=>(r.kind==='REVIEW_ROUND'&&r.proof.claim.branchId===branch.id&&r.proof.claim.branchRevision===branch.revision)
+        ||(r.kind==='SEPARATED_REVIEW'&&r.branchId===branch.id&&r.branchRevision===branch.revision));
+      if(existingRound){
+        if(existingRound.kind==='SEPARATED_REVIEW'&&existingRound.evidenceHash===input.evidenceHash&&canonical(existingRound.contexts)===canonical(contexts)){result={roundId:existingRound.id,existing:true};return;}
+        throw new Error('A review round is already frozen for this branch revision.');
+      }
+      for(const context of contexts){
+        if((state.pipeline??[]).some(r=>(r.kind==='REVIEW_ROUND'&&r.proof.claim.kind==='ISOLATION'&&r.proof.claim.contexts.some(c=>c.contextId===context.contextId))
+          ||(r.kind==='SEPARATED_REVIEW'&&r.contexts.some(c=>c.contextId===context.contextId))))throw new Error('An isolated reviewer context cannot be reused.');
+        const snapshot=state.snapshots?.find(s=>s.id===context.snapshotId&&s.requestId===request.id&&s.requestRevision===request.revision);
+        if(!snapshot||canonical([...snapshot.files,...snapshot.generated??[]].map(f=>f.sha256).sort())!==canonical([...input.objectHashes].sort()))throw new Error('Separated round must bind exactly the delivered snapshot objects.');
+      }
+      const record=pipelineRecordSchema.parse({id:randomUUID(),kind:'SEPARATED_REVIEW',projectId:branch.projectId,branchId:branch.id,createdAt:new Date().toISOString(),
+        stage:branch.stage,specId:branch.specId,specHash:spec.contentHash,subjectHash:link.subjectHash,branchRevision:branch.revision,
+        requestId:request.id,requestRevision:request.revision,scheduleHash:input.scheduleHash,subjectAssignmentId:subject.assignmentId,
+        evidenceHash:input.evidenceHash,objectHashes:[...input.objectHashes].sort(),contexts,correctnessBlinded:input.correctnessBlinded,expiresAt:input.expiresAt});
+      const changes:Change[]=[{collection:'pipeline',value:record}];
+      for(const context of contexts){
+        if(!state.grants?.some(g=>g.agentId===context.agentId&&g.requestId===request.id&&!g.revokedAt))
+          changes.push({collection:'grants',value:{id:randomUUID(),projectId:branch.projectId,requestId:request.id,agentId:context.agentId,capacity:'REVIEW',grantedAt:record.createdAt}});
+      }
+      this.append(state,changes,{kind:'RESEARCH_SEPARATED_REVIEW',projectId:branch.projectId,experimentId:null,reason:'Froze a controller-separated review round; reports admit as separated-session evidence, not independent attestation.'},null);
+      result={roundId:record.id,existing:false};
+    });
+    return result;
+  }
+
+  /**
+   * S3 export: records the frozen run package and opens the durable user-wait attempt. The record is
+   * the wait state — it survives restart and restore with no execution job anywhere. One package per
+   * branch revision; re-exporting identical content is idempotent, a different package is rejected.
+   */
+  recordRunPackage(input:{branchId:string;expectedRevision:number;manifest:RunPackageManifest;objectHash:string}):{packageId:string;existing:boolean}{
+    let result={packageId:'',existing:false};
+    this.transaction(()=>{
+      this.assertStagePreparation(input.branchId,input.expectedRevision);
+      const state=this.readProjection(),branch=state.branches?.find(b=>b.id===input.branchId)!;
+      if(branch.stage!=='S3')throw new Error('Run-package export belongs to S3.');
+      const spec=state.specs?.find(s=>s.id===branch.specId);
+      if(!spec?.frozen)throw new Error('Run-package export requires a frozen specification.');
+      const link=state.pipeline?.filter(r=>r.kind==='LINK'&&r.branchId===branch.id).at(-1);
+      if(!link||link.kind!=='LINK')throw new Error('Exact candidate link is missing.');
+      const request=state.requests?.find(r=>r.id===link.requestId);
+      if(!request||request.revision!==link.requestRevision||request.status==='CANCELED')throw new Error('Linked request changed before package export.');
+      const m=input.manifest;
+      if(m.branchId!==branch.id||m.branchRevision!==branch.revision||m.projectId!==branch.projectId||m.specId!==branch.specId
+        ||m.specHash!==spec.contentHash||m.subjectHash!==link.subjectHash||m.requestId!==request.id||m.requestRevision!==request.revision)
+        throw new Error('Run package names different research than the current branch.');
+      if(runPackageHash({schemaVersion:1,kind:'RUN_PACKAGE',projectId:m.projectId,branchId:m.branchId,branchRevision:m.branchRevision,specId:m.specId,
+        specHash:m.specHash,subjectHash:m.subjectHash,requestId:m.requestId,requestRevision:m.requestRevision,entries:m.entries,environment:m.environment,
+        expectedReturn:m.expectedReturn,instructions:m.instructions})!==m.packageHash||runPackageId(m.packageHash)!==m.packageId)
+        throw new Error('Run-package identity does not recompute.');
+      for(const gate of ['G-PORTFOLIO','G-COST','G-ECON'] as const)
+        if(!m.expectedReturn.requiredGates.includes(gate))throw new Error('The run package must require the user-run evidence for '+gate+'.');
+      const prior=(state.pipeline??[]).filter(r=>r.kind==='RUN_PACKAGE'&&r.branchId===branch.id&&r.branchRevision===branch.revision).at(-1);
+      if(prior&&prior.kind==='RUN_PACKAGE'){
+        if(prior.packageId!==m.packageId)throw new Error('A different run package is already frozen for this branch revision. Amend the branch to change it.');
+        result={packageId:prior.packageId,existing:true};return;
+      }
+      const trial=(state.trials??[]).find(t=>t.branchId===branch.id&&t.variantHash===link.subjectHash);
+      const now=new Date().toISOString();
+      const record=pipelineRecordSchema.parse({id:randomUUID(),kind:'RUN_PACKAGE',projectId:branch.projectId,branchId:branch.id,createdAt:now,
+        packageId:m.packageId,packageHash:m.packageHash,specId:m.specId,specHash:m.specHash,subjectHash:m.subjectHash,
+        branchRevision:m.branchRevision,requestRevision:m.requestRevision,expectedFiles:m.expectedReturn.files,requiredGates:m.expectedReturn.requiredGates,
+        objectHash:input.objectHash,state:'AWAITING_RETURN',exportedAt:m.exportedAt,detail:m.instructions.slice(0,4000)});
+      this.append(state,[{collection:'pipeline',value:record},
+        {collection:'attempts',value:{id:randomUUID(),branchId:branch.id,stage:'S3',assignmentId:null,trialId:trial?.id??null,state:'OPEN',summary:'Awaiting the user-run return for package '+m.packageId+'.',createdAt:now,settledAt:''}}],
+        {kind:'RESEARCH_RUN_PACKAGE',projectId:branch.projectId,experimentId:null,reason:'Exported the frozen user-run package; the branch now waits for the manual return with no execution job anywhere.'},null);
+      result={packageId:m.packageId,existing:false};
+    });
+    return result;
+  }
+
+  /**
+   * S3 import: binds returned bytes to the frozen package. Wrong package, changed lineage, a
+   * conflicting duplicate or an incomplete required-gate answer set are rejected. An eligible return
+   * is admitted as USER_IMPORTED; its gate rows become USER_RUN receipts and the office writes its
+   * own G-ARTIFACT receipt for the transfer binding. Nothing is promoted to provider or harness
+   * evidence. A failed-execution return is recorded without completing the stage — the branch waits
+   * for direction rather than advancing on absent evidence.
+   */
+  admitRunReturn(input:{branchId:string;expectedRevision:number;artifactId:string;manifest:RunReturnManifest;manifestHash:string;outputHashes:string[]}):void{
+    this.transaction(()=>{
+      const state=this.readProjection(),branch=state.branches?.find(b=>b.id===input.branchId);
+      if(!branch||branch.revision!==input.expectedRevision||branch.stage!=='S3'||branch.outcome!=='IN_PROGRESS')throw new Error('Run-return import requires the current S3 branch.');
+      this.activeProject(state,branch.projectId);
+      const spec=state.specs?.find(s=>s.id===branch.specId);
+      if(!spec?.frozen)throw new Error('Return admission requires a frozen specification.');
+      const link=state.pipeline?.filter(r=>r.kind==='LINK'&&r.branchId===branch.id).at(-1);
+      if(!link||link.kind!=='LINK')throw new Error('Exact candidate link is missing.');
+      const request=state.requests?.find(r=>r.id===link.requestId);
+      if(!request||request.revision!==link.requestRevision||request.status==='CANCELED')throw new Error('Linked request changed before return admission.');
+      const pkg=(state.pipeline??[]).filter(r=>r.kind==='RUN_PACKAGE'&&r.branchId===branch.id&&r.branchRevision===branch.revision).at(-1);
+      if(!pkg||pkg.kind!=='RUN_PACKAGE'||pkg.state==='SUPERSEDED')throw new Error('No awaiting run package exists for this branch revision.');
+      const m=input.manifest;
+      if(m.packageId!==pkg.packageId||m.packageHash!==pkg.packageHash||m.branchId!==branch.id||m.specId!==branch.specId
+        ||m.specHash!==pkg.specHash||m.subjectHash!==link.subjectHash)throw new Error('Returned bundle names a different package, subject or specification.');
+      if(!state.artifacts.some(a=>a.id===input.artifactId&&a.projectId===branch.projectId))throw new Error('Returned bundle must be imported bytes in this project.');
+      const priorReturn=(state.pipeline??[]).find(r=>r.kind==='RUN_RETURN'&&r.packageId===pkg.packageId);
+      if(priorReturn&&priorReturn.kind==='RUN_RETURN'){
+        if(priorReturn.manifestHash!==input.manifestHash)throw new Error('A different return is already admitted for this package; conflicting returns are rejected, never merged.');
+        return;
+      }
+      // The inventory is closed: every returned file must have been declared by the package, a
+      // completed return must carry all of them, and no path may repeat.
+      const declared=new Set(pkg.expectedFiles);
+      if(m.artifacts.some(a=>!declared.has(a.path)))throw new Error('The return carries files the package did not declare.');
+      if(new Set(m.artifacts.map(a=>a.path)).size!==m.artifacts.length)throw new Error('Duplicate artifact paths in the return manifest.');
+      if(input.outputHashes.some(h=>!m.artifacts.some(a=>a.sha256===h)))throw new Error('Returned objects do not match the manifest inventory.');
+      if(m.status!=='EXECUTION_FAILED'){
+        for(const file of declared)if(!m.artifacts.some(a=>a.path===file))throw new Error('The return is incomplete: missing expected file '+file+'.');
+        for(const gate of pkg.requiredGates)if(!m.gates.some(g=>g.gate===gate))throw new Error('The return is incomplete: it does not report the required gate '+gate+'.');
+      }
+      const now=new Date().toISOString(),changes:Change[]=[
+        {collection:'pipeline',value:pipelineRecordSchema.parse({id:randomUUID(),kind:'RUN_RETURN',projectId:branch.projectId,branchId:branch.id,createdAt:now,
+          packageId:pkg.packageId,packageHash:pkg.packageHash,specId:branch.specId,subjectHash:link.subjectHash,artifactId:input.artifactId,manifestHash:input.manifestHash,
+          outputHashes:input.outputHashes,status:m.status,verification:'USER_IMPORTED',summary:m.detail.slice(0,4000)})},
+        {collection:'pipeline',value:{...pkg,state:'RETURNED' as const,returnManifestHash:input.manifestHash}}];
+      for(const row of m.gates){
+        if(!STAGE_GATES[row.stage]?.includes(row.gate))throw new Error('Returned gate '+row.gate+' does not belong to '+row.stage+'.');
+        if(!['S5','S6'].includes(row.stage))continue;
+        if(row.outcome==='NOT_APPLICABLE'&&(!row.rationale.trim()||!spec.notApplicable.some(n=>n.gate===row.gate&&n.rationale.trim())))throw new Error('Returned inapplicability must be prospectively frozen in the specification.');
+        changes.push({collection:'receipts',value:receiptSchema.parse({id:randomUUID(),branchId:branch.id,stage:row.stage,gate:row.gate,outcome:row.outcome,
+          subjectHash:link.subjectHash,specId:branch.specId,detail:row.detail.trim()||'Reported by the bound user-run return.',rationale:row.rationale.trim()||'User-run report.',
+          evidenceRef:input.manifestHash,provenance:'USER_RUN',createdAt:now})});
+      }
+      changes.push({collection:'receipts',value:receiptSchema.parse({id:randomUUID(),branchId:branch.id,stage:'S3',gate:'G-ARTIFACT',outcome:'PASS',
+        subjectHash:link.subjectHash,specId:branch.specId,detail:'Package-bound return admitted; manifest identity and artifact hashes verified against the frozen export.',
+        rationale:'Transfer integrity check by the office.',evidenceRef:input.manifestHash,provenance:'OFFICE',createdAt:now})});
+      if(m.status==='EXECUTION_FAILED'){
+        this.append(state,changes,{kind:'RESEARCH_RUN_RETURN',projectId:branch.projectId,experimentId:null,reason:'Admitted a bound user-run return reporting failed execution; the branch awaits direction, not advancement.'},null);
+        return;
+      }
+      const attempt=(state.attempts??[]).find(a=>a.branchId===branch.id&&a.stage==='S3'&&a.state==='OPEN'&&a.assignmentId===null);
+      if(!attempt)throw new Error('The durable wait attempt for the package is missing.');
+      changes.push({collection:'attempts',value:{...attempt,state:'COMPLETED',summary:'Bound return admitted for package '+pkg.packageId+'.',settledAt:now}},
+        {collection:'pipeline',value:pipelineRecordSchema.parse({id:randomUUID(),kind:'STAGE_COMPLETION',projectId:branch.projectId,branchId:branch.id,createdAt:now,
+          assignmentId:null,jobId:null,attemptId:attempt.id,specId:branch.specId,subjectHash:link.subjectHash,contextHash:pkg.packageHash,reportHash:input.manifestHash,
+          stage:'S3',branchRevision:branch.revision,requestRevision:link.requestRevision,provenance:'USER_IMPORTED'})});
+      this.append(state,changes,{kind:'RESEARCH_RUN_RETURN',projectId:branch.projectId,experimentId:null,reason:'Admitted a bound user-run return; user-run provenance retained on every record.'},null);
+    });
+  }
+
+  /**
+   * Manual collection of a stage report the user carried back instead of a provider-observed job.
+   * Every binding provider collection enforces is enforced here — context hash, branch/spec/subject
+   * scope, open attempt — with USER_IMPORTED provenance on the completion. S2/S7 reports must belong
+   * to a separated round; a signed round still collects only through its provider-observed contexts.
+   */
+  admitImportedStageReport(input:{assignmentId:string;reportHash:string;bytes:Uint8Array}):void{
+    this.transaction(()=>{
+      const state=this.readProjection(),assignment=state.assignments?.find(a=>a.id===input.assignmentId);
+      const research=assignment?.research;
+      const branch=state.branches?.find(b=>b.id===research?.branchId);
+      if(!assignment||!research||!branch||branch.revision!==research.branchRevision||branch.stage!==research.stage||branch.outcome!=='IN_PROGRESS')
+        throw new Error('Report import requires a current exact-stage assignment.');
+      this.activeProject(state,branch.projectId);
+      this.assertStagePreparation(branch.id,branch.revision);
+      const spec=state.specs?.find(s=>s.id===branch.specId);
+      if(!spec?.frozen)throw new Error('Report admission requires a frozen specification.');
+      const signedDeclared=new Set((spec.gateEvidence??[]).filter(g=>g.tier==='SIGNED_HARNESS').map(g=>g.gate));
+      const link=state.pipeline?.filter(r=>r.kind==='LINK'&&r.branchId===branch.id).at(-1);
+      if(!link||link.kind!=='LINK'||link.subjectHash!==research.subjectHash)throw new Error('Exact candidate link is missing.');
+      const request=state.requests?.find(r=>r.id===link.requestId);
+      if(!request||request.revision!==link.requestRevision||request.status==='CANCELED'||assignment.requestId!==request.id||assignment.requestRevision!==request.revision)
+        throw new Error('Linked request changed before report admission.');
+      if(stageContextHash({...research,agentId:assignment.agentId,agentRevision:assignment.agentRevision,inputs:research})!==research.contextHash)
+        throw new Error('Assignment context no longer recomputes.');
+      if(sha256(input.bytes)!==input.reportHash)throw new Error('Stage report hash mismatch.');
+      const report=stageReportSchema.parse(parseStrictJson(Buffer.from(input.bytes).toString('utf8')));
+      if(report.contextHash!==research.contextHash||report.branchId!==branch.id||report.specId!==branch.specId||report.subjectHash!==research.subjectHash||report.stage!==branch.stage)
+        throw new Error('Imported report names different research than the assignment context.');
+      const previous=(state.pipeline??[]).find(r=>r.kind==='STAGE_COMPLETION'&&r.assignmentId===assignment.id);
+      if(previous){if(previous.kind!=='STAGE_COMPLETION'||previous.reportHash!==input.reportHash)throw new Error('Conflicting stage completion report.');return;}
+      const attempt=(state.attempts??[]).find(a=>a.assignmentId===assignment.id&&a.state==='OPEN');
+      if(!attempt)throw new Error('Stage completion requires a durable open attempt.');
+      const now=new Date().toISOString(),changes:Change[]=[];
+      if(new Set(report.gates.map(g=>g.gate)).size!==report.gates.length)throw new Error('Duplicate gates in one report.');
+      for(const g of report.gates){
+        if(!STAGE_GATES[branch.stage].includes(g.gate))throw new Error(`${g.gate} does not belong to ${branch.stage}.`);
+        if((g.outcome==='PASS'||g.outcome==='NOT_APPLICABLE')&&signedDeclared.has(g.gate))throw new Error('Imported reports cannot approve a gate the frozen specification declares signed-harness evidence.');
+        if(g.outcome==='NOT_APPLICABLE'&&(!g.rationale.trim()||!spec.notApplicable.some(n=>n.gate===g.gate&&n.rationale.trim())))throw new Error('Gate inapplicability must be prospectively frozen.');
+        changes.push({collection:'receipts',value:receiptSchema.parse({id:randomUUID(),branchId:branch.id,stage:branch.stage,gate:g.gate,outcome:g.outcome,
+          subjectHash:research.subjectHash,specId:branch.specId,detail:g.detail.trim()||'Imported stage report.',rationale:g.rationale.trim()||'See report.',
+          evidenceRef:input.reportHash,provenance:'REVIEWER_ASSERTED',createdAt:now})});
+      }
+      if(report.realisedPrediction){
+        const prediction=state.predictions?.find(p=>p.id===report.realisedPrediction!.predictionId&&p.branchId===branch.id&&p.specId===branch.specId&&p.outcomeName===report.realisedPrediction!.outcomeName);
+        if(!prediction)throw new Error('A realised forecast outcome requires the exact registered metric.');
+        if(state.pipeline?.some(r=>r.kind==='FORECAST_OUTCOME'&&r.predictionId===prediction.id))throw new Error('A registered forecast has already been scored; historical outcomes are immutable.');
+        changes.push({collection:'pipeline',value:{id:randomUUID(),kind:'FORECAST_OUTCOME',projectId:branch.projectId,branchId:branch.id,createdAt:now,
+          predictionId:prediction.id,specId:prediction.specId,subjectHash:link.subjectHash,reportHash:input.reportHash,value:report.realisedPrediction.value}});
+      }
+      changes.push({collection:'attempts',value:{...attempt,state:'COMPLETED',summary:report.detail.slice(0,4000),settledAt:now}},
+        {collection:'pipeline',value:pipelineRecordSchema.parse({id:randomUUID(),kind:'STAGE_COMPLETION',projectId:branch.projectId,
+          branchId:branch.id,createdAt:now,assignmentId:assignment.id,jobId:null,attemptId:attempt.id,specId:research.specId,
+          subjectHash:research.subjectHash,contextHash:research.contextHash,reportHash:input.reportHash,stage:research.stage,
+          branchRevision:research.branchRevision,requestRevision:research.requestRevision,provenance:'USER_IMPORTED'})});
+      if(research.stage==='S2'||research.stage==='S7'){
+        const round=this.isolatedResearchContext(state,assignment);
+        if(!round||round.source!=='SEPARATED')throw new Error('A signed review round collects reports only through its provider-observed contexts; import is the separated tier.');
+        if(report.verdict===undefined||report.defectFound===undefined)throw new Error('A review report must carry a verdict and defect finding.');
+        const reports=(state.pipeline??[]).filter((r):r is Extract<PipelineRecord,{kind:'REVIEW_REPORT'}>=>r.kind==='REVIEW_REPORT'&&r.roundId===round.roundId);
+        if(reports.some(r=>r.assignmentId===assignment.id||state.assignments?.find(a=>a.id===r.assignmentId)?.agentId===assignment.agentId))throw new Error('This reviewer has already committed its first report.');
+        const review:Extract<PipelineRecord,{kind:'REVIEW_REPORT'}>={id:randomUUID(),kind:'REVIEW_REPORT',roundId:round.roundId,projectId:branch.projectId,branchId:branch.id,createdAt:now,
+          assignmentId:assignment.id,subjectHash:research.subjectHash,specId:research.specId,reportHash:input.reportHash,expectedReviewerIds:round.contexts.map(c=>c.agentId),stage:research.stage,
+          verdict:report.verdict,defectFound:report.defectFound,detail:report.detail,opened:false,independence:'SEPARATE_SESSION_UNVERIFIED'};
+        const sealed:SealedReviewReport={id:randomUUID(),projectId:branch.projectId,subjectAssignmentId:round.subjectAssignmentId,reviewerAgentId:assignment.agentId,phase:'FIRST',contentHash:input.reportHash,sealedAt:now,openedAt:null};
+        const all=[...reports,review];
+        const complete=round.contexts.every(c=>all.some(r=>state.assignments?.find(a=>a.id===r.assignmentId)?.agentId===c.agentId));
+        changes.push({collection:'pipeline',value:{...review,opened:complete}},{collection:'sealed',value:{...sealed,openedAt:complete?now:null}});
+        if(complete){
+          for(const r of reports)changes.push({collection:'pipeline',value:{...r,opened:true}});
+          for(const r of state.sealed??[])if(r.subjectAssignmentId===round.subjectAssignmentId&&round.contexts.some(c=>c.agentId===r.reviewerAgentId)&&r.openedAt===null)changes.push({collection:'sealed',value:{...r,openedAt:now}});
+        }
+      }
+      this.append(state,changes,{kind:'RESEARCH_REPORT_IMPORTED',projectId:branch.projectId,experimentId:null,reason:'Admitted a user-carried stage report bound to the exact assignment context; provenance stays USER_IMPORTED.'},null);
+    });
+  }
+
+  /**
+   * Office stages (S5, S6, S8, S9, S10): no agent runs them and no provider reports them — the office
+   * validates the bound evidence already admitted and completes the stage under OFFICE_VALIDATED
+   * provenance. S5/S6 confirm the user-run return's gate receipts pass; S8 the completed custody
+   * exposure; S9/S10 the admitted shadow verdicts. A stage whose evidence reports failure simply does
+   * not complete — the branch awaits direction.
+   */
+  validateOfficeStage(input:{branchId:string;expectedRevision:number}):void{
+    this.transaction(()=>{
+      const state=this.readProjection(),branch=state.branches?.find(b=>b.id===input.branchId);
+      if(!branch||branch.revision!==input.expectedRevision||branch.outcome!=='IN_PROGRESS')throw new Error('Stage validation is stale or settled.');
+      this.activeProject(state,branch.projectId);
+      if(STAGE_DELIVERY[branch.stage]!=='OFFICE')throw new Error(branch.stage+' is not an office-validated stage.');
+      this.assertStagePreparation(branch.id,branch.revision);
+      const link=state.pipeline?.filter(r=>r.kind==='LINK'&&r.branchId===branch.id).at(-1);
+      if(!link||link.kind!=='LINK')throw new Error('Exact candidate link is missing.');
+      const request=state.requests?.find(r=>r.id===link.requestId);
+      if(!request||request.revision!==link.requestRevision||request.status==='CANCELED')throw new Error('Linked request changed before stage validation.');
+      if((state.pipeline??[]).some(r=>r.kind==='STAGE_COMPLETION'&&r.branchId===branch.id&&r.branchRevision===branch.revision&&r.stage===branch.stage&&r.subjectHash===link.subjectHash))return;
+      const now=new Date().toISOString(),changes:Change[]=[];
+      let reportHash='',contextHash='';
+      const officeReceipt=(gate:GateReceipt['gate'],outcome:GateReceipt['outcome'],detail:string,rationale:string,evidenceRef:string)=>{
+        const latest=(state.receipts??[]).filter(r=>r.branchId===branch.id&&r.specId===branch.specId&&r.subjectHash===link.subjectHash&&r.gate===gate).at(-1);
+        if(latest&&latest.outcome===outcome&&latest.evidenceRef===evidenceRef)return;
+        changes.push({collection:'receipts',value:receiptSchema.parse({id:randomUUID(),branchId:branch.id,stage:branch.stage,gate,outcome,
+          subjectHash:link.subjectHash,specId:branch.specId,detail,rationale,evidenceRef,provenance:'OFFICE',createdAt:now})});
+      };
+      if(branch.stage==='S5'||branch.stage==='S6'){
+        const ret=(state.pipeline??[]).filter(r=>r.kind==='RUN_RETURN'&&r.branchId===branch.id&&r.specId===branch.specId&&r.subjectHash===link.subjectHash).at(-1);
+        if(!ret||ret.kind!=='RUN_RETURN'||ret.status!=='COMPLETED')throw new Error('No completed user-run return exists for this subject.');
+        for(const gate of STAGE_GATES[branch.stage]){
+          const receipt=(state.receipts??[]).filter(r=>r.branchId===branch.id&&r.specId===branch.specId&&r.subjectHash===link.subjectHash&&r.gate===gate).at(-1);
+          if(!receipt||!['PASS','NOT_APPLICABLE'].includes(receipt.outcome))throw new Error(gate+' has no passing admitted evidence from the bound return.');
+        }
+        reportHash=ret.manifestHash;contextHash=ret.packageHash;
+      }else if(branch.stage==='S8'){
+        const reservation=(state.pipeline??[]).filter(r=>r.kind==='RESERVATION'&&r.branchId===branch.id&&r.reservation.candidateHash===link.subjectHash).at(-1);
+        const result=(state.pipeline??[]).filter(r=>r.kind==='HOLDOUT_RESULT'&&r.branchId===branch.id&&r.specId===branch.specId&&r.subjectHash===link.subjectHash).at(-1);
+        if(!reservation||reservation.kind!=='RESERVATION'||reservation.reservation.state!=='EXPOSED'||!reservation.reservation.reportHash||!result||result.kind!=='HOLDOUT_RESULT')
+          throw new Error('S8 requires a completed custody exposure with an admitted result.');
+        officeReceipt('G-INTEGRITY','PASS','Custody exposure completed under the export/import chain; result bound to the reservation.','Office validation of the manual custody path.',result.reportHash);
+        reportHash=result.reportHash;contextHash=reservation.reservation.reportHash;
+      }else{
+        const verdict=(state.pipeline??[]).filter(r=>r.kind==='MONITOR_VERDICT'&&r.branchId===branch.id&&r.specId===branch.specId&&r.subjectHash===link.subjectHash).at(-1);
+        if(!verdict||verdict.kind!=='MONITOR_VERDICT')throw new Error(branch.stage+' requires an admitted monitor verdict.');
+        const qualified=verdict.outcome==='SHADOW_QUALIFIED';
+        if(branch.stage==='S9'){
+          officeReceipt('G-SHADOW',qualified?'PASS':'FAIL','Office replay of the prospective shadow batches under the frozen policy: '+verdict.outcome+'.','Office validation of shadow evidence.',canonicalHash(verdict));
+          if(!qualified){this.append(state,changes,{kind:'RESEARCH_OFFICE_STAGE',projectId:branch.projectId,experimentId:null,reason:'Recorded the office shadow-gate outcome; the stage does not complete on unqualified evidence.'},null);return;}
+        }
+        reportHash=canonicalHash(verdict);contextHash=canonicalHash(verdict);
+      }
+      const trial=(state.trials??[]).find(t=>t.branchId===branch.id&&t.variantHash===link.subjectHash);
+      const attemptId=randomUUID();
+      changes.push({collection:'attempts',value:{id:attemptId,branchId:branch.id,stage:branch.stage,assignmentId:null,trialId:trial?.id??null,state:'COMPLETED',
+        summary:'Office validation of bound '+branch.stage+' evidence.',createdAt:now,settledAt:now}},
+        {collection:'pipeline',value:pipelineRecordSchema.parse({id:randomUUID(),kind:'STAGE_COMPLETION',projectId:branch.projectId,branchId:branch.id,createdAt:now,
+          assignmentId:null,jobId:null,attemptId,specId:branch.specId,subjectHash:link.subjectHash,contextHash,reportHash,stage:branch.stage,
+          branchRevision:branch.revision,requestRevision:link.requestRevision,provenance:'OFFICE_VALIDATED'})});
+      this.append(state,changes,{kind:'RESEARCH_OFFICE_STAGE',projectId:branch.projectId,experimentId:null,reason:'Completed '+branch.stage+' by validating the bound admitted evidence; office-validated provenance, not agent or harness evidence.'},null);
+    });
   }
 
   beginHarness(assignmentId:string,reportHash:string):{operationId:string;existing:boolean}{
@@ -1123,8 +1520,9 @@ export class OfficeStore {
           const specId=randomUUID();
           const spec={id:specId,branchId,sections:command.sections,thresholds:command.thresholds,
             notApplicable:command.notApplicable,maxSelectionTrials:command.maxSelectionTrials,
+            ...(command.gateEvidence?{gateEvidence:command.gateEvidence}:{}) ,
             frozen:false,contentHash:canonicalHash({sections:command.sections,thresholds:command.thresholds,
-              notApplicable:command.notApplicable,maxSelectionTrials:command.maxSelectionTrials}),
+              notApplicable:command.notApplicable,maxSelectionTrials:command.maxSelectionTrials,gateEvidence:command.gateEvidence??[]}),
             createdAt:now,frozenAt:''};
           changes.push({collection:'specs',value:spec});
           changes.push({collection:'branches',value:branch

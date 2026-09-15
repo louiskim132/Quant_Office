@@ -8,6 +8,7 @@ import { OfficeStore, effortSchema } from '../core/store.js';
 import { ArtifactService, MAX_TOTAL } from './artifacts.js';
 import { EvidenceService } from './evidence.js';
 import { promotable, scheduleStage, STAGE_FUNCTIONS_REQUIRED } from './research-controller.js';
+import { STAGE_DELIVERY } from '../shared/run-package.js';
 import { migrateRolesToFunctions, resolveFunctions } from './context-policy.js';
 import { stat, readFile } from 'node:fs/promises';
 import { reconstructUsage } from './local-usage.js';
@@ -276,11 +277,27 @@ const changed=()=>win?.webContents.send('office:changed');
   const assignments=(state.functions??[]).filter(item=>!item.supersededById);
   const schedule=scheduleStage({state,records:state,assignments,branch,subjectHash:input.subjectHash,mode:input.mode,outputSchema:'research-stage-report@1'});
   const integration=store.researchStageBlocker(branch.stage),promotion=promotable(state,branch,input.subjectHash,integration);
+  const delivery=STAGE_DELIVERY[branch.stage];
+  const pkg=(state.pipeline??[]).filter(r=>r.kind==='RUN_PACKAGE'&&r.branchId===branch.id&&r.branchRevision===branch.revision).at(-1);
+  const awaiting=pkg?.kind==='RUN_PACKAGE'&&pkg.state==='AWAITING_RETURN'?pkg:null;
+  const caps=pipeline.capabilities();
   return {stage:branch.stage,outcome:branch.outcome,requiredFunctions:functions,
    functions:resolveFunctions(state,assignments,{projectId:branch.projectId,stage:branch.stage,functions}),
    tasks:schedule.tasks,scheduleBlockers:schedule.blockers.filter(b=>!b.includes('execution and advancement are blocked')).concat(integration?[integration]:[]),
-   canPrepare:!integration&&branch.outcome==='IN_PROGRESS'&&!state.projects.find(p=>p.id===branch.projectId)?.archived&&schedule.tasks.length>0,
-   canPromote:promotion.allowed,promotionBlockers:promotion.reasons};
+   canPrepare:!integration&&branch.outcome==='IN_PROGRESS'&&!state.projects.find(p=>p.id===branch.projectId)?.archived&&(schedule.tasks.length>0||delivery!=='AGENT'),
+   canPromote:promotion.allowed,promotionBlockers:promotion.reasons,
+   stageDelivery:delivery,
+   manual:{canExport:branch.stage==='S3'&&branch.outcome==='IN_PROGRESS'&&!awaiting&&!pkg,
+    awaitingPackageId:awaiting?awaiting.packageId:null,
+    exportedAt:pkg?.kind==='RUN_PACKAGE'?pkg.exportedAt:null,
+    canImport:!!awaiting,
+    canValidate:delivery==='OFFICE'&&branch.outcome==='IN_PROGRESS'},
+   capabilities:{
+    agentCommunication:{state:'READY',detail:'Labeled terminal handoff is available; programmatic observe/retrieve is not part of this build.'},
+    agentToolExecution:{state:'HANDOFF_ONLY',detail:'Agent work runs through the manual terminal handoff; hosted dispatch requires the separately scoped provider route.'},
+    manualExperimentHandoff:{state:caps.packageExport?'READY':'BLOCKED',detail:caps.packageExport?'Run-package export is configured.':'This build has no run-package author configured.'},
+    returnValidation:{state:caps.returnValidation?'READY':'BLOCKED',detail:caps.returnValidation?'Bound-return validation is configured.':'This build has no return inspector configured.'},
+    protectedEvaluation:{state:caps.independentRuntime?'READY':'NOT_CONFIGURED',detail:caps.independentRuntime?'Independent runtime is configured.':'No independent runtime or custodian is configured; stronger evidence is separately scoped.'}}};
  });
  // One stage action per call, run inside the dispatch admission so a restore cannot swap the
  // database mid-action. The renderer names the action; the service and the store re-check it.
@@ -417,5 +434,13 @@ function buildPipeline():PipelineService{
       }else if(createHash('sha256').update(await readFile(file)).digest('hex')!==sha256)throw new Error('Stored report object integrity failure.');
       return {sha256,bytes:bytes.length};
     },
-  });
+    // The user takes the exported package to Colab by hand; this only writes it somewhere they can.
+    exportPackage:async(bytes,packageId)=>{
+      const selected=await dialog.showSaveDialog({title:'Export run package for your manual Colab run',defaultPath:`run-package-${packageId.slice(0,8)}.zip`});
+      if(selected.canceled||!selected.filePath)return null;
+      rejectInternalDestination(selected.filePath);
+      await writeFile(selected.filePath,bytes,{flag:'wx',flush:true});
+      return selected.filePath;
+    },
+  },{});
 }
