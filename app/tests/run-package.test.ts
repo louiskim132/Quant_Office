@@ -73,7 +73,7 @@ function returnBundle(pkg: RunPackageManifest, options: {
     gates: [...RETURN_GATES], failedRuns: [], detail: 'Synthetic user-run return.',
     ...(options.manifestExtra ?? {}),
   };
-  const members: Record<string, Uint8Array> = { 'RUN_RETURN.json': strToU8(JSON.stringify(manifest)) };
+  const members: Record<string, Uint8Array> = { 'return-manifest.json': strToU8(JSON.stringify(manifest)) };
   for (const item of outputs) members[item.path] = item.data;
   for (const [name, data] of Object.entries(options.extraMembers ?? {})) members[name] = data;
   for (const name of options.omitMembers ?? []) delete members[name];
@@ -163,12 +163,12 @@ test('inspect refuses tampered declared hashes, altered member bytes, undeclared
   const outputs = EXPECTED_FILES.map(file => ({ path: file, data: strToU8(`content of ${file}`) }));
   const tampered = returnBundle(manifest).manifest;
   tampered.artifacts[0] = { ...tampered.artifacts[0], sha256: sha256('not the member bytes') };
-  const rehashed = zipSync({ 'RUN_RETURN.json': strToU8(JSON.stringify(tampered)), ...Object.fromEntries(outputs.map(item => [item.path, item.data])) });
+  const rehashed = zipSync({ 'return-manifest.json': strToU8(JSON.stringify(tampered)), ...Object.fromEntries(outputs.map(item => [item.path, item.data])) });
   assert.throws(() => inspect(rehashed), /does not match its declared identity/);
 
   // Member bytes altered while the manifest keeps the true declaration.
   const altered = zipSync({
-    'RUN_RETURN.json': strToU8(JSON.stringify(returnBundle(manifest).manifest)),
+    'return-manifest.json': strToU8(JSON.stringify(returnBundle(manifest).manifest)),
     ...Object.fromEntries(outputs.map((item, index) => [item.path, index === 0 ? strToU8('swapped content') : item.data])),
   });
   assert.throws(() => inspect(altered), /does not match its declared identity/);
@@ -209,12 +209,12 @@ test('inspect refuses archives over the declared entry and size caps', async () 
   assert.throws(() => inspect(new Uint8Array(64 * 1024 * 1024 + 1)), /64 MiB/);
 
   // More entries than the declared cap: 513 members including the manifest.
-  const many: Record<string, Uint8Array> = { 'RUN_RETURN.json': strToU8('{}') };
+  const many: Record<string, Uint8Array> = { 'return-manifest.json': strToU8('{}') };
   for (let index = 0; index < 512; index++) many[`f${index}.bin`] = strToU8('x');
   assert.throws(() => inspect(zipSync(many)), /oversized|too many entries/);
 
   // A small archive whose central directory claims a member expands past the per-file cap.
-  const small = Buffer.from(zipSync({ 'RUN_RETURN.json': strToU8('{}') }));
+  const small = Buffer.from(zipSync({ 'return-manifest.json': strToU8('{}') }));
   const eocd = small.length - 22;
   assert.equal(small.readUInt32LE(eocd), 0x06054b50);
   const directoryOffset = small.readUInt32LE(eocd + 16);
@@ -231,7 +231,7 @@ test('inspect enforces the strict manifest schema and requires the manifest memb
   assert.throws(() => inspect(unknownField.bytes), /Unrecognized key/);
 
   const noManifest = zipSync({ 'outputs/economics.json': strToU8('x') });
-  assert.throws(() => inspect(noManifest), /RUN_RETURN\.json/);
+  assert.throws(() => inspect(noManifest), /return-manifest\.json/);
 
   const garbage = strToU8('this is not a zip');
   assert.throws(() => inspect(garbage), /Invalid ZIP/);

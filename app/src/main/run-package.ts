@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { parseStrictJson } from '../core/strict-json.js';
@@ -30,7 +30,8 @@ import type { GateId, Stage } from '../shared/research.js';
 const PACKAGE_MANIFEST = 'MANIFEST.json';
 const PACKAGE_INSTRUCTIONS = 'INSTRUCTIONS.md';
 const PACKAGE_SPEC = 'spec.json';
-const RETURN_MANIFEST = 'RUN_RETURN.json';
+const PACKAGE_LAUNCHER = 'launcher.v1.py';
+const RETURN_MANIFEST = 'return-manifest.json';
 
 /** Archive bounds, declared so both sides of the transfer enforce the same limits. */
 const MAX_ENTRIES = 512;
@@ -88,19 +89,20 @@ function packageInstructions(templates: { file: string }[]): string {
     ...templates.map(template => `  - ${template.file}`),
     '- inputs/ - the frozen input bytes this run is bound to, grouped by input snapshot id.',
     '',
+    `- ${PACKAGE_LAUNCHER} - the fixed launcher that verifies the package, runs the checks and`,
+    '  writes the bound return bundle.',
+    '',
     '## Steps',
-    '1. Open a fresh Colab notebook and upload this archive.',
-    '2. Unpack it and run the shipped templates against inputs/ under the frozen spec, in order:',
-    `   ${templates.map(template => template.file).join(', ')}.`,
+    '1. Open a fresh Colab notebook, upload this archive and unpack it.',
+    `2. Run ${PACKAGE_LAUNCHER} in the package root. It verifies every packaged byte against`,
+    `   ${PACKAGE_MANIFEST}, runs the shipped templates against inputs/ under the frozen spec in`,
+    `   order (${templates.map(template => template.file).join(', ')}), and writes`,
+    `   ${RETURN_MANIFEST} plus run-return.zip.`,
     '3. Record every attempt, including failures. A return that reports only its successful run is',
     '   a selected ledger and cannot be admitted.',
-    `4. Write ${RETURN_MANIFEST} at the bundle root: schemaVersion 1, kind RUN_RETURN, this`,
-    `   package's packageId and packageHash from ${PACKAGE_MANIFEST}, the branch/spec/subject`,
-    '   identity, your run id, start and finish timestamps, the final status, the sha256 and byte',
-    '   length of every returned artifact, the gate outcomes the checks produced and the',
-    '   failed-run ledger.',
-    `5. Zip ${RETURN_MANIFEST} together with exactly these output files and import the bundle`,
-    '   back into the office:',
+    '4. Import run-return.zip back into the office. Its manifest binds this package\'s packageId',
+    `   and packageHash from ${PACKAGE_MANIFEST}, and the bundle carries ${RETURN_MANIFEST} plus`,
+    '   exactly these produced files:',
     ...EXPECTED_RETURN_FILES.map(file => `   - ${file}`),
     '',
     'The office checks the return byte-for-byte: wrong package identity, missing, extra or altered',
@@ -133,6 +135,13 @@ export function createRunPackageCodec(options: RunPackageCodecOptions): RunPacka
         add(`templates/${template.file}`, bytes);
       }
       add(PACKAGE_SPEC, strToU8(JSON.stringify(spec, null, 2)));
+
+      // The fixed launcher ships verbatim at the package root: it verifies the packaged bytes,
+      // runs the checks and writes the bound return the office later inspects.
+      const launcherPath = path.join(options.templatesDir, PACKAGE_LAUNCHER);
+      if (!existsSync(launcherPath))
+        throw new Error(`The fixed launcher ${PACKAGE_LAUNCHER} is missing from ${options.templatesDir}.`);
+      add(PACKAGE_LAUNCHER, readFileSync(launcherPath));
 
       // Every input object frozen against the linked request revision is package-bound data. A
       // declared object the store cannot produce fails the export loudly rather than shipping a

@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 import { OfficeStore, effortSchema } from '../core/store.js';
 import { ArtifactService, MAX_TOTAL } from './artifacts.js';
+import { createRunPackageCodec } from './run-package.js';
 import { EvidenceService } from './evidence.js';
 import { promotable, scheduleStage, STAGE_FUNCTIONS_REQUIRED } from './research-controller.js';
 import { STAGE_DELIVERY } from '../shared/run-package.js';
@@ -442,5 +443,5 @@ function buildPipeline():PipelineService{
       await writeFile(selected.filePath,bytes,{flag:'wx',flush:true});
       return selected.filePath;
     },
-  },{});
+  },(()=>{const codec=createRunPackageCodec({templatesDir:path.join(app.getAppPath(),'research-templates')});return {build:codec,inspect:codec};})());
 }
