@@ -1040,7 +1040,7 @@ Status vocabulary: NOT_STARTED, IMPLEMENTED_FOUNDATION, IN_PROGRESS, PARTIALLY_V
 | C7 | VERIFIED_LOCAL; provider experiment BLOCKED_EXTERNAL | Current-source UI, paging, scale/retrieval measurement, migration/backup/recovery and fresh packaged/native acceptance complete. The final full suite passed 382/382 on the packaged revision's source, after a consolidated 370/382 run and targeted repairs. No measured provider token or model-quality claim. |
 | R7 / C7 | VERIFIED_LOCAL | Canonical activity/readiness, scoped paged views, stable room/seat placement, integrated research/monitoring UI and current-source packaged/native acceptance verified. |
 | Roadmap consolidation | VERIFIED_LOCAL documentation | Comment/report evaluated; one active roadmap; old entry points redirected. Local links/anchors, fences and complete R0–R7/C1–C7/S0–S10 inventory checked. No source implementation or new application test run in this consolidation. |
-| C8 manual-pilot realignment | NOT_STARTED; roadmap contract corrected 2026-09-14 | The 2026-09-14 alignment review (records/reviews/roadmap-alignment-2026-09-14.md) corrected the execution contract: the main experiment is the user's manual Colab run, and hosted runtime/harness/custodian are separately scoped capabilities. Slice C8 in section 10 defines the implementation areas and the manual-pilot acceptance milestone. Product code still enforces the superseded contract at the named places; no code changed in this revision. |
+| C8 manual-pilot realignment | PARTIALLY_VERIFIED_LOCAL; user-run pilot pending | Round c8-impl (2026-09-15) implemented the corrected contract end to end: shared RUN_PACKAGE/RUN_RETURN schemas and tiered gate provenance, store admission (bound return identity, closed inventory, conflict/idempotency, durable AWAITING_RETURN), S3 as the user-run stage with office stages for S5/S6/S8/S9/S10, runtime-free separated S2/S7 review, the five-capability readiness split, the real zip codec (`main/run-package.ts`, fflate) shipping `launcher.v1.py`, the stdlib-only Colab launcher producing `run-return.zip`, renderer export/await/import/validate controls, and organizer wiring of the codec into buildPipeline. Combined verification: typecheck clean, 408/408 unit tests, build clean — including a full S0→S10 journey on user-run evidence alone. Two worker packets were blocked by an organizer-owned separated-review staging defect (fixed at c75d589) and their committed deliverables were integrated by cherry-pick. Open: the user-run pilot itself (acceptance steps 5–6 with a real Colab return), and `tests/pipeline.desktop.ts` was updated but the packaged desktop suite has not been re-run this round. |
 
 Current-source qualification, 2026-09-12: version 0.5.0. The application qualification occurred before Git initialization; the same qualified source was then committed and connected to the private GitHub repository on `main`. The complete local C4–C7 revision was reviewed, verified and freshly packaged. Section 12.1 and its dated raw logs supersede earlier slice-level counts and pre-audit package claims. Live provider/custodian requirements remain external and do not become verified through packaging.
 
@@ -2561,3 +2561,17 @@ Remaining defects and exact next item: product code still enforces the supersede
   so the manual pilot is not yet demonstrable. Next item: decompose and implement slice C8 per the
   section 1.5/D2 worker process.
 ~~~
+
+2026-09-15 — C8 manual-run contract implemented in desktop round `c8-impl` on batch `next-batch-001`.
+Organizer prerequisites at `b57ee67`/`ef5d998` landed the shared package/return schemas, tiered gate
+provenance, store admission, pipeline seams, stage-delivery table and readiness split; worker packets
+delivered the fflate run-package codec (`c343541`), the stdlib Colab launcher (`a64922e`) and the
+renderer manual-run journey (`6f154bb`). Two test packets were blocked by an organizer-owned
+separated-review staging defect (per-reviewer snapshots broke the round's union binding); fixed at
+`c75d589` and the committed deliverables integrated by cherry-pick (`6edae82`, `906bc7a`). Organizer
+alignment at `65a0d79` renamed the return manifest member to `return-manifest.json`, shipped the
+launcher inside the package and wired the codec into buildPipeline; `59cf36c` updated the desktop e2e
+footer assertion. Combined verification at the integrated head: typecheck clean, 408/408 unit tests,
+`npm run build` clean; the manual-pilot test reaches S10 on user-run evidence alone. Remaining: the
+user-run pilot itself and a packaged desktop re-run. No provider operations ran; no hosted,
+independent-harness or custodial evidence is claimed.
