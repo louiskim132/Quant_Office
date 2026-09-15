@@ -36,15 +36,16 @@ try {
  await panel.getByRole('heading',{name:'Research pipeline'}).waitFor();
  await panel.getByLabel('Research branch',{exact:true}).selectOption({label:'Unreviewed candidate · S0'});
  assert.match(await panel.innerText(),/No gate receipts identify a subject/);
- assert.match(await panel.innerText(),/Optional · not configured/);
  assert.equal(await panel.getByRole('button',{name:/promote|dispatch|evaluate holdout/i}).count(),0);
  assert.equal(await panel.getByLabel('Evidence reader').locator('option').count(),1);
  await assert.rejects(page.evaluate(()=>window.office.verifyCloudTransport({provider:'claude',model:'opus',effort:'default'} as never)));
  await panel.getByLabel('Research branch',{exact:true}).selectOption({label:'Lineage A · S2'});
  await panel.getByLabel('Recorded subject',{exact:true}).selectOption(subjectHash);
- await panel.getByText(/execution and advancement are blocked/).first().waitFor();
+ await panel.getByText(/correctness reviewer function at S2/).first().waitFor();
+ assert.match(await panel.innerText(),/Optional · not configured/);
  const before=await page.evaluate(()=>window.office.getState());
- for(const type of ['prepare','advance'] as const) await assert.rejects(page.evaluate(input=>window.office.pipelineAction(input),{type,branchId:reviewBranch.id,expectedRevision:revision}),/not integrated/);
+ await assert.rejects(page.evaluate(input=>window.office.pipelineAction(input),{type:'prepare',branchId:reviewBranch.id,expectedRevision:revision}),/correctness reviewer/i);
+ await assert.rejects(page.evaluate(input=>window.office.pipelineAction(input),{type:'advance',branchId:reviewBranch.id,expectedRevision:revision}),/completed exact-context|frozen review round|no receipt|passing admitted/i);
  const after=await page.evaluate(()=>window.office.getState());
  assert.deepEqual(after.events,before.events);
  assert.deepEqual(after.assignments,before.assignments);
@@ -65,6 +66,6 @@ try {
  await assert.rejects(page.evaluate(input=>window.office.pipelineAction(input),{type:'verifySpec' as const,branchId:reviewBranch.id,expectedRevision:revision}),/archived/i);
  assert.deepEqual(errors,[]);
  await mkdir('test-output',{recursive:true});
- await writeFile('test-output/pipeline-desktop-report.json',JSON.stringify({status:'PASS',at:new Date().toISOString(),checks:['project branch visibility','missing exact subject blocks','holdout limitation visible','ungranted evidence unavailable','probe refused','S2 integration blocker visible','S2 prepare and advance refused through IPC without state changes'],workspace:data},null,2));
+ await writeFile('test-output/pipeline-desktop-report.json',JSON.stringify({status:'PASS',at:new Date().toISOString(),checks:['project branch visibility','missing exact subject blocks','holdout limitation visible','ungranted evidence unavailable','probe refused','S2 unappointed-reviewer blocker visible','S2 prepare and advance refused through IPC without state changes'],workspace:data},null,2));
  console.log('Pipeline desktop checks passed.');
 } finally {await app.close();for(const cleanup of cleanups)cleanup();}

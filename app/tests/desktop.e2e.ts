@@ -22,7 +22,7 @@ try{
  assert.equal(await page.locator('.office-person').count(),0);
  assert.equal((await page.evaluate(()=>window.office.getState())).agents.length,0);
  await page.screenshot({path:path.join(output,'office-empty.png'),fullPage:true});
- await page.getByRole('button',{name:'Add Agent',exact:true}).click();
+ await page.getByRole('button',{name:'Add agent',exact:true}).click();
  await page.getByLabel('Agent name',{exact:true}).waitFor();
  assert.equal(await page.getByRole('button',{name:'Confirm',exact:true}).count(),0);
  await page.screenshot({path:path.join(output,'add-agent-setup.png'),fullPage:true});
