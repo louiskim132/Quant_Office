@@ -44,8 +44,8 @@ try {
  await panel.getByText(/correctness reviewer function at S2/).first().waitFor();
  assert.match(await panel.innerText(),/Optional · not configured/);
  const before=await page.evaluate(()=>window.office.getState());
- await assert.rejects(page.evaluate(input=>window.office.pipelineAction(input),{type:'prepare',branchId:reviewBranch.id,expectedRevision:revision}),/correctness reviewer/i);
- await assert.rejects(page.evaluate(input=>window.office.pipelineAction(input),{type:'advance',branchId:reviewBranch.id,expectedRevision:revision}),/completed exact-context|frozen review round|no receipt|passing admitted/i);
+ await assert.rejects(page.evaluate(input=>window.office.pipelineAction(input),{type:'prepare' as const,branchId:reviewBranch.id,expectedRevision:revision}),/correctness reviewer/i);
+ await assert.rejects(page.evaluate(input=>window.office.pipelineAction(input),{type:'advance' as const,branchId:reviewBranch.id,expectedRevision:revision}),/completed exact-context|frozen review round|no receipt|passing admitted/i);
  const after=await page.evaluate(()=>window.office.getState());
  assert.deepEqual(after.events,before.events);
  assert.deepEqual(after.assignments,before.assignments);

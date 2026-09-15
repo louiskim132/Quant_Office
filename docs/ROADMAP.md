@@ -2581,3 +2581,16 @@ cleanly (node-pty included). Packaged desktop suites re-run against the binary: 
 revision.desktop, packaged-native (actual ConPTY I/O) and desktop.e2e all pass at `8ca14db`; two stale
 old-contract assertions were corrected (the S2 hosted-integration blocker and the retired 'Add Agent'
 selector). The e2e files carry no product-code change.
+
+2026-09-15 (PR #3 CI correction) — The required GitHub `verify` check exposed TS2345
+errors in the two new `pipeline.desktop.ts` action payloads at `48e5a9e`: Playwright
+inferred each action discriminator as `string`. Added `as const` to `prepare` and
+`advance`, matching the surrounding test convention; runtime behavior is unchanged.
+Organizer verification from `app`: `npm run typecheck` passed;
+`node node_modules/tsx/dist/cli.mjs --test --test-concurrency=4 tests/*.test.ts`
+passed 408/408 (raw log `app/test-output/pr3-unit.log`); `npm run build` passed;
+`node node_modules/tsx/dist/cli.mjs tests/pipeline.desktop.ts` passed with a fresh
+synthetic workspace. Changed files: this roadmap and `app/tests/pipeline.desktop.ts`.
+No schema/migration or provider changes. The round remains CLOSED with all workers
+resolved; protected PR merge still requires successful CI on the corrected head.
+The real user-run Colab pilot remains pending.
