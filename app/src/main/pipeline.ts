@@ -213,11 +213,12 @@ export class PipelineService {
       const spec=state.specs?.find(s=>s.id===branch.specId);
       const body={kind:'OFFICE_REVIEW_EVIDENCE',stage:branch.stage,subjectHash:link.subjectHash,specId:branch.specId,specHash:spec?.contentHash??'',requestRevision:request.revision,objective:request.objective};
       const object=await this.io.writeObject(Buffer.from(JSON.stringify(body)));
-      const snapshots:InputSnapshot[]=[];
-      for(const task of schedule.tasks){
-        const base=await this.stageInputs({projectId:branch.projectId,requestId:request.id,requestRevision:request.revision,objective:request.objective});
-        snapshots.push({...base,id:randomUUID(),files:[...base.files,{path:'review-evidence.json',sha256:object.sha256,bytes:object.bytes}],totalBytes:base.totalBytes+object.bytes});
-      }
+      // One staging per round: every reviewer context binds the same delivered evidence set. The
+      // base snapshot is staged once and cloned per context with a fresh record id; staging per
+      // context would embed a different snapshot id/timestamp in each generated inventory and break
+      // the round's union binding.
+      const base=await this.stageInputs({projectId:branch.projectId,requestId:request.id,requestRevision:request.revision,objective:request.objective});
+      const snapshots:InputSnapshot[]=schedule.tasks.map(()=>({...base,id:randomUUID(),files:[...base.files,{path:'review-evidence.json',sha256:object.sha256,bytes:object.bytes}],totalBytes:base.totalBytes+object.bytes}));
       const objectHashes=[...new Set(snapshots.flatMap(s=>[...s.files,...s.generated??[]].map(f=>f.sha256)))].sort();
       const evidenceHash=branch.stage==='S2'
         ?createHash('sha256').update(JSON.stringify({subjectId:link.subjectHash,hashes:[...objectHashes].sort(),body})).digest('hex')
