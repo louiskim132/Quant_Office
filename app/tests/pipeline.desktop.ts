@@ -36,7 +36,7 @@ try {
  await panel.getByRole('heading',{name:'Research pipeline'}).waitFor();
  await panel.getByLabel('Research branch',{exact:true}).selectOption({label:'Unreviewed candidate · S0'});
  assert.match(await panel.innerText(),/No gate receipts identify a subject/);
- assert.match(await panel.innerText(),/isolated holdout evaluation remain unavailable/);
+ assert.match(await panel.innerText(),/Optional · not configured/);
  assert.equal(await panel.getByRole('button',{name:/promote|dispatch|evaluate holdout/i}).count(),0);
  assert.equal(await panel.getByLabel('Evidence reader').locator('option').count(),1);
  await assert.rejects(page.evaluate(()=>window.office.verifyCloudTransport({provider:'claude',model:'opus',effort:'default'} as never)));
