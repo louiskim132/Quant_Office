@@ -86,12 +86,16 @@ test('a correctness defect suspends the lineage and disagreement consumes one fo
  const before=g.store.lineageTip();await assert.rejects(g.service().run({type:'adjudicate',branchId:g.branch().id,expectedRevision:g.branch().revision-1,followUp:true}));assert.deepEqual(g.store.lineageTip(),before);
 });
 
-test('manual custody return remains user-attested and cannot satisfy independent S8',async t=>{
+test('manual custody return satisfies S8 under user-attested provenance, never relabelled independent',async t=>{
  const f=await researchFixture(t);await s8(f);const r=await reserve(f);
  await f.service().run({type:'holdoutExport',branchId:f.branch().id,reservationId:r.reservation.id});assert.ok(f.writes.has('export'));
  const artifactId=await f.artifact({reservationId:r.reservation.id,candidateHash:f.subjectHash,refitHash:r.reservation.refitHash,queryHash:r.reservation.queryHash,result:{metric:'synthetic',value:0.5,samples:1,detail:'Manual synthetic return'}});
  await f.service().run({type:'holdoutImport',branchId:f.branch().id,reservationId:r.reservation.id,artifactId});
  await f.service().run({type:'holdoutImport',branchId:f.branch().id,reservationId:r.reservation.id,artifactId});
- await assert.rejects(f.stage(false),/isolated custody report/);
+ await f.stage(false);
+ const completion=f.store.snapshot().pipeline!.filter(r=>r.kind==='STAGE_COMPLETION'&&r.stage==='S8').at(-1)!;
+ assert.equal(completion.kind,'STAGE_COMPLETION');assert.equal(completion.provenance,'OFFICE_VALIDATED');
+ const result=f.store.snapshot().pipeline!.filter(r=>r.kind==='HOLDOUT_RESULT').at(-1)!;
+ assert.equal(result.kind,'HOLDOUT_RESULT');assert.equal(result.verification,'USER_IMPORTED','a manual return keeps its user-attested label through completion');
  const journal=path.join(f.root,'custodian','journal.jsonl'),lines=readFileSync(journal,'utf8').trim().split('\n');writeFileSync(journal,lines.slice(0,-1).join('\n')+'\n');assert.throws(()=>f.custody.journal(),/truncated/);
 });

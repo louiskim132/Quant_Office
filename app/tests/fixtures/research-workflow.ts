@@ -8,7 +8,9 @@ import {canonical,canonicalHash} from '../../src/core/canonical';
 import {PipelineService,type ResearchRuntime,type PipelineIO} from '../../src/main/pipeline';
 import {STAGE_FUNCTIONS_REQUIRED} from '../../src/main/research-controller';
 import {STAGE_GATES,STAGES,type Stage} from '../../src/shared/research';
+import {STAGE_DELIVERY,runPackageHash,runPackageId,runReturnManifestSchema,type RunPackageManifest} from '../../src/shared/run-package';
 import type {SignedResearchClaim,ResearchTrustPin} from '../../src/shared/research-admission';
+import type {OfficeStore} from '../../src/core/store';
 import {snapshotObjectPath} from '../../src/main/locations';
 import {HoldoutCustody} from '../../src/main/holdout';
 
@@ -60,12 +62,59 @@ export async function researchFixture(t:Pick<TestContext,'after'>){
   async reconcileRebuttal(id){return responses.get(id)??null;}
  };
  const custody=new HoldoutCustody({sealedRoot:path.join(f.root,'custodian','sealed'),journalFile:path.join(f.root,'custodian','journal.jsonl')},{verification:'LOCAL_FIXTURE',sealedStorageSupported:true,isolatedEvaluatorSupported:true,detail:'Synthetic isolated evaluator only'}, {isolated:true,async evaluate(input){counters.custody++;assert.deepEqual(Object.keys(input).sort(),['candidateHash','predictions','sealedBytes','sealedHash']);return {reportHash:sha256('synthetic-result'),metric:'synthetic',value:0.5,samples:input.predictions.length,detail:'LOCAL_FIXTURE'};}},()=>new Date(now).toISOString());
- const service=()=>new PipelineService(f.store,f.controller,custody,f.stageInputs,f.readObject,()=>new Date(now).toISOString(),runtime,io);
+ // The manual-run seams as test doubles: a JSON envelope stands in for the production zip codec,
+ // while the store and pipeline admission paths under test run exactly as shipped.
+ const packages={
+  build:{async build(input:{state:ReturnType<OfficeStore['snapshot']>;branch:ReturnType<typeof f.branch>;link:Extract<import('../../src/shared/pipeline').PipelineRecord,{kind:'LINK'}>;spec:NonNullable<ReturnType<OfficeStore['snapshot']>['specs']>[number]}){
+   const base:Omit<RunPackageManifest,'packageId'|'packageHash'|'exportedAt'>={schemaVersion:1,kind:'RUN_PACKAGE',projectId:input.branch.projectId,branchId:input.branch.id,branchRevision:input.branch.revision,
+    specId:input.spec.id,specHash:input.spec.contentHash,subjectHash:input.link.subjectHash,requestId:input.link.requestId,requestRevision:input.link.requestRevision,
+    entries:[{path:'main.py',sha256:sha256('synthetic-launcher'),bytes:18}],environment:{runtime:'COLAB_USER_RUN',detail:'Synthetic package; user runs it in Colab.'},
+    expectedReturn:{files:['result.json'],requiredGates:['G-PORTFOLIO','G-COST','G-ECON']},instructions:'Open Colab, upload this package, run the launcher, return the produced bundle.'};
+   const packageHash=runPackageHash(base),manifest:RunPackageManifest={...base,packageId:runPackageId(packageHash),packageHash,exportedAt:new Date(now).toISOString()};
+   return {manifest,bytes:Buffer.from(JSON.stringify({kind:'QRO_RUN_PACKAGE',manifest}))};
+  }},
+  inspect:{inspect(input:{bytes:Uint8Array;expect:{packageId:string;packageHash:string}}){
+   const manifest=runReturnManifestSchema.parse(JSON.parse(Buffer.from(input.bytes).toString('utf8')));
+   if(manifest.packageId!==input.expect.packageId||manifest.packageHash!==input.expect.packageHash)throw new Error('Returned bundle names a different package.');
+   return {manifest,objects:manifest.artifacts.map(a=>({path:a.path,sha256:a.sha256,bytes:Buffer.alloc(a.bytes,a.sha256.slice(0,2))})),manifestHash:sha256(input.bytes),summary:'Bound return admitted for package '+manifest.packageId+'.'};
+  }},
+ };
+ const service=()=>new PipelineService(f.store,f.controller,custody,f.stageInputs,f.readObject,()=>new Date(now).toISOString(),runtime,io,packages);
  f.adapter.behaviour.observe=async job=>{const c=f.store.snapshot({history:false}).assignments!.find(a=>a.id===job.assignmentId)!.research!;return {state:'COMPLETED',detail:'Synthetic provider completion',outputs:[declared(JSON.stringify({schemaVersion:1,branchId:c.branchId,specId:c.specId,subjectHash:c.subjectHash,stage:c.stage,contextHash:c.contextHash,gates:[],detail:'Synthetic raw report; no self-approval.',...(['S2','S7'].includes(c.stage)?{verdict:opposes&&c.function==='SKEPTIC'?'OPPOSES':'SUPPORTS',defectFound:defect}:{})}))]};};
  await service().run({type:'link',branchId:f.branch().id,expectedRevision:f.branch().revision,requestId:f.request.id,subjectHash:f.subjectHash});
  await service().run({type:'verifySpec',branchId:f.branch().id,expectedRevision:f.branch().revision});
  await service().run({type:'advance',branchId:f.branch().id,expectedRevision:f.branch().revision});
- const stage=async(advance=true)=>{const result=await service().run({type:'prepare',branchId:f.branch().id,expectedRevision:f.branch().revision});for(const a of result.assignments!){await f.controller.dispatch(a.id);await f.controller.observe(a.id);await service().run({type:'collect',assignmentId:a.id});}if(advance)await service().run({type:'advance',branchId:f.branch().id,expectedRevision:f.branch().revision});return result.assignments!;};
+ const returnBundle=async()=>{
+  const record=f.store.snapshot().pipeline!.filter(r=>r.kind==='RUN_PACKAGE'&&r.branchId===f.branch().id&&r.branchRevision===f.branch().revision).at(-1);
+  assert.ok(record&&record.kind==='RUN_PACKAGE','a run package must be exported before a return can be imported');
+  const manifest={schemaVersion:1,kind:'RUN_RETURN',packageId:record.packageId,packageHash:record.packageHash,branchId:record.branchId,specId:record.specId,specHash:record.specHash,subjectHash:record.subjectHash,
+   runId:'synthetic-run-'+randomUUID().slice(0,8),startedAt:new Date(now).toISOString(),finishedAt:new Date(now).toISOString(),status:'COMPLETED',
+   artifacts:[{path:'result.json',sha256:sha256('synthetic-result-bytes'),bytes:22}],
+   gates:[{gate:'G-PORTFOLIO',stage:'S5',outcome:'PASS',detail:'Synthetic portfolio gate passed.',rationale:'fixture'},
+    {gate:'G-COST',stage:'S6',outcome:'PASS',detail:'Synthetic cost gate passed.',rationale:'fixture'},
+    {gate:'G-ECON',stage:'S6',outcome:'PASS',detail:'Synthetic economics gate passed.',rationale:'fixture'}],
+   failedRuns:[],detail:'Synthetic user-run return.'};
+  return artifact(manifest,'return.zip');
+ };
+ const stage=async(advance=true)=>{
+  const branch=f.branch(),delivery=STAGE_DELIVERY[branch.stage];
+  if(delivery==='AGENT'){
+   const result=await service().run({type:'prepare',branchId:branch.id,expectedRevision:branch.revision});
+   for(const a of result.assignments!){await f.controller.dispatch(a.id);await f.controller.observe(a.id);await service().run({type:'collect',assignmentId:a.id});}
+   if(advance)await service().run({type:'advance',branchId:branch.id,expectedRevision:branch.revision});
+   return result.assignments!;
+  }
+  if(delivery==='USER_RUN'){
+   await service().run({type:'exportRunPackage',branchId:branch.id,expectedRevision:branch.revision});
+   const artifactId=await returnBundle();
+   await service().run({type:'importRunReturn',branchId:branch.id,expectedRevision:branch.revision,artifactId});
+   if(advance)await service().run({type:'advance',branchId:branch.id,expectedRevision:branch.revision});
+   return [];
+  }
+  await service().run({type:'validateReturn',branchId:branch.id,expectedRevision:branch.revision});
+  if(advance)await service().run({type:'advance',branchId:branch.id,expectedRevision:branch.revision});
+  return [];
+ };
  const through=async(target:Stage)=>{while(STAGES.indexOf(f.branch().stage)<STAGES.indexOf(target))await stage();};
  const artifact=async(body:unknown,name='fixture.json')=>{const object=await io.writeObject(Buffer.from(JSON.stringify(body))),id=randomUUID();f.store.addArtifact({id,projectId:f.project.id,experimentId:null,name,sha256:object.sha256,size:object.bytes,kind:'RESULT',classification:'USER_ATTESTED',status:'QUARANTINED',createdAt:new Date(now).toISOString(),mediaType:'application/json',note:'Synthetic test artifact'});return id;};
  return {...f,third,pin,seal,common,runtime,service,custody,counters,stage,through,artifact,io,writes,advanceTime:(ms:number)=>{now+=ms;},now:()=>new Date(now).toISOString(),setDefect:(v:boolean)=>{defect=v;},setOpposes:(v:boolean)=>{opposes=v;},loseHarness:()=>{loseHarness=true;}};

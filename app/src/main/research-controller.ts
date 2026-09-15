@@ -11,10 +11,14 @@ import { resolveFunctions, type FunctionAssignment, type ResolvedFunction, type 
  * written against assumptions S3 had not yet tested, and it will run anyway.
  */
 
-/** Which functions each stage actually needs. A stage that needs nobody creates no assignment. */
+/**
+ * Which functions each stage actually needs. A stage that needs nobody creates no assignment.
+ * Under the corrected contract (section 1.6) S3 is the user-run export/wait/import stage and
+ * S5/S6/S8/S9/S10 are the office's bound-evidence validations — none of them schedules an agent.
+ */
 export const STAGE_FUNCTIONS_REQUIRED: Record<Stage, StageFunction[]> = {
-  S0: ['PRINCIPAL'], S1: ['PRINCIPAL'], S2: ['CORRECTNESS_REVIEWER'], S3: ['PRINCIPAL'], S4: ['PRINCIPAL'],
-  S5: ['PRINCIPAL'], S6: ['PRINCIPAL'], S7: ['ADVOCATE', 'SKEPTIC'], S8: ['CUSTODIAN'], S9: ['PRINCIPAL'], S10: ['DIRECTOR'],
+  S0: ['PRINCIPAL'], S1: ['PRINCIPAL'], S2: ['CORRECTNESS_REVIEWER'], S3: [], S4: ['PRINCIPAL'],
+  S5: [], S6: [], S7: ['ADVOCATE', 'SKEPTIC'], S8: [], S9: [], S10: [],
 };
 
 export interface StageTask {

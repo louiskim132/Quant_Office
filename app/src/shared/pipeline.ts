@@ -1,6 +1,6 @@
 import {createHash} from 'node:crypto';
 import {z} from 'zod';
-import {STAGES,STAGE_FUNCTIONS,type StageFunction} from './research';
+import {STAGES,STAGE_FUNCTIONS,GATES,type StageFunction} from './research';
 import {holdoutSchema,reservationSchema} from './holdout';
 import {shadowPredictionSchema,quoteSchema,fillSchema,shadowPolicySchema} from './shadow';
 import {signedResearchClaimSchema} from './research-admission';
@@ -34,10 +34,31 @@ export const pipelineRecordSchema=z.discriminatedUnion('kind',[
  z.object({...base,kind:z.literal('REVIEW_INTENT'),branchRevision:z.number().int().nonnegative(),scheduleHash:hash}).strict(),
  z.object({...base,kind:z.literal('HARNESS_INTENT'),assignmentId:id,reportHash:hash,status:z.enum(['OPEN','COMPLETED'])}).strict(),
  z.object({...base,kind:z.literal('REVIEW_ROUND'),proof:signedResearchClaimSchema,verification:z.enum(['LOCAL_FIXTURE','HOSTED'])}).strict(),
+ // The controller-separated review round (section 1.6): the same context binding an isolation claim
+ // carries, recorded by the office rather than an independent signer. It is the pilot-tier evidence;
+ // nothing in it claims provider-side isolation.
+ z.object({...base,kind:z.literal('SEPARATED_REVIEW'),stage:z.enum(['S2','S7']),specId:id,specHash:hash,subjectHash:hash,
+  branchRevision:z.number().int().nonnegative(),requestId:id,requestRevision:z.number().int().nonnegative(),
+  scheduleHash:hash,subjectAssignmentId:id.nullable(),evidenceHash:hash,objectHashes:z.array(hash).min(1).max(256),
+  contexts:z.array(z.object({agentId:id,contextId:z.string().min(1).max(240),snapshotId:id}).strict()).min(1).max(2),
+  correctnessBlinded:z.boolean(),expiresAt:at}).strict(),
  z.object({...base,kind:z.literal('HARNESS_RECEIPT'),proof:signedResearchClaimSchema,verification:z.enum(['LOCAL_FIXTURE','HOSTED'])}).strict(),
  z.object({...base,kind:z.literal('REBUTTAL_INTENT'),roundId:id,assignmentId:id,firstReportHashes:z.array(hash).length(2)}).strict(),
- z.object({...base,kind:z.literal('REBUTTAL'),roundId:id,assignmentId:id,reportHash:hash,reportBytes:z.number().int().nonnegative(),proof:signedResearchClaimSchema,detail:z.string().max(4000)}).strict(),
- z.object({...base,kind:z.literal('STAGE_COMPLETION'),assignmentId:id,jobId:id,attemptId:id,specId:id,subjectHash:hash,contextHash:hash,reportHash:hash,stage:z.enum(STAGES),branchRevision:z.number().int().nonnegative(),requestRevision:z.number().int().nonnegative()}).strict(),
+ // proof is absent on controller-separated rounds: binding is checked against the durable intent.
+ z.object({...base,kind:z.literal('REBUTTAL'),roundId:id,assignmentId:id,reportHash:hash,reportBytes:z.number().int().nonnegative(),proof:signedResearchClaimSchema.nullable(),detail:z.string().max(4000)}).strict(),
+ // assignmentId/jobId are null when the stage completed without a provider job: a user-run return
+ // (S3) or an office validation of bound evidence (S5/S6/S8/S9/S10), labelled by provenance.
+ z.object({...base,kind:z.literal('STAGE_COMPLETION'),assignmentId:id.nullable(),jobId:id.nullable(),attemptId:id,specId:id,subjectHash:hash,contextHash:hash,reportHash:hash,stage:z.enum(STAGES),branchRevision:z.number().int().nonnegative(),requestRevision:z.number().int().nonnegative(),provenance:z.enum(['PROVIDER_REPORTED','USER_IMPORTED','OFFICE_VALIDATED']).optional()}).strict(),
+ // The exported manual-run package (S3): one frozen identity per branch revision. AWAITING_RETURN is
+ // the durable user-wait state — it survives restart and restore without any execution job existing.
+ z.object({...base,kind:z.literal('RUN_PACKAGE'),packageId:id,packageHash:hash,specId:id,specHash:hash,subjectHash:hash,
+  branchRevision:z.number().int().nonnegative(),requestRevision:z.number().int().nonnegative(),
+  expectedFiles:z.array(z.string().max(240)).max(256),requiredGates:z.array(z.enum(GATES)).max(32),objectHash:hash,
+  state:z.enum(['AWAITING_RETURN','RETURNED','SUPERSEDED']),returnManifestHash:hash.optional(),exportedAt:at,detail:z.string().max(4000)}).strict(),
+ // A bound user return for an exported package. USER_IMPORTED is a provenance label, not approval.
+ z.object({...base,kind:z.literal('RUN_RETURN'),packageId:id,packageHash:hash,specId:id,subjectHash:hash,artifactId:id,manifestHash:hash,
+  outputHashes:z.array(hash).max(512),status:z.enum(['COMPLETED','EXECUTION_FAILED','INCONCLUSIVE']),
+  verification:z.literal('USER_IMPORTED'),summary:z.string().max(4000)}).strict(),
  z.object({...base,kind:z.literal('FORECAST_OUTCOME'),predictionId:id,specId:id,subjectHash:hash,reportHash:hash,value:z.number().finite()}).strict(),
  z.object({...base,kind:z.literal('LINK'),requestId:id,subjectHash:hash,requestRevision:z.number().int().nonnegative(),branchRevision:z.number().int().nonnegative()}).strict(),
  z.object({...base,kind:z.literal('IMPORT'),artifactId:id,subjectHash:hash,specId:id,format:z.enum(['CATBOOST','SHADOW','STAGE_REPORT']),status:z.literal('QUARANTINED'),summary:z.string().max(4000)}).strict(),
@@ -62,7 +83,16 @@ export const pipelineActionSchema=z.discriminatedUnion('type',[
  z.object({type:z.literal('submit'),assignmentId:id}).strict(),
  z.object({type:z.literal('verifySpec'),branchId:id,expectedRevision:z.number().int().nonnegative()}).strict(),
  z.object({type:z.literal('adjudicate'),branchId:id,expectedRevision:z.number().int().nonnegative(),followUp:z.boolean()}).strict(),
- z.object({type:z.literal('rebuttal'),assignmentId:id}).strict(),
+ // artifactId selects the imported bounded response on the manual path; absent means ask the runtime.
+ z.object({type:z.literal('rebuttal'),assignmentId:id,artifactId:id.optional()}).strict(),
+ // S3: export the frozen run package, then admit a bound return. The wait between them is the
+ // RUN_PACKAGE record itself — durable across restart, with no execution job anywhere.
+ z.object({type:z.literal('exportRunPackage'),branchId:id,expectedRevision:z.number().int().nonnegative()}).strict(),
+ z.object({type:z.literal('importRunReturn'),branchId:id,expectedRevision:z.number().int().nonnegative(),artifactId:id}).strict(),
+ // Manual collection for any stage assignment: bind an imported stage report to the exact context.
+ z.object({type:z.literal('importStageReport'),assignmentId:id,artifactId:id}).strict(),
+ // Office stages validate the admitted bound return (or custody/monitoring records) and complete.
+ z.object({type:z.literal('validateReturn'),branchId:id,expectedRevision:z.number().int().nonnegative()}).strict(),
  z.object({type:z.literal('shadowPolicy'),branchId:id,expectedRevision:z.number().int().nonnegative(),policy:shadowPolicySchema.omit({thresholdHash:true})}).strict(),
  z.object({type:z.literal('shadowIngest'),branchId:id,artifactId:id,expectedRevision:z.number().int().nonnegative()}).strict(),
  z.object({type:z.literal('monitor'),branchId:id,expectedRevision:z.number().int().nonnegative()}).strict(),

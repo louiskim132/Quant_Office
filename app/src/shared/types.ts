@@ -180,7 +180,7 @@ export interface Assignment {
 }
 /** A first report whose identity is on record before its text may be read. */
 export interface SealedReviewReport {
-  id: string; projectId: string; subjectAssignmentId: string; reviewerAgentId: string;
+  id: string; projectId: string; subjectAssignmentId: string | null; reviewerAgentId: string;
   phase: 'FIRST'; contentHash: string; sealedAt: string; openedAt: string | null;
 }
 export interface JobOutput { path: string; sha256: string; bytes: number; stored?: true }
@@ -210,7 +210,7 @@ export type Command =
  | { type: 'team.member'; idempotencyKey: string; teamId: string; agentId: string; role: Role; member: boolean }
  | { type: 'request.slots'; idempotencyKey: string; requestId: string; expectedRevision: number; teamId: string | null; slots: RoleSlot[] }
  | { type: 'request.grant'; idempotencyKey: string; requestId: string; agentId: string; capacity: RequestGrant['capacity']; granted: boolean }
- | { type: 'research.draftSpec'; idempotencyKey: string; projectId: string; branchId?: string; expectedRevision?:number; name: string; sections: SpecSections; thresholds: { gate: GateId; rule: string }[]; notApplicable: { gate: GateId; rationale: string }[]; maxSelectionTrials: number }
+ | { type: 'research.draftSpec'; idempotencyKey: string; projectId: string; branchId?: string; expectedRevision?:number; name: string; sections: SpecSections; thresholds: { gate: GateId; rule: string }[]; notApplicable: { gate: GateId; rationale: string }[]; gateEvidence?: { gate: GateId; tier: 'SIGNED_HARNESS' }[]; maxSelectionTrials: number }
  | { type: 'research.freezeSpec'; idempotencyKey: string; specId: string; expectedRevision: number; prediction: { outcomeName: string; sign: PredictionRecord['sign']; expectedLow: number; expectedHigh: number; probability: number; falsifiers: string[]; existingKnowledge: string; retrospective: boolean } }
  | { type: 'research.registerVariant'; idempotencyKey: string; branchId: string; kind: TrialLedgerEntry['kind']; variantHash: string; description: string }
  | { type: 'research.createStageAttempt'; idempotencyKey: string; branchId: string; stage: ResearchStage; assignmentId: string | null; trialId: string | null; summary: string }
@@ -300,5 +300,11 @@ export interface ResearchStatus {
  functions: { function: string; agentId: string; agentRevision: number; blockers: string[] }[];
  tasks: { branchId: string; stage: ResearchStage; function: string; agentId: string; contextHash: string; outputSchema: string; dependsOn: string[] }[];
  scheduleBlockers: string[]; canPromote: boolean; promotionBlockers: string[];
+ /** How this stage's work is delivered under the section-1.6 contract. */
+ stageDelivery?: 'AGENT' | 'USER_RUN' | 'OFFICE';
+ /** The manual-run surface: export when at S3, the durable wait, and bound-import availability. */
+ manual?: { canExport: boolean; awaitingPackageId: string | null; exportedAt: string | null; canImport: boolean; canValidate: boolean };
+ /** Section 5.3's split: each capability on its own evidence, never one collapsed readiness flag. */
+ capabilities?: import('./run-package').ManualRunReadiness;
 }
 declare global { interface Window { office: OfficeAPI; } }

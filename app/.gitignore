@@ -4,3 +4,4 @@ release/
 test-output/
 *.log
 *.sqlite*
+package-lock.json
