@@ -59,6 +59,9 @@ const id=z.string().uuid();
 const importSchema=z.object({projectId:id,experimentId:id.nullable(),kind:z.enum(['REFERENCE','RESULT'])}).strict();
 const selectedRoot=process.env.QRO_USER_DATA_DIR;
 if(selectedRoot){app.setPath('userData',path.resolve(selectedRoot));}
+// One stable application identity so the taskbar groups dev and packaged windows under the
+// same icon rather than falling back to the Electron binary's generic one.
+app.setAppUserModelId('Quant Research Office');
 const hasLock=app.requestSingleInstanceLock();
 if(!hasLock) app.quit();
 else {
@@ -84,7 +87,10 @@ async function start(){
   // No renderer network or live content. Future provider transport belongs in guarded main-process adapters.
   callback({cancel:!details.url.startsWith('file:') && !details.url.startsWith('devtools:') && !details.url.startsWith('data:')});
  });
- win=new BrowserWindow({width:1440,height:1000,minWidth:1050,minHeight:720,title:'Quant Research Office',backgroundColor:'#101414',show:false,autoHideMenuBar:true,icon:path.join(__dirname,'../assets/icon.png'),webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,webSecurity:true,allowRunningInsecureContent:false,devTools:!app.isPackaged}});
+  // The .ico keeps window and taskbar pinned to the same artwork the packager embeds in the exe;
+ // the .png remains for platforms without multi-size ico support.
+ const appIcon=path.join(__dirname,process.platform==='win32'?'../assets/icon.ico':'../assets/icon.png');
+ win=new BrowserWindow({width:1440,height:1000,minWidth:1050,minHeight:720,title:'Quant Research Office',backgroundColor:'#101414',show:false,autoHideMenuBar:true,icon:appIcon,webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,webSecurity:true,allowRunningInsecureContent:false,devTools:!app.isPackaged}});
  Menu.setApplicationMenu(Menu.buildFromTemplate([{label:'Office',submenu:[{label:'Quit',role:'quit'}]},{label:'Edit',submenu:[{role:'undo'},{role:'redo'},{type:'separator'},{role:'cut'},{role:'copy'},{role:'paste'},{role:'selectAll'}]},{label:'View',submenu:[{role:'resetZoom'},{role:'zoomIn'},{role:'zoomOut'},{role:'togglefullscreen'}]}]));
  win.webContents.setWindowOpenHandler(()=>({action:'deny'}));
  win.webContents.on('will-navigate',event=>event.preventDefault());
