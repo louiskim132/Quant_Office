@@ -101,3 +101,9 @@ body{min-width:0}.sidebar{overflow-y:auto}.page-heading p{overflow-wrap:anywhere
 .sidebar-action{width:100%;display:flex;align-items:center;justify-content:center;gap:8px;border:1px dashed var(--border);border-radius:8px;padding:10px;font-size:11px;font-weight:600;color:var(--accent);margin-bottom:18px}
 .sidebar-action:hover,.sidebar-action.active{background:var(--accent-bg);border-color:#a7845144}
 .statusbar>span:last-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.browse-field{display:flex;align-items:center;gap:9px;width:100%;background:var(--input);border:1px solid var(--border);border-radius:7px;color:var(--text);padding:10px 12px;text-align:left}
+.browse-field:hover{border-color:var(--accent)}
+.browse-field svg{color:var(--subtle)}
+.browse-field-value{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.browse-field-empty{flex:1;min-width:0;color:var(--subtle)}
+.browse-field-hint{font-size:9px;color:var(--subtle);border:1px solid var(--border);border-radius:5px;padding:3px 7px}
