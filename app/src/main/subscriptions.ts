@@ -12,6 +12,22 @@ export type AccountObservation=z.infer<typeof observationSchema>;
 export const providerSchema=z.enum(['openai','claude','devin']);
 const PROVIDER_EXECUTABLE:Record<Provider,string>={openai:'codex.exe',claude:'claude.exe',devin:'devin.exe'};
 const PROVIDER_TOOL_NAME:Record<Provider,string>={openai:'Codex',claude:'Claude Code',devin:'Devin'};
+/**
+ * Which official tool a sign-in window belongs to and which account is re-checked after it.
+ * OpenAI signs in through the Codex app-server browser flow, not a terminal login command, so it has
+ * no entry here; every other provider's window is its own executable running `auth login`, and the
+ * same provider's status is what verifies the result.
+ */
+export function providerLogin(provider:Provider):{provider:Provider;executable:string;args:string[]}|null {
+ return provider==='openai'?null:{provider,executable:PROVIDER_EXECUTABLE[provider],args:['auth','login']};
+}
+/** Reads `devin models list --format json`: family objects and variant objects ({model_uid,label}) alike. */
+export function devinModelCatalog(parsed:unknown):Connection['models'] {
+ const models:Connection['models']=[];
+ const collect=(node:any):void=>{if(Array.isArray(node)){node.forEach(collect);return;}if(node&&typeof node==='object'){const id=node.id??node.slug??node.name??node.model_uid;if(typeof id==='string'&&id&&models.length<512&&!models.some(m=>m.id===id))models.push({id,name:typeof node.displayName==='string'?node.displayName:typeof node.name==='string'?node.name:typeof node.label==='string'?node.label:id,source:'Installed Devin CLI models list --format json; cloud application unverified'});Object.values(node).forEach(collect);}};
+ collect(parsed);
+ return models;
+}
 const allowedMethods=new Set(['initialize','account/read','account/login/start','account/login/cancel','account/rateLimits/read','model/list']);
 export function subscriptionEnvironment(): NodeJS.ProcessEnv {
  const env={...process.env};
@@ -105,9 +121,7 @@ export class Subscriptions {
    if(!identity){connection.note='Devin CLI auth status was not understood. Update the official tool and retry.';return connection;}
    connection.account=z.string().min(1).max(160).parse(identity);connection.connected=true;
    try{
-    const parsed=JSON.parse(await run(['models','list','--format','json']));
-    const collect=(node:any):void=>{if(Array.isArray(node)){node.forEach(collect);return;}if(node&&typeof node==='object'){const id=node.id??node.slug??node.name;if(typeof id==='string'&&id&&connection.models.length<512&&!connection.models.some(m=>m.id===id))connection.models.push({id,name:typeof node.displayName==='string'?node.displayName:typeof node.name==='string'?node.name:id,source:'Installed Devin CLI models list --format json; cloud application unverified'});Object.values(node).forEach(collect);}};
-    collect(parsed);
+    connection.models=devinModelCatalog(JSON.parse(await run(['models','list','--format','json'])));
    }catch{connection.note='Devin model catalog unavailable. Refresh to retry.';}
    if(!connection.note)connection.note='Devin CLI sign-in verified. Model entitlement has not been tested. Local sessions only; no usage windows are tracked.';
   }else{
@@ -190,14 +204,11 @@ export class Subscriptions {
      const deadline=Date.now()+5*60*1000;
      do{await new Promise(resolve=>setTimeout(resolve,1500));if(generation!==this.generation)throw new Error('Sign-in canceled.');connection=await this.status('openai');}while(!connection.connected&&Date.now()<deadline);
     }else{
-     const executable=this.executable('claude');
+     // Never null here: openai is the only browser-flow provider and it was handled above.
+     const login=providerLogin(draft.provider)!;
      // A visible official login terminal allows fallback code entry without exposing credentials to the renderer.
-     await new Promise<void>((resolve,reject)=>{const shell=path.join(process.env.SystemRoot||'C:\\Windows','System32','WindowsPowerShell','v1.0','powershell.exe');
-      const command=Buffer.from(`& '${executable.replaceAll("'","''")}' auth login; exit $LASTEXITCODE`,'utf16le').toString('base64');
-      const launcher=`$loginWindow = Start-Process -FilePath '${shell.replaceAll("'","''")}' -ArgumentList @('-NoProfile','-EncodedCommand','${command}') -PassThru -Wait; exit $loginWindow.ExitCode`;
-      const child=spawn(shell,['-NoProfile','-Command',launcher],{cwd:this.root,env:subscriptionEnvironment(),windowsHide:true,stdio:'ignore'});this.loginProcess=child;
-      const timeout=setTimeout(()=>{this.stopLogin();reject(new Error('Sign-in timed out. Try again.'));},5*60*1000);child.once('error',()=>{clearTimeout(timeout);reject(new Error('Could not open the Claude Code sign-in window.'));});child.once('exit',code=>{clearTimeout(timeout);code===0?resolve():reject(new Error('Claude Code sign-in did not complete.'));});
-     });connection=await this.status('claude');
+     await this.loginWindow(this.executable(login.provider),login.args,PROVIDER_TOOL_NAME[login.provider]);
+     connection=await this.status(login.provider);
     }
    }
    if(generation!==this.generation)throw new Error('Sign-in canceled.');
@@ -206,6 +217,15 @@ export class Subscriptions {
    this.validateEffort(draft.provider,draft.model,draft.effort??'default',connection);
    this.ticket={id:randomUUID(),draft,connection,expiresAt:Date.now()+10*60*1000};return structuredClone(this.ticket);
   }finally{this.connecting=false;this.loginProcess=undefined;this.loginId=undefined;}
+ }
+ /** A visible official login terminal allows fallback code entry without exposing credentials to the renderer. */
+ private async loginWindow(executable:string,args:string[],toolName:string):Promise<void>{
+  await new Promise<void>((resolve,reject)=>{const shell=path.join(process.env.SystemRoot||'C:\\Windows','System32','WindowsPowerShell','v1.0','powershell.exe');
+   const command=Buffer.from(`& '${executable.replaceAll("'","''")}' ${args.join(' ')}; exit $LASTEXITCODE`,'utf16le').toString('base64');
+   const launcher=`$loginWindow = Start-Process -FilePath '${shell.replaceAll("'","''")}' -ArgumentList @('-NoProfile','-EncodedCommand','${command}') -PassThru -Wait; exit $loginWindow.ExitCode`;
+   const child=spawn(shell,['-NoProfile','-Command',launcher],{cwd:this.root,env:subscriptionEnvironment(),windowsHide:true,stdio:'ignore'});this.loginProcess=child;
+   const timeout=setTimeout(()=>{this.stopLogin();reject(new Error('Sign-in timed out. Try again.'));},5*60*1000);child.once('error',()=>{clearTimeout(timeout);reject(new Error(`Could not open the ${toolName} sign-in window.`));});child.once('exit',code=>{clearTimeout(timeout);code===0?resolve():reject(new Error(`${toolName} sign-in did not complete.`));});
+  });
  }
  async confirm(id:string,save:(agent:Agent,observation:AccountObservation)=>void):Promise<void>{
   const ticket=this.ticket;if(!ticket||ticket.id!==id||ticket.expiresAt<Date.now())throw new Error('Connection confirmation expired. Click Add to verify again.');
