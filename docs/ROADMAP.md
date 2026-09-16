@@ -2864,3 +2864,27 @@ verification at bc99bfa: typecheck clean, 499/499 unit, build
 clean. Remaining: repackage the distributed binary and retest the
 local pilot end-to-end; the OpenAI curated suggestion list needs
 a dated refresh per model-catalogs.md.
+
+2026-09-16 (round pilot-ux2) — removal and consolidation round
+landed on 504701e. Organizer prerequisite (3aaee70) added
+Project.removedAt and project.delete: archived-only, refused
+while any project request still has an unresolved provider job,
+records/history/files retained, and un-archiving a removed
+project restores it into the archived list. A mid-review
+organizer defect — removedAt: undefined rejected by canonical
+serialization — was fixed at f8a8a2b and worker-3's guard tests
+absorbed as cfb0ced before its BLOCKED submission was rejected.
+Worker packets integrated: the queue surfaces where hidden
+removable rows went (names the lifecycle filter, explains
+retention, keeps unresolved-job rows non-deletable) (f1fa679);
+Tasks and Research nav destinations merged away — Office carries
+the queue, Projects is the single project surface (list or
+research workspace), pickers filter removedAt, archived rows get
+Remove from list, and desktop.e2e was repaired for the merged
+IA (c4e472f); workflow.md documents the consolidated pages and
+both removal lifecycles (6ccdf75). Organizer integration fix
+(504701e): a Removed lifecycle filter exposes removed projects
+with a Restore action — the store recovery path was otherwise
+unreachable through the UI — and docs now match the
+archived-list landing. Combined verification at 504701e:
+typecheck clean, 505/505 unit, build clean, desktop e2e green.
