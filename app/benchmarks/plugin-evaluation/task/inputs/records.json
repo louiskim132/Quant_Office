@@ -1,0 +1,10 @@
+[
+  {"id":"a","kind":"FEATURE","status":"COMPLETE","observedAt":"2026-01-01T09:00:00Z","availableAt":"2026-01-01T09:05:00Z","decisionAt":"2026-01-01T10:00:00Z"},
+  {"id":"b","kind":"FEATURE","status":"COMPLETE","observedAt":"2026-01-01T09:00:00Z","availableAt":"2026-01-01T10:01:00Z","decisionAt":"2026-01-01T10:00:00Z"},
+  {"id":"c","kind":"TARGET","status":"COMPLETE","observedAt":"2026-01-01T09:00:00Z","availableAt":"2026-01-01T09:05:00Z","decisionAt":"2026-01-01T10:00:00Z"},
+  {"id":"d","kind":"FEATURE","status":"COMPLETE","observedAt":"invalid","availableAt":"2026-01-01T09:05:00Z","decisionAt":"2026-01-01T10:00:00Z"},
+  {"id":"e","kind":"FEATURE","status":"COMPLETE","observedAt":"2026-01-01T09:00:00Z","decisionAt":"2026-01-01T10:00:00Z"},
+  {"id":"f","kind":"FEATURE","status":"FAILED","observedAt":"2026-01-01T09:00:00Z","availableAt":"2026-01-01T09:05:00Z","decisionAt":"2026-01-01T10:00:00Z"},
+  {"id":"g","kind":"FEATURE","status":"COMPLETE","observedAt":"2026-01-01T11:00:00+02:00","availableAt":"2026-01-01T12:00:00+02:00","decisionAt":"2026-01-01T10:00:00Z"},
+  {"id":"h","kind":"FEATURE","status":"COMPLETE","observedAt":"2026-01-01T11:00:00Z","availableAt":"2026-01-01T09:05:00Z","decisionAt":"2026-01-01T10:00:00Z"}
+]
