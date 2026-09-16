@@ -21,6 +21,10 @@
 .work-queue .task-card summary{cursor:pointer;font-size:11px;color:var(--muted)}
 .work-queue .task-actions{justify-content:flex-end;border-top:1px solid var(--border);padding-top:14px;margin-top:2px}
 
+/* Discoverability hints: name the filter hiding removable rows, and why a blocked Remove is off. */
+.work-queue .queue-hint{margin:-4px 0 12px;font-size:11px}
+.work-queue .remove-note{font-size:10px;line-height:1.55}
+
 /* Request editor: a contained sub-panel inside the row details. */
 .request-editor fieldset{min-width:0;display:grid;gap:12px;padding:14px;border:1px solid var(--border);border-radius:8px;background:var(--panel-2)}
 .request-editor .field{margin:0}
