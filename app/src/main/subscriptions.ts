@@ -5,7 +5,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { agentDraftSchema, observationSchema } from '../core/store.js';
-import { efforts } from '../shared/effort.js';
+import { efforts, PROVIDER_MODEL_SUGGESTIONS } from '../shared/effort.js';
 import type { Effort, Agent, AgentTicket, Connection, Provider, UsageWindow } from '../shared/types.js';
 export type AccountObservation=z.infer<typeof observationSchema>;
 
@@ -97,7 +97,7 @@ export class Subscriptions {
   }else{
    const raw=await new Promise<string>((resolve,reject)=>execFile(this.executable('claude'),['auth','status'],{cwd:this.root,env:subscriptionEnvironment(),windowsHide:true,timeout:30000,maxBuffer:1024*1024},(error,stdout)=>{if(error&&!stdout){reject(new Error('Claude Code status unavailable. Update the official tool and retry.'));return;}resolve(stdout);}));
    try{connection.account=claudeIdentity(JSON.parse(raw));connection.connected=true;}catch{connection.note='Sign in through Claude Code with a Claude subscription.';return connection;}
-   connection.models=[{id:'opus',name:'Opus (Claude Code alias)'},{id:'sonnet',name:'Sonnet (Claude Code alias)'},{id:'haiku',name:'Haiku (Claude Code alias)'}];
+   connection.models=[...PROVIDER_MODEL_SUGGESTIONS.claude];
    connection.note='Account sign-in verified. Model entitlement has not been tested. Automatic usage retrieval is unavailable; open Claude usage to see the official limits.';
   }
   return connection;
