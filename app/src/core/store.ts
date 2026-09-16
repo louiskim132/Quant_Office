@@ -4,7 +4,7 @@ import { resolve, isAbsolute } from 'node:path';
 import { DatabaseSync, backup as sqliteBackup } from 'node:sqlite';
 import { z } from 'zod';
 import { independenceClaimBlocker } from '../shared/cooperation.js';
-import { requestJobs } from '../shared/queue.js';
+import { requestJobs, UNRESOLVED } from '../shared/queue.js';
 import type { AccountConnection, ProviderCapabilitySnapshot, ProjectLocation, InputSnapshot, Assignment, ProviderJob, JobEvent, JobEvidence, JobState, Team, TeamMembership, Message, ReviewDecision, RequestGrant, ProbeAttempt, ResearchBranch, FrozenResearchSpec, PredictionRecord, TrialLedgerEntry, StageAttempt, GateReceipt, FunctionAssignment, SealedReviewReport, Agent, AgentLog, WorkLog, Effort, AppState, Artifact, Command, Experiment, LineageEvent, Project, ResearchContract, ResearchTask, Request, Settings } from '../shared/types.js';
 import { canonical, canonicalHash, sha256 } from './canonical.js';
 import { parseStrictJson } from './strict-json.js';
@@ -41,6 +41,7 @@ export const commandSchema = z.discriminatedUnion('type', [
   z.object({...common,type:z.literal('request.update'),requestId:id,expectedRevision:z.number().int().nonnegative(),objective:z.string().trim().min(1).max(12000),leadAgentId:id.nullable(),participantIds:z.array(id),acceptanceCriteria:text(12000)}).strict(),
   ...(['request.start','request.cancel','request.duplicate'] as const).map(type=>z.object({...common,type:z.literal(type),requestId:id,expectedRevision:z.number().int().nonnegative()}).strict()),
   z.object({...common,type:z.literal('agent.remove'),agentId:id,removed:z.boolean()}).strict(),
+  z.object({...common,type:z.literal('agent.delete'),agentId:id}).strict(),
   z.object({...common,type:z.literal('agent.update'),agentId:id,expectedRevision:z.number().int().nonnegative().optional(),name:title,team:title,role,instructions:text(12000)}).strict(),
   z.object({ ...common, type: z.literal('project.create'), name: title, mandate: text(30000), localFolder:text(32000).optional(),cloudWorkspace:text(1000).optional(), budgetCents: cents }).strict(),
   z.object({ ...common, type: z.literal('project.update'), projectId: id, name: title, mandate: text(30000), localFolder:text(32000).optional(),cloudWorkspace:text(1000).optional(), budgetCents: cents }).strict(),
@@ -85,7 +86,7 @@ const artifactSchema = z.object({ id, projectId: id, experimentId: id.nullable()
 export const effortSchema=z.enum(['default','none','minimal','low','medium','high','xhigh','max','ultra']);
 export const agentDraftSchema = z.object({ name: title, provider: z.enum(['openai','claude','devin']), model: z.string().trim().min(1).max(160), team: title, role, instructions: text(12000), effort: effortSchema.optional(), execution: z.enum(['HOSTED_SETUP_REQUIRED','LOCAL']).optional(), toolProfile: z.enum(['STANDARD','CODE_NAV']).optional() }).strict();
 // `account` stays the historical setup identity. `connectionId` is a durable binding fact and is never writable through a profile edit.
-const agentSchema = agentDraftSchema.extend({revision:z.number().int().nonnegative().optional(),removedAt:timestamp.optional(),id, account: title, setupAccount: title.optional(), createdAt: timestamp, connectionVerifiedAt: timestamp, connectionId:id.optional(), bindingVerifiedAt:timestamp.optional(), execution: z.enum(['HOSTED_SETUP_REQUIRED','LOCAL']).default('HOSTED_SETUP_REQUIRED')}).strict();
+const agentSchema = agentDraftSchema.extend({revision:z.number().int().nonnegative().optional(),removedAt:timestamp.optional(),deletedAt:timestamp.optional(),id, account: title, setupAccount: title.optional(), createdAt: timestamp, connectionVerifiedAt: timestamp, connectionId:id.optional(), bindingVerifiedAt:timestamp.optional(), execution: z.enum(['HOSTED_SETUP_REQUIRED','LOCAL']).default('HOSTED_SETUP_REQUIRED')}).strict();
 const logSchema=z.object({id,conversationId:z.string().min(1).max(200),from:z.string().min(1).max(100),to:z.string().min(1).max(100),kind:z.enum(['MESSAGE','TOOL','STATUS']),text:text(64000),timestamp,sourceHash:hash,externalId:z.string().min(1).max(200),provenance:z.literal('USER_IMPORTED')}).strict();
 const requestSchema=z.object({migratedFromTaskId:id.optional(),teamId:id.optional(),roleSlots:z.array(z.object({role,count:z.number().int().min(1).max(64)}).strict()).max(16).optional(),id,projectId:id,experimentId:id.nullable(),name:title,objective:text(12000),workType:z.enum(['QUESTION','ANALYSIS','IMPLEMENTATION','CODE_REVIEW','EXPERIMENT']),mode:z.enum(['SINGLE','GROUP','TEAM']),leadAgentId:id.nullable(),participantIds:z.array(id),acceptanceCriteria:text(12000),revision:z.number().int().nonnegative(),status:z.enum(['DRAFT','READY','CANCELED']),removedAt:timestamp.optional(),blockers:z.array(z.object({code:text(100),message:text(1000),action:text(200)}).strict()),delegation:z.boolean(),createdAt:timestamp,updatedAt:timestamp,sourceRequestId:id.optional()}).strict();
 const providerEnum=z.enum(['openai','claude','devin']);
@@ -1450,10 +1451,30 @@ export class OfficeStore {
           reason = `Removed archived project "${project.name}" from lists; records and history retained`; break;
         }
         case 'agent.update':
-        case 'agent.remove': {
+        case 'agent.remove':
+        case 'agent.delete': {
           const agent=state.agents?.find(a=>a.id===command.agentId);if(!agent)throw new Error('Agent not found');
           if(command.type==='agent.update'){if(agent.removedAt)throw new Error('Restore this agent before editing');if(command.expectedRevision!==(agent.revision??0))throw new Error('Stale profile revision; reload before saving');changes.push({collection:'agents',value:{...agent,revision:(agent.revision??0)+1,name:command.name,team:command.team,role:command.role,instructions:command.instructions}});reason=`Updated ${command.name} profile`;}
-          else {const {removedAt,...active}=agent;changes.push({collection:'agents',value:command.removed?{...agent,revision:(agent.revision??0)+1,removedAt:now}:{...active,revision:(agent.revision??0)+1}});reason=`${command.removed?'Archived':'Restored'} ${agent.name}; history retained`;}break;
+          else if(command.type==='agent.delete'){
+            // Same removal lifecycle as projects: archiving already guarantees the profile is
+            // read-only, and removal only hides it — the record, memberships, assignments and
+            // lineage all stay. An unresolved provider outcome under this agent's assignments
+            // must remain reachable until reconciled.
+            if(agent.deletedAt)throw new Error('This agent is already removed from the list');
+            if(!agent.removedAt)throw new Error('Archive the agent before removing it from the list');
+            const assigned=new Set((state.assignments??[]).filter(item=>item.agentId===agent.id).map(item=>item.id));
+            if((state.jobs??[]).some(job=>assigned.has(job.assignmentId)&&UNRESOLVED.includes(job.state)))throw new Error('A provider job outcome is still unresolved; reconcile it before removing this agent');
+            changes.push({collection:'agents',value:{...agent,deletedAt:now}});reason=`Removed archived agent "${agent.name}" from lists; records and history retained`;
+          }
+          else {
+            const {removedAt,deletedAt,...active}=agent;
+            if(command.removed&&agent.deletedAt)throw new Error('Restore this agent before changing it');
+            // Restoring a removed agent clears only the removal so it lands in the archived
+            // list; a second restore reactivates it, mirroring project.archive.
+            changes.push({collection:'agents',value:command.removed?{...agent,revision:(agent.revision??0)+1,removedAt:now}:agent.deletedAt?{...active,removedAt:agent.removedAt,revision:(agent.revision??0)+1}:{...active,revision:(agent.revision??0)+1}});
+            reason=`${command.removed?'Archived':'Restored'} ${agent.name}; history retained`;
+          }
+          break;
         }
         case 'request.update':
         case 'request.start':

@@ -39,7 +39,7 @@ export interface RequestActions {
 }
 
 const SETTLED: ProviderJob['state'][] = ['COMPLETED', 'FAILED', 'CANCEL_ACKNOWLEDGED'];
-const UNRESOLVED: ProviderJob['state'][] = ['SUBMITTING', 'ACCEPTED', 'RUNNING', 'UNKNOWN', 'CANCEL_REQUESTED'];
+export const UNRESOLVED: ProviderJob['state'][] = ['SUBMITTING', 'ACCEPTED', 'RUNNING', 'UNKNOWN', 'CANCEL_REQUESTED'];
 
 /**
  * Aggregates every job on a request rather than reporting the latest assignment.

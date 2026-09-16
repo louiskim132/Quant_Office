@@ -27,7 +27,7 @@ export interface AgentDraft { name: string; provider: Provider; model: string; t
  * the profile's origin stays legible afterwards. Profiles saved before this distinction existed have
  * no `setupAccount`, and their origin is genuinely unknown rather than assumed to be the current one.
  */
-export interface Agent extends AgentDraft { revision?: number; removedAt?: string; id: string; account: string; setupAccount?: string; createdAt: string; connectionVerifiedAt: string; connectionId?: string; bindingVerifiedAt?: string; execution: ExecutionEnvironment; }
+export interface Agent extends AgentDraft { revision?: number; removedAt?: string; deletedAt?: string; id: string; account: string; setupAccount?: string; createdAt: string; connectionVerifiedAt: string; connectionId?: string; bindingVerifiedAt?: string; execution: ExecutionEnvironment; }
 export interface UsageWindow { label: string; remainingPercent: number; resetsAt: number; }
 export interface Connection { provider: Provider; connected: boolean; account: string; models: { id: string; name: string; efforts?: Effort[]; defaultEffort?:Effort; effortDescriptions?:{effort:Effort;description:string}[]; source?:string }[]; windows: UsageWindow[]; checkedAt: string; note: string; }
 export interface WorkLog { id: string; conversationId: string; from: string; to: string; kind: 'MESSAGE' | 'TOOL' | 'STATUS'; text: string; timestamp: string; sourceHash: string; externalId: string; provenance: 'USER_IMPORTED'; }
@@ -205,6 +205,7 @@ export type Command =
  | { type:'request.update';idempotencyKey:string;requestId:string;expectedRevision:number;objective:string;leadAgentId:string|null;participantIds:string[];acceptanceCriteria:string }
  | { type: 'request.start' | 'request.cancel' | 'request.duplicate'; idempotencyKey:string; requestId:string; expectedRevision:number }
  | { type: 'agent.remove'; idempotencyKey: string; agentId: string; removed: boolean }
+ | { type: 'agent.delete'; idempotencyKey: string; agentId: string }
  | { type: 'agent.update'; idempotencyKey: string; agentId: string; expectedRevision?: number; name: string; team: string; role: Role; instructions: string }
  | { type: 'project.create'; idempotencyKey: string; name: string; mandate: string; budgetCents: number; localFolder?:string; cloudWorkspace?:string }
  | { type: 'project.update'; idempotencyKey: string; projectId: string; name: string; mandate: string; budgetCents: number; localFolder?:string; cloudWorkspace?:string }
