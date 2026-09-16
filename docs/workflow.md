@@ -46,6 +46,25 @@ All stages can enter a named BLOCKED or FAILED branch with original stage, cause
 
 BLOCKED_DATA and BLOCKED_POLICY identify missing inputs. INVALID identifies a failed validity gate. INCONCLUSIVE identifies insufficient evidence/sample size/detector power. EXECUTION_FAILED is not a null result. PILOT_COMPLETE alone cannot authorize promotion or protected-data access. CANDIDATE_FOR_NEXT_STAGE requires valid evidence satisfying the separate advancement contract.
 
+## The desktop surface
+
+The sidebar groups the office into a small set of pages, and two of them carry most of the work:
+
+- **Office** is the landing view and carries the full work queue: every request across every project, with lifecycle, project, agent, team and text filters. There is no separate Tasks page — the queue is part of the office view.
+- **Projects** is the single project surface. With nothing selected it is the project list — active and archived, each row showing the mandate, location and experiment count. Selecting a project — from the topbar selector, a list row's Open project, or a queue card — opens that project's research workspace in place of the list: the mandate, its experiment tabs, the research contract, the project location and its input files. Deselecting returns to the list.
+
+Agents manages profiles and membership, and Add Agent creates them. Reviews, Artifacts, History, Usage and Settings remain their own pages.
+
+## Removal is a view, not an erasure
+
+Canceling and removing are different acts, and neither rewrites the record.
+
+- **Canceling a request** (`request.cancel`; legacy task groups use `task.cancel`) ends the open work: the request goes CANCELED and its linked experiment and tasks are canceled with it. The row stays in the queue — visible under the Canceled filter — and 'Use as new request' copies its objective into a fresh draft.
+- **Removing a row** (`task.delete`) only hides it. The command is refused while the request is still open, and again while a provider job outcome is unresolved — an UNKNOWN attempt must stay reachable until it is reconciled — so only terminal rows can leave the list. Removal is one-way; the request, its tasks and every lineage event are retained and remain readable in History.
+- **Removing a project** is the same shape one level up. Archive first — refused while any request or task under the project is still open — then Remove from list (`project.delete`) hides it from pickers and lists, and is refused while any of its requests still has an unresolved provider outcome. A removed project is brought back by restoring it: the restore clears the removal and returns the project to the active list.
+
+Nothing on this page deletes evidence: canceled, removed and archived records all keep their history, and a provider job whose outcome is still unknown keeps its place in the queue until it is reconciled.
+
 ## Exact export contents
 
 An export contains a finalized payload archive and a detached release envelope. The payload contains source, dependency lock, fixed launcher/notebook as a static file, configuration, frozen contract, data manifest, approved schedule/mode, seeds where relevant, check definitions, expected artifact schemas, inventory and user instructions. The detached envelope contains the payload byte hash and approval/verification references. Export no API credentials, remote session IDs that grant access, live links or callback configuration.
