@@ -6,6 +6,9 @@ export const efforts:Effort[]=['default','none','minimal','low','medium','high',
 // entry declares real levels. OpenAI entries carry levels from the signed-in catalog; Claude's
 // aliases expose none.
 export function suggestedEfforts(_provider:Provider,_model:string):Effort[]{return ['default'];}
+/** Whether the provider exposes effort as a control separate from the model choice. Devin encodes
+ * effort in the model variant itself, so its effort field is Provider default by construction. */
+export function effortIsIndependentAxis(provider:Provider):boolean{return provider!=='devin';}
 /**
  * Curated model suggestions shown before (Claude) or alongside (OpenAI) a signed-in catalog.
  * Suggestions only — the model input is free-text and provider-side validation stays authoritative.

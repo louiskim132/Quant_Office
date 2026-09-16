@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, realpathSync, statSync } from 'node:fs';
 import { resolve, isAbsolute } from 'node:path';
 import { DatabaseSync, backup as sqliteBackup } from 'node:sqlite';
 import { z } from 'zod';
@@ -1454,7 +1454,11 @@ export class OfficeStore {
             if(!request.leadAgentId)blockers.push({code:'LEAD_REQUIRED',message:'Choose a responsible agent when creating the request.',action:'Edit request participants'});
             for(const id of selected){const a=state.agents?.find(a=>a.id===id);if(!a||a.removedAt)blockers.push({code:'AGENT_UNAVAILABLE',message:'A selected agent is archived or unavailable.',action:'Restore the agent or edit participants'});}
             if(request.mode==='TEAM')for(const role of ['DIRECTOR','PM_A','WORKER'])if(!selected.some(id=>state.agents?.some(a=>a.id===id&&!a.removedAt&&a.role===role)))blockers.push({code:'ROLE_REQUIRED',message:'Full research team requires a selected '+role+'.',action:'Edit request participants'});
-            blockers.push({code:'CLOUD_TRANSPORT_UNVERIFIED',message:'No subscription cloud transport has verified submission, settings, events and cancellation capabilities.',action:'Configure and verify a provider cloud workspace'});
+            // The cloud-transport warning belongs only to work that could reach a hosted route.
+            // An all-local selection is gated by local evidence instead; naming a cloud gap there
+            // tells the user to fix a route they never asked for.
+            const needsHosted=selected.some(id=>{const a=state.agents?.find(a=>a.id===id);return a&&!a.removedAt&&a.execution!=='LOCAL';});
+            if(needsHosted)blockers.push({code:'CLOUD_TRANSPORT_UNVERIFIED',message:'No subscription cloud transport has verified submission, settings, events and cancellation capabilities.',action:'Configure and verify a provider cloud workspace'});
           }
           changes.push({collection:'requests',value:{...request,status:command.type==='request.cancel'?'CANCELED':'READY',blockers,revision:request.revision+1,updatedAt:now}});
           if(command.type==='request.cancel'&&experimentId){const exp=state.experiments.find(e=>e.id===experimentId)!;changes.push({collection:'experiments',value:{...exp,stage:'CANCELED',revision:exp.revision+1,updatedAt:now}});for(const task of state.tasks.filter(t=>t.experimentId===experimentId&&!['CANCELED','SUPERSEDED','ACCEPTED'].includes(t.status)))changes.push({collection:'tasks',value:{...task,status:'CANCELED',blocker:null,updatedAt:now}});}
@@ -1662,6 +1666,9 @@ export class OfficeStore {
           const root=folder?realpathSync(folder):'';
           const selected=[...new Set(command.inputPaths.map(value=>value.replaceAll('\\\\','/').trim()).filter(Boolean))].sort();
           if(selected.length&&!root)throw new Error('Choose the project folder before selecting files to share.');
+          // The managed input directory lives inside the chosen project folder so the user can find
+          // it; files are shared only through the explicit selection above.
+          if(root)mkdirSync(resolve(root,'inputs'),{recursive:true});
           const location:ProjectLocation={
             id:existing?.id??randomUUID(),projectId:project.id,localFolder:root,inputPaths:selected,
             outputFolder:output?realpathSync(output):'',

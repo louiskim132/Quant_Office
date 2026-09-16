@@ -2,6 +2,10 @@ import type { AccountConnection, AdapterRoute, Agent, AppState, CapabilityOperat
 
 /** Conservative application defaults. They are our own staleness rules, not provider guarantees. */
 export const ACCOUNT_STALE_MS = 5 * 60 * 1000;
+// A local account check is an office-observed CLI probe, not provider attestation; the manual
+// packet/handoff flow spans more wall-clock than a hosted dispatch, so local scopes get a wider
+// window before the check reads as stale.
+export const LOCAL_ACCOUNT_STALE_MS = 30 * 60 * 1000;
 export const CAPABILITY_EXPIRY_MS = 24 * 60 * 60 * 1000;
 type Records = Pick<AppState, 'connections' | 'capabilities'>;
 type Options = { now?: number; model?: string; environment?: string; effort?: Effort; delegation?: boolean; route?: AdapterRoute; execution?: ExecutionEnvironment };
@@ -242,7 +246,8 @@ export function providerReadiness(state: Records, provider: Provider, options: O
   const has = (operation: CapabilityOperation) => verified(found.get(operation), localScope);
 
   const signedIn = connection?.state === 'SIGNED_IN' && has('ACCOUNT_STATUS');
-  const accountFresh = Boolean(connection && now - Date.parse(connection.lastCheckedAt) <= ACCOUNT_STALE_MS);
+  const accountStaleMs = localScope ? LOCAL_ACCOUNT_STALE_MS : ACCOUNT_STALE_MS;
+  const accountFresh = Boolean(connection && now - Date.parse(connection.lastCheckedAt) <= accountStaleMs);
   // A provider-wide catalog does not verify the selected model; scoped application evidence does.
   const modelChecked = model
     ? has('MODEL_APPLICATION') && found.get('MODEL_APPLICATION')?.model === model
@@ -253,17 +258,22 @@ export function providerReadiness(state: Records, provider: Provider, options: O
   const ready = signedIn && accountFresh && modelChecked && dispatchChecked;
 
   const blockers: string[] = [];
-  if (!connection) blockers.push('No account check has been recorded for this provider yet.');
-  else if (connection.state !== 'SIGNED_IN') blockers.push(connection.note || 'The official tool does not report a signed-in subscription.');
-  else if (!has('ACCOUNT_STATUS')) blockers.push('The signed-in state has not been confirmed by an observed account check.');
-  if (connection && !snapshot) blockers.push('No capability snapshot has been recorded for this account.');
-  if (connection && !accountFresh) blockers.push('The account check is stale; recheck before any external action.');
-  if (signedIn && !modelChecked) blockers.push(model ? `The office has not verified that ${model} is the model a job would actually use.` : 'Model entitlement has not been verified for this account.');
+  const blockerDetails: NonNullable<ProviderReadiness['blockerDetails']> = [];
+  // A blocker that fails the actions.handoff conditions (signed-in + fresh account) blocks the
+  // manual action in front of the user. Evidence gaps for individual dispatch operations gate only
+  // automatic start — manual packet write and handoff stay available while they are unverified.
+  const block = (message: string, blocks: 'THIS_ACTION' | 'AUTOMATIC_START') => { blockers.push(message); blockerDetails.push({ message, blocks }); };
+  if (!connection) block('No account check has been recorded for this provider yet.', 'THIS_ACTION');
+  else if (connection.state !== 'SIGNED_IN') block(connection.note || 'The official tool does not report a signed-in subscription.', 'THIS_ACTION');
+  else if (!has('ACCOUNT_STATUS')) block('The signed-in state has not been confirmed by an observed account check.', 'THIS_ACTION');
+  if (connection && !snapshot) block('No capability snapshot has been recorded for this account.', 'THIS_ACTION');
+  if (connection && !accountFresh) block('The account check is stale; recheck before any external action.', 'THIS_ACTION');
+  if (signedIn && !modelChecked) block(model ? `The office has not verified that ${model} is the model a job would actually use.` : 'Model entitlement has not been verified for this account.', 'AUTOMATIC_START');
   for (const operation of requiredDispatch) {
     if (has(operation)) continue;
     const item = found.get(operation) ?? described.get(operation);
     const outOfScope = !found.has(operation) && described.has(operation) ? ' for these exact conditions' : '';
-    blockers.push(`Unverified ${LABEL[operation]}${outOfScope}: ${item ? (item.expired ? `evidence expired (${item.level.toLowerCase().replace('_', ' ')}, checked ${item.verifiedAt})` : `${item.level.toLowerCase().replace('_', ' ')}, ${item.evidence.toLowerCase()}`) : 'no evidence recorded'}.`);
+    block(`Unverified ${LABEL[operation]}${outOfScope}: ${item ? (item.expired ? `evidence expired (${item.level.toLowerCase().replace('_', ' ')}, checked ${item.verifiedAt})` : `${item.level.toLowerCase().replace('_', ' ')}, ${item.evidence.toLowerCase()}`) : 'no evidence recorded'}.`, 'AUTOMATIC_START');
   }
 
   const actions: ReadinessActions = {
@@ -277,7 +287,7 @@ export function providerReadiness(state: Records, provider: Provider, options: O
   return {
     provider, connectionId: connection?.id ?? '', identity: connection?.identity ?? '', signedIn, accountFresh,
     modelChecked, dispatchChecked, ready, model, lastObservedAt: connection?.lastCheckedAt ?? '', lastCheckedAt: connection?.lastCheckedAt ?? '',
-    actions, evidence, blockers,
+    actions, evidence, blockers, blockerDetails,
   };
 }
 
