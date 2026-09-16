@@ -1015,7 +1015,7 @@ Acceptance — demonstrate with a synthetic returned bundle first, then a user-r
 
 Explicit non-requirements: no Colab connection, polling or control; no automatic main-run execution; no independent custodian for the manual pilot — a manual holdout return is labeled user-run, not custodial. R5 remains the gate for automated hosted agent dispatch but does not block this slice. A user-run pilot at roughly ten assets, fixes to the supplied CatBoost pipeline and independent review is the original first milestone; later lifecycle capabilities (stronger custody, shadow, monitoring) stay separately scoped.
 
-### C9 — Local CLI office agents — NOT_STARTED 2026-09-16
+### C9 — Local CLI office agents — PARTIALLY_VERIFIED_LOCAL 2026-09-16
 
 Established by user direction on 2026-09-15 with CLI probes run 2026-09-16. This slice adds local CLI agents (Devin/SWE-2, Claude Code, Codex) as a governed third execution surface for office labor only. Research compute — model training, evaluation, backtesting — remains exclusively the user's manual Colab workflow under section 1.6; nothing here runs research locally.
 
@@ -1064,7 +1064,7 @@ Status vocabulary: NOT_STARTED, IMPLEMENTED_FOUNDATION, IN_PROGRESS, PARTIALLY_V
 | R7 / C7 | VERIFIED_LOCAL | Canonical activity/readiness, scoped paged views, stable room/seat placement, integrated research/monitoring UI and current-source packaged/native acceptance verified. |
 | Roadmap consolidation | VERIFIED_LOCAL documentation | Comment/report evaluated; one active roadmap; old entry points redirected. Local links/anchors, fences and complete R0–R7/C1–C7/S0–S10 inventory checked. No source implementation or new application test run in this consolidation. |
 | C8 manual-pilot realignment | PARTIALLY_VERIFIED_LOCAL; user-run pilot pending | Round c8-impl (2026-09-15) implemented the corrected contract end to end: shared RUN_PACKAGE/RUN_RETURN schemas and tiered gate provenance, store admission (bound return identity, closed inventory, conflict/idempotency, durable AWAITING_RETURN), S3 as the user-run stage with office stages for S5/S6/S8/S9/S10, runtime-free separated S2/S7 review, the five-capability readiness split, the real zip codec (`main/run-package.ts`, fflate) shipping `launcher.v1.py`, the stdlib-only Colab launcher producing `run-return.zip`, renderer export/await/import/validate controls, and organizer wiring of the codec into buildPipeline. Combined verification: typecheck clean, 408/408 unit tests, build clean — including a full S0→S10 journey on user-run evidence alone. Two worker packets were blocked by an organizer-owned separated-review staging defect (fixed at c75d589) and their committed deliverables were integrated by cherry-pick. Open: the user-run pilot itself (acceptance steps 5–6 with a real Colab return). The packaged desktop suites were re-run against the built app on 2026-09-15 — pipeline.desktop, revision.desktop, packaged-native (real node-pty I/O) and desktop.e2e all pass after correcting stale old-contract assertions. |
-| C9 local CLI office agents | NOT_STARTED | Established 2026-09-16 from the 2026-09-15 user direction. CLI probes on this machine verified the surfaces the contract names: devin 3000.10.21 (auth status, models list, acp stdio server with tool-scoped agent types, -p), codex 0.154.0 (exec --json --sandbox -C, resume/fork, existing app-server account/read+model/list), claude 2.1.273 (-p with --output-format/--allowedTools/--model/--effort; no model catalog — curated aliases remain). devin CLI is not currently logged in; its credential is separate from the Desktop session. Office labor may run locally under labeled evidence; research compute remains manual-Colab-only; blinding/custody/verified-gate roles stay ineligible for local agents. Next: organizer contract commit, then the transport/renderer/tests/docs round. |
+| C9 local CLI office agents | PARTIALLY_VERIFIED_LOCAL | Established 2026-09-16 from the 2026-09-15 user direction. CLI probes on this machine verified the surfaces the contract names: devin 3000.10.21 (auth status, models list, acp stdio server with tool-scoped agent types, -p), codex 0.154.0 (exec --json --sandbox -C, resume/fork, existing app-server account/read+model/list), claude 2.1.273 (-p with --output-format/--allowedTools/--model/--effort; no model catalog — curated aliases remain). devin CLI is not currently logged in; its credential is separate from the Desktop session. Landed in round c9-impl: 'devin' provider with real CLI discovery (auth status + `models list --format json`, DEVIN_* env stripped, no API-key fallback), Agent.execution/toolProfile persisted with a pre-C9 hosted default, LOCAL routes/transports/operation evidence, LOCAL_DISPATCH readiness family scoped by route (hosted evidence never satisfies a local scope or vice versa), AssignmentController per-route adapter resolution that fails closed on a miss, LocalMailboxAdapter (hash-manifested packet out, hash-verified result.json + artifacts back, honest cancel sentinel) wired for local agents, renderer execution-environment/tool-profile surfaces and Devin option, and workflow/evidence docs. Verification: typecheck clean, 430/430 unit, build clean. Open items before first-milestone acceptance: a local-session probe must exercise a real mailbox round-trip to record the first LOCAL_* OBSERVED evidence (dispatch stays correctly gated until then), then the end-to-end pilot — add a signed-in Devin agent → packet written → user-run session → verified outputs → cancel → restart non-duplication. CLI-exec/ACP transports and local Claude/Codex providers are still unimplemented. |
 
 Current-source qualification, 2026-09-12: version 0.5.0. The application qualification occurred before Git initialization; the same qualified source was then committed and connected to the private GitHub repository on `main`. The complete local C4–C7 revision was reviewed, verified and freshly packaged. Section 12.1 and its dated raw logs supersede earlier slice-level counts and pre-audit package claims. Live provider/custodian requirements remain external and do not become verified through packaging.
 
@@ -2649,3 +2649,24 @@ mailbox-first milestone and explicit non-requirements. The unlimited local
 SWE-2 promotion is motivation only — the contract does not depend on free
 pricing, and no usage-quota accounting is required for the local seats. No
 code changed in this entry.
+
+2026-09-16 (round c9-impl) — C9 contract and mailbox transport landed.
+Organizer: 66ee042 contract ('devin' provider, auth status + `models list
+--format json` catalog, env stripping, execution/toolProfile schemas, LOCAL
+routes/operations/readiness family, dispatchChecked rename), d7eeefd
+per-route adapter resolution with fail-closed misses, c67735a pre-C9
+execution default, e8e1173 resolver wiring. worker-1 8c8e713:
+LocalMailboxAdapter (packet.json + hashed declared inputs out, result.json
+with every declared sha256 verified against disk bytes back, traversal-safe
+session names, UNKNOWN/OFFICE_LOCAL for silence or malformed results,
+honest cancel sentinel) + 12 transport tests. worker-2 e3a0d6a: Devin
+provider option forcing LOCAL execution, execution-environment and
+tool-profile selects, honest no-transport dispatch gating, environment-
+scoped readiness calls. worker-3 a9da3a8: route-family evidence separation
+both directions, resolver-miss hard failures, route-owned resolution,
+migration default and restart non-duplication coverage. worker-4 5116f25:
+workflow local-agents section + evidence.md label definitions verified
+against the implementation. Combined verification at e8e1173: typecheck
+clean, 430/430 unit, build clean. Remaining for first-milestone acceptance:
+a local-session probe to produce the first LOCAL_* OBSERVED evidence, then
+the end-to-end pilot.
