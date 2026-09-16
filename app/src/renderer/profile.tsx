@@ -27,7 +27,7 @@ export function ProfileTabs({agent,state,children,onState:_onState}:{agent:Agent
    void window.office.messagePage({agentId:agent.id,limit:50}).then(page=>{if(!canceled){setMessages(page.entries);setMessageCursor(page.nextCursor);}}).catch(e=>{if(!canceled)setError((e as Error).message);});
    return()=>{canceled=true;};
  },[tab,agent.id,state]);
- const gate=agentDispatchReadiness(state,agent,{route:'OFFICIAL_TERMINAL_HANDOFF'});
+ const gate=agentDispatchReadiness(state,agent,agent.execution==='LOCAL'?{}:{route:'OFFICIAL_TERMINAL_HANDOFF'});
  useEffect(()=>{
   if(tab!=='Logs')return;
   let cancelled=false;

@@ -38,8 +38,10 @@ export function RequestDispatch({request,state,onState}:{request:Request;state:A
  },[job?.id,job?.revision]);
  const agent:Agent|undefined=state.agents.find(item=>item.id===(assignment?.agentId??request.leadAgentId));
  // The same scope the main process gates on: the route this office would really use, the profile's
- // effort, and the collaboration policy this request authorized.
- const gate=agent?agentDispatchReadiness(state,agent,{now,route:'OFFICIAL_TERMINAL_HANDOFF',delegation:request.delegation}):undefined;
+ // effort, and the collaboration policy this request authorized. Local profiles have no hosted
+ // route, so their gate is scoped to the local transport family instead of a nonexistent handoff.
+ const local=agent?.execution==='LOCAL';
+ const gate=agent?agentDispatchReadiness(state,agent,{now,...(local?{}:{route:'OFFICIAL_TERMINAL_HANDOFF' as const}),delegation:request.delegation}):undefined;
  const settled=job?['COMPLETED','FAILED','CANCEL_ACKNOWLEDGED'].includes(job.state):false;
  async function run(label:string,action:()=>Promise<AppState|void>){
   setBusy(label);setError('');
@@ -52,9 +54,10 @@ export function RequestDispatch({request,state,onState}:{request:Request;state:A
   {!agent&&<p className="muted">Choose the agent for this request before preparing work.</p>}
   {gate&&<ul className="readiness-list">
    <li data-state={gate.canPrepare?'yes':'no'}>Prepare: {gate.canPrepare?'Available':'Blocked'}</li>
-   <li data-state={gate.canHandoff?'yes':'no'}>Official terminal handoff: {gate.canHandoff?'Available':'Blocked'}</li>
+   <li data-state={gate.canHandoff?'yes':'no'}>{local?'Local session handoff':'Official terminal handoff'}: {gate.canHandoff?'Available':'Blocked'}</li>
    <li data-state={gate.canStart?'yes':'no'}>Automatic start: {gate.canStart?'Available':'Blocked'}</li>
   </ul>}
+  {local&&<p className="muted">This profile runs sessions on this machine through the official CLI. No local-session transport is configured in this build, so dispatch controls stay disabled; the readiness above reflects local-transport evidence, never hosted.</p>}
   {job&&<p><strong>{jobLabels[job.state]}</strong>{job.externalId?` · ${job.externalId}${job.evidence==='USER_REPORTED'?' (reported by you, unverified)':''}`:''}</p>}
   {job&&<p className="muted">{job.detail}</p>}
   {snapshot&&<p className="muted">Snapshot {snapshot.files.length} file{snapshot.files.length===1?'':'s'} · {snapshot.totalBytes} bytes{snapshot.stagingCommit?` · commit ${snapshot.stagingCommit.slice(0,10)}`:' · no commit'}</p>}
@@ -63,10 +66,10 @@ export function RequestDispatch({request,state,onState}:{request:Request;state:A
   {plan?.outputDestination&&<div className="command-preview"><p>Reserved results folder: {plan.outputDestination.path}</p><p>Exact staged inventory: {plan.outputDestination.totalBytes} bytes</p><ul>{plan.outputDestination.files.map(file=><li key={file.path}>{file.path} · {file.bytes} bytes · {file.sha256}</li>)}</ul></div>}
   {error&&<p className="notice error" role="alert">{error}</p>}
   <div className="button-row">
-   {(!assignment||settled)&&!summaries.some(item=>!item.settled)&&<button className="primary" disabled={!!busy||!agent||!gate?.canPrepare||request.status==='CANCELED'||state.projects.some(p=>p.id===request.projectId&&p.archived)} onClick={()=>void run('prepare',async()=>{
+   {(!assignment||settled)&&!summaries.some(item=>!item.settled)&&<button className="primary" disabled={!!busy||!agent||local||!gate?.canPrepare||request.status==='CANCELED'||state.projects.some(p=>p.id===request.projectId&&p.archived)} onClick={()=>void run('prepare',async()=>{
     if(!agent)return;
     const result=await window.office.prepareRequest({requestId:request.id,expectedRequestRevision:request.revision,agentId:agent.id,expectedAgentRevision:agent.revision??0});
-    setSelectedJob(result.state.jobs?.find(item=>item.assignmentId===result.assignmentId)?.id??'');return result.state;})}>{busy==='prepare'?'Preparing…':'Prepare Claude handoff'}</button>}
+    setSelectedJob(result.state.jobs?.find(item=>item.assignmentId===result.assignmentId)?.id??'');return result.state;})}>{busy==='prepare'?'Preparing…':local?'Prepare local session':'Prepare Claude handoff'}</button>}
    {assignment&&!settled&&<>
     <button className="secondary" disabled={!!busy} onClick={()=>void run('plan',async()=>{setPlan(await window.office.handoffPlan({assignmentId:assignment.id}));})}>Show exact command</button>
     <button className="primary" disabled={!!busy||job?.state!=='INTENT'||!gate?.canHandoff||request.status==='CANCELED'} onClick={()=>void run('handoff',()=>window.office.openHandoffTerminal({assignmentId:assignment.id}))}>{busy==='handoff'?'Opening…':'Open official Claude terminal'}</button>
