@@ -21,6 +21,9 @@ try{
  let page=await launch();
  assert.equal(await page.locator('.office-person').count(),0);
  assert.equal((await page.evaluate(()=>window.office.getState())).agents.length,0);
+ // The Tasks and Research destinations are merged into Office and Projects.
+ assert.equal(await page.getByRole('button',{name:'Tasks',exact:true}).count(),0);
+ assert.equal(await page.getByRole('button',{name:'Research',exact:true}).count(),0);
  await page.screenshot({path:path.join(output,'office-empty.png'),fullPage:true});
  await page.getByRole('button',{name:'Add agent',exact:true}).click();
  await page.getByLabel('Agent name',{exact:true}).waitFor();
@@ -40,7 +43,10 @@ try{
  await exp.getByLabel('Work type').selectOption('EXPERIMENT');
  await exp.getByRole('button',{name:'Save draft'}).click();await exp.waitFor({state:'hidden'});
  let state=await page.evaluate(()=>window.office.getState());assert.equal(state.tasks.length,0);assert.equal(state.requests!.length,1);assert.equal(state.requests![0].experimentId,state.experiments[0].id);
- const evaluation=page.getByPlaceholder('Define metrics, validation design, uncertainty, and statistical comparisons.');
+ // Saving a draft stays on the current page; the queue card opens the project's research workspace.
+ await page.getByRole('button',{name:'Open research details',exact:true}).click();
+ // Contract sections 02-08 stay collapsed until the editor asks for them.
+ await page.getByRole('button',{name:/Define the remaining/}).click();
  // Use the field's explicit contract position to avoid tying scientific copy to test behavior.
  await page.locator('.contract-field textarea').nth(3).fill('Chronological evaluation with a declared loss and uncertainty analysis.');
  await page.getByRole('button',{name:'Save contract',exact:true}).click();
@@ -119,10 +125,11 @@ try{
  await application!.close();application=undefined;
  page=await launch();state=await page.evaluate(()=>window.office.getState());assert.equal(state.projects.length,1);assert.equal(state.artifacts.length,1);assert.equal(state.events.length,eventCount);assert.equal(state.settings.globalBudgetCents,0);
  assert.equal(state.agents.length,0);assert.equal(state.reviews.length,0);assert.equal(state.tasks.every(t=>t.status==='BLOCKED'),true);
- await page.getByRole('button',{name:/^Tasks/}).first().click();
+ // The queue lives on Office after relaunch; the canceled request still opens its research details.
  await page.getByRole('button',{name:'Cancel request',exact:true}).click();
  await page.getByLabel('Show requests').selectOption('canceled');
  await page.getByRole('button',{name:'View research details',exact:true}).click();
+ await page.locator('.contract-field textarea').first().waitFor();
  assert.equal(await page.locator('.contract-field textarea:disabled').count(),8);
  assert.equal(await page.getByRole('button',{name:'Submit for review',exact:true}).isDisabled(),true);
  // New bridge action is main-owned and cannot retire an arbitrary/missing job.
