@@ -2829,3 +2829,38 @@ starter rejected). No plugin was installed and no agent benchmark
 ran — C10-A is the harness only. Next: C10-B..E per-plugin
 integration packets gated on the surfaces inventory, then a real
 evaluator session per RUNBOOK.md.
+
+2026-09-16 (round pilot-ux) — first-pilot revision round landed on
+bc99bfa. Organizer prerequisites (3323cf9) on protected surfaces:
+request.start stamps CLOUD_TRANSPORT_UNVERIFIED only when a
+selected agent is hosted; location.save creates <project
+folder>/inputs; ProviderReadiness gains blockerDetails with
+THIS_ACTION vs AUTOMATIC_START severity; local scopes use
+LOCAL_ACCOUNT_STALE_MS (30 min vs the 5-minute hosted window);
+effortIsIndependentAxis() marks devin's effort-in-variant shape.
+Worker packets integrated: local-session.ts now creates the
+session directory before the input loop (zero-input snapshots no
+longer ENOENT) and writes CONTRACT.md generated from the parser's
+own constants (fc3438f); the project location panel is browse-only
+with a wired input-file picker persisting real inputPaths, and
+request submission no longer force-navigates to Research
+(2150b2d); Add Agent hydrates the stored connection on provider
+select, effort controls follow each provider's real axis, and
+subscriptionEnvironment strips ACP_* so provider CLIs spawned
+under agent shells no longer misreport sign-in (c69c90a); the
+contract editor seeds from its request, collapses fields 02-08
+behind an affordance, and shows an honest awaiting-review panel —
+reviewer role, capable agents, sealed-report state, real cancel/
+withdraw actions only (9caaf4a); the dispatch card groups
+blockers by what they actually gate, local filesystem failures
+stop naming the provider, and stale accounts get an in-place
+re-check (5a9da24); workflow.md documents the revised flow plus
+the never-launch-from-an-agent-terminal warning and corrects the
+three-local-routes overclaim (0ca5440); docs/model-catalogs.md
+answers the gpt6 report — gpt-6-astra is real since 2026-09-03
+and the curated OpenAI list is stale, while a signed-in catalog
+missing it is accurate rollout reporting (0837ac9). Combined
+verification at bc99bfa: typecheck clean, 499/499 unit, build
+clean. Remaining: repackage the distributed binary and retest the
+local pilot end-to-end; the OpenAI curated suggestion list needs
+a dated refresh per model-catalogs.md.
