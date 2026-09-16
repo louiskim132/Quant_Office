@@ -77,6 +77,42 @@ Chronological derivations, forward label horizons, gaps, units, measured-versus-
 
 Artifact grants enforce those regions before provider transfer, including derived reports and models. Unclassified or mixed protected/allowed files are not ordinary agent inputs. Any necessary protected-data preparation/access needs a specific user decision and durable pre-transfer exposure record; changed scientific use requires a new contract. Only authorized provider computation or user preparation can partition data, never the local controller.
 
+## Local CLI agents
+
+The office can also assign bounded office labor — notes, file passes, draft text and scoped edits — to an agent that runs in the user's own installed CLI on this machine. Local agents are an additional surface for office work only. Model training, evaluation, backtests and every other research computation stay in the manual Colab flow above; a local session never runs them and is never a substitute for the user's run.
+
+### Adding a local agent
+
+Add Agent can create a Devin, Claude Code or Codex agent whose execution environment is LOCAL. Setup uses only the official installed tool signed in to the user's own subscription: Devin is probed through `devin auth status` and `devin models list --format json`, Codex through its app-server account and model endpoints, and Claude Code through `claude auth status` with the curated alias list — an alias is built into the application and is not an entitlement check for the account. No API key is accepted: the child environment is stripped of provider credential variables and there is no API-key fallback. The Devin CLI sign-in is a separate credential from the signed-in Devin Desktop session.
+
+Two fields beyond provider, model and team describe how a local agent is configured:
+
+- **Execution environment** — HOSTED_SETUP_REQUIRED or LOCAL. Records created before this field existed are labeled HOSTED_SETUP_REQUIRED. The environment is part of the readiness scope: evidence observed under one environment never satisfies the other, and a local agent never silently falls back to a hosted route or vice versa.
+- **Tool profile** — STANDARD or CODE_NAV, the office-side declaration of the tool surface the session is configured for. A recorded profile is configuration, not proof the session ran under it.
+
+A saved local profile is never proof that the runtime exists. Signing in is not proof a local session can run: readiness requires office-observed LOCAL_* evidence for the scope's actual route, and a route with no configured local adapter fails closed rather than dispatching through another surface.
+
+### Delivering work locally
+
+Three local routes exist: LOCAL_MAILBOX, LOCAL_CLI_EXEC and LOCAL_ACP. The mailbox transport works as follows:
+
+1. The office writes a scoped packet directory under a workspace-local sessions root: `packet.json` plus the declared input files copied from the snapshot staging path, each hashed. The packet directory is the session's external identity.
+2. The user runs the local session against that directory in the official tool.
+3. The session writes `result.json` plus its declared artifact files.
+4. The office reads the directory back, verifies every declared sha256 against the bytes on disk and reports the outputs through the normal inventory. Undeclared or mismatched files are not results.
+
+Cancellation writes a cancel sentinel in the packet directory: ending the session is a real cancellation of that local session, honestly labeled — it is not a provider cancellation acknowledgement, and no provider-side job exists to acknowledge. The recorded route and packet identity are the durable facts, so a restart cannot duplicate a dispatch.
+
+### What local evidence establishes
+
+Local evidence is office-observed: the office itself wrote, spawned, read or terminated, so it is recorded as OBSERVED evidence at TOOL_SUPPORTED level — never ACCOUNT_VERIFIED provider attestation. The labels mean only what they say:
+
+- Scoped workspace delivery, recorded under TOOL_CONFINEMENT, is not enforced isolation, sandboxing or blinding.
+- A model or effort reported by a local session is self-report unless the tool's own output verifies it.
+- No usage or allowance accounting exists for local sessions; the Devin CLI reports no usage windows to this application.
+
+Because scoped delivery is not isolation, local agents are ineligible for blinded-review, holdout-custody and independently-verified-gate roles unless enforced isolation is separately verified. Label definitions: [evidence.md](evidence.md).
+
 ## Worked generic cycle
 
 A user asks for a volatility forecasting study. The Director drafts a claim and comparison; C proposes metrics and uncertainty, D proposes falsification, A plans code and B checks acceptance coverage. After contract freeze, workers produce and verify bounded code on provider infrastructure. A/B positions persist; the Director approves the package.
