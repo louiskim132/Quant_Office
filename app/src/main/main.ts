@@ -66,7 +66,14 @@ const hasLock=app.requestSingleInstanceLock();
 if(!hasLock) app.quit();
 else {
  app.on('second-instance',()=>{if(win){if(win.isMinimized())win.restore();win.focus();}});
- app.whenReady().then(start).catch(error=>{dialog.showErrorBox('Workspace could not be opened',`${error instanceof Error?error.message:'Unknown startup error'}\n\nYour files have not been reset. Keep the data folder and use a compatible build or a verified backup.`);app.quit();});
+ app.whenReady().then(start).catch(error=>{
+  // A schema-replay failure almost always means this build is older than the one that wrote the
+  // workspace — the strict event schemas fail closed on values they do not know. Say that plainly
+  // instead of dumping the raw validation issues.
+  const detail=error instanceof z.ZodError
+   ?'The stored workspace does not match this build’s record schema — most often because it was written by a newer version of Quant Research Office. Open it with the newer build, or restore a verified backup.\n\nYour files have not been reset.'
+   :`${error instanceof Error?error.message:'Unknown startup error'}\n\nYour files have not been reset. Keep the data folder and use a compatible build or a verified backup.`;
+  dialog.showErrorBox('Workspace could not be opened',detail);app.quit();});
  app.on('window-all-closed',()=>app.quit());
  app.on('before-quit',()=>{subscriptions?.close();if(store)store.close();});
 }
