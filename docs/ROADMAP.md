@@ -2769,3 +2769,38 @@ impossible), local submit records UNKNOWN + the office-created session
 identity rather than a fabricated acceptance, and dispatch UI enabling
 the local prepare/handoff path. Verification at f779ecd: typecheck
 clean, 446/446 unit, build clean. Next: user-run local-session pilot.
+
+2026-09-16 (plugin evaluation fixture + C10 plan) — 565e867 (picked
+from d6da777) plus 19c384b. A planning session added the synthetic
+feature-availability fixture under app/benchmarks/plugin-evaluation/
+(task/, EVALUATOR.md, verify.mjs grader — self-check verified: oracle
+16/16, broken starter rejected) and this roadmap's section 3.2 with
+the Serena/Ponytail/Graphify/LightRAG candidate plan and the C10
+packet ordering. The organizer added harness/records.mjs: the shared
+attempt manifest / usage / score record contracts, arm constants, the
+six evidence findings, and deterministic content hashing — dependency-
+free .mjs because the harness must run in the disposable evaluator
+environment, not inside the app build. No plugin is installed and no
+agent benchmark has run; LightRAG's permitted model route remains an
+explicitly open question.
+
+2026-09-16 (round devin-fixes) — f31d782, d487335, ec34acd on
+c833207. The connect() non-OpenAI branch routed every terminal-login
+provider draft into `claude auth login`; a Devin draft therefore
+opened the wrong tool's sign-in and could never complete. The
+provider→login selection is now the exported providerLogin() seam and
+the visible PowerShell window is provider-keyed, so a devin draft
+opens `devin auth login` and re-checks status('devin'). The Devin
+models collector (now the exported devinModelCatalog()) collects
+variant objects — the id chain gains model_uid and the display-name
+chain gains label — so swe-2-max and siblings appear alongside family
+slugs, deduped and capped as before. The renderer presents Devin's
+variant-encoded effort honestly: both effort selects offer only
+Provider default for devin and explain that choosing the variant
+chooses the effort. docs/workflow.md and docs/evidence.md were
+brought current with the landed local-evidence lifecycle (accrual
+conditions, UNKNOWN-not-ACCEPTED submission, self-report limits, the
+local/hosted readiness split). Verification at ec34acd: typecheck
+clean, 451/451 unit, build clean. Next: the user-run local-session
+pilot; `devin auth login` still has not been completed on this
+machine, which remains the sign-in prerequisite.
