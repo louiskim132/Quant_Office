@@ -1,10 +1,10 @@
-import type { AccountConnection, AdapterRoute, Agent, AppState, CapabilityOperation, EffectiveEvidence, Effort, Provider, ProviderCapabilitySnapshot, ProviderReadiness, ReadinessActions } from './types.js';
+import type { AccountConnection, AdapterRoute, Agent, AppState, CapabilityOperation, EffectiveEvidence, Effort, ExecutionEnvironment, Provider, ProviderCapabilitySnapshot, ProviderReadiness, ReadinessActions } from './types.js';
 
 /** Conservative application defaults. They are our own staleness rules, not provider guarantees. */
 export const ACCOUNT_STALE_MS = 5 * 60 * 1000;
 export const CAPABILITY_EXPIRY_MS = 24 * 60 * 60 * 1000;
 type Records = Pick<AppState, 'connections' | 'capabilities'>;
-type Options = { now?: number; model?: string; environment?: string; effort?: Effort; delegation?: boolean; route?: AdapterRoute };
+type Options = { now?: number; model?: string; environment?: string; effort?: Effort; delegation?: boolean; route?: AdapterRoute; execution?: ExecutionEnvironment };
 
 /**
  * The exact conditions one external action would run under.
@@ -18,7 +18,7 @@ export interface RequestedScope {
   identity: string;
   credentialContext: string;
   toolVersion: string;
-  route: 'FAKE_ADAPTER' | 'OFFICIAL_TERMINAL_HANDOFF' | 'OFFICIAL_CLI_PTY';
+  route: AdapterRoute;
   environment: string;
   model: string;
   effort: Effort;
@@ -30,7 +30,15 @@ const ROUTE_TRANSPORT: Record<RequestedScope['route'], readonly ProviderCapabili
   FAKE_ADAPTER: ['NONE', 'OFFICIAL_CLI_PIPE', 'OFFICIAL_CLI_TERMINAL'],
   OFFICIAL_TERMINAL_HANDOFF: ['OFFICIAL_CLI_TERMINAL'],
   OFFICIAL_CLI_PTY: ['OFFICIAL_CLI_TERMINAL'],
+  LOCAL_MAILBOX: ['LOCAL_MAILBOX'],
+  LOCAL_CLI_EXEC: ['LOCAL_CLI_EXEC'],
+  LOCAL_ACP: ['LOCAL_ACP'],
 };
+
+/** The dispatch family a requested scope must satisfy follows its route, never silently the other one. */
+function dispatchFamily(route: RequestedScope['route']): readonly CapabilityOperation[] {
+  return route.startsWith('LOCAL_') ? LOCAL_DISPATCH : CLOUD_DISPATCH;
+}
 
 /**
  * Everything about the requested scope that the recorded evidence does not support.
@@ -53,7 +61,7 @@ export function scopeMismatches(state: Records, scope: RequestedScope, options: 
   // refresh records transport NONE and an empty environment; reading the identity of the environment
   // work would run in from that snapshot would let a bare sign-in check redefine the execution scope.
   const supplying = new Set<string>();
-  for (const operation of CLOUD_DISPATCH) {
+  for (const operation of dispatchFamily(scope.route)) {
     const scoped: Options = PROVIDER_WIDE.includes(operation)
       ? { now, environment: scope.environment, route: scope.route }
       : { now, model: scope.model, environment: scope.environment, route: scope.route };
@@ -93,7 +101,7 @@ export function supplyingSnapshotIds(state: Records, scope: RequestedScope, opti
   const connection = currentConnection(state, scope.provider);
   if (!connection) return [];
   const ids = new Set<string>();
-  for (const operation of CLOUD_DISPATCH) {
+  for (const operation of dispatchFamily(scope.route)) {
     const scoped: Options = PROVIDER_WIDE.includes(operation)
       ? { now, environment: scope.environment, route: scope.route }
       : { now, model: scope.model, environment: scope.environment, route: scope.route };
@@ -180,13 +188,20 @@ function verified(evidence: EffectiveEvidence | undefined): boolean {
  */
 const PROVIDER_WIDE: CapabilityOperation[] = ['ACCOUNT_STATUS', 'MODEL_CATALOG', 'ALLOWANCE_READ'];
 const CLOUD_DISPATCH: CapabilityOperation[] = ['CLOUD_SUBMIT', 'CLOUD_OBSERVE', 'CLOUD_OUTPUT_FETCH', 'CLOUD_CANCEL_REQUEST', 'CLOUD_CANCEL_ACK', 'MODEL_APPLICATION', 'EFFORT_APPLICATION', 'ENVIRONMENT_IDENTITY', 'DELEGATION_CONTROL', 'TOOL_CONFINEMENT'];
-const REPORTED: CapabilityOperation[] = ['ACCOUNT_STATUS', 'MODEL_CATALOG', 'ALLOWANCE_READ', ...CLOUD_DISPATCH, 'CLOUD_FOLLOW_UP'];
+/**
+ * The local-session dispatch family. Evidence here is office-observed — the office writes the packet
+ * or spawns the child itself — so it is TOOL_SUPPORTED/OBSERVED, never an ACCOUNT_VERIFIED provider
+ * attestation. Scoped workspace delivery is recorded under TOOL_CONFINEMENT and is not isolation.
+ */
+const LOCAL_DISPATCH: CapabilityOperation[] = ['LOCAL_SUBMIT', 'LOCAL_OBSERVE', 'LOCAL_OUTPUT_FETCH', 'LOCAL_CANCEL', 'MODEL_APPLICATION', 'EFFORT_APPLICATION', 'DELEGATION_CONTROL', 'TOOL_CONFINEMENT'];
+const REPORTED: CapabilityOperation[] = [...new Set(['ACCOUNT_STATUS', 'MODEL_CATALOG', 'ALLOWANCE_READ', ...CLOUD_DISPATCH, 'CLOUD_FOLLOW_UP', ...LOCAL_DISPATCH] as CapabilityOperation[])];
 const LABEL: Record<CapabilityOperation, string> = {
   ACCOUNT_STATUS: 'account status', MODEL_CATALOG: 'model catalog', ALLOWANCE_READ: 'allowance read',
   CLOUD_SUBMIT: 'cloud submission', CLOUD_OBSERVE: 'cloud observation', CLOUD_FOLLOW_UP: 'cloud follow-up',
   CLOUD_OUTPUT_FETCH: 'output retrieval', CLOUD_CANCEL_REQUEST: 'cancellation request', CLOUD_CANCEL_ACK: 'cancellation acknowledgement',
   MODEL_APPLICATION: 'applied model', EFFORT_APPLICATION: 'applied effort', ENVIRONMENT_IDENTITY: 'environment identity',
   DELEGATION_CONTROL: 'delegation control', TOOL_CONFINEMENT: 'tool, filesystem and network confinement', CLOUD_CANCEL: 'cancellation (legacy record)',
+  LOCAL_SUBMIT: 'local session submission', LOCAL_OBSERVE: 'local session observation', LOCAL_OUTPUT_FETCH: 'local output retrieval', LOCAL_CANCEL: 'local session cancellation',
 };
 
 /**
@@ -223,8 +238,10 @@ export function providerReadiness(state: Records, provider: Provider, options: O
   const modelChecked = model
     ? has('MODEL_APPLICATION') && found.get('MODEL_APPLICATION')?.model === model
     : has('MODEL_CATALOG') && Boolean(snapshot?.models.length);
-  const cloudChecked = CLOUD_DISPATCH.every(has);
-  const ready = signedIn && accountFresh && modelChecked && cloudChecked;
+  // The dispatch family follows where the session would run, never silently the other one.
+  const requiredDispatch = options.route ? [...dispatchFamily(options.route)] : options.execution === 'LOCAL' ? LOCAL_DISPATCH : CLOUD_DISPATCH;
+  const dispatchChecked = requiredDispatch.every(has);
+  const ready = signedIn && accountFresh && modelChecked && dispatchChecked;
 
   const blockers: string[] = [];
   if (!connection) blockers.push('No account check has been recorded for this provider yet.');
@@ -233,7 +250,7 @@ export function providerReadiness(state: Records, provider: Provider, options: O
   if (connection && !snapshot) blockers.push('No capability snapshot has been recorded for this account.');
   if (connection && !accountFresh) blockers.push('The account check is stale; recheck before any external action.');
   if (signedIn && !modelChecked) blockers.push(model ? `The office has not verified that ${model} is the model a job would actually use.` : 'Model entitlement has not been verified for this account.');
-  for (const operation of CLOUD_DISPATCH) {
+  for (const operation of requiredDispatch) {
     if (has(operation)) continue;
     const item = found.get(operation) ?? described.get(operation);
     const outOfScope = !found.has(operation) && described.has(operation) ? ' for these exact conditions' : '';
@@ -245,12 +262,12 @@ export function providerReadiness(state: Records, provider: Provider, options: O
     prepare: true, duplicate: true, viewTerminalHistory: true,
     handoff: signedIn && accountFresh,
     automaticStart: ready,
-    observe: has('CLOUD_OBSERVE'),
-    requestCancellation: has('CLOUD_CANCEL_REQUEST'),
+    observe: has(options.execution === 'LOCAL' ? 'LOCAL_OBSERVE' : 'CLOUD_OBSERVE'),
+    requestCancellation: has(options.execution === 'LOCAL' ? 'LOCAL_CANCEL' : 'CLOUD_CANCEL_REQUEST'),
   };
   return {
     provider, connectionId: connection?.id ?? '', identity: connection?.identity ?? '', signedIn, accountFresh,
-    modelChecked, cloudChecked, ready, model, lastObservedAt: connection?.lastCheckedAt ?? '', lastCheckedAt: connection?.lastCheckedAt ?? '',
+    modelChecked, dispatchChecked, ready, model, lastObservedAt: connection?.lastCheckedAt ?? '', lastCheckedAt: connection?.lastCheckedAt ?? '',
     actions, evidence, blockers,
   };
 }
@@ -291,11 +308,13 @@ export function agentBinding(state: Records, agent: Pick<Agent, 'provider' | 'ac
  * The full gate one profile must pass before any external dispatch: an available binding, a fresh
  * account check, and verified transport evidence for the exact model this profile would use.
  */
-export function agentDispatchReadiness(state: Records, agent: Pick<Agent, 'provider' | 'model' | 'effort' | 'account' | 'setupAccount' | 'connectionId' | 'bindingVerifiedAt' | 'removedAt'>, options: Options = {}) {
+export function agentDispatchReadiness(state: Records, agent: Pick<Agent, 'provider' | 'model' | 'effort' | 'account' | 'setupAccount' | 'connectionId' | 'bindingVerifiedAt' | 'removedAt' | 'execution'>, options: Options = {}) {
   const binding = agentBinding(state, agent);
   // The profile's own effort is part of what would actually be requested, so readiness answers for
   // it rather than for an unspecified one. Route and delegation come from the caller when known.
-  const readiness = providerReadiness(state, agent.provider, { ...options, model: agent.model, effort: options.effort ?? agent.effort ?? 'default' });
+  // The execution environment picks the dispatch family: LOCAL agents are gated on office-observed
+  // local transport evidence, never silently on the hosted family.
+  const readiness = providerReadiness(state, agent.provider, { ...options, execution: agent.execution ?? 'HOSTED_SETUP_REQUIRED', model: agent.model, effort: options.effort ?? agent.effort ?? 'default' });
   return {
     binding, readiness,
     canPrepare: !agent.removedAt,

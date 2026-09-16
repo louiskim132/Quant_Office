@@ -62,7 +62,7 @@ export function ConnectionBinding({agent,state,onState}:{agent:Agent;state:AppSt
    <div><dt>Profile was created for</dt><dd>{binding.setupIdentity}</dd></div>
    <div><dt>Currently signed in</dt><dd>{binding.currentIdentity||'No recorded account check'}</dd></div>
    <div><dt>Last verified</dt><dd>{binding.lastVerifiedAt?new Date(binding.lastVerifiedAt).toLocaleString():'Never'}</dd></div>
-   <div><dt>Cloud readiness</dt><dd>{readiness.cloudChecked?'Verified transport':'Hosted execution unverified'}</dd></div>
+   <div><dt>Dispatch readiness</dt><dd>{readiness.dispatchChecked?'Verified transport':'Execution transport unverified'}</dd></div>
   </dl>
   {binding.blockers.map(blocker=><p className="muted" key={blocker}>{blocker}</p>)}
   {error&&<p className="notice error" role="alert">{error}</p>}

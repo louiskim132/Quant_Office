@@ -9,11 +9,13 @@ import { efforts, PROVIDER_MODEL_SUGGESTIONS } from '../shared/effort.js';
 import type { Effort, Agent, AgentTicket, Connection, Provider, UsageWindow } from '../shared/types.js';
 export type AccountObservation=z.infer<typeof observationSchema>;
 
-export const providerSchema=z.enum(['openai','claude']);
+export const providerSchema=z.enum(['openai','claude','devin']);
+const PROVIDER_EXECUTABLE:Record<Provider,string>={openai:'codex.exe',claude:'claude.exe',devin:'devin.exe'};
+const PROVIDER_TOOL_NAME:Record<Provider,string>={openai:'Codex',claude:'Claude Code',devin:'Devin'};
 const allowedMethods=new Set(['initialize','account/read','account/login/start','account/login/cancel','account/rateLimits/read','model/list']);
 export function subscriptionEnvironment(): NodeJS.ProcessEnv {
  const env={...process.env};
- for(const key of Object.keys(env))if(/^(OPENAI_API_KEY|OPENAI_BASE_URL|ANTHROPIC_|CLAUDE_CODE_OAUTH|CLAUDE_CODE_USE_|CODEX_API_KEY)/i.test(key))delete env[key];
+ for(const key of Object.keys(env))if(/^(OPENAI_API_KEY|OPENAI_BASE_URL|ANTHROPIC_|CLAUDE_CODE_OAUTH|CLAUDE_CODE_USE_|CODEX_API_KEY|DEVIN_API_KEY|DEVIN_TOKEN|DEVIN_AUTH_TOKEN)/i.test(key))delete env[key];
  return env;
 }
 export function usageWindows(raw: any): UsageWindow[] {
@@ -62,10 +64,10 @@ export class Subscriptions {
  private connecting=false;
  constructor(private root:string,private openBrowser:(url:string)=>Promise<void>){
   mkdirSync(root,{recursive:true});
-  try{this.paths=z.object({openai:z.string().optional(),claude:z.string().optional()}).strict().parse(JSON.parse(readFileSync(path.join(root,'provider-tools.json'),'utf8')));}catch{}
+  try{this.paths=z.object({openai:z.string().optional(),claude:z.string().optional(),devin:z.string().optional()}).strict().parse(JSON.parse(readFileSync(path.join(root,'provider-tools.json'),'utf8')));}catch{}
  }
  private executable(provider:Provider):string {
-  const name=provider==='openai'?'codex.exe':'claude.exe';
+  const name=PROVIDER_EXECUTABLE[provider];
   const selected=this.paths[provider];if(selected&&existsSync(selected))return selected;
   const candidates=(process.env.PATH||'').split(path.delimiter).filter(Boolean).map(p=>path.join(p,name));
   if(process.env.USERPROFILE)candidates.push(path.join(process.env.USERPROFILE,'.local','bin',name));
@@ -73,10 +75,11 @@ export class Subscriptions {
    const installed=path.join(process.env.LOCALAPPDATA,'OpenAI','Codex','bin');
    try{candidates.push(...readdirSync(installed,{withFileTypes:true}).filter(d=>d.isDirectory()).map(d=>path.join(installed,d.name,name)).filter(p=>existsSync(p)).sort((a,b)=>statSync(b).mtimeMs-statSync(a).mtimeMs));}catch{}
   }
-  const found=candidates.find(p=>existsSync(p));if(!found)throw new Error(`${provider==='openai'?'Codex':'Claude Code'} is not installed or could not be found. Install the official tool, then use Locate sign-in tool to select ${name}.`);return found;
+  if(provider==='devin'&&process.env.LOCALAPPDATA)candidates.push(path.join(process.env.LOCALAPPDATA,'Programs','Devin',name));
+  const found=candidates.find(p=>existsSync(p));if(!found)throw new Error(`${PROVIDER_TOOL_NAME[provider]} is not installed or could not be found. Install the official tool, then use Locate sign-in tool to select ${name}.`);return found;
  }
  select(provider:Provider,executable:string){
-  if(!path.isAbsolute(executable)||path.basename(executable).toLowerCase()!==(provider==='openai'?'codex.exe':'claude.exe')||!existsSync(executable))throw new Error('Select the official provider executable.');
+  if(!path.isAbsolute(executable)||path.basename(executable).toLowerCase()!==PROVIDER_EXECUTABLE[provider]||!existsSync(executable))throw new Error('Select the official provider executable.');
   this.cancel();this.codex?.stop();this.codex=undefined;this.versions.clear();this.paths[provider]=executable;writeFileSync(path.join(this.root,'provider-tools.json'),JSON.stringify(this.paths));
  }
  /** The official executable the office would run. Located here, never supplied by the renderer. */
@@ -94,6 +97,19 @@ export class Subscriptions {
     try{connection.windows=usageWindows(await client.request('account/rateLimits/read'));}catch{connection.note='Usage unavailable from Codex. Refresh to retry.';}
     if(!connection.windows.length&&!connection.note)connection.note='Usage unavailable from Codex for this account.';
    }catch(error){this.codex?.stop();this.codex=undefined;throw error;}
+  }else if(provider==='devin'){
+   const run=(args:string[])=>new Promise<string>((resolve,reject)=>execFile(this.executable('devin'),args,{cwd:this.root,env:subscriptionEnvironment(),windowsHide:true,timeout:30000,maxBuffer:1024*1024},(error,stdout)=>{if(error&&!stdout){reject(new Error('Devin CLI unavailable. Update the official tool and retry.'));return;}resolve(stdout);}));
+   const raw=await run(['auth','status']);
+   if(/not logged in/i.test(raw)){connection.note='Sign in through the Devin CLI (devin auth login). The Devin Desktop session is a separate credential.';return connection;}
+   const identity=raw.match(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/)?.[0]??raw.split('\n').map(l=>l.trim()).find(l=>l&&!/credentials path/i.test(l))??'';
+   if(!identity){connection.note='Devin CLI auth status was not understood. Update the official tool and retry.';return connection;}
+   connection.account=z.string().min(1).max(160).parse(identity);connection.connected=true;
+   try{
+    const parsed=JSON.parse(await run(['models','list','--format','json']));
+    const collect=(node:any):void=>{if(Array.isArray(node)){node.forEach(collect);return;}if(node&&typeof node==='object'){const id=node.id??node.slug??node.name;if(typeof id==='string'&&id&&connection.models.length<512&&!connection.models.some(m=>m.id===id))connection.models.push({id,name:typeof node.displayName==='string'?node.displayName:typeof node.name==='string'?node.name:id,source:'Installed Devin CLI models list --format json; cloud application unverified'});Object.values(node).forEach(collect);}};
+    collect(parsed);
+   }catch{connection.note='Devin model catalog unavailable. Refresh to retry.';}
+   if(!connection.note)connection.note='Devin CLI sign-in verified. Model entitlement has not been tested. Local sessions only; no usage windows are tracked.';
   }else{
    const raw=await new Promise<string>((resolve,reject)=>execFile(this.executable('claude'),['auth','status'],{cwd:this.root,env:subscriptionEnvironment(),windowsHide:true,timeout:30000,maxBuffer:1024*1024},(error,stdout)=>{if(error&&!stdout){reject(new Error('Claude Code status unavailable. Update the official tool and retry.'));return;}resolve(stdout);}));
    try{connection.account=claudeIdentity(JSON.parse(raw));connection.connected=true;}catch{connection.note='Sign in through Claude Code with a Claude subscription.';return connection;}
@@ -119,14 +135,16 @@ export class Subscriptions {
   const at=connection.checkedAt;
   const observed=(operation:AccountObservation['operations'][number]['operation'],level:'ACCOUNT_VERIFIED'|'UNAVAILABLE',detail:string,source:string)=>({operation,level,detail,evidence:'OBSERVED' as const,verifiedAt:at,source});
   const documented=(operation:AccountObservation['operations'][number]['operation'],level:'DOCUMENTED'|'TOOL_SUPPORTED'|'UNAVAILABLE'|'UNKNOWN',detail:string,source:string)=>({operation,level,detail,evidence:'DOCUMENTED' as const,verifiedAt:at,source});
-  const accountSource=provider==='openai'?'codex app-server account/read':'claude auth status';
+  const accountSource=provider==='openai'?'codex app-server account/read':provider==='devin'?'devin auth status':'claude auth status';
   const operations:AccountObservation['operations']=[
    observed('ACCOUNT_STATUS',connection.connected?'ACCOUNT_VERIFIED':'UNAVAILABLE',connection.connected?'Official tool reported a signed-in subscription for this account.':connection.note||'No signed-in subscription reported.',accountSource),
-   provider==='openai'
-    ?observed('MODEL_CATALOG',connection.models.length?'ACCOUNT_VERIFIED':'UNAVAILABLE',connection.models.length?`Catalog of ${connection.models.length} models returned by the official app-server for this account.`:'No catalog returned for this account.','codex app-server model/list')
-    :documented('MODEL_CATALOG','TOOL_SUPPORTED','Claude Code model aliases are built into this application. They were not read from the tool and are not an entitlement check for this account.','application alias list'),
+   provider==='claude'
+    ?documented('MODEL_CATALOG','TOOL_SUPPORTED','Claude Code model aliases are built into this application. They were not read from the tool and are not an entitlement check for this account.','application alias list')
+    :observed('MODEL_CATALOG',connection.models.length?'ACCOUNT_VERIFIED':'UNAVAILABLE',connection.models.length?`Catalog of ${connection.models.length} models returned by the official tool for this account.`:'No catalog returned for this account.',provider==='openai'?'codex app-server model/list':'devin models list --format json'),
    provider==='openai'
     ?observed('ALLOWANCE_READ',connection.windows.length?'ACCOUNT_VERIFIED':'UNAVAILABLE',connection.windows.length?`${connection.windows.length} rate-limit windows read for this account.`:connection.note||'Usage unavailable for this account.','codex app-server account/rateLimits/read')
+    :provider==='devin'
+    ?documented('ALLOWANCE_READ','UNAVAILABLE','The Devin CLI reports no usage windows to this application; local-session limits are outside this check.','devin auth status')
     :documented('ALLOWANCE_READ','UNAVAILABLE','Automatic Claude allowance retrieval is unavailable from the installed tool; the official usage page is the only source.','https://claude.ai/settings/usage'),
   ];
   if(provider==='claude')operations.push(
@@ -143,8 +161,10 @@ export class Subscriptions {
   );
   else for(const operation of ['CLOUD_SUBMIT','CLOUD_OBSERVE','CLOUD_FOLLOW_UP','CLOUD_OUTPUT_FETCH','CLOUD_CANCEL_REQUEST','CLOUD_CANCEL_ACK','MODEL_APPLICATION','EFFORT_APPLICATION','ENVIRONMENT_IDENTITY','DELEGATION_CONTROL'] as const)
    operations.push(documented(operation,'UNAVAILABLE','No provider-hosted execution transport is available for this tool.',accountSource));
+  if(provider==='devin')for(const operation of ['LOCAL_SUBMIT','LOCAL_OBSERVE','LOCAL_OUTPUT_FETCH','LOCAL_CANCEL','TOOL_CONFINEMENT'] as const)
+   operations.push(documented(operation,'UNKNOWN','No local session transport has been exercised for this tool yet. A signed-in CLI is not proof a local session can run.',accountSource));
   return {connection,observation:{
-   provider,identity:connection.account,credentialContext:provider==='openai'?'codex-cli':'claude-code-cli',
+   provider,identity:connection.account,credentialContext:provider==='openai'?'codex-cli':provider==='devin'?'devin-cli':'claude-code-cli',
    state:connection.connected?'SIGNED_IN':'SIGNED_OUT',allowance:connection.windows,note:connection.note,
    toolVersion,transport:'NONE',environment:'',
    models:connection.models.map(model=>({id:model.id,name:model.name,...(model.efforts?{efforts:model.efforts}:{}),...(model.defaultEffort?{defaultEffort:model.defaultEffort}:{}),...(model.effortDescriptions?.length?{effortDescriptions:model.effortDescriptions}:{}),...(model.source?{source:model.source}:{})})),
@@ -182,7 +202,7 @@ export class Subscriptions {
    }
    if(generation!==this.generation)throw new Error('Sign-in canceled.');
    if(!connection.connected)throw new Error('Subscription sign-in could not be verified.');
-   if(draft.provider==='openai'&&!connection.models.some(m=>m.id===draft.model))throw new Error('The selected model is not in your available Codex catalog. Refresh models and select again.');
+   if((draft.provider==='openai'||draft.provider==='devin')&&!connection.models.some(m=>m.id===draft.model))throw new Error(`The selected model is not in your available ${PROVIDER_TOOL_NAME[draft.provider]} catalog. Refresh models and select again.`);
    this.validateEffort(draft.provider,draft.model,draft.effort??'default',connection);
    this.ticket={id:randomUUID(),draft,connection,expiresAt:Date.now()+10*60*1000};return structuredClone(this.ticket);
   }finally{this.connecting=false;this.loginProcess=undefined;this.loginId=undefined;}
@@ -192,10 +212,10 @@ export class Subscriptions {
   const generation=this.generation;const {connection:current,observation}=await this.observe(ticket.draft.provider);
   if(generation!==this.generation||this.ticket!==ticket)throw new Error('Confirmation canceled.');
   if(!current.connected||current.account!==ticket.connection.account)throw new Error('The signed-in account changed. Connect again before confirming.');
-  if(ticket.draft.provider==='openai'&&!current.models.some(m=>m.id===ticket.draft.model))throw new Error('Model access changed. Choose an available model.');
+  if((ticket.draft.provider==='openai'||ticket.draft.provider==='devin')&&!current.models.some(m=>m.id===ticket.draft.model))throw new Error('Model access changed. Choose an available model.');
   this.validateEffort(ticket.draft.provider,ticket.draft.model,ticket.draft.effort??'default',current);
   // The caller commits the agent and this observation atomically; a failed durable write must create no agent.
-  save({...ticket.draft,id:ticket.id,account:current.account,createdAt:new Date().toISOString(),connectionVerifiedAt:current.checkedAt,execution:'HOSTED_SETUP_REQUIRED'},observation);this.ticket=undefined;
+  save({...ticket.draft,id:ticket.id,account:current.account,createdAt:new Date().toISOString(),connectionVerifiedAt:current.checkedAt,execution:ticket.draft.execution??'HOSTED_SETUP_REQUIRED'},observation);this.ticket=undefined;
  }
  /** One official check for an existing profile's provider, used by explicit Verify/Change connection. */
  async observeFor(provider:Provider):Promise<AccountObservation>{return (await this.observe(provider)).observation;}

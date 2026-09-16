@@ -33,5 +33,10 @@ export const PROVIDER_MODEL_SUGGESTIONS:Record<Provider,{id:string;name:string}[
   {id:'claude-opus-5',name:'Claude Opus 5 (pinned)'},
   {id:'claude-sonnet-5',name:'Claude Sonnet 5 (pinned)'},
   {id:'claude-haiku-4-5-20251001',name:'Claude Haiku 4.5 (pinned)'}
- ]
+ ],
+ /**
+  * Devin's real catalog comes from `devin models list --format json` after `devin auth login`;
+  * there is no documented provisional list, so nothing is suggested before that sign-in.
+  */
+ devin:[]
 };
