@@ -2888,3 +2888,8 @@ with a Restore action — the store recovery path was otherwise
 unreachable through the UI — and docs now match the
 archived-list landing. Combined verification at 504701e:
 typecheck clean, 505/505 unit, build clean, desktop e2e green.
+Follow-up (1c0c050): agents had archive-only — no second-level
+removal — so agent.delete mirrors project.delete: archived-only,
+refused while any of the agent's assignments carries an
+unresolved provider job, records retained; a Removed membership
+filter exposes them and restore lands archived. 509/509 unit.
