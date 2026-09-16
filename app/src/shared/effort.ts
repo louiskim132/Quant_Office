@@ -1,6 +1,10 @@
 import type {Effort,Provider} from './types.js';
 export const efforts:Effort[]=['default','none','minimal','low','medium','high','xhigh','max','ultra'];
 /** No inferred capability: aliases and missing catalogs remain unresolved. */
+// Devin encodes effort in the model variant (e.g. swe-2-max is the max-effort variant), so a
+// separate effort axis cannot be honored there — 'default' is the honest answer until a catalog
+// entry declares real levels. OpenAI entries carry levels from the signed-in catalog; Claude's
+// aliases expose none.
 export function suggestedEfforts(_provider:Provider,_model:string):Effort[]{return ['default'];}
 /**
  * Curated model suggestions shown before (Claude) or alongside (OpenAI) a signed-in catalog.
