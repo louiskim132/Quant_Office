@@ -561,8 +561,15 @@ export class AssignmentController {
       this.noteLocalEvidence(job, adapter.submitEvidence?.(submitContext, result) ?? []);
       return opened;
     } catch (error) {
+      const failure = error instanceof Error ? error.message : 'unknown launcher failure';
+      // The failure class follows where the launcher ran. A local route fails writing the session
+      // packet on this machine — the provider never saw the attempt, so naming it would send the
+      // user to the wrong place. Only a hosted-route failure points at the provider.
+      const detail = localRoute
+        ? `The local session packet could not be written on this machine: ${failure} Check the workspace and try again.`
+        : `The handoff could not be completed: ${failure} Check the provider before trying again.`;
       return this.store.recordJobTransition({ jobId: job.id, expectedRevision: job.revision, to: 'UNKNOWN', evidence: 'OFFICE_LOCAL',
-        detail: `The handoff could not be completed: ${error instanceof Error ? error.message : 'unknown launcher failure'} Check the provider before trying again.`, at: this.now() });
+        detail, at: this.now() });
     }
   }
 

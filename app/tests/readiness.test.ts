@@ -123,6 +123,52 @@ test('a stale account check blocks external actions but not local preparation',t
  assert.ok(stale.blockers.some(b=>b.includes('stale')));
 });
 
+test('blocker details name which gate each blocker actually controls',t=>{
+ const s=store(t);
+ const state=s.recordAccountObservation(metadata(0));
+ // The account check is stale and every dispatch operation is unverified: the details must keep
+ // the two audiences apart, and the flat list stays exactly the detail messages in order.
+ const readiness=providerReadiness(state,'claude',{now:ms(6),model:'opus'});
+ assert.ok(readiness.blockerDetails,'blockerDetails is populated alongside blockers');
+ assert.deepEqual(readiness.blockerDetails!.map(d=>d.message),readiness.blockers,
+  'the grouped view can never drift from the flat blocker list');
+ const severity=new Map(readiness.blockerDetails!.map(d=>[d.message,d.blocks]));
+ assert.equal(severity.get('The account check is stale; recheck before any external action.'),'THIS_ACTION',
+  'a stale account gates the manual action in front of the user');
+ assert.equal(severity.get(`The office has not verified that opus is the model a job would actually use.`),'AUTOMATIC_START');
+ for(const detail of readiness.blockerDetails!.filter(d=>d.message.startsWith('Unverified')))
+  assert.equal(detail.blocks,'AUTOMATIC_START',`${detail.message} gates automatic start, not the manual handoff`);
+ // A provider that was never checked leads with an action blocker; the unverified evidence it
+ // cannot supply still gates only automatic start.
+ const unknown=providerReadiness(s.snapshot(),'openai',{now:ms(1)});
+ assert.equal(unknown.blockerDetails![0].blocks,'THIS_ACTION');
+ assert.equal(unknown.blockerDetails![0].message,'No account check has been recorded for this provider yet.');
+ assert.ok(unknown.blockerDetails!.slice(1).every(d=>d.blocks==='AUTOMATIC_START'));
+});
+
+test('local scopes keep a fresh account check for thirty minutes while hosted goes stale at five',t=>{
+ const s=store(t);
+ const state=s.recordAccountObservation(metadata(0));
+ // The same account record at the same instant: the hosted family reads a six-minute check as
+ // stale, while the local family — whose manual packet flow spans more wall-clock — stays fresh.
+ const hosted=providerReadiness(state,'claude',{now:ms(6)});
+ const local=providerReadiness(state,'claude',{now:ms(6),route:'LOCAL_MAILBOX'});
+ assert.equal(hosted.accountFresh,false);
+ assert.equal(hosted.actions.handoff,false);
+ assert.equal(local.accountFresh,true);
+ assert.equal(local.actions.handoff,true,'the wider local window covers packet write and handoff');
+ // The boundary is exactly thirty minutes: still fresh at the edge, stale past it, and the
+ // staleness gates the action itself rather than automatic start.
+ assert.equal(providerReadiness(state,'claude',{now:ms(30),route:'LOCAL_MAILBOX'}).accountFresh,true);
+ const staleLocal=providerReadiness(state,'claude',{now:ms(31),route:'LOCAL_MAILBOX'});
+ assert.equal(staleLocal.accountFresh,false);
+ assert.equal(staleLocal.actions.handoff,false);
+ const detail=staleLocal.blockerDetails!.find(d=>/stale/.test(d.message));
+ assert.equal(detail?.blocks,'THIS_ACTION');
+ assert.equal(providerReadiness(state,'claude',{now:ms(31),route:'LOCAL_MAILBOX',execution:'LOCAL'}).accountFresh,false,
+  'the window follows the scope family, not which field carried it');
+});
+
 test('unsupported delegation or applied-settings control keeps automatic start blocked',t=>{
  const s=store(t);
  for(const missing of ['DELEGATION_CONTROL','EFFORT_APPLICATION','ENVIRONMENT_IDENTITY'] as CapabilityOperation[]){

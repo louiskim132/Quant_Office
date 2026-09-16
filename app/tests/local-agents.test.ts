@@ -216,6 +216,45 @@ test('local-session evidence satisfies only the local scope; a hosted route stil
   assert.equal(f.job(preparedLocal.assignment.id).externalId, 'session_fixture_1');
 });
 
+test('a failed handoff names the failure class the route actually belongs to', async t => {
+  // A local launcher fails writing the packet on this machine — the provider never saw the
+  // attempt, so pointing the user at it would send them to the wrong place. A hosted-route
+  // failure is the one place "check the provider" is honest.
+  const hosted = new FakeAdapter('OFFICIAL_TERMINAL_HANDOFF');
+  hosted.submit = async () => { hosted.submits++; throw new Error('spawn claude ENOENT'); };
+  const local = new FakeAdapter('LOCAL_MAILBOX');
+  local.submit = async () => { local.submits++; throw new Error('ENOENT: the packet directory could not be created'); };
+  let localAgentId = '';
+  const f = await fixture(t, {
+    resolver: ref => ref.agent
+      ? (ref.agent.id === localAgentId ? local : hosted)
+      : ref.route === 'LOCAL_MAILBOX' ? local : ref.route === 'OFFICIAL_TERMINAL_HANDOFF' ? hosted : undefined,
+  });
+  const preparedHosted = f.controller.prepare({ requestId: f.request.id, agentId: f.agent.id, snapshotId: f.snapshot.id });
+  assert.equal(preparedHosted.assignment.route, 'OFFICIAL_TERMINAL_HANDOFF');
+  await f.controller.handoff(preparedHosted.assignment.id);
+  const hostedJob = f.job(preparedHosted.assignment.id);
+  assert.equal(hostedJob.state, 'UNKNOWN');
+  assert.equal(hosted.submits, 1);
+  assert.match(hostedJob.detail, /The handoff could not be completed: spawn claude ENOENT/);
+  assert.match(hostedJob.detail, /Check the provider before trying again/);
+
+  const localAgent: Agent = { id: randomUUID(), name: 'Local worker', provider: 'claude', model: 'opus', team: 'Research', role: 'WORKER',
+    instructions: '', effort: 'default', account: 'researcher@example.com', createdAt: at(0), connectionVerifiedAt: at(0), execution: 'LOCAL' };
+  f.store.confirmAgentBinding({ observation: localObservation(0), agent: localAgent });
+  localAgentId = localAgent.id;
+  const work = await f.addWork(localAgent);
+  const preparedLocal = f.controller.prepare({ requestId: work.request.id, agentId: localAgent.id, snapshotId: work.snapshot.id });
+  assert.equal(preparedLocal.assignment.route, 'LOCAL_MAILBOX');
+  await f.controller.handoff(preparedLocal.assignment.id);
+  const localJob = f.job(preparedLocal.assignment.id);
+  assert.equal(localJob.state, 'UNKNOWN');
+  assert.equal(local.submits, 1);
+  assert.match(localJob.detail, /The local session packet could not be written on this machine: ENOENT/);
+  assert.match(localJob.detail, /Check the workspace and try again/);
+  assert.doesNotMatch(localJob.detail, /provider/i);
+});
+
 test('a resolver miss is a hard failure at every use; nothing falls back or fabricates an outcome', async t => {
   // No adapter configured for the agent's work: preparation itself refuses.
   const unconfigured = await fixture(t, { resolver: () => undefined });
