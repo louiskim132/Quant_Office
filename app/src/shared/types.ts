@@ -4,7 +4,7 @@ export type TaskStatus = 'BLOCKED' | 'QUEUED' | 'RUNNING' | 'ACCEPTED' | 'CANCEL
 export type WorkType = 'QUESTION' | 'ANALYSIS' | 'IMPLEMENTATION' | 'CODE_REVIEW' | 'EXPERIMENT';
 export type WorkMode = 'SINGLE' | 'GROUP' | 'TEAM';
 export interface Request { migratedFromTaskId?:string; teamId?:string; roleSlots?:RoleSlot[]; id:string; projectId:string; experimentId:string|null; name:string; objective:string; workType:WorkType; mode:WorkMode; leadAgentId:string|null; participantIds:string[]; acceptanceCriteria:string; revision:number; status:'DRAFT'|'READY'|'CANCELED'; removedAt?:string; blockers:{code:string;message:string;action:string}[]; delegation:boolean; createdAt:string; updatedAt:string; sourceRequestId?:string; }
-export interface Project { localFolder?:string; cloudWorkspace?:string; id: string; name: string; mandate: string; createdAt: string; updatedAt: string; archived: boolean; budgetCents: number; }
+export interface Project { localFolder?:string; cloudWorkspace?:string; id: string; name: string; mandate: string; createdAt: string; updatedAt: string; archived: boolean; removedAt?: string; budgetCents: number; }
 export interface Experiment { id: string; projectId: string; name: string; hypothesis: string; stage: Stage; revision: number; createdAt: string; updatedAt: string; contract: ResearchContract; }
 export interface ResearchContract { objective: string; dataPolicy: string; modelFamilies: string; evaluation: string; economics: string; protectedRegions: string; requiredChecks: string; limitations: string; }
 export interface ResearchTask { id: string; projectId: string; experimentId: string | null; prompt: string; recipient: Role; status: TaskStatus; blocker: string | null; removedAt?: string; createdAt: string; updatedAt: string; }
@@ -227,6 +227,7 @@ export type Command =
  | { type: 'task.create'; idempotencyKey: string; projectId: string; experimentId: string | null; prompt: string; recipient: Role }
  | { type: 'task.cancel'; idempotencyKey: string; taskId: string }
  | { type: 'task.delete'; idempotencyKey: string; taskId: string; expectedRevision?: number }
+ | { type: 'project.delete'; idempotencyKey: string; projectId: string }
  | { type: 'settings.update'; idempotencyKey: string; settings: Settings };
 export interface FileActionResult { canceled: boolean; count: number; message: string; state: AppState; }
 export interface AppInfo { version: string; dataDirectory: string; platform: string; packaged: boolean; transportModule: boolean; transportDetail: string; }

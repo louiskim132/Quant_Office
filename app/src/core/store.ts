@@ -75,9 +75,10 @@ export const commandSchema = z.discriminatedUnion('type', [
   z.object({ ...common, type: z.literal('task.create'), projectId: id, experimentId: id.nullable(), prompt: z.string().trim().min(1).max(30000), recipient: role }).strict(),
   z.object({ ...common, type: z.literal('task.cancel'), taskId: id }).strict(),
   z.object({ ...common, type: z.literal('task.delete'), taskId: id, expectedRevision: z.number().int().nonnegative().optional() }).strict(),
+  z.object({ ...common, type: z.literal('project.delete'), projectId: id }).strict(),
   z.object({ ...common, type: z.literal('settings.update'), settings: settingsSchema }).strict(),
 ]);
-const projectSchema = z.object({ id, name: title, mandate: text(30000), localFolder:text(32000).optional(),cloudWorkspace:text(1000).optional(), budgetCents: cents, archived: z.boolean(), createdAt: timestamp, updatedAt: timestamp }).strict();
+const projectSchema = z.object({ id, name: title, mandate: text(30000), localFolder:text(32000).optional(),cloudWorkspace:text(1000).optional(), budgetCents: cents, archived: z.boolean(), removedAt: timestamp.optional(), createdAt: timestamp, updatedAt: timestamp }).strict();
 const experimentSchema = z.object({ id, projectId: id, name: title, hypothesis: text(30000), stage: z.enum(['DRAFT', 'CONTRACT_REVIEW', 'CANCELED']), revision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER), contract: contractSchema, createdAt: timestamp, updatedAt: timestamp }).strict();
 const taskSchema = z.object({ id, projectId: id, experimentId: id.nullable(), prompt: text(30000), recipient: role, status: z.enum(['BLOCKED', 'CANCELED', 'SUPERSEDED']), blocker: text(1000).nullable(), removedAt: timestamp.optional(), createdAt: timestamp, updatedAt: timestamp }).strict();
 const artifactSchema = z.object({ id, projectId: id, experimentId: id.nullable(), name: z.string().min(1).max(255).refine(value => !/[\\/\x00-\x1f]/.test(value), 'Artifact name must be a basename'), sha256: hash, size: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER), kind: z.enum(['REFERENCE','RESULT']), classification: z.enum(['UNCLASSIFIED','USER_ATTESTED']), status: z.enum(['STORED','QUARANTINED']), createdAt: timestamp, mediaType: text(160), note: text(4000) }).strict();
@@ -1417,10 +1418,30 @@ export class OfficeStore {
           const project = state.projects.find(item => item.id === command.projectId);
           if (!project) throw new Error('Project not found');
           projectId = project.id;
-          changes.push({ collection: 'projects', value: { ...project, archived: command.archived, updatedAt: now } });
+          // Restoring a removed project is the only way back: it clears the removal and lands in
+          // the archived list, so a mistaken remove is recoverable while lists stay clean.
+          const clearRemoval = project.removedAt && !command.archived ? { removedAt: undefined } : {};
+          changes.push({ collection: 'projects', value: { ...project, ...clearRemoval, archived: command.archived, updatedAt: now } });
           if(command.archived&&state.requests?.some(r=>r.projectId===project.id&&r.status!=='CANCELED'))throw new Error('Cancel outstanding requests before archiving this project.');
           if (command.archived && state.tasks.some(item => item.projectId === project.id && !['CANCELED','ACCEPTED','SUPERSEDED'].includes(item.status))) throw new Error('Cancel outstanding requests before archiving this project. Restore never resumes work.');
           reason = command.archived ? 'Archived project; outcomes retained' : 'Restored project'; break;
+        }
+        case 'project.delete': {
+          // Removal only hides the project from pickers and lists. Its requests, experiments,
+          // lineage events, location record and stored bytes are all retained — like task.delete,
+          // this never rewrites history. Archiving already guarantees every request and task under
+          // the project is terminal, so the remaining guard is unresolved provider work: an UNKNOWN
+          // outcome still in flight must stay reachable through its request until reconciled.
+          const project = state.projects.find(item => item.id === command.projectId);
+          if (!project) throw new Error('Project not found');
+          projectId = project.id;
+          if (project.removedAt) throw new Error('This project is already removed from the list');
+          if (!project.archived) throw new Error('Archive the project before removing it from the list');
+          for (const request of (state.requests ?? []).filter(item => item.projectId === project.id && !item.removedAt))
+            if (requestJobs(state, request.id).some(job => job.unresolved))
+              throw new Error('A provider job outcome is still unresolved; reconcile it before removing this project');
+          changes.push({ collection: 'projects', value: { ...project, removedAt: now, updatedAt: now } });
+          reason = `Removed archived project "${project.name}" from lists; records and history retained`; break;
         }
         case 'agent.update':
         case 'agent.remove': {
