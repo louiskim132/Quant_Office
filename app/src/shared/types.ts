@@ -233,6 +233,7 @@ export interface OfficeAPI {
  openProjectFolder(projectId:string):Promise<void>;
  scanClaudeUsage(chooseFolder: boolean): Promise<LocalUsage | null>;
  changeAgentEffort(input: { agentId: string; effort: Effort; expectedEffort: Effort }): Promise<AppState>;
+ changeAgentModel(input: { agentId: string; model: string; expectedModel: string }): Promise<AppState>;
  getWorkLogs(): Promise<AgentLog[]>;
  importWorkLogs(agentId: string): Promise<{ count: number; skipped: number; message: string }>;
  /** Verify or deliberately change the account a profile is bound to. The observation is taken in the main process. */

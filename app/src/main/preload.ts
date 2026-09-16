@@ -3,7 +3,7 @@ import type { OfficeAPI } from '../shared/types.js';
 async function request<T>(channel:string,input?:unknown):Promise<T>{const result=await ipcRenderer.invoke(channel,input);if(!result?.ok)throw new Error(result?.error||'The desktop request failed.');return result.value as T;}
 const api:OfficeAPI={
  chooseProjectFolder:()=>request('office:project-folder'),chooseInputFiles:localFolder=>request('office:choose-input-files',localFolder),openProjectFolder:id=>request('office:project-open-folder',id),
- scanClaudeUsage:chooseFolder=>request('office:claude-local-usage',chooseFolder),changeAgentEffort:input=>request('office:agent-effort',input),getWorkLogs:()=>request('office:work-logs'),importWorkLogs:agentId=>request('office:work-log-import',agentId),
+ scanClaudeUsage:chooseFolder=>request('office:claude-local-usage',chooseFolder),changeAgentEffort:input=>request('office:agent-effort',input),changeAgentModel:input=>request('office:agent-model',input),getWorkLogs:()=>request('office:work-logs'),importWorkLogs:agentId=>request('office:work-log-import',agentId),
  bindAgentConnection:input=>request('office:agent-bind',input),
  connectAgent:draft=>request('office:agent-connect',draft),confirmAgent:ticket=>request('office:agent-confirm',ticket),cancelAgent:()=>request('office:agent-cancel'),
  connectionStatus:provider=>request('office:connection-status',provider),selectProviderTool:provider=>request('office:provider-tool',provider),openProviderUsage:provider=>request('office:provider-usage',provider),

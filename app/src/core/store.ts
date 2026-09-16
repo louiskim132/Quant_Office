@@ -1810,6 +1810,15 @@ export class OfficeStore {
       this.append(state,[{collection:'agents',value:{...agent,revision:(agent.revision??0)+1,effort}}],{kind:'AGENT_EFFORT_CHANGED',projectId:null,experimentId:null,reason:`${agent.name}: effort ${agent.effort??'default'} → ${effort}. Saved for the next provider request; no running request was changed.`},null);
     });
   }
+  setAgentModel(agentId:string, model:string, expectedModel:string):AppState {
+    id.parse(agentId);const clean=z.string().trim().min(1).max(160).parse(model),expected=z.string().trim().min(1).max(160).parse(expectedModel);
+    return this.transaction(()=>{const state=this.readProjection(),agent=state.agents?.find(a=>a.id===agentId);if(!agent)throw new Error('Agent not found');
+      if(agent.removedAt)throw new Error('Restore this agent before editing');
+      if(agent.model===clean)return;
+      if(agent.model!==expected)throw new Error('Model changed in another view. Refresh before saving.');
+      this.append(state,[{collection:'agents',value:{...agent,revision:(agent.revision??0)+1,model:clean}}],{kind:'AGENT_MODEL_CHANGED',projectId:null,experimentId:null,reason:`${agent.name}: model ${agent.model} → ${clean}. Model-scoped provider evidence does not transfer; dispatch readiness re-derives under the new model.`},null);
+    });
+  }
   /**
    * Records one official account/capability observation made by the main process.
    * The renderer cannot reach this: provider evidence is never accepted from the sandboxed window.
