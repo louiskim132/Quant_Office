@@ -87,6 +87,8 @@ Add Agent can create a Devin, Claude Code or Codex agent whose execution environ
 
 When the official tool is not signed in, the app opens a visible terminal running that tool's own login — for Devin, `devin auth login` — and re-checks status afterward; the same command can be run manually in any terminal. The Devin CLI credential is separate from the signed-in Devin Desktop session: signing in to the desktop app does not sign in the CLI, and the office checks only the CLI. The Devin model catalog is read from `devin models list --format json` once the CLI is signed in; there is no provisional suggestion list before that.
 
+**Never launch the office itself from an agent terminal.** Provider CLIs read their environment when they resolve credentials: a CLI spawned under an agent-protocol environment — one carrying `ACP_BACKEND` or other `ACP_*` variables, as happens when the office process is started from inside a coding agent's terminal — can falsely report a signed-out account even though the tool is signed in. The office strips `ACP_*` variables from the environment of every child process it spawns, alongside the provider credential variables it already removes, but it cannot repair the environment it was itself launched under. Start the app from an ordinary desktop or shell session; if a signed-in tool reports signed-out inside the app, suspect the launch environment before re-authenticating.
+
 Devin encodes effort in the model variant rather than a separate effort axis — `swe-2-max` is the max-effort variant, `swe-2-high` a lower one — so the variant is chosen in the Model field and the separate effort field stays at Provider default unless a catalog entry explicitly declares real effort levels.
 
 Two fields beyond provider, model and team describe how a local agent is configured:
@@ -96,11 +98,20 @@ Two fields beyond provider, model and team describe how a local agent is configu
 
 A saved local profile is never proof that the runtime exists. Signing in is not proof a local session can run: readiness requires office-observed LOCAL_* evidence for the scope's actual route, and a route with no configured local adapter fails closed rather than dispatching through another surface.
 
+### Preparing a local request
+
+A local session sees only what the office stages for it, and staging starts from the project's recorded location:
+
+- The project folder is chosen through the system's folder dialog; the field in the project form is read-only and not free-typed, and saving revalidates that the path is absolute and an existing directory. Choosing a folder never uploads, indexes or reads its contents — it is recorded for provenance and file selection only, and the office database stays in application data.
+- Saving a project location creates a managed `inputs/` directory inside the chosen folder so the user can see where shared files belong. Membership in that directory shares nothing by itself; files are shared only through explicit selection.
+- Input files are chosen through the wired file picker rooted at the project folder. Selections are validated in the main process before they can become a saved allowlist: every path must resolve inside the project folder and is recorded relative to it, up to 200 files per pick, and credential/tool-configuration paths and the office's reserved `_office/` bookkeeping names are refused.
+- Preparing the request snapshots the selected files into office-owned staging: each file is copied, hashed and inventoried, generated bookkeeping lands under `_office/` (a README naming the staged set and a manifest listing every byte), and the snapshot can be rebuilt from stored workspace bytes after a restore — the source folder is never reread.
+
 ### Delivering work locally
 
-Three local routes exist: LOCAL_MAILBOX, LOCAL_CLI_EXEC and LOCAL_ACP. The mailbox transport works as follows:
+The readiness model names three local routes — LOCAL_MAILBOX, LOCAL_CLI_EXEC and LOCAL_ACP — but only the mailbox has a transport adapter in this build; a scope bound to an unwired route fails closed rather than falling back to another surface. The mailbox transport works as follows:
 
-1. The office writes a scoped packet directory under a workspace-local sessions root: `packet.json` plus the declared input files copied from the snapshot staging path under `inputs/`, each hashed. The packet directory is the session's external identity.
+1. The office writes a scoped packet directory under a workspace-local sessions root: `packet.json` plus the session's result contract, and the declared input files copied from the snapshot staging path under `inputs/`, each hashed. The packet directory is the session's external identity.
 2. The user runs the local session against that directory in the official tool.
 3. The session writes `result.json` plus its declared artifact files. The receipt must carry exactly `state`, `detail` and `outputs` — each output naming its path, sha256 and byte count — and may additionally self-report `appliedModel`, `appliedEffort` and `delegation`.
 4. The office reads the directory back, verifies every declared sha256 and byte count against the bytes on disk and reports the outputs through the normal inventory. Undeclared or mismatched files are not results, and a missing, oversized, malformed or hash-mismatched receipt is an office-local UNKNOWN reading — never a session report.
@@ -112,6 +123,14 @@ Each step records only what the office itself did, as office-observed evidence:
 - Cancellation writes a `cancel.requested` sentinel in the packet directory and records LOCAL_CANCEL once that sentinel is on disk: ending the session is a real cancellation of that local session, honestly labeled — it is not a provider cancellation acknowledgement, and no provider-side job exists to acknowledge.
 
 The recorded route and packet identity are the durable facts, so a restart cannot duplicate a dispatch.
+
+### What the request view shows
+
+Start request records readiness blockers in two groups. Blockers that fail the manual step in front of the user — no account check, an unsigned-in tool, a missing capability snapshot, a stale check — stop that action. Blockers that only gate automatic start — unverified model application, or missing dispatch-family evidence for this scope — leave preparation and the packet write available, because writing a packet records the office's own first local evidence rather than claiming capability. A hosted-transport warning appears only when a selected participant could actually reach a hosted route; an all-local selection records no cloud-transport blocker.
+
+Account checks go stale on the office's own clock, not a provider guarantee: five minutes for hosted scopes, thirty minutes for local scopes, because the manual packet/handoff flow spans more wall-clock than a hosted dispatch. A stale check blocks external action until the account is rechecked; staleness is a freshness rule, never a claim the account signed out.
+
+Local-route errors describe only what the office found. A missing session directory or missing `result.json` reads as UNKNOWN awaiting a session — silence is never reported as a failed or completed job — and a malformed, oversized or hash-mismatched receipt names its defect rather than guessing at a session report.
 
 ### What local evidence establishes
 

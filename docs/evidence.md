@@ -21,7 +21,7 @@ Evidence accrues only from the operation the office just performed, and only whi
 
 | Operation | What it records | What it does not record |
 | --- | --- | --- |
-| LOCAL_SUBMIT | The office submitted work to the local session — writing the scoped packet directory (`packet.json` plus hashed declared inputs under `inputs/`) or spawning the child process — and the route was recorded. The job is left UNKNOWN, awaiting a session. | Hosted dispatch; the provider receiving or accepting a job. |
+| LOCAL_SUBMIT | The office submitted work to the local session — writing the scoped packet directory (`packet.json` plus the result contract and hashed declared inputs under `inputs/`) or spawning the child process — and the route was recorded. The job is left UNKNOWN, awaiting a session. | Hosted dispatch; the provider receiving or accepting a job. |
 | LOCAL_OBSERVE | The office read the session's own reported state from a `result.json` that passed strict shape validation with every declared output verified. | Provider-reported status; an account-side job. Silence — an absent, oversized or malformed receipt — records nothing. |
 | LOCAL_OUTPUT_FETCH | The office read back every artifact `result.json` declared and verified each declared sha256 and byte count against the bytes on disk. | Artifact correctness, review quality or custody. |
 | LOCAL_CANCEL | The office ended the local session — cancel sentinel or process kill. A real cancellation of that session. | A provider cancellation acknowledgement; nothing provider-side exists to acknowledge. |
