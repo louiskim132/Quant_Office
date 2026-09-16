@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import type { Assignment, AppState, Effort, InputSnapshot, JobEvent, JobOutput, Provider, ProviderJob } from '../shared/types.js';
+import type { AdapterRoute, Agent, Assignment, AppState, Effort, InputSnapshot, JobEvent, JobOutput, Provider, ProviderJob } from '../shared/types.js';
 import { canonicalHash } from '../core/canonical.js';
 import { isTerminalJob, reconciliationPlan } from '../core/jobs.js';
 import { assertHostedExecution, assertWorkerCapacity } from '../core/guards.js';
@@ -78,7 +78,7 @@ export interface OutputFetcher {
 export interface ProviderAdapter {
   /** Implementations must actually deliver into the independently attested context ID. */
   readonly isolatedContexts?:true;
-  readonly route: 'FAKE_ADAPTER' | 'OFFICIAL_TERMINAL_HANDOFF' | 'OFFICIAL_CLI_PTY';
+  readonly route: AdapterRoute;
   /** Which providers this adapter can actually reach. Omitted means the route's default below. */
   readonly providers?: readonly Provider[];
   submit(context: SubmitContext): Promise<SubmitResult>;
@@ -127,10 +127,23 @@ export class AssignmentController {
     /** Persists verified output bytes into managed content-addressed storage. */
     private readonly storeOutput?: (sha256: string, bytes: Uint8Array, job: ProviderJob, output: JobOutput) => Promise<void>,
     private readonly prepareOutputs?: (assignment: Assignment, snapshot: InputSnapshot) => OutputDestination,
+    /**
+     * Resolves which adapter carries a piece of work. At preparation time it is asked for the agent;
+     * after that the recorded route is the durable fact, so it is asked for the route instead. When
+     * configured, a miss is a hard failure — there is never a silent fallback to another route.
+     */
+    private readonly adapters?: (ref: { agent?: Agent; route?: AdapterRoute }) => ProviderAdapter | undefined,
   ) {}
 
   /** One clock for gates and records, so evidence freshness never depends on the wall calendar. */
   private nowMs(): number { return Date.parse(this.now()); }
+
+  private adapterFor(ref: { agent?: Agent; route?: AdapterRoute }): ProviderAdapter {
+    if (!this.adapters) return this.adapter;
+    const adapter = this.adapters(ref);
+    if (!adapter) throw new Error(`No adapter is configured for ${ref.route ? `the ${ref.route.toLowerCase().replaceAll('_', ' ')} route` : `${ref.agent?.provider ?? 'this provider'} work`}. Configure a supported route or use a handoff.`);
+    return adapter;
+  }
 
   /** Freezes the exact inputs for one request and records the intent to submit. */
   prepare(input: { requestId: string; agentId: string; snapshotId: string; expectedRequestRevision?: number; expectedAgentRevision?: number; dependsOn?: string[]; research?: Assignment['research'] }): { state: AppState; assignment: Assignment } {
@@ -153,13 +166,15 @@ export class AssignmentController {
     const connection = currentConnection(state, agent.provider);
     const capability = connection ? latestCapability(state, connection.id) : undefined;
     if (!connection || !capability) throw new Error('Check the provider account before preparing work.');
+    // The agent picks the route once, here; everything after reads the recorded route.
+    const adapter = this.adapterFor({ agent });
     const assignment: Assignment = {
       id: randomUUID(), projectId: request.projectId, requestId: request.id, requestRevision: request.revision,
       agentId: agent.id, agentRevision: agent.revision ?? 0, connectionId: connection.id, capabilitySnapshotId: capability.id,
-      snapshotId: snapshot.id, route: this.adapter.route, requestedModel: agent.model, resolvedModel: '',
+      snapshotId: snapshot.id, route: adapter.route, requestedModel: agent.model, resolvedModel: '',
       capabilitySnapshotIds: supplyingSnapshotIds(state, {
         provider: agent.provider, identity: connection.identity, credentialContext: connection.credentialContext,
-        toolVersion: capability.toolVersion, route: this.adapter.route, environment: capability.environment,
+        toolVersion: capability.toolVersion, route: adapter.route, environment: capability.environment,
         model: agent.model, effort: agent.effort ?? 'default', delegation: request.delegation,
       }, { now: this.nowMs() }),
       requestedEffort: agent.effort ?? 'default', appliedEffort: 'UNVERIFIED', delegation: request.delegation,
@@ -181,7 +196,7 @@ export class AssignmentController {
     this.prepareOutputs?.(assignment, state.snapshots!.find(item => item.id === assignment.snapshotId)!);
     const next = this.store.createAssignment({
       assignment,
-      job: { id: randomUUID(), assignmentId: assignment.id, projectId: assignment.projectId, requestId: assignment.requestId, provider: agent.provider, route: this.adapter.route },
+      job: { id: randomUUID(), assignmentId: assignment.id, projectId: assignment.projectId, requestId: assignment.requestId, provider: agent.provider, route: adapter.route },
     });
     return { state: next, assignment };
   }
@@ -246,9 +261,10 @@ export class AssignmentController {
 
     // The route must be able to reach this provider at all, on every path. No substitution: an
     // unsupported pairing is refused rather than quietly sent somewhere that might accept it.
-    const supported = this.adapter.providers ?? (this.adapter.route === 'FAKE_ADAPTER' ? (['claude', 'openai'] as const) : (['claude'] as const));
+    const adapter = this.adapterFor({ route: assignment.route });
+    const supported = adapter.providers ?? (adapter.route === 'FAKE_ADAPTER' ? (['claude', 'openai', 'devin'] as const) : (['claude'] as const));
     if (!supported.includes(agent.provider))
-      throw new Error(`No supported route: the ${this.adapter.route.toLowerCase().replaceAll('_', ' ')} adapter cannot run ${agent.provider} work. Use a handoff, or configure a supported route.`);
+      throw new Error(`No supported route: the ${adapter.route.toLowerCase().replaceAll('_', ' ')} adapter cannot run ${agent.provider} work. Use a handoff, or configure a supported route.`);
 
     // The account context this work was frozen against must still be the one in force, by record and
     // not merely by name: a different connection with the same address is a different context.
@@ -283,8 +299,8 @@ export class AssignmentController {
         throw new Error('The research branch is no longer active under this specification.');
       const blocker = this.store.researchStageBlocker(research.stage);
       if (blocker) throw new Error(blocker);
-      this.store.assertIsolatedLaunch(assignment.id,this.adapter.route);
-      if(['S2','S7'].includes(research.stage)&&!this.adapter.isolatedContexts)throw new Error('This adapter has no isolated context delivery implementation.');
+      this.store.assertIsolatedLaunch(assignment.id,adapter.route);
+      if(['S2','S7'].includes(research.stage)&&!adapter.isolatedContexts)throw new Error('This adapter has no isolated context delivery implementation.');
       if (kind === 'HANDOFF') throw new Error('Research handoff is blocked: the terminal route cannot deliver the frozen stage context.');
       if (stageContextHash({ ...research, agentId: assignment.agentId, agentRevision: assignment.agentRevision, inputs: research }) !== research.contextHash)
         throw new Error('This research context predates exact input/revision binding. Prepare it again.');
@@ -348,7 +364,7 @@ export class AssignmentController {
     // effort or delegation policy is evidence about a different question and does not authorize this.
     const scope: RequestedScope = {
       provider: agent.provider, identity: connection.identity, credentialContext: connection.credentialContext,
-      toolVersion: capability?.toolVersion ?? '', route: this.adapter.route, environment: capability?.environment ?? '',
+      toolVersion: capability?.toolVersion ?? '', route: assignment.route, environment: capability?.environment ?? '',
       model: assignment.requestedModel, effort: assignment.requestedEffort, delegation: assignment.delegation,
     };
     const mismatches = scopeMismatches(state, scope, { now });
@@ -395,10 +411,11 @@ export class AssignmentController {
     this.prepareOutputs?.(assignment, staged);
     ({ state, frozen, connection, now } = context);
     let job = this.job(assignmentId);
-    this.store.recordJobTransition({ jobId: job.id, expectedRevision: job.revision, to: 'SUBMITTING', evidence: 'OFFICE_LOCAL', detail: `Submitting through ${this.adapter.route}.`, at: this.now() });
+    this.store.recordJobTransition({ jobId: job.id, expectedRevision: job.revision, to: 'SUBMITTING', evidence: 'OFFICE_LOCAL', detail: `Submitting through ${assignment.route}.`, at: this.now() });
     job = this.job(assignmentId);
+    const adapter = this.adapterFor({ route: assignment.route });
     try {
-      const result = await this.adapter.submit({ assignment, snapshot: staged, objective: frozen.objective, requestName: frozen.requestName, payload: this.providerPayload(assignment) });
+      const result = await adapter.submit({ assignment, snapshot: staged, objective: frozen.objective, requestName: frozen.requestName, payload: this.providerPayload(assignment) });
       if (!result.externalId) throw new UnknownDispatchError('The provider returned no identifier for this submission.');
       return this.store.recordJobTransition({
         jobId: job.id, expectedRevision: job.revision, to: 'ACCEPTED', evidence: 'PROVIDER_REPORTED',
@@ -435,11 +452,11 @@ export class AssignmentController {
 
   /** The exact command a handoff would run, for display before anything is launched. */
   handoffPlan(assignmentId: string): { executable: string; args: string[]; cwd: string; outputDestination?: OutputDestination } | null {
-    const adapter = this.adapter as ProviderAdapter & { plan?: (context: SubmitContext) => { executable: string; args: string[]; cwd: string } };
-    if (!adapter.plan) return null;
     const state = this.store.snapshot({history:false});
     const assignment = (state.assignments ?? []).find(item => item.id === assignmentId);
     if (!assignment) throw new Error('Assignment not found.');
+    const adapter = this.adapterFor({ route: assignment.route }) as ProviderAdapter & { plan?: (context: SubmitContext) => { executable: string; args: string[]; cwd: string } };
+    if (!adapter.plan) return null;
     const snapshot = state.snapshots!.find(item => item.id === assignment.snapshotId)!;
     const frozen = this.frozenPayload(assignment);
     // The preview and the launch read the same frozen values, so what the user approves is what runs.
@@ -468,8 +485,9 @@ export class AssignmentController {
     let job = this.job(assignmentId);
     this.store.recordJobTransition({ jobId: job.id, expectedRevision: job.revision, to: 'SUBMITTING', evidence: 'OFFICE_LOCAL', detail: 'Opening the official terminal for a manual submission.', at: this.now() });
     job = this.job(assignmentId);
+    const adapter = this.adapterFor({ route: assignment.route });
     try {
-      const result = await this.adapter.submit({ assignment, snapshot: staged, objective: frozen.objective, requestName: frozen.requestName, payload: this.providerPayload(assignment) });
+      const result = await adapter.submit({ assignment, snapshot: staged, objective: frozen.objective, requestName: frozen.requestName, payload: this.providerPayload(assignment) });
       return this.store.recordJobTransition({ jobId: job.id, expectedRevision: job.revision, to: 'UNKNOWN', evidence: 'OFFICE_LOCAL', detail: result.detail, at: this.now() });
     } catch (error) {
       return this.store.recordJobTransition({ jobId: job.id, expectedRevision: job.revision, to: 'UNKNOWN', evidence: 'OFFICE_LOCAL',
@@ -487,7 +505,7 @@ export class AssignmentController {
   async observe(assignmentId: string): Promise<AppState> {
     let job = this.job(assignmentId);
     if (isTerminalJob(job.state)) return this.store.snapshot({history:false});
-    const result = await this.adapter.observe(job);
+    const result = await this.adapterFor({ route: job.route }).observe(job);
     if (result.events?.length) this.store.recordJobEvents(job.id, result.events);
     job = this.job(assignmentId);
     if (isTerminalJob(job.state)) return this.store.snapshot({history:false});
@@ -562,7 +580,7 @@ export class AssignmentController {
         detail: 'Cancellation requested; no dependent work will be dispatched while this is open.', at: this.now() });
       job = this.job(assignmentId);
     }
-    const result = await this.adapter.cancel(job);
+    const result = await this.adapterFor({ route: job.route }).cancel(job);
     if (!result.acknowledged) {
       this.store.recordJobEvents(job.id, [{ externalId: `cancel-attempt:${job.revision}`, cursor: '', kind: 'STATUS',
         text: `Cancellation not acknowledged: ${result.detail}`, occurredAt: this.now(), receivedAt: this.now(), evidence: 'OFFICE_LOCAL' }]);

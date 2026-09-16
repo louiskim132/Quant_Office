@@ -381,7 +381,8 @@ function rejectInternalDestination(destination:string){const relative=path.relat
 function buildController():AssignmentController{
  const workspace=()=>workspaceDirectory(app.getPath('userData'));
  const outputs=new OutputService(store,workspace());
- return new AssignmentController(store,new TerminalHandoffAdapter({executable:()=>subscriptions.toolPath('claude')}),undefined,
+ const handoff=new TerminalHandoffAdapter({executable:()=>subscriptions.toolPath('claude')});
+ return new AssignmentController(store,handoff,undefined,
   // Verification is scoped to the staging root this office owns, so a snapshot pointing anywhere
   // else is refused rather than verified in place.
   snapshot=>verifySnapshotForTransfer(snapshot,'git',path.join(workspace(),'snapshots')),
@@ -394,7 +395,15 @@ function buildController():AssignmentController{
    const rebuilt=await reconstructSnapshot({snapshot,objectRoot:workspace(),stagingRoot:path.join(workspace(),'snapshots')});
    if(rebuilt.problems.length)throw new Error(`The prepared inputs could not be rebuilt: ${rebuilt.problems[0]} Prepare the request again.`);
    return rebuilt.stagingPath;
-  },undefined,outputs.storeBytes,outputs.prepare);
+  },undefined,outputs.storeBytes,outputs.prepare,
+  // Hosted work uses the labeled terminal handoff. Local agents need a local-session adapter;
+  // until one is configured the resolver misses and dispatch fails closed rather than silently
+  // handing local work to a hosted route.
+  ref=>{
+   if(ref.route)return ref.route===handoff.route?handoff:undefined;
+   if(ref.agent)return ref.agent.execution==='HOSTED_SETUP_REQUIRED'?handoff:undefined;
+   return undefined;
+  });
 }
 async function transfer<T>(fn:()=>Promise<T>):Promise<T>{if(transferBusy)throw new Error('Another file dialog or transfer is already active.');transferBusy=true;try{return await fn();}finally{transferBusy=false;}}
 /**
