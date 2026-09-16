@@ -247,8 +247,13 @@ export class LocalMailboxAdapter implements ProviderAdapter {
 
   async cancel(job: ProviderJob): Promise<{ acknowledged: boolean; detail: string }> {
     const dir = job.externalId ? this.sessionDir(job.externalId) : null;
-    if (!dir || !existsSync(dir))
-      return { acknowledged: false, detail: 'No local session directory exists for this job, so no session can be signalled. The cancellation stays requested.' };
+    if (!dir)
+      // No session identity was ever recorded — a submit that failed before naming a directory
+      // left nothing external running. The office is the transport for local sessions, so this
+      // acknowledgement is a statement about local state, not a provider receipt.
+      return { acknowledged: true, detail: 'No session was ever recorded for this job, so nothing external exists to signal. Acknowledged by the office.' };
+    if (!existsSync(dir))
+      return { acknowledged: false, detail: 'The recorded session directory is gone, so no session can be signalled. The cancellation stays requested.' };
     try {
       writeFileSync(path.join(dir, CANCEL_FILE), `${JSON.stringify({ jobId: job.id, requestedAt: this.now() })}\n`);
     } catch (error) {

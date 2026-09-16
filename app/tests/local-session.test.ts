@@ -254,6 +254,15 @@ test('cancel without a session directory cannot acknowledge anything', async t =
   assert.equal(existsSync(path.join(f.sessions, 'not-created', CANCEL_FILE)), false);
 });
 
+test('cancel of a job that never recorded a session acknowledges vacuously', async t => {
+  const f = fixture(t);
+  // A submit that fails before naming a session directory leaves nothing external running; the
+  // office is the local transport, so acknowledging states a local fact rather than a receipt.
+  const result = await f.adapter.cancel(f.job(''));
+  assert.equal(result.acknowledged, true);
+  assert.match(result.detail, /No session was ever recorded/);
+});
+
 test('a session self-report of applied model, effort and delegation surfaces through applied', async t => {
   const f = fixture(t);
   const { externalId } = await f.adapter.submit(f.context);

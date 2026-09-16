@@ -1755,6 +1755,7 @@ export class OfficeStore {
           this.activeProject(state, experiment.projectId); projectId = experiment.projectId; experimentId = experiment.id;
           if (experiment.revision !== command.expectedRevision) throw new Error('Stale contract revision; reload the experiment before saving');
           if(experiment.stage==='CANCELED')throw new Error('Canceled research is read-only. Create a new request to begin another investigation.');
+          if(state.requests?.some(r=>r.experimentId===experiment.id&&r.status==='CANCELED'))throw new Error('The request behind this contract is canceled; contract review is closed. Create a new request to begin another investigation.');
           if (!['DRAFT', 'CONTRACT_REVIEW'].includes(experiment.stage)) throw new Error('Frozen contracts require a scientific amendment');
           if (command.type === 'contract.submit' && experiment.stage === 'CONTRACT_REVIEW') throw new Error('Contract is already awaiting review');
           if (command.type === 'contract.submit' && !experiment.contract.objective.trim()) throw new Error('A research objective is required for contract review');
@@ -1772,7 +1773,9 @@ export class OfficeStore {
           const task = state.tasks.find(item => item.id === command.taskId);
           if (!task) throw new Error('Task not found');
           this.activeProject(state, task.projectId); projectId = task.projectId; experimentId = task.experimentId;
-          if(state.requests?.some(r=>r.experimentId&&r.experimentId===task.experimentId))throw new Error('Cancel the parent request using its request ID');
+          // A live parent request owns the cascade; cancel it instead. A canceled or removed
+          // parent can no longer propagate, so its leftover review children get canceled here.
+          if(state.requests?.some(r=>r.experimentId&&r.experimentId===task.experimentId&&r.status!=='CANCELED'))throw new Error('Cancel the parent request using its request ID');
           if (['CANCELED','ACCEPTED','SUPERSEDED'].includes(task.status)) throw new Error('Terminal task cannot be canceled');
           for(const linked of state.tasks.filter(t=>t.id===task.id||(experimentId&&t.experimentId===experimentId&&t.status!=='CANCELED'&&t.status!=='ACCEPTED'&&t.status!=='SUPERSEDED')))changes.push({collection:'tasks',value:{...linked,status:'CANCELED',blocker:null,updatedAt:now}});
           if(experimentId){const experiment=state.experiments.find(e=>e.id===experimentId)!;changes.push({collection:'experiments',value:{...experiment,stage:'CANCELED',revision:experiment.revision+1,updatedAt:now}});} reason = 'Canceled research request'; break;
@@ -1795,7 +1798,7 @@ export class OfficeStore {
           if(!task)throw new Error('Request not found');
           this.activeProject(state,task.projectId);projectId=task.projectId;experimentId=task.experimentId;
           if(task.removedAt)throw new Error('This request is already removed from the list');
-          if(experimentId&&state.requests?.some(r=>r.experimentId===experimentId))throw new Error('Remove the parent request using its request ID');
+          if(experimentId&&state.requests?.some(r=>r.experimentId===experimentId&&!r.removedAt))throw new Error('Remove the parent request using its request ID');
           const experiment=experimentId?state.experiments.find(e=>e.id===experimentId):undefined;
           const status=experiment?.stage==='CANCELED'?'CANCELED':task.status;
           if(status!=='ACCEPTED'&&status!=='CANCELED')throw new Error('Only a completed or canceled request can be removed from the list');
@@ -2251,8 +2254,15 @@ export class OfficeStore {
       }
       const request=state.requests?.find(r=>r.id===job.requestId);
       // Canceling the request cancels dispatch intent, but only the provider can settle dispatched work.
-      if(request&&request.mode==='SINGLE'&&next.state==='CANCEL_ACKNOWLEDGED'&&request.status!=='CANCELED')
+      if(request&&request.mode==='SINGLE'&&next.state==='CANCEL_ACKNOWLEDGED'&&request.status!=='CANCELED'){
         changes.push({collection:'requests',value:{...request,status:'CANCELED',revision:request.revision+1,updatedAt:at}});
+        // The job-side cancellation must run the same cascade request.cancel runs. Without it the
+        // experiment stays under review and keeps accepting contract revisions and spawning review
+        // tasks that no command can terminalize once the request row is removed.
+        const experiment=request.experimentId?state.experiments.find(e=>e.id===request.experimentId):undefined;
+        if(experiment&&experiment.stage!=='CANCELED')changes.push({collection:'experiments',value:{...experiment,stage:'CANCELED',revision:experiment.revision+1,updatedAt:at}});
+        if(request.experimentId)for(const task of state.tasks.filter(t=>t.experimentId===request.experimentId&&!['CANCELED','SUPERSEDED','ACCEPTED'].includes(t.status)))changes.push({collection:'tasks',value:{...task,status:'CANCELED',blocker:null,updatedAt:at}});
+      }
       this.append(state,changes,{kind:'PROVIDER_JOB_'+next.state,projectId:job.projectId,experimentId:null,
         reason:`${job.state} → ${next.state} (${input.evidence.toLowerCase().replaceAll('_',' ')}): ${input.detail}`},null);
     });
