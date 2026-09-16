@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { removeTreeSync } from '../src/main/fsx';
 import { buildProviderPayload, type SubmitContext } from '../src/main/controller';
-import { CANCEL_FILE, INPUTS_DIR, LocalMailboxAdapter, PACKET_FILE, RESULT_FILE } from '../src/main/local-session';
+import { CANCEL_FILE, CONTRACT_FILE, INPUTS_DIR, LocalMailboxAdapter, PACKET_FILE, RESULT_FILE, RESULT_OPTIONAL_KEYS, RESULT_REQUIRED_KEYS, RESULT_STATES } from '../src/main/local-session';
 import type { Assignment, InputSnapshot, ProviderJob } from '../src/shared/types';
 
 const at = (minutes: number) => new Date(Date.UTC(2026, 8, 8, 10, 0, 0) + minutes * 60000).toISOString();
@@ -95,6 +95,61 @@ test('submit fails loudly when a staged input no longer matches its frozen hash'
   const f = fixture(t);
   writeFileSync(path.join(f.staging, 'notes.txt'), 'changed after freezing');
   await assert.rejects(f.adapter.submit(f.context), /no longer matches the bytes that were frozen/);
+});
+
+test('a zero-input submit writes a valid packet directory with the result contract', async t => {
+  const f = fixture(t);
+  const context: SubmitContext = { ...f.context, snapshot: { ...f.snapshot, files: [], totalBytes: 0 } };
+  const result = await f.adapter.submit(context);
+  assert.match(result.externalId, /^session-/);
+  const dir = path.join(f.sessions, result.externalId);
+  const packet = JSON.parse(readFileSync(path.join(dir, PACKET_FILE), 'utf8'));
+  assert.equal(packet.assignmentId, f.assignment.id);
+  assert.equal(packet.files.length, 0);
+  assert.equal(packet.contract, CONTRACT_FILE);
+  const contract = readFileSync(path.join(dir, CONTRACT_FILE), 'utf8');
+  assert.match(contract, /result\.json/);
+});
+
+test('the written contract names exactly the keys and states the strict parser accepts', async t => {
+  const f = fixture(t);
+  const { externalId } = await f.adapter.submit(f.context);
+  const dir = path.join(f.sessions, externalId);
+  const contract = readFileSync(path.join(dir, CONTRACT_FILE), 'utf8');
+  // Both lists come from the parser's own exported constants, so a contract that drifts
+  // from what readResult enforces fails here.
+  for (const key of [...RESULT_REQUIRED_KEYS, ...RESULT_OPTIONAL_KEYS])
+    assert.ok(contract.includes(`\`${key}\``), `contract names ${key}`);
+  for (const state of RESULT_STATES) assert.ok(contract.includes(state), `contract names state ${state}`);
+  assert.match(contract, new RegExp(CANCEL_FILE.replace('.', '\\.')));
+  // A receipt built exactly to that contract is accepted.
+  report(dir, { state: 'COMPLETED', detail: 'Done.', outputs: [] }, {});
+  const result = await f.adapter.observe(f.job(externalId));
+  assert.equal(result.state, 'COMPLETED');
+  assert.equal(result.provenance, 'PROVIDER_REPORTED');
+});
+
+test('an oversized result receipt is refused, not parsed', async t => {
+  const f = fixture(t);
+  const { externalId } = await f.adapter.submit(f.context);
+  const dir = path.join(f.sessions, externalId);
+  writeFileSync(path.join(dir, RESULT_FILE), JSON.stringify({ state: 'COMPLETED', detail: 'x'.repeat(4 * 1024 * 1024), outputs: [] }));
+  const result = await f.adapter.observe(f.job(externalId));
+  assert.equal(result.state, 'UNKNOWN');
+  assert.equal(result.provenance, 'OFFICE_LOCAL');
+  assert.match(result.detail, /receipt limit/);
+});
+
+test('a retry after a failed submit re-submits cleanly', async t => {
+  const f = fixture(t);
+  writeFileSync(path.join(f.staging, 'notes.txt'), 'changed after freezing');
+  await assert.rejects(f.adapter.submit(f.context), /no longer matches the bytes that were frozen/);
+  // No intent was recorded for the failed attempt; restoring the frozen bytes retries cleanly.
+  writeFileSync(path.join(f.staging, 'notes.txt'), 'fixture notes');
+  const result = await f.adapter.submit(f.context);
+  const dir = path.join(f.sessions, result.externalId);
+  const packet = JSON.parse(readFileSync(path.join(dir, PACKET_FILE), 'utf8'));
+  assert.equal(packet.files.length, 2);
 });
 
 test('observe without a result reports UNKNOWN with OFFICE_LOCAL provenance', async t => {
