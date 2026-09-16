@@ -2594,3 +2594,15 @@ synthetic workspace. Changed files: this roadmap and `app/tests/pipeline.desktop
 No schema/migration or provider changes. The round remains CLOSED with all workers
 resolved; protected PR merge still requires successful CI on the corrected head.
 The real user-run Colab pilot remains pending.
+
+2026-09-16 (round model-select) — Agent model selection improvements. Shared
+PROVIDER_MODEL_SUGGESTIONS table (shared/effort.ts) replaces three stale
+hardcoded lists; Add Agent's model field is now a select fed by the signed-in
+catalog or the suggestion table, and the profile dialog's AgentDetails can
+change an agent's model through store.setAgentModel + office:agent-model
+(OpenAI requires the signed-in account's catalog membership; Claude accepts a
+documented alias or pinned ID since subscriptions expose no catalog). Dialogs
+close on backdrop clicks outside their bounding rect. Model-scoped dispatch
+evidence does not transfer across a model change — readiness re-derives.
+Verification: typecheck clean, 412/412 unit, build clean. No provider or
+schema changes; no provider operations ran.
