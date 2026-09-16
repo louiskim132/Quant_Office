@@ -21,6 +21,7 @@ import { PipelineService } from './pipeline.js';
 import { HoldoutCustody } from './holdout.js';
 import { OutputService } from './outputs.js';
 import { TerminalHandoffAdapter } from './handoff.js';
+import { LocalMailboxAdapter } from './local-session.js';
 import { PtyCloudAdapter, transportModuleStatus } from './pty.js';
 import { probeCloudTransport } from './probe.js';
 import { currentConnection } from '../shared/readiness.js';
@@ -382,6 +383,7 @@ function buildController():AssignmentController{
  const workspace=()=>workspaceDirectory(app.getPath('userData'));
  const outputs=new OutputService(store,workspace());
  const handoff=new TerminalHandoffAdapter({executable:()=>subscriptions.toolPath('claude')});
+ const mailbox=new LocalMailboxAdapter(()=>path.join(workspace(),'local-sessions'));
  return new AssignmentController(store,handoff,undefined,
   // Verification is scoped to the staging root this office owns, so a snapshot pointing anywhere
   // else is refused rather than verified in place.
@@ -396,12 +398,12 @@ function buildController():AssignmentController{
    if(rebuilt.problems.length)throw new Error(`The prepared inputs could not be rebuilt: ${rebuilt.problems[0]} Prepare the request again.`);
    return rebuilt.stagingPath;
   },undefined,outputs.storeBytes,outputs.prepare,
-  // Hosted work uses the labeled terminal handoff. Local agents need a local-session adapter;
-  // until one is configured the resolver misses and dispatch fails closed rather than silently
-  // handing local work to a hosted route.
+  // Hosted work uses the labeled terminal handoff; local work uses the mailbox transport. Routes
+  // and agents resolve only to the adapter that actually owns them — a miss fails closed, never a
+  // silent fallback across environments.
   ref=>{
-   if(ref.route)return ref.route===handoff.route?handoff:undefined;
-   if(ref.agent)return ref.agent.execution==='HOSTED_SETUP_REQUIRED'?handoff:undefined;
+   if(ref.route)return ref.route===handoff.route?handoff:ref.route===mailbox.route?mailbox:undefined;
+   if(ref.agent)return ref.agent.execution==='HOSTED_SETUP_REQUIRED'?handoff:ref.agent.execution==='LOCAL'?mailbox:undefined;
    return undefined;
   });
 }
