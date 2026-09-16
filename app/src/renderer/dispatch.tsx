@@ -48,7 +48,7 @@ export function RequestDispatch({request,state,onState}:{request:Request;state:A
   try{const next=await action();if(next)onState(next);}catch(e){setError((e as Error).message);}finally{setBusy('');}
  }
  return <section className="dispatch-card">
-  <h3>Provider work</h3>
+  <h3>{local?'Local session work':'Provider work'}</h3>
   {summaries.length>0&&<label className="field">Job history<select value={job?.id??''} onChange={e=>setSelectedJob(e.target.value)}>{summaries.map(item=><option key={item.jobId} value={item.jobId}>{state.agents.find(agent=>agent.id===item.agentId)?.name??'Agent'} · {jobLabels[item.state]} · {item.jobId.slice(0,8)}</option>)}</select></label>}
   {summaries.some(item=>item.unresolved)&&<p className="notice">{summaries.filter(item=>item.unresolved).length} job(s) still require observation or reconciliation, regardless of other completed jobs.</p>}
   {!agent&&<p className="muted">Choose the agent for this request before preparing work.</p>}
@@ -57,7 +57,8 @@ export function RequestDispatch({request,state,onState}:{request:Request;state:A
    <li data-state={gate.canHandoff?'yes':'no'}>{local?'Local session handoff':'Official terminal handoff'}: {gate.canHandoff?'Available':'Blocked'}</li>
    <li data-state={gate.canStart?'yes':'no'}>Automatic start: {gate.canStart?'Available':'Blocked'}</li>
   </ul>}
-  {local&&<p className="muted">This profile runs sessions on this machine through the official CLI. Writing the session packet records office-observed evidence for this exact scope; automatic start stays blocked until that local evidence exists. The office never runs the session itself.</p>}
+  {local&&<p className="muted">Write local session packet → run the session → observe. This profile runs sessions on this machine through the official CLI. Writing the session packet records office-observed evidence for this exact scope; automatic start stays blocked until that local evidence exists. The office never runs the session itself.</p>}
+  {agent&&gate&&gate.readiness.connectionId&&!gate.readiness.accountFresh&&<p><button className="secondary" disabled={!!busy} onClick={()=>void run('recheck',async()=>{await window.office.connectionStatus(agent.provider);return window.office.getState();})}>{busy==='recheck'?'Checking…':'Re-check account'}</button> <span className="muted">The account check is stale; a live re-check refreshes it in place.</span></p>}
   {job&&<p><strong>{jobLabels[job.state]}</strong>{job.externalId?` · ${job.externalId}${job.evidence==='USER_REPORTED'?' (reported by you, unverified)':''}`:''}</p>}
   {job&&<p className="muted">{job.detail}</p>}
   {snapshot&&<p className="muted">Snapshot {snapshot.files.length} file{snapshot.files.length===1?'':'s'} · {snapshot.totalBytes} bytes{snapshot.stagingCommit?` · commit ${snapshot.stagingCommit.slice(0,10)}`:' · no commit'}</p>}
@@ -85,9 +86,21 @@ export function RequestDispatch({request,state,onState}:{request:Request;state:A
    <label className="field">Session URL<input value={sessionUrl} onChange={e=>setSessionUrl(e.target.value)} maxLength={2000} placeholder="https://claude.ai/code/…"/></label>
    <button className="secondary" disabled={!!busy||!sessionId}>Link session</button>
   </form>}
-  {events.length>0&&<details><summary>Provider events ({events.length})</summary><ul className="evidence-list">{events.map(event=><li key={event.id}><b>{event.kind.toLowerCase()}</b> {new Date(event.occurredAt).toLocaleString()} — {event.text}</li>)}</ul>
-    {eventCursor&&job&&<button className="secondary" onClick={()=>void window.office.jobEventPage({jobId:job.id,limit:50,cursor:eventCursor}).then(page=>{setEvents(current=>[...current,...page.entries]);setEventCursor(page.nextCursor);}).catch(e=>setError((e as Error).message))}>More provider events</button>}
+  {events.length>0&&<details><summary>{local?'Session events':'Provider events'} ({events.length})</summary><ul className="evidence-list">{events.map(event=><li key={event.id}><b>{event.kind.toLowerCase()}</b> {new Date(event.occurredAt).toLocaleString()} — {event.text}</li>)}</ul>
+    {eventCursor&&job&&<button className="secondary" onClick={()=>void window.office.jobEventPage({jobId:job.id,limit:50,cursor:eventCursor}).then(page=>{setEvents(current=>[...current,...page.entries]);setEventCursor(page.nextCursor);}).catch(e=>setError((e as Error).message))}>{local?'More session events':'More provider events'}</button>}
   </details>}
-  {gate&&gate.blockers.length>0&&<details><summary>Why automatic start is blocked</summary><ul className="evidence-list">{gate.blockers.map(blocker=><li key={blocker}>{blocker}</li>)}</ul></details>}
+  {gate&&gate.blockers.length>0&&(()=>{
+   // What a blocker gates is part of the gate itself: account problems stop the manual action in
+   // front of the user, while unverified dispatch evidence gates only automatic start. Binding
+   // problems block every external action, so they group with the action blockers.
+   const details=gate.readiness.blockerDetails;
+   if(!details)return<details><summary>Why actions are blocked</summary><ul className="evidence-list">{gate.blockers.map(blocker=><li key={blocker}>{blocker}</li>)}</ul></details>;
+   const thisAction=[...gate.binding.blockers,...details.filter(item=>item.blocks==='THIS_ACTION').map(item=>item.message)];
+   const automatic=details.filter(item=>item.blocks==='AUTOMATIC_START').map(item=>item.message);
+   return<>
+    {thisAction.length>0&&<details open><summary>Blocks this action</summary><ul className="evidence-list">{thisAction.map(blocker=><li key={blocker}>{blocker}</li>)}</ul></details>}
+    {automatic.length>0&&<details><summary>Gates automatic start</summary><ul className="evidence-list">{automatic.map(blocker=><li key={blocker}>{blocker}</li>)}</ul></details>}
+   </>;
+  })()}
  </section>;
 }
