@@ -10,6 +10,7 @@ import type { ObserveResult, ProviderAdapter, SubmitContext, SubmitResult } from
 export const PACKET_FILE = 'packet.json';
 export const RESULT_FILE = 'result.json';
 export const CANCEL_FILE = 'cancel.requested';
+export const CONTRACT_FILE = 'CONTRACT.md';
 export const INPUTS_DIR = 'inputs';
 
 /** A receipt is a small record; a multi-megabyte one is a defect, not a result. */
@@ -17,14 +18,14 @@ const MAX_RESULT_BYTES = 4 * 1024 * 1024;
 /** Mirrors the inventory cap the controller enforces on reported outputs. */
 const MAX_OUTPUTS = 256;
 /** The states a session may claim. UNKNOWN is the office's own reading of silence, never a claim. */
-const RESULT_STATES = ['ACCEPTED', 'RUNNING', 'COMPLETED', 'FAILED'] as const;
+export const RESULT_STATES = ['ACCEPTED', 'RUNNING', 'COMPLETED', 'FAILED'] as const;
 type ResultState = (typeof RESULT_STATES)[number];
 /** Session directories are single safe names under the sessions root — never paths, never traversal. */
 const SESSION_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,160}$/;
 /** The receipt keys every result must carry. */
-const RESULT_REQUIRED_KEYS = ['state', 'detail', 'outputs'] as const;
+export const RESULT_REQUIRED_KEYS = ['state', 'detail', 'outputs'] as const;
 /** The only additions a result may carry: the session's own self-report, never inferred when absent. */
-const RESULT_OPTIONAL_KEYS = ['appliedModel', 'appliedEffort', 'delegation'] as const;
+export const RESULT_OPTIONAL_KEYS = ['appliedModel', 'appliedEffort', 'delegation'] as const;
 /** The recorded source of every observation this adapter produces. */
 const EVIDENCE_SOURCE = 'office-local-mailbox@1';
 
@@ -43,8 +44,56 @@ interface AppliedReport { model?: string; effort?: Effort; delegation?: boolean 
 const sha256File = (file: string): string => createHash('sha256').update(readFileSync(file)).digest('hex');
 
 /**
+ * The participant-readable receipt contract written next to packet.json in every packet
+ * directory. It is generated from the same constants readResult() enforces, so the
+ * document a session reads can never drift from the parser the office applies.
+ */
+export const resultContract = (): string => [
+  '# Local session result contract',
+  '',
+  `This directory is a Quant Research Office session packet: \`${PACKET_FILE}\` is the`,
+  `assignment and \`${INPUTS_DIR}/\` holds the declared input files. Do the bounded work,`,
+  `then write \`${RESULT_FILE}\` in this directory to report back.`,
+  '',
+  `## ${RESULT_FILE}`,
+  '',
+  `A single JSON object of at most ${MAX_RESULT_BYTES} bytes, carrying exactly`,
+  `${RESULT_REQUIRED_KEYS.map(key => `\`${key}\``).join(', ')}:`,
+  '',
+  `- \`state\` — one of ${RESULT_STATES.join(', ')}`,
+  '- `detail` — a string of at most 4000 characters',
+  `- \`outputs\` — an array of at most ${MAX_OUTPUTS} declared output files`,
+  '',
+  `The only permitted additional keys are ${RESULT_OPTIONAL_KEYS.map(key => `\`${key}\``).join(', ')}:`,
+  "the session's own self-report. Omit them rather than guess; the office never fills",
+  'an absent key with an assumption.',
+  '',
+  '- `appliedModel` — a string of at most 160 characters',
+  `- \`appliedEffort\` — one of ${efforts.join(', ')}`,
+  '- `delegation` — a boolean',
+  '',
+  'Each `outputs` entry is an object carrying exactly `path`, `sha256` and `bytes`:',
+  '',
+  '- `path` — a relative file path inside this session directory',
+  "- `sha256` — the lowercase hex SHA-256 digest of the file's bytes",
+  `- \`bytes\` — the file's byte count, 0 to ${MAX_FILE}`,
+  '',
+  '## Rules',
+  '',
+  '- Every declared output must exist inside this session directory; the office re-reads',
+  '  each file and verifies its sha256 and bytes before reporting anything.',
+  '- A missing, oversized, malformed or hash-mismatched receipt is recorded as the',
+  "  office's own UNKNOWN reading, never as a session result.",
+  `- \`${CANCEL_FILE}\` in this directory is the office's end signal: stop work and write`,
+  `  \`${RESULT_FILE}\` with what was completed. It ends this local session; it is not a`,
+  '  provider acknowledgement.',
+  '',
+].join('\n');
+
+/**
  * The local mailbox transport (roadmap local-sessions milestone): the office writes a scoped packet
- * — packet.json plus the snapshot's declared input files, each hashed — into a dedicated session
+ * — packet.json, the CONTRACT.md result contract and the snapshot's declared input files, each
+ * hashed — into a dedicated session
  * directory under a workspace-local root. A user-launched local session reads the packet, does its
  * bounded work and writes result.json with a declared output inventory. The office then verifies
  * every declared byte itself before reporting it.
@@ -68,6 +117,9 @@ export class LocalMailboxAdapter implements ProviderAdapter {
     if (!context.snapshot.stagingPath) throw new Error('Prepare the request inputs before dispatching.');
     const name = `session-${this.now().replace(/[^0-9A-Za-z]/g, '')}-${randomUUID()}`;
     const dir = path.join(this.sessionsRoot(), name);
+    // Create the session directory before any input copy: a zero-input snapshot still gets
+    // a real packet directory for packet.json and the result contract.
+    mkdirSync(dir, { recursive: true });
     const files: { path: string; sha256: string; bytes: number }[] = [];
     for (const file of context.snapshot.files) {
       if (!safeEntry(file.path)) throw new Error(`The prepared snapshot declares an unsafe member name: ${file.path}`);
@@ -93,8 +145,10 @@ export class LocalMailboxAdapter implements ProviderAdapter {
       payload: context.payload.text,
       createdAt: this.now(),
       files,
+      contract: CONTRACT_FILE,
     };
     writeFileSync(path.join(dir, PACKET_FILE), `${JSON.stringify(packet, null, 2)}\n`);
+    writeFileSync(path.join(dir, CONTRACT_FILE), resultContract());
     return {
       externalId: name,
       externalUrl: '',
@@ -234,7 +288,7 @@ export class LocalMailboxAdapter implements ProviderAdapter {
         ...scope, operation: 'TOOL_CONFINEMENT',
         detail: 'Scoped workspace delivery: the session received only the packet directory.',
         confinement: {
-          tools: 'packet contents only: packet.json plus declared snapshot inputs',
+          tools: 'packet contents only: packet.json, the result contract and declared snapshot inputs',
           filesystem: 'one dedicated session directory under the workspace sessions root',
           network: 'not restricted by the office; the packet declares what the session may read',
           environment: 'user-launched official CLI session on this machine',
