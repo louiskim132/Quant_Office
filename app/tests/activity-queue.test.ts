@@ -135,6 +135,27 @@ test('queue filters and their counts describe the same scope',async t=>{
  assert.equal(queueScope(state,{search:'nothing here'}).counts.all,0);
 });
 
+test('a canceled request with an unresolved job stays in the queue, and removal keeps its rows resolvable',async t=>{
+ const f=await fixture(t);
+ const {assignment}=f.controller.prepare({requestId:f.alphaRequest.id,agentId:f.worker.id,snapshotId:f.snapshot.id});
+ await f.controller.dispatch(assignment.id);
+ // Canceling the request is office bookkeeping; the provider-side outcome is still unknown.
+ const canceled=f.store.execute({type:'request.cancel',idempotencyKey:key(),requestId:f.alphaRequest.id,expectedRevision:f.alphaRequest.revision});
+ const openEntry=queueScope(canceled).entries.find(e=>e.id===f.alphaRequest.id)!;
+ assert.equal(openEntry.status,'CANCELED');
+ assert.equal(openEntry.active,true,'an unresolved provider outcome keeps the row in view');
+ assert.equal(openEntry.deletable,false,'and the row cannot leave the queue before reconciliation');
+ // Settle the job, archive, then remove the project: the retained record still resolves its name.
+ const job=f.store.snapshot({history:false}).jobs![0];
+ f.store.recordJobTransition({jobId:job.id,expectedRevision:job.revision,to:'COMPLETED',evidence:'PROVIDER_REPORTED',detail:'Done.',outputs:[{path:'out/result.json',sha256:'a'.repeat(64),bytes:1}],at:at(3)});
+ f.store.execute({type:'project.archive',idempotencyKey:key(),projectId:f.alpha.id,archived:true});
+ const removed=f.store.execute({type:'project.delete',idempotencyKey:key(),projectId:f.alpha.id});
+ assert.ok(removed.projects.find(p=>p.id===f.alpha.id)!.removedAt);
+ const entry=queueScope(removed).entries.find(e=>e.id===f.alphaRequest.id);
+ assert.ok(entry,'the canceled row is not hidden by removing its project');
+ assert.equal(removed.projects.find(p=>p.id===f.alpha.id)?.name,'Alpha','the retained project record still resolves the row name');
+});
+
 test('team filters follow membership, and lifecycle filtering keeps scope counts intact',async t=>{
  const f=await fixture(t);
  const team=f.store.execute({type:'team.create',idempotencyKey:key(),name:'Alpha desk',projectId:f.alpha.id}).teams![0];
