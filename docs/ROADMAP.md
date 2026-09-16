@@ -2893,3 +2893,24 @@ removal — so agent.delete mirrors project.delete: archived-only,
 refused while any of the agent's assignments carries an
 unresolved provider job, records retained; a Removed membership
 filter exposes them and restore lands archived. 509/509 unit.
+
+2026-09-16 (round pilot-ux3) — orphaned-job round landed on
+31d21e1. The pilot found canceling a request (or archiving its
+project) unmounted the dispatch card and stranded any unresolved
+provider job, which then wedged request, agent and project
+removal. Organizer prerequisites (0afb6c1): the OpenAI curated
+suggestion list gained gpt-6-astra and dropped deprecated
+codex-suffixed 5.x entries per model-catalogs.md, and a
+too-new-store startup failure now explains itself instead of
+dumping schema issues. Worker packets integrated: RequestDispatch
+mounts whenever a job awaits reconciliation and a closed flag
+gates every dispatch-initiation control while Observe, job
+cancel and the UNKNOWN link-session form stay reachable; the
+hardcoded 'No provider job submitted' copy now derives from real
+job and review state (e8afaf4); a Codex model/list failure
+degrades to an honest catalog-unavailable note without failing
+the verified account check or shipping a truncated catalog
+(6825637); workflow.md documents the reconcile-reachability
+contract and the three-entity removal matrix (c72334f).
+Combined verification at 31d21e1: typecheck clean, 511/511 unit,
+build clean, desktop e2e green.
