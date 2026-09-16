@@ -103,6 +103,12 @@ const capabilitySchema=z.object({id,provider:providerEnum,connectionId:id,identi
 export const observationSchema=connectionSchema.omit({id:true,revision:true,firstSeenAt:true,lastCheckedAt:true})
   .merge(capabilitySchema.pick({toolVersion:true,transport:true,environment:true,models:true,operations:true,source:true}))
   .extend({observedAt:timestamp}).strict();
+/**
+ * Office-observed evidence about a local transport, bound to the durable connection it was taken
+ * under. The caller names the connection, the route and the scope the batch ran under; the provider,
+ * identity, tool version and catalog are always taken from the recorded account, never from input.
+ */
+const transportEvidenceSchema=z.object({connectionId:id,route:routeEnum,environment:secretFree(200),model:secretFree(160).optional(),effort:effortSchema.optional(),delegation:z.boolean().optional(),operations:z.array(evidenceSchema).min(1).max(64),source:secretFree(1000),observedAt:timestamp}).strict();
 const relativePath=z.string().min(1).max(1000)
   .refine(value=>!/^([a-zA-Z]:|[\\/])/.test(value),'Selected files are recorded relative to the project folder')
   .refine(value=>!value.split(/[\\/]/).some(part=>part==='..'||part==='.'||part===''),'Selected file paths cannot traverse directories')
@@ -1935,6 +1941,60 @@ export class OfficeStore {
       if(record.redundant)return;
       this.append(state,record.changes,{kind:record.capabilityChanged?'PROVIDER_CAPABILITY_OBSERVED':'ACCOUNT_CONNECTION_OBSERVED',projectId:null,experimentId:null,
         reason:`${observation.provider} account ${observation.state.toLowerCase().replace('_',' ')}${observation.identity?` as ${observation.identity}`:''}; ${record.capabilityChanged?'new capability snapshot recorded':'capabilities unchanged'}. Sign-in alone does not make work runnable.`},null);
+    });
+  }
+  /**
+   * Records transport-operation evidence the office itself observed on a local route.
+   *
+   * This is the local-session evidence bootstrap: the office writes the packet or spawns the child
+   * itself, so what it records is its own observation — never a provider attestation. Provider,
+   * identity, tool version and catalog come from the durable connection and its newest snapshot,
+   * never from the caller. The merged operation list becomes one more immutable capability
+   * snapshot; the connection record itself is untouched, and a re-recording of identical evidence
+   * appends only the history event.
+   */
+  recordTransportEvidence(input:unknown):AppState {
+    const record=transportEvidenceSchema.parse(input);
+    // Hosted-route evidence is recorded through provider observation; this path is local only.
+    if(!record.route.startsWith('LOCAL_'))throw new Error('Hosted-route evidence is recorded through provider observation, not this path.');
+    // An office observation can attest that the office exercised a transport, never that the
+    // provider's account verified it. Attestation levels belong to provider observation.
+    for(const entry of record.operations)if(entry.level==='ACCOUNT_VERIFIED')throw new Error('ACCOUNT_VERIFIED cannot be recorded through the office-observed transport path.');
+    return this.transaction(()=>{
+      const state=this.readProjection();
+      const connection=(state.connections??[]).find(item=>item.id===record.connectionId);
+      if(!connection)throw new Error('That connection was never recorded; observe the provider account first.');
+      const latest=(state.capabilities??[]).filter(item=>item.connectionId===connection.id).at(-1);
+      if(!latest)throw new Error('Transport evidence requires a prior account observation for this connection.');
+      // Every entry's route is the one the office actually exercised; caller-supplied route labels
+      // could otherwise claim a transport this path never touched. Model, effort and delegation
+      // fall back to the batch scope, the conditions the batch was genuinely taken under. A field
+      // left undeclared stays absent — an explicit undefined would not survive canonical hashing.
+      const incoming=record.operations.map(entry=>{
+        const stamped:z.infer<typeof evidenceSchema>={...entry,route:record.route};
+        if(stamped.model===undefined&&record.model!==undefined)stamped.model=record.model;
+        if(stamped.effort===undefined&&record.effort!==undefined)stamped.effort=record.effort;
+        if(stamped.delegation===undefined&&record.delegation!==undefined)stamped.delegation=record.delegation;
+        return evidenceSchema.parse(stamped);
+      });
+      // Same scope key supersedes; a field an entry does not declare is a distinct scope, never a wildcard.
+      const scopeKey=(entry:z.infer<typeof evidenceSchema>)=>JSON.stringify([entry.operation,entry.route,entry.model,entry.environment,entry.effort,entry.delegation]);
+      const superseded=new Set(incoming.map(scopeKey));
+      const merged=[...latest.operations.filter(entry=>!superseded.has(scopeKey(entry))),...incoming];
+      if(merged.length>64)throw new Error('Merging this evidence would exceed the 64-operation snapshot limit.');
+      // Local routes are themselves transport kinds; any other route runs in the official terminal.
+      const transport:ProviderCapabilitySnapshot['transport']=record.route.startsWith('LOCAL_')?capabilitySchema.shape.transport.parse(record.route):'OFFICIAL_CLI_TERMINAL';
+      const {provider,identity}=connection;
+      const {toolVersion,models}=latest;
+      const environment=record.environment,source=record.source,operations=merged;
+      const contentHash=canonicalHash({provider,identity,toolVersion,transport,environment,models,operations,source});
+      // Snapshots are immutable; identical evidence earns a history entry, not a duplicate row.
+      const capabilityChanged=latest.contentHash!==contentHash;
+      const changes:Change[]=capabilityChanged?[{collection:'capabilities',value:capabilitySchema.parse({
+        id:randomUUID(),provider,connectionId:connection.id,identity,toolVersion,transport,environment,models,operations,source,contentHash,observedAt:record.observedAt,
+      } satisfies ProviderCapabilitySnapshot)}]:[];
+      this.append(state,changes,{kind:'TRANSPORT_EVIDENCE_RECORDED',projectId:null,experimentId:null,
+        reason:`Office-observed transport evidence for ${provider} via ${record.route.toLowerCase().replaceAll('_',' ')}: ${incoming.map(entry=>entry.operation.toLowerCase().replaceAll('_',' ')).join(', ')}; ${capabilityChanged?'new capability snapshot recorded':'capabilities unchanged'}. Office observation is not provider attestation.`},null);
     });
   }
   /**

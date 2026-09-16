@@ -53,7 +53,7 @@ function fixture(t: test.TestContext) {
 }
 
 /** Simulates the user-launched session: write the declared output bytes, then the result receipt. */
-function report(dir: string, result: { state: string; detail: string; outputs: { path: string; sha256: string; bytes: number }[] }, files: Record<string, string>) {
+function report(dir: string, result: { state: string; detail: string; outputs: { path: string; sha256: string; bytes: number }[]; appliedModel?: string; appliedEffort?: string; delegation?: boolean }, files: Record<string, string>) {
   for (const [name, text] of Object.entries(files)) {
     const target = path.join(dir, name);
     mkdirSync(path.dirname(target), { recursive: true });
@@ -197,4 +197,156 @@ test('cancel without a session directory cannot acknowledge anything', async t =
   const result = await f.adapter.cancel(f.job('not-created'));
   assert.equal(result.acknowledged, false);
   assert.equal(existsSync(path.join(f.sessions, 'not-created', CANCEL_FILE)), false);
+});
+
+test('a session self-report of applied model, effort and delegation surfaces through applied', async t => {
+  const f = fixture(t);
+  const { externalId } = await f.adapter.submit(f.context);
+  const dir = path.join(f.sessions, externalId);
+  const output = { path: 'out/summary.json', sha256: sha('{"summary":"done"}'), bytes: Buffer.byteLength('{"summary":"done"}') };
+  report(dir, { state: 'COMPLETED', detail: 'The local session finished.', outputs: [output], appliedModel: 'devin-local-7', appliedEffort: 'high', delegation: false }, { 'out/summary.json': '{"summary":"done"}' });
+  const result = await f.adapter.observe(f.job(externalId));
+  assert.equal(result.state, 'COMPLETED');
+  assert.equal(result.provenance, 'PROVIDER_REPORTED');
+  const applied = (result as { applied?: { model?: string; effort?: string; delegation?: boolean } }).applied;
+  assert.deepEqual(applied, { model: 'devin-local-7', effort: 'high', delegation: false });
+});
+
+test('a partial self-report surfaces only what the receipt declared', async t => {
+  const f = fixture(t);
+  const { externalId } = await f.adapter.submit(f.context);
+  const dir = path.join(f.sessions, externalId);
+  report(dir, { state: 'COMPLETED', detail: 'Done.', outputs: [], delegation: true }, {});
+  const result = await f.adapter.observe(f.job(externalId));
+  assert.deepEqual((result as { applied?: unknown }).applied, { delegation: true });
+  report(dir, { state: 'COMPLETED', detail: 'Done.', outputs: [] }, {});
+  const silent = await f.adapter.observe(f.job(externalId));
+  assert.equal((silent as { applied?: unknown }).applied, undefined, 'no self-report means no applied record at all');
+});
+
+test('a receipt carrying any key outside the contract is still a defect', async t => {
+  const f = fixture(t);
+  const { externalId } = await f.adapter.submit(f.context);
+  const dir = path.join(f.sessions, externalId);
+  writeFileSync(path.join(dir, RESULT_FILE), JSON.stringify({ state: 'COMPLETED', detail: 'Claimed.', outputs: [], appliedModel: 'devin-local-7', sneaky: true }));
+  const result = await f.adapter.observe(f.job(externalId));
+  assert.equal(result.state, 'UNKNOWN');
+  assert.equal(result.provenance, 'OFFICE_LOCAL');
+  assert.match(result.detail, /exactly state, detail and outputs/);
+});
+
+test('a malformed self-report is a defect, not a value to carry', async t => {
+  const f = fixture(t);
+  const { externalId } = await f.adapter.submit(f.context);
+  const dir = path.join(f.sessions, externalId);
+  const resultPath = path.join(dir, RESULT_FILE);
+  writeFileSync(resultPath, JSON.stringify({ state: 'COMPLETED', detail: 'x', outputs: [], appliedEffort: 'ludicrous' }));
+  let result = await f.adapter.observe(f.job(externalId));
+  assert.equal(result.state, 'UNKNOWN');
+  assert.match(result.detail, /appliedEffort .*not one of/);
+  writeFileSync(resultPath, JSON.stringify({ state: 'COMPLETED', detail: 'x', outputs: [], appliedModel: 42 }));
+  result = await f.adapter.observe(f.job(externalId));
+  assert.equal(result.state, 'UNKNOWN');
+  assert.match(result.detail, /appliedModel must be a string/);
+  writeFileSync(resultPath, JSON.stringify({ state: 'COMPLETED', detail: 'x', outputs: [], delegation: 'no' }));
+  result = await f.adapter.observe(f.job(externalId));
+  assert.equal(result.state, 'UNKNOWN');
+  assert.match(result.detail, /delegation must be a boolean/);
+});
+
+test('submitEvidence records office-observed packet delivery, scoped confinement and no delegation channel', async t => {
+  const f = fixture(t);
+  const submitted = await f.adapter.submit(f.context);
+  const entries = f.adapter.submitEvidence(f.context, submitted);
+  assert.deepEqual(entries.map(entry => entry.operation), ['LOCAL_SUBMIT', 'TOOL_CONFINEMENT', 'DELEGATION_CONTROL']);
+  for (const entry of entries) {
+    assert.equal(entry.level, 'TOOL_SUPPORTED');
+    assert.equal(entry.evidence, 'OBSERVED');
+    assert.equal(entry.route, 'LOCAL_MAILBOX');
+    assert.equal(entry.environment, 'LOCAL_MACHINE');
+    assert.equal(entry.source, 'office-local-mailbox@1');
+    assert.equal(entry.verifiedAt, at(1));
+  }
+  assert.match(entries[0].detail, /Office-observed, not provider attestation/);
+  const confinement = entries[1].confinement!;
+  assert.match(confinement.filesystem, /dedicated session directory/);
+  assert.match(confinement.network, /not restricted/);
+  assert.equal(entries[2].delegation, false);
+  // The packet declares what was requested; nothing about what was applied is claimed at submit.
+  assert.ok(entries.every(entry => entry.operation !== 'MODEL_APPLICATION' && entry.operation !== 'EFFORT_APPLICATION'));
+  assert.ok(entries.every(entry => entry.model === undefined && entry.effort === undefined));
+});
+
+test('observeEvidence records the verified read and only the self-reports the receipt declared', async t => {
+  const f = fixture(t);
+  const { externalId } = await f.adapter.submit(f.context);
+  const dir = path.join(f.sessions, externalId);
+  const output = { path: 'out/summary.json', sha256: sha('{"summary":"done"}'), bytes: Buffer.byteLength('{"summary":"done"}') };
+  report(dir, { state: 'COMPLETED', detail: 'Done.', outputs: [output], appliedModel: 'devin-local-7', appliedEffort: 'high', delegation: false }, { 'out/summary.json': '{"summary":"done"}' });
+  const job = f.job(externalId);
+  const entries = f.adapter.observeEvidence(job, await f.adapter.observe(job));
+  assert.deepEqual(entries.map(entry => entry.operation), ['LOCAL_OBSERVE', 'LOCAL_OUTPUT_FETCH', 'MODEL_APPLICATION', 'EFFORT_APPLICATION', 'DELEGATION_CONTROL']);
+  for (const entry of entries) {
+    assert.equal(entry.level, 'TOOL_SUPPORTED');
+    assert.equal(entry.evidence, 'OBSERVED');
+    assert.equal(entry.route, 'LOCAL_MAILBOX');
+    assert.equal(entry.environment, 'LOCAL_MACHINE');
+    assert.equal(entry.source, 'office-local-mailbox@1');
+    assert.equal(entry.verifiedAt, at(1));
+  }
+  assert.match(entries[0].detail, /session's own result\.json/);
+  assert.match(entries[1].detail, /1 declared output file/);
+  const model = entries.find(entry => entry.operation === 'MODEL_APPLICATION')!;
+  assert.equal(model.model, 'devin-local-7');
+  assert.match(model.detail, /self-report/);
+  assert.match(model.detail, /not provider attestation/);
+  const effort = entries.find(entry => entry.operation === 'EFFORT_APPLICATION')!;
+  assert.equal(effort.effort, 'high');
+  assert.match(effort.detail, /self-report/);
+  assert.equal(entries.find(entry => entry.operation === 'DELEGATION_CONTROL')!.delegation, false);
+});
+
+test('observeEvidence without declared self-reports carries no model, effort or delegation record', async t => {
+  const f = fixture(t);
+  const { externalId } = await f.adapter.submit(f.context);
+  const dir = path.join(f.sessions, externalId);
+  report(dir, { state: 'RUNNING', detail: 'Working.', outputs: [] }, {});
+  const job = f.job(externalId);
+  const entries = f.adapter.observeEvidence(job, await f.adapter.observe(job));
+  assert.deepEqual(entries.map(entry => entry.operation), ['LOCAL_OBSERVE']);
+});
+
+test('observeEvidence produces nothing for an unverified or silent session', async t => {
+  const f = fixture(t);
+  const { externalId } = await f.adapter.submit(f.context);
+  const job = f.job(externalId);
+  const silent = await f.adapter.observe(job);
+  assert.equal(silent.state, 'UNKNOWN');
+  assert.deepEqual(f.adapter.observeEvidence(job, silent), []);
+  // A receipt the office could not trust is not a session observation either.
+  const dir = path.join(f.sessions, externalId);
+  writeFileSync(path.join(dir, RESULT_FILE), JSON.stringify({ state: 'COMPLETED', detail: 'x', outputs: [{ path: 'ghost', sha256: sha('y'), bytes: 1 }] }));
+  const untrusted = await f.adapter.observe(job);
+  assert.equal(untrusted.state, 'UNKNOWN');
+  assert.deepEqual(f.adapter.observeEvidence(job, untrusted), []);
+});
+
+test('cancelEvidence records an office-observed local end, never a provider acknowledgement', async t => {
+  const f = fixture(t);
+  const { externalId } = await f.adapter.submit(f.context);
+  const job = f.job(externalId);
+  assert.deepEqual(f.adapter.cancelEvidence(job), [], 'no sentinel on disk means nothing was ended');
+  await f.adapter.cancel(job);
+  const entries = f.adapter.cancelEvidence(job);
+  assert.equal(entries.length, 1);
+  const [entry] = entries;
+  assert.equal(entry.operation, 'LOCAL_CANCEL');
+  assert.equal(entry.level, 'TOOL_SUPPORTED');
+  assert.equal(entry.evidence, 'OBSERVED');
+  assert.equal(entry.route, 'LOCAL_MAILBOX');
+  assert.equal(entry.environment, 'LOCAL_MACHINE');
+  assert.equal(entry.source, 'office-local-mailbox@1');
+  assert.equal(entry.verifiedAt, at(1));
+  assert.match(entry.detail, /real cancellation/);
+  assert.match(entry.detail, /not a provider acknowledgement/);
 });

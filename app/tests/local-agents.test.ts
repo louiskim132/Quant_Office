@@ -152,17 +152,19 @@ test('a local-mailbox assignment is gated on local-session evidence; hosted evid
   assert.equal(local.submits, 0);
 
   // Re-preparing freezes the local capability, so the local scope is then fully satisfied — and
-  // dispatch still stops, at the hosted-execution guard. The boundary is the execution environment
-  // itself: no volume of local-session evidence turns a recorded route into a provider-hosted launch.
+  // dispatch proceeds through the local guard. Office-observed evidence is the local ceiling; what
+  // changed is which environment answers for the scope, never who vouches for it.
   f.controller.discardPreparation(prepared.assignment.id);
   const relaunched = f.controller.prepare({ requestId: f.request.id, agentId: f.agent.id, snapshotId: f.snapshot.id });
   assert.equal(relaunched.assignment.route, 'LOCAL_MAILBOX');
   assert.notEqual(relaunched.assignment.capabilitySnapshotId, prepared.assignment.capabilitySnapshotId);
   state = f.store.snapshot({ history: false });
   assert.deepEqual(scopeMismatches(state, requestedScope('LOCAL_MAILBOX', 'office-local'), { now: ms(1) }), []);
-  await assert.rejects(f.controller.dispatch(relaunched.assignment.id), /provider-hosted execution is allowed; no local/);
-  assert.equal(local.submits, 0);
-  assert.equal(f.job(relaunched.assignment.id).state, 'INTENT');
+  await f.controller.dispatch(relaunched.assignment.id);
+  assert.equal(local.submits, 1, 'the local adapter received the submission once its own family was satisfied');
+  assert.equal(f.job(relaunched.assignment.id).state, 'UNKNOWN',
+    'a packet delivery is submitted, not accepted — nothing has run until a session reports');
+  assert.equal(f.job(relaunched.assignment.id).externalId, 'session_fixture_1');
 });
 
 test('local-session evidence satisfies only the local scope; a hosted route still requires the cloud family', async t => {
@@ -176,16 +178,15 @@ test('local-session evidence satisfies only the local scope; a hosted route stil
       : ref.route === 'LOCAL_MAILBOX' ? local : ref.route === 'OFFICIAL_TERMINAL_HANDOFF' ? handoff : undefined,
   });
   const state = f.store.snapshot({ history: false });
-  // The office's own local evidence is visible to the check and still unverified at its honest
-  // level, so even the local scope reports it rather than treating it as proof.
+  // The office's own local evidence satisfies the local scope at its honest level: office-observed
+  // TOOL_SUPPORTED is the ceiling for work the office itself performs, never provider attestation.
   const localProblems = scopeMismatches(state, requestedScope('LOCAL_MAILBOX', 'office-local'), { now: ms(1) });
-  assert.ok(localProblems.length > 0);
-  assert.ok(localProblems.every(problem => /tool supported, observed/.test(problem)));
+  assert.deepEqual(localProblems, []);
   // The hosted route's family holds nothing at all — the local records are not consulted for it.
   const handoffProblems = scopeMismatches(state, requestedScope('OFFICIAL_TERMINAL_HANDOFF', 'office-local'), { now: ms(1) });
   assert.ok(handoffProblems.length > 0);
   assert.ok(handoffProblems.every(problem => /no evidence recorded for these conditions/.test(problem)));
-  assert.equal(providerReadiness(state, 'claude', { now: ms(1), route: 'LOCAL_MAILBOX', model: 'opus' }).dispatchChecked, false);
+  assert.equal(providerReadiness(state, 'claude', { now: ms(1), route: 'LOCAL_MAILBOX', model: 'opus' }).dispatchChecked, true);
   assert.equal(providerReadiness(state, 'claude', { now: ms(1), route: 'OFFICIAL_TERMINAL_HANDOFF', model: 'opus' }).dispatchChecked, false);
 
   // A hosted-route assignment under local-only evidence cannot start: the cloud family is unverified.
@@ -198,8 +199,8 @@ test('local-session evidence satisfies only the local scope; a hosted route stil
   assert.equal(handoff.submits, 0);
   assert.equal(f.job(prepared.assignment.id).state, 'INTENT');
 
-  // A LOCAL agent under the same records is gated on the office-observed local transport evidence,
-  // which at TOOL_SUPPORTED never verifies — so a local launch is honestly blocked too.
+  // A LOCAL agent under the same records is satisfied by the office-observed local transport
+  // evidence — the local family answers at its honest ceiling, and the local adapter receives it.
   const localAgent: Agent = { id: randomUUID(), name: 'Local worker', provider: 'claude', model: 'opus', team: 'Research', role: 'WORKER',
     instructions: '', effort: 'default', account: 'researcher@example.com', createdAt: at(0), connectionVerifiedAt: at(0), execution: 'LOCAL' };
   f.store.confirmAgentBinding({ observation: localObservation(0), agent: localAgent });
@@ -208,10 +209,11 @@ test('local-session evidence satisfies only the local scope; a hosted route stil
   const preparedLocal = f.controller.prepare({ requestId: work.request.id, agentId: localAgent.id, snapshotId: work.snapshot.id });
   assert.equal(preparedLocal.assignment.route, 'LOCAL_MAILBOX');
   const localGate = agentDispatchReadiness(f.store.snapshot({ history: false }), f.storedAgent(localAgent.id), { now: ms(1) });
-  assert.equal(localGate.canStart, false);
-  assert.ok(localGate.blockers.some(blocker => /local session submission/.test(blocker)));
-  await assert.rejects(f.controller.dispatch(preparedLocal.assignment.id), /Automatic start is blocked/);
-  assert.equal(local.submits, 0);
+  assert.equal(localGate.canStart, true);
+  await f.controller.dispatch(preparedLocal.assignment.id);
+  assert.equal(local.submits, 1);
+  assert.equal(f.job(preparedLocal.assignment.id).state, 'UNKNOWN');
+  assert.equal(f.job(preparedLocal.assignment.id).externalId, 'session_fixture_1');
 });
 
 test('a resolver miss is a hard failure at every use; nothing falls back or fabricates an outcome', async t => {

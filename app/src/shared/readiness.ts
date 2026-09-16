@@ -69,7 +69,7 @@ export function scopeMismatches(state: Records, scope: RequestedScope, options: 
     if (operation === 'DELEGATION_CONTROL') scoped.delegation = scope.delegation;
     const evidence = effectiveEvidence(state, connection, operation, scoped);
     if (evidence) supplying.add(evidence.snapshotId);
-    if (!verified(evidence)) {
+    if (!verified(evidence, scope.route.startsWith('LOCAL_'))) {
       problems.push(`Unverified ${LABEL[operation]} for this exact scope: ${evidence ? (evidence.impossible ? `evidence is dated after the moment it is being checked at (${evidence.verifiedAt})` : evidence.expired ? `evidence expired (checked ${evidence.verifiedAt})` : `${evidence.level.toLowerCase().replaceAll('_', ' ')}, ${evidence.evidence.toLowerCase()}`) : 'no evidence recorded for these conditions'}.`);
       continue;
     }
@@ -175,10 +175,16 @@ export function effectiveEvidence(state: Records, connection: AccountConnection,
   };
 }
 
-/** An operation counts as usable only when it was observed for this exact scope and has not expired. */
-function verified(evidence: EffectiveEvidence | undefined): boolean {
-  return Boolean(evidence && evidence.level === 'ACCOUNT_VERIFIED' && evidence.evidence === 'OBSERVED'
-    && !evidence.expired && !evidence.impossible);
+/**
+ * An operation counts as usable only when it was observed for this exact scope and has not expired.
+ * For local scopes the office itself is the observing authority — it writes the packet, reads the
+ * receipt and lands the sentinel — so office-observed TOOL_SUPPORTED is the local ceiling. Hosted
+ * scopes keep requiring provider-side ACCOUNT_VERIFIED attestation, and the two families share no
+ * operations, so office testimony can never stand in for a provider's.
+ */
+function verified(evidence: EffectiveEvidence | undefined, local = false): boolean {
+  return Boolean(evidence && evidence.evidence === 'OBSERVED' && !evidence.expired && !evidence.impossible
+    && (evidence.level === 'ACCOUNT_VERIFIED' || (local && evidence.level === 'TOOL_SUPPORTED')));
 }
 
 /**
@@ -230,7 +236,10 @@ export function providerReadiness(state: Records, provider: Provider, options: O
   // It is only ever read for the message; `has` below stays strictly scoped.
   const described = new Map((connection ? REPORTED.map(operation => effectiveEvidence(state, connection, operation, { now }))
     .filter((item): item is EffectiveEvidence => Boolean(item)) : []).map(item => [item.operation, item]));
-  const has = (operation: CapabilityOperation) => verified(found.get(operation));
+  // The verification bar follows the requested family: an explicit route is the ground truth,
+  // otherwise the execution environment chooses. A route's family never relaxes for the other one.
+  const localScope = options.route ? options.route.startsWith('LOCAL_') : options.execution === 'LOCAL';
+  const has = (operation: CapabilityOperation) => verified(found.get(operation), localScope);
 
   const signedIn = connection?.state === 'SIGNED_IN' && has('ACCOUNT_STATUS');
   const accountFresh = Boolean(connection && now - Date.parse(connection.lastCheckedAt) <= ACCOUNT_STALE_MS);

@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import type { AdapterRoute, Agent, Assignment, AppState, Effort, InputSnapshot, JobEvent, JobOutput, Provider, ProviderJob } from '../shared/types.js';
+import type { AdapterRoute, Agent, Assignment, AppState, CapabilityEvidence, Effort, InputSnapshot, JobEvent, JobOutput, Provider, ProviderJob } from '../shared/types.js';
 import { canonicalHash } from '../core/canonical.js';
 import { isTerminalJob, reconciliationPlan } from '../core/jobs.js';
-import { assertHostedExecution, assertWorkerCapacity } from '../core/guards.js';
+import { assertHostedExecution, assertLocalExecution, assertWorkerCapacity } from '../core/guards.js';
 import type { OfficeStore } from '../core/store.js';
 import { agentDispatchReadiness, currentConnection, effectiveEvidence, latestCapability, scopeMismatches, supplyingSnapshotIds, type RequestedScope } from '../shared/readiness.js';
 import { dependencyStatus } from '../shared/cooperation.js';
@@ -61,6 +61,11 @@ export interface ObserveResult {
    * between evidence and silence. Defaults to local for UNKNOWN, which is the safe reading.
    */
   provenance?: 'PROVIDER_REPORTED' | 'OFFICE_LOCAL';
+  /**
+   * Self-reported applied facts a verified receipt declared — what the session says it ran, not
+   * what the office asked for. Absent keys mean the tool said nothing; they are never inferred.
+   */
+  applied?: { model?: string; effort?: Effort; delegation?: boolean };
 }
 
 /** Fetches the bytes an output claims to be, so a deliverable is never certified by a hash alone. */
@@ -84,6 +89,17 @@ export interface ProviderAdapter {
   submit(context: SubmitContext): Promise<SubmitResult>;
   observe(job: ProviderJob): Promise<ObserveResult>;
   cancel(job: ProviderJob): Promise<{ acknowledged: boolean; detail: string }>;
+  /**
+   * Office-observed evidence from a completed local operation. Only local-route adapters implement
+   * these; what they return is the office's own testimony about work it performed — the caller
+   * scopes it to the recorded route and request, and it is never provider attestation. Returning
+   * no entries records nothing.
+   */
+  submitEvidence?(context: SubmitContext, result: SubmitResult): CapabilityEvidence[];
+  observeEvidence?(job: ProviderJob, result: ObserveResult): CapabilityEvidence[];
+  cancelEvidence?(job: ProviderJob): CapabilityEvidence[];
+  /** Reads bytes for an output this route verifies itself, when the office has no fetcher for it. */
+  fetch?(job: ProviderJob, output: { path: string; sha256: string; bytes: number }): Promise<Uint8Array>;
 }
 
 /** Everything one external action needs, gathered and validated together by `launchGuard`. */
@@ -143,6 +159,33 @@ export class AssignmentController {
     const adapter = this.adapters(ref);
     if (!adapter) throw new Error(`No adapter is configured for ${ref.route ? `the ${ref.route.toLowerCase().replaceAll('_', ' ')} route` : `${ref.agent?.provider ?? 'this provider'} work`}. Configure a supported route or use a handoff.`);
     return adapter;
+  }
+
+  /**
+   * Persists office-observed transport evidence for a local route. The connection and the model the
+   * evidence answers for come from the recorded assignment and its bound snapshot — never from
+   * adapter-supplied identity — and the route stamped on every entry is the job's recorded one.
+   * A recording failure is reported on the job rather than corrupting the outcome it describes:
+   * the operation the evidence would describe genuinely happened.
+   */
+  private noteLocalEvidence(job: ProviderJob, entries: CapabilityEvidence[]): void {
+    if (!entries.length || !job.route.startsWith('LOCAL_')) return;
+    try {
+      const state = this.store.snapshot({ history: false });
+      const assignment = (state.assignments ?? []).find(item => item.id === job.assignmentId);
+      const capability = assignment ? (state.capabilities ?? []).find(item => item.id === assignment.capabilitySnapshotId) : undefined;
+      const connection = capability ? (state.connections ?? []).find(item => item.id === capability.connectionId) : undefined;
+      if (!assignment || !connection) return;
+      this.store.recordTransportEvidence({
+        connectionId: connection.id, route: job.route, environment: 'LOCAL_MACHINE',
+        model: assignment.requestedModel, operations: entries,
+        source: 'office-local-transport', observedAt: this.now(),
+      });
+    } catch (error) {
+      this.store.recordJobEvents(job.id, [{ externalId: `transport-evidence:${job.revision}:${Date.parse(this.now())}`, cursor: '', kind: 'STATUS',
+        text: `Office-observed transport evidence could not be recorded: ${error instanceof Error ? error.message : 'unknown error'}`,
+        occurredAt: this.now(), receivedAt: this.now(), evidence: 'OFFICE_LOCAL' }]);
+    }
   }
 
   /** Freezes the exact inputs for one request and records the intent to submit. */
@@ -386,17 +429,27 @@ export class AssignmentController {
       now, model: scope.model, environment: scope.environment, route: scope.route,
     });
     const policy = confinement?.confinement;
-    const toolsConfined = Boolean(confinement && confinement.level === 'ACCOUNT_VERIFIED' && confinement.evidence === 'OBSERVED'
+    const localRoute = assignment.route.startsWith('LOCAL_');
+    // The confinement level bar follows the route family: the office is the observing authority for
+    // local delivery, so TOOL_SUPPORTED is its ceiling, exactly as the scope check already applied.
+    const levelOk = confinement && (confinement.level === 'ACCOUNT_VERIFIED' || (localRoute && confinement.level === 'TOOL_SUPPORTED'));
+    const toolsConfined = Boolean(confinement && levelOk && confinement.evidence === 'OBSERVED'
       && !confinement.expired && !confinement.impossible
       && policy && policy.tools.trim() && policy.filesystem.trim() && policy.network.trim() && policy.environment.trim());
-    assertHostedExecution({
-      provider: agent.provider === 'claude' ? 'ANTHROPIC' : 'OPENAI',
-      location: capability?.environment === 'anthropic-managed' ? 'PROVIDER_HOSTED' : 'UNVERIFIED',
-      constrainedTools: toolsConfined,
-      // Every permitted route submits to provider-hosted infrastructure; the office never runs research locally.
-      colabAccess: false,
-      localExecution: false,
-    });
+    if (localRoute) {
+      // A local route runs only under office-observed scoped delivery — honestly labeled, never a
+      // claim of enforced isolation or provider attestation.
+      assertLocalExecution({ constrainedTools: toolsConfined, colabAccess: false });
+    } else {
+      assertHostedExecution({
+        provider: agent.provider === 'claude' ? 'ANTHROPIC' : 'OPENAI',
+        location: capability?.environment === 'anthropic-managed' ? 'PROVIDER_HOSTED' : 'UNVERIFIED',
+        constrainedTools: toolsConfined,
+        // Every permitted route submits to provider-hosted infrastructure; the office never runs research locally.
+        colabAccess: false,
+        localExecution: false,
+      });
+    }
     // Every open job in the workspace counts against capacity, including this one.
     assertWorkerCapacity((state.jobs ?? []).map(job => ({ id: job.id, state: job.state === 'INTENT' ? 'RESERVED' : job.state === 'SUBMITTING' ? 'SUBMITTED' : job.state === 'CANCEL_ACKNOWLEDGED' ? 'CANCELED_ACKNOWLEDGED' : job.state === 'ACCEPTED' ? 'SUBMITTED' : job.state })), 1);
     // The frozen bytes are re-checked against the staged tree and its commit immediately before the
@@ -414,13 +467,24 @@ export class AssignmentController {
     this.store.recordJobTransition({ jobId: job.id, expectedRevision: job.revision, to: 'SUBMITTING', evidence: 'OFFICE_LOCAL', detail: `Submitting through ${assignment.route}.`, at: this.now() });
     job = this.job(assignmentId);
     const adapter = this.adapterFor({ route: assignment.route });
+    const submitContext: SubmitContext = { assignment, snapshot: staged, objective: frozen.objective, requestName: frozen.requestName, payload: this.providerPayload(assignment) };
     try {
-      const result = await adapter.submit({ assignment, snapshot: staged, objective: frozen.objective, requestName: frozen.requestName, payload: this.providerPayload(assignment) });
+      const result = await adapter.submit(submitContext);
       if (!result.externalId) throw new UnknownDispatchError('The provider returned no identifier for this submission.');
-      return this.store.recordJobTransition({
-        jobId: job.id, expectedRevision: job.revision, to: 'ACCEPTED', evidence: 'PROVIDER_REPORTED',
-        detail: result.detail, externalId: result.externalId, externalUrl: result.externalUrl, at: this.now(),
-      });
+      // A local transport delivers into a mailbox the office owns; nothing has run or been accepted
+      // yet, so the honest record is the office's submission awaiting a session — never ACCEPTED.
+      const submitted = localRoute
+        ? this.store.recordJobTransition({
+          jobId: job.id, expectedRevision: job.revision, to: 'UNKNOWN', evidence: 'OFFICE_LOCAL',
+          detail: result.detail, externalId: result.externalId, externalUrl: result.externalUrl, at: this.now(),
+        })
+        : this.store.recordJobTransition({
+          jobId: job.id, expectedRevision: job.revision, to: 'ACCEPTED', evidence: 'PROVIDER_REPORTED',
+          detail: result.detail, externalId: result.externalId, externalUrl: result.externalUrl, at: this.now(),
+        });
+      // The office itself performed this delivery, so what it did is recorded as office evidence.
+      this.noteLocalEvidence(job, adapter.submitEvidence?.(submitContext, result) ?? []);
+      return submitted;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'The dispatch failed for an unknown reason.';
       // Any failure after the call started leaves the provider's view unknown, never "not submitted".
@@ -486,9 +550,16 @@ export class AssignmentController {
     this.store.recordJobTransition({ jobId: job.id, expectedRevision: job.revision, to: 'SUBMITTING', evidence: 'OFFICE_LOCAL', detail: 'Opening the official terminal for a manual submission.', at: this.now() });
     job = this.job(assignmentId);
     const adapter = this.adapterFor({ route: assignment.route });
+    const localRoute = assignment.route.startsWith('LOCAL_');
+    const submitContext: SubmitContext = { assignment, snapshot: staged, objective: frozen.objective, requestName: frozen.requestName, payload: this.providerPayload(assignment) };
     try {
-      const result = await adapter.submit({ assignment, snapshot: staged, objective: frozen.objective, requestName: frozen.requestName, payload: this.providerPayload(assignment) });
-      return this.store.recordJobTransition({ jobId: job.id, expectedRevision: job.revision, to: 'UNKNOWN', evidence: 'OFFICE_LOCAL', detail: result.detail, at: this.now() });
+      const result = await adapter.submit(submitContext);
+      // For a local transport the office knows the session identity it created; recording it keeps
+      // observation and cancellation pointed at the packet directory that actually exists.
+      const opened = this.store.recordJobTransition({ jobId: job.id, expectedRevision: job.revision, to: 'UNKNOWN', evidence: 'OFFICE_LOCAL',
+        detail: result.detail, externalId: localRoute ? result.externalId : undefined, at: this.now() });
+      this.noteLocalEvidence(job, adapter.submitEvidence?.(submitContext, result) ?? []);
+      return opened;
     } catch (error) {
       return this.store.recordJobTransition({ jobId: job.id, expectedRevision: job.revision, to: 'UNKNOWN', evidence: 'OFFICE_LOCAL',
         detail: `The handoff could not be completed: ${error instanceof Error ? error.message : 'unknown launcher failure'} Check the provider before trying again.`, at: this.now() });
@@ -505,7 +576,8 @@ export class AssignmentController {
   async observe(assignmentId: string): Promise<AppState> {
     let job = this.job(assignmentId);
     if (isTerminalJob(job.state)) return this.store.snapshot({history:false});
-    const result = await this.adapterFor({ route: job.route }).observe(job);
+    const adapter = this.adapterFor({ route: job.route });
+    const result = await adapter.observe(job);
     if (result.events?.length) this.store.recordJobEvents(job.id, result.events);
     job = this.job(assignmentId);
     if (isTerminalJob(job.state)) return this.store.snapshot({history:false});
@@ -534,10 +606,11 @@ export class AssignmentController {
       const previous = names.get(output.path.toLowerCase());
       if (previous && previous !== output.sha256) { failures.push('The output inventory has conflicting paths.'); continue; }
       names.set(output.path.toLowerCase(), output.sha256);
-      if (!this.fetchOutput) { failures.push(`${output.path} was reported but this route cannot retrieve bytes.`); continue; }
+      const fetch = adapter.fetch ?? this.fetchOutput;
+      if (!fetch) { failures.push(`${output.path} was reported but this route cannot retrieve bytes.`); continue; }
       if (!this.storeOutput) { failures.push(`${output.path} cannot be durably stored by this route.`); continue; }
       try {
-        const bytes = await this.fetchOutput(job, output);
+        const bytes = await fetch(job, output);
         const digest = createHash('sha256').update(bytes).digest('hex');
         if (bytes.byteLength !== output.bytes) { failures.push(`${output.path} arrived as ${bytes.byteLength} bytes, not the ${output.bytes} reported.`); continue; }
         if (digest !== output.sha256) { failures.push(`${output.path} does not match the identity the provider reported.`); continue; }
@@ -558,10 +631,14 @@ export class AssignmentController {
     if (isTerminalJob(job.state)) return this.store.snapshot({history:false});
     const fresh = retrieved.filter(output => !job.outputs.some(old => old.path === output.path && old.sha256 === output.sha256 && old.stored));
     if (job.state === result.state && !fresh.length) return this.store.snapshot({history:false});
-    return this.store.recordJobTransition({
+    const transitioned = this.store.recordJobTransition({
       jobId: job.id, expectedRevision: job.revision, to: result.state, evidence: 'PROVIDER_REPORTED',
       detail, outputs: fresh.length ? fresh : undefined, at: this.now(),
     });
+    // A verified observation of a local session is itself office evidence — recorded only when the
+    // observation changed something, so repeated polls do not churn capability snapshots.
+    this.noteLocalEvidence(job, adapter.observeEvidence?.(job, result) ?? []);
+    return transitioned;
   }
 
   /**
@@ -580,14 +657,17 @@ export class AssignmentController {
         detail: 'Cancellation requested; no dependent work will be dispatched while this is open.', at: this.now() });
       job = this.job(assignmentId);
     }
-    const result = await this.adapterFor({ route: job.route }).cancel(job);
+    const adapter = this.adapterFor({ route: job.route });
+    const result = await adapter.cancel(job);
     if (!result.acknowledged) {
       this.store.recordJobEvents(job.id, [{ externalId: `cancel-attempt:${job.revision}`, cursor: '', kind: 'STATUS',
         text: `Cancellation not acknowledged: ${result.detail}`, occurredAt: this.now(), receivedAt: this.now(), evidence: 'OFFICE_LOCAL' }]);
       return this.store.snapshot({history:false});
     }
-    return this.store.recordJobTransition({ jobId: job.id, expectedRevision: job.revision, to: 'CANCEL_ACKNOWLEDGED', evidence: 'PROVIDER_REPORTED',
-      detail: result.detail, at: this.now() });
+    const acknowledged = this.store.recordJobTransition({ jobId: job.id, expectedRevision: job.revision, to: 'CANCEL_ACKNOWLEDGED',
+      evidence: 'PROVIDER_REPORTED', detail: result.detail, at: this.now() });
+    this.noteLocalEvidence(job, adapter.cancelEvidence?.(job) ?? []);
+    return acknowledged;
   }
 
   /** Retire only a proven-undispatched preparation so a new revision can be prepared. */
