@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { devinModelCatalog, providerLogin } from '../src/main/subscriptions';
+import { devinModelCatalog, providerLogin, subscriptionEnvironment } from '../src/main/subscriptions';
 
 // Unit coverage only: `devin auth status` is not logged in on this machine and the signed-in
 // output shape is unverified, so no test here may spawn the real CLI.
@@ -56,4 +56,29 @@ test('empty and shapeless catalogs collect nothing rather than fabricating entri
   assert.deepEqual(devinModelCatalog({}), []);
   assert.deepEqual(devinModelCatalog('not a catalog'), []);
   assert.deepEqual(devinModelCatalog({ items: [{ label: 'label without any id' }] }), []);
+});
+
+test('provider CLI environments strip ACP_* variables while unrelated variables survive', () => {
+  // Agent-spawned shells set ACP_BACKEND (e.g. windsurf); passing it to `devin auth status`
+  // makes the CLI report signed-out even when its own credential is valid.
+  const saved = {
+    ACP_BACKEND: process.env.ACP_BACKEND,
+    ACP_SESSION_ID: process.env.ACP_SESSION_ID,
+    QRO_UNRELATED: process.env.QRO_UNRELATED,
+  };
+  process.env.ACP_BACKEND = 'windsurf';
+  process.env.ACP_SESSION_ID = 'session-fixture';
+  process.env.QRO_UNRELATED = 'survives';
+  try {
+    const env = subscriptionEnvironment();
+    assert.equal(env.ACP_BACKEND, undefined, 'ACP_BACKEND must not reach provider CLI probes');
+    assert.equal(env.ACP_SESSION_ID, undefined, 'the ACP_ prefix is stripped, not one variable');
+    assert.equal(env.QRO_UNRELATED, 'survives', 'unrelated variables pass through');
+    assert.equal(process.env.ACP_BACKEND, 'windsurf', 'the parent process environment is not mutated');
+  } finally {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
 });

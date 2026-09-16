@@ -31,7 +31,9 @@ export function devinModelCatalog(parsed:unknown):Connection['models'] {
 const allowedMethods=new Set(['initialize','account/read','account/login/start','account/login/cancel','account/rateLimits/read','model/list']);
 export function subscriptionEnvironment(): NodeJS.ProcessEnv {
  const env={...process.env};
- for(const key of Object.keys(env))if(/^(OPENAI_API_KEY|OPENAI_BASE_URL|ANTHROPIC_|CLAUDE_CODE_OAUTH|CLAUDE_CODE_USE_|CODEX_API_KEY|DEVIN_API_KEY|DEVIN_TOKEN|DEVIN_AUTH_TOKEN)/i.test(key))delete env[key];
+ // ACP_* describes the agent-client shell that spawned this process (e.g. ACP_BACKEND=windsurf), not
+ // a provider login; left in place it makes checks such as `devin auth status` misreport sign-in state.
+ for(const key of Object.keys(env))if(/^(ACP_|OPENAI_API_KEY|OPENAI_BASE_URL|ANTHROPIC_|CLAUDE_CODE_OAUTH|CLAUDE_CODE_USE_|CODEX_API_KEY|DEVIN_API_KEY|DEVIN_TOKEN|DEVIN_AUTH_TOKEN)/i.test(key))delete env[key];
  return env;
 }
 export function usageWindows(raw: any): UsageWindow[] {
