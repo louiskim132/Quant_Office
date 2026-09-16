@@ -2804,3 +2804,28 @@ local/hosted readiness split). Verification at ec34acd: typecheck
 clean, 451/451 unit, build clean. Next: the user-run local-session
 pilot; `devin auth login` still has not been completed on this
 machine, which remains the sign-in prerequisite.
+
+2026-09-16 (round plugin-eval-a) — C10-A harness landed. Seven
+packets integrated on d5dfd2d: harness/attempt.mjs (isolated attempt
+dirs — only task/ copied, hashed manifest, contamination and reuse
+refused), harness/freshness.mjs (the verbatim catalog.md correction
+with a post-write diff proving nothing else changed), harness/
+ledger.mjs (append-only JSONL, every entry records.mjs-validated,
+corrupt lines surfaced by number), harness/scorecard.mjs (pure
+rollup implementing every section-3.2 comparison rule — gates before
+efficiency, UNKNOWN counters, failed attempts still charged,
+cold/reuse separate, NO_FINITE_SCORE, INCONCLUSIVE), harness/
+score.mjs (seeded blind review packets with evaluator-side-only
+mapping, recordScore requiring a blind mapping entry and all six
+findings, runCodeGate driving the real verify.mjs), docs/
+plugin-surfaces.md (primary-source inventory for all four plugins;
+LightRAG has no documented subscription route — API keys or local
+ollama only), and RUNBOOK.md (the ordered evaluator protocol:
+environment checklist, per-attempt flow, plugin-arm binding and
+readiness, freshness phase, blind review, scoring, teardown,
+honesty rules). Verification at head: typecheck clean, 487/487
+unit, build clean, fixture self-check unchanged (oracle 16/16,
+starter rejected). No plugin was installed and no agent benchmark
+ran — C10-A is the harness only. Next: C10-B..E per-plugin
+integration packets gated on the surfaces inventory, then a real
+evaluator session per RUNBOOK.md.
