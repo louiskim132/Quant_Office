@@ -59,12 +59,20 @@ Agents manages profiles and membership, and Add Agent creates them. Reviews, Art
 
 Canceling and removing are different acts, and neither rewrites the record.
 
-- **Canceling a request** (`request.cancel`; legacy task groups use `task.cancel`) ends the open work: the request goes CANCELED and its linked experiment and tasks are canceled with it. The row stays in the queue — visible under the Canceled filter — and 'Use as new request' copies its objective into a fresh draft.
+- **Canceling a request** (`request.cancel`; legacy task groups use `task.cancel`) ends the open work: the request goes CANCELED and its linked experiment and tasks are canceled with it. The row stays in the queue — visible under the Canceled filter — and 'Use as new request' copies its objective into a fresh draft. Canceling never orphans a provider job: the job records stay attached to the request, the row counts as active — and so stays in view — while any outcome is unresolved, and the card's reconcile controls (observe the job, request its cancellation, and for an UNKNOWN outcome the session link) remain on it until every outcome is settled, on a canceled request and under an archived project alike. That reachability is exactly what keeps the removals below unblocked: an unresolved outcome can always be found and reconciled, so the unresolved-job refusal is a pause, never a dead end.
 - **Removing a row** (`task.delete`) only hides it. The command is refused while the request is still open, and again while a provider job outcome is unresolved — an UNKNOWN attempt must stay reachable until it is reconciled — so only terminal rows can leave the list. Removal is one-way; the request, its tasks and every lineage event are retained and remain readable in History.
 - **Removing a project** is the same shape one level up. Archive first — refused while any request or task under the project is still open — then Remove from list (`project.delete`) hides it from pickers and lists, and is refused while any of its requests still has an unresolved provider outcome. A removed project stays reachable through the project list's Removed lifecycle filter; restoring it clears the removal and lands it in the archived list, where a second restore makes it active again.
 - **Removing an agent** follows the same lifecycle on the Agents page. Archive first — the profile goes read-only and leaves pickers and assignment — then Remove from list (`agent.delete`) hides it from every membership filter except Removed, and is refused while any assignment under the agent still has an unresolved provider outcome. Restore clears the removal into the archived list; a second restore reactivates the profile.
 
-Nothing on this page deletes evidence: canceled, removed and archived records all keep their history, and a provider job whose outcome is still unknown keeps its place in the queue until it is reconciled.
+The same contract repeats at each level of ownership:
+
+| Entity | First step | Remove command | Refused while | Way back |
+| --- | --- | --- | --- | --- |
+| Request | Cancel (`request.cancel`; legacy groups `task.cancel`) | Remove (`task.delete`) | the request is still open, any of its provider jobs is unresolved, or its project is archived | None — one-way; the record stays readable in History |
+| Project | Archive (`project.archive`) | Remove from list (`project.delete`) | the project is still active, or any request under it still carries an unresolved provider outcome | Restore clears the removal into the archived list; a second restore reactivates |
+| Agent | Archive agent (`agent.remove`) | Remove from list (`agent.delete`) | the profile is still active, or any assignment under it still carries an unresolved provider outcome | Restore clears the removal into the archived list; a second restore reactivates |
+
+Nothing on this page deletes evidence: canceled, removed and archived records all keep their history, stored files stay on disk, and a provider job whose outcome is still unknown keeps its place in the queue until it is reconciled.
 
 ## Exact export contents
 
