@@ -2914,3 +2914,22 @@ the verified account check or shipping a truncated catalog
 contract and the three-entity removal matrix (c72334f).
 Combined verification at 31d21e1: typecheck clean, 511/511 unit,
 build clean, desktop e2e green.
+
+2026-09-16 follow-up (91908e2) — the manual pilot then surfaced two
+deeper cancellation wedges the round had missed. A local job whose
+submit failed before recording a session directory could never be
+cancel-acknowledged: the mailbox adapter had nothing to signal and
+refused, leaving the job CANCEL_REQUESTED forever and wedging every
+removal path. With no session dir nothing was ever running, so the
+office now acknowledges vacuously; no sentinel is written and
+cancelEvidence still reports nothing, so no LOCAL_CANCEL evidence is
+fabricated. Separately, recordJobTransition marked a single-mode
+request CANCELED on CANCEL_ACKNOWLEDGED without the experiment/task
+cascade request.cancel runs, so the experiment kept accepting contract
+revisions and spawning review tasks that became unreachable —
+task.cancel deferred to a parent that could not act, request.cancel
+refused the already-canceled parent, and project.archive refused the
+still-open task. The job-side path now runs the same cascade;
+task.cancel/task.delete only defer to a live parent request; contract
+writes refuse an experiment whose request is already canceled. A
+regression test pins the whole wedge. 513/513 unit, typecheck clean.
