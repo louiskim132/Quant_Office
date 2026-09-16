@@ -1418,10 +1418,16 @@ export class OfficeStore {
           const project = state.projects.find(item => item.id === command.projectId);
           if (!project) throw new Error('Project not found');
           projectId = project.id;
-          // Restoring a removed project is the only way back: it clears the removal and lands in
-          // the archived list, so a mistaken remove is recoverable while lists stay clean.
-          const clearRemoval = project.removedAt && !command.archived ? { removedAt: undefined } : {};
-          changes.push({ collection: 'projects', value: { ...project, ...clearRemoval, archived: command.archived, updatedAt: now } });
+          // Un-archiving a removed project is the recovery path: the removal clears and the
+          // project lands in the archived list — a second restore activates it — so a mistaken
+          // remove is recoverable while pickers stay clean. removedAt is destructured out, not
+          // written as undefined, which canonical serialization rejects.
+          if (project.removedAt && !command.archived) {
+            const { removedAt: _removed, ...restored } = project;
+            changes.push({ collection: 'projects', value: { ...restored, archived: true, updatedAt: now } });
+            reason = `Restored removed project "${project.name}" to the archived list`; break;
+          }
+          changes.push({ collection: 'projects', value: { ...project, archived: command.archived, updatedAt: now } });
           if(command.archived&&state.requests?.some(r=>r.projectId===project.id&&r.status!=='CANCELED'))throw new Error('Cancel outstanding requests before archiving this project.');
           if (command.archived && state.tasks.some(item => item.projectId === project.id && !['CANCELED','ACCEPTED','SUPERSEDED'].includes(item.status))) throw new Error('Cancel outstanding requests before archiving this project. Restore never resumes work.');
           reason = command.archived ? 'Archived project; outcomes retained' : 'Restored project'; break;
