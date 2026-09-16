@@ -22,5 +22,14 @@
 .contract-field textarea{font-size:11px;min-height:113px}
 .contract-actions{border-top:1px solid var(--border);padding-top:20px;margin-top:5px;display:flex;align-items:center;justify-content:space-between;gap:15px}
 .contract-actions .button-row{justify-content:flex-end;flex-wrap:wrap}
+.contract-intro{font-size:11px;color:var(--muted);margin:0 0 16px;max-width:720px;line-height:1.6}
+.contract-more{display:inline-flex;align-items:center;gap:7px;font-size:11px;padding:10px 0 4px}
+.contract-await{margin-top:18px;border:1px solid var(--border);border-radius:8px;background:var(--panel-2);padding:18px}
+.contract-await h3{font-size:13px;margin:6px 0 4px}
+.contract-await p{font-size:11px;color:var(--muted);line-height:1.65;margin:8px 0 0}
+.contract-await .button-row{margin-top:14px}
+.await-list{list-style:none;margin:10px 0 0;padding:0;display:flex;flex-direction:column;gap:8px;font-size:11px}
+.await-list b{display:block;font-size:9px;color:var(--subtle);font-weight:600;text-transform:uppercase;letter-spacing:.8px;margin-bottom:2px}
+.await-list span{color:var(--text)}
 @media(max-width:1200px){.contract-actions{flex-wrap:wrap}}
 @media(max-width:1040px){.contract-fields{column-gap:15px}.research-overview{gap:15px;align-items:flex-start;flex-wrap:wrap}}
