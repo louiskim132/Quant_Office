@@ -14,6 +14,8 @@
 .project-row-count strong{color:var(--text);font-weight:600}
 .project-row-actions{display:flex;align-items:center;gap:10px;margin-left:auto}
 .project-open{display:inline-flex;align-items:center;gap:6px;color:var(--accent);font-size:11px;white-space:nowrap}
+.project-remove{color:var(--muted);font-size:11px;white-space:nowrap}
+.project-remove:hover:not(:disabled){color:var(--text)}
 .project-row .icon-button{border:1px solid var(--border);border-radius:6px;padding:7px}
 .project-row .icon-button[aria-expanded="true"]{color:var(--accent);background:var(--accent-bg);border-color:#a7845144}
 .project-row-panel{border-top:1px solid var(--border);padding:16px 18px;display:grid;gap:12px;font-size:11px}
