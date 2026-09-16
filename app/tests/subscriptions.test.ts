@@ -44,6 +44,33 @@ test('usage uses actual window durations, clamps percentages and preserves unava
  assert.deepEqual(windows.map(w=>w.remainingPercent),[65,0]);assert.match(windows[0].label,/5 hour/);assert.match(windows[1].label,/Weekly/);assert.equal(windows[1].resetsAt,4567);
  assert.deepEqual(usageWindows({rateLimits:{primary:{usedPercent:null,windowDurationMins:300,resetsAt:1}}}),[]);
 });
+test('a Codex catalog failure keeps the verified account and reports the catalog as unavailable',async()=>{
+ const root=mkdtempSync(path.join(tmpdir(),'qro-subscriptions-'));
+ const service=new Subscriptions(root,async()=>{throw new Error('No browser in this metadata fixture');});
+ const calls:string[]=[];
+ (service as any).codex={async request(method:string){calls.push(method);if(method==='account/read')return {account:{type:'chatgpt',email:'research@example.test'}};if(method==='model/list')throw new Error('catalog exploded');if(method==='account/rateLimits/read')return {rateLimits:{primary:{usedPercent:40,windowDurationMins:300,resetsAt:9999}}};throw new Error('Unexpected '+method);},stop(){}};
+ try{
+  const connection=await service.status('openai');
+  assert.equal(connection.connected,true);assert.equal(connection.account,'research@example.test');
+  assert.deepEqual(connection.models,[]);
+  assert.match(connection.note,/Codex model catalog unavailable\. Refresh to retry\./);
+  assert.equal(connection.windows.length,1);
+  assert.deepEqual(calls,['account/read','model/list','account/rateLimits/read']);
+ }finally{service.close();}
+});
+test('a repeated catalog cursor degrades mid-pagination rather than shipping a truncated catalog',async()=>{
+ const root=mkdtempSync(path.join(tmpdir(),'qro-subscriptions-'));
+ const service=new Subscriptions(root,async()=>{throw new Error('No browser in this metadata fixture');});
+ let pages=0;
+ (service as any).codex={async request(method:string){if(method==='account/read')return {account:{type:'chatgpt',email:'research@example.test'}};if(method==='model/list')return {data:[{id:'model-'+(++pages),displayName:'Model '+pages}],nextCursor:'same-cursor'};if(method==='account/rateLimits/read')return {rateLimits:{}};throw new Error('Unexpected '+method);},stop(){}};
+ try{
+  const connection=await service.status('openai');
+  assert.equal(connection.connected,true);
+  assert.equal(pages,2);
+  assert.deepEqual(connection.models,[]);
+  assert.match(connection.note,/Codex model catalog unavailable\. Refresh to retry\./);
+ }finally{service.close();}
+});
 test('metadata child environment excludes API billing overrides',()=>{
  const original=process.env.ANTHROPIC_API_KEY;process.env.ANTHROPIC_API_KEY='test-placeholder';try{assert.equal(subscriptionEnvironment().ANTHROPIC_API_KEY,undefined);assert.equal(process.env.ANTHROPIC_API_KEY,'test-placeholder');}finally{if(original===undefined)delete process.env.ANTHROPIC_API_KEY;else process.env.ANTHROPIC_API_KEY=original;}
 });
