@@ -145,6 +145,17 @@ test('a canceled request with an unresolved job stays in the queue, and removal 
  assert.equal(openEntry.status,'CANCELED');
  assert.equal(openEntry.active,true,'an unresolved provider outcome keeps the row in view');
  assert.equal(openEntry.deletable,false,'and the row cannot leave the queue before reconciliation');
+ // The renderer mounts its reconcile controls on exactly these flags — pin them here.
+ assert.equal(openEntry.actions!.awaitingReconciliation,true);
+ assert.equal(openEntry.jobs!.some(job=>job.unresolved),true);
+ assert.equal(openEntry.canCancel,false,'a canceled request is not cancelable again');
+ // Archiving the project strands the same job: the row must still carry reconcile semantics.
+ const archived=f.store.execute({type:'project.archive',idempotencyKey:key(),projectId:f.alpha.id,archived:true});
+ const archivedEntry=queueScope(archived).entries.find(e=>e.id===f.alphaRequest.id)!;
+ assert.equal(archivedEntry.canCancel,false,'an archived project offers no cancel');
+ assert.equal(archivedEntry.actions!.awaitingReconciliation,true,'the unresolved job still surfaces reconcile controls');
+ assert.equal(archivedEntry.deletable,false);
+ f.store.execute({type:'project.archive',idempotencyKey:key(),projectId:f.alpha.id,archived:false});
  // Settle the job, archive, then remove the project: the retained record still resolves its name.
  const job=f.store.snapshot({history:false}).jobs![0];
  f.store.recordJobTransition({jobId:job.id,expectedRevision:job.revision,to:'COMPLETED',evidence:'PROVIDER_REPORTED',detail:'Done.',outputs:[{path:'out/result.json',sha256:'a'.repeat(64),bytes:1}],at:at(3)});
