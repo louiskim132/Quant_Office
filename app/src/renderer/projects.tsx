@@ -1,30 +1,44 @@
 import React,{useState} from 'react';
-import {ArrowUpRight,Folder,FolderPlus,Plus,Settings2} from 'lucide-react';
+import {ArrowUpRight,Folder,FolderPlus,Plus,Settings2,X} from 'lucide-react';
 import type {AppState,Project,ProjectLocation} from '../shared/types';
 import {Empty,SearchField} from './components';
 import './projects.css';
 
+const samePaths=(a:string[],b:string[])=>a.length===b.length&&a.every((value,index)=>value===b[index]);
+const childPath=(root:string,name:string)=>`${root.replace(/[\\/]+$/,'')}${root.includes('\\')?'\\':'/'}${name}`;
+
 function ProjectLocationPanel({project,saved,location,onState}:{project:Project;saved:ProjectLocation|undefined;location:string;onState:(s:AppState)=>void}){
  const [folder,setFolder]=useState(location);
+ const [inputs,setInputs]=useState<string[]>(saved?.inputPaths??[]);
  const [busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
- const dirty=folder!==location;
+ const dirty=folder!==location||!samePaths(inputs,saved?.inputPaths??[]);
  async function pickFolder(){
   setError('');
-  try{const chosen=await window.office.chooseProjectFolder();if(chosen)setFolder(chosen);}
+  // Selected paths are relative to the folder they were picked under: a new root clears the pending
+  // list, while returning to the saved root restores the saved selection.
+  try{const chosen=await window.office.chooseProjectFolder();if(chosen){setFolder(chosen);if(chosen!==folder)setInputs(chosen===location?saved?.inputPaths??[]:[]);}}
+  catch(e){setError((e as Error).message);}
+ }
+ async function pickInputs(){
+  setError('');
+  try{const chosen=await window.office.chooseInputFiles(folder);if(chosen.length)setInputs(prev=>[...new Set([...prev,...chosen])].sort());}
   catch(e){setError((e as Error).message);}
  }
  async function save(){
   setBusy(true);setError('');setNotice('');
-  try{onState(await window.office.command({type:'location.save',idempotencyKey:crypto.randomUUID(),projectId:project.id,expectedRevision:saved?.revision??0,localFolder:folder,inputPaths:saved?.inputPaths??[],outputFolder:saved?.outputFolder??''}));setNotice('Saved. Nothing has been transferred.');}
+  try{onState(await window.office.command({type:'location.save',idempotencyKey:crypto.randomUUID(),projectId:project.id,expectedRevision:saved?.revision??0,localFolder:folder,inputPaths:inputs,outputFolder:saved?.outputFolder??''}));setNotice('Saved. Nothing has been transferred.');}
   catch(e){setError((e as Error).message);}finally{setBusy(false);}
  }
  return <div className="project-row-panel">
-  <div><strong>Project folder on this device</strong><p className="path-text">{location||'Not selected'}</p></div>
-  <label className="field">Location<input value={folder} disabled={busy||project.archived} onChange={e=>setFolder(e.target.value)} placeholder="Not selected"/></label>
+  <div><strong>Project folder on this device</strong><p className="path-text">{folder||'Not selected'}</p>
+  {folder&&<p className="muted">Files placed in <span className="path-text">{childPath(folder,'inputs')}</span> or selected below are shared with requests.</p>}</div>
+  <div><strong>Input files</strong>
+  {inputs.length?<ul className="input-file-list">{inputs.map(item=><li key={item}><span className="path-text">{item}</span><button className="icon-button" aria-label={`Remove ${item}`} disabled={busy||project.archived} onClick={()=>setInputs(prev=>prev.filter(entry=>entry!==item))}><X size={13}/></button></li>)}</ul>:<p className="muted">{folder?'No files selected.':'Choose the project folder before selecting files.'}</p>}
+  {inputs.length>0&&<p className="muted">Selected paths resolve under <span className="path-text">{folder}</span>.</p>}</div>
   {project.archived&&<p className="muted">Archived projects are read-only; restore the project to change its location.</p>}
   {error&&<p className="notice error" role="alert">{error}</p>}
   {notice&&<p className="notice success" role="status">{notice}</p>}
-  <div className="button-row"><button className="secondary" disabled={busy||project.archived} onClick={()=>void pickFolder()}>Choose folder</button><button className="primary" disabled={busy||!dirty||project.archived} onClick={()=>void save()}>Save</button></div>
+  <div className="button-row"><button className="secondary" disabled={busy||project.archived} onClick={()=>void pickFolder()}>Choose folder</button><button className="secondary" disabled={busy||!folder||project.archived} onClick={()=>void pickInputs()}>Choose input files</button><button className="primary" disabled={busy||!dirty||project.archived} onClick={()=>void save()}>Save</button></div>
  </div>;
 }
 
