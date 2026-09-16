@@ -83,7 +83,11 @@ The office can also assign bounded office labor — notes, file passes, draft te
 
 ### Adding a local agent
 
-Add Agent can create a Devin, Claude Code or Codex agent whose execution environment is LOCAL. Setup uses only the official installed tool signed in to the user's own subscription: Devin is probed through `devin auth status` and `devin models list --format json`, Codex through its app-server account and model endpoints, and Claude Code through `claude auth status` with the curated alias list — an alias is built into the application and is not an entitlement check for the account. No API key is accepted: the child environment is stripped of provider credential variables and there is no API-key fallback. The Devin CLI sign-in is a separate credential from the signed-in Devin Desktop session.
+Add Agent can create a Devin, Claude Code or Codex agent whose execution environment is LOCAL. Setup uses only the official installed tool signed in to the user's own subscription: Devin is probed through `devin auth status` and `devin models list --format json`, Codex through its app-server account and model endpoints, and Claude Code through `claude auth status` with the curated alias list — an alias is built into the application and is not an entitlement check for the account. No API key is accepted: the child environment is stripped of provider credential variables and there is no API-key fallback.
+
+When the official tool is not signed in, the app opens a visible terminal running that tool's own login — for Devin, `devin auth login` — and re-checks status afterward; the same command can be run manually in any terminal. The Devin CLI credential is separate from the signed-in Devin Desktop session: signing in to the desktop app does not sign in the CLI, and the office checks only the CLI. The Devin model catalog is read from `devin models list --format json` once the CLI is signed in; there is no provisional suggestion list before that.
+
+Devin encodes effort in the model variant rather than a separate effort axis — `swe-2-max` is the max-effort variant, `swe-2-high` a lower one — so the variant is chosen in the Model field and the separate effort field stays at Provider default unless a catalog entry explicitly declares real effort levels.
 
 Two fields beyond provider, model and team describe how a local agent is configured:
 
@@ -96,19 +100,26 @@ A saved local profile is never proof that the runtime exists. Signing in is not 
 
 Three local routes exist: LOCAL_MAILBOX, LOCAL_CLI_EXEC and LOCAL_ACP. The mailbox transport works as follows:
 
-1. The office writes a scoped packet directory under a workspace-local sessions root: `packet.json` plus the declared input files copied from the snapshot staging path, each hashed. The packet directory is the session's external identity.
+1. The office writes a scoped packet directory under a workspace-local sessions root: `packet.json` plus the declared input files copied from the snapshot staging path under `inputs/`, each hashed. The packet directory is the session's external identity.
 2. The user runs the local session against that directory in the official tool.
-3. The session writes `result.json` plus its declared artifact files.
-4. The office reads the directory back, verifies every declared sha256 against the bytes on disk and reports the outputs through the normal inventory. Undeclared or mismatched files are not results.
+3. The session writes `result.json` plus its declared artifact files. The receipt must carry exactly `state`, `detail` and `outputs` — each output naming its path, sha256 and byte count — and may additionally self-report `appliedModel`, `appliedEffort` and `delegation`.
+4. The office reads the directory back, verifies every declared sha256 and byte count against the bytes on disk and reports the outputs through the normal inventory. Undeclared or mismatched files are not results, and a missing, oversized, malformed or hash-mismatched receipt is an office-local UNKNOWN reading — never a session report.
 
-Cancellation writes a cancel sentinel in the packet directory: ending the session is a real cancellation of that local session, honestly labeled — it is not a provider cancellation acknowledgement, and no provider-side job exists to acknowledge. The recorded route and packet identity are the durable facts, so a restart cannot duplicate a dispatch.
+Each step records only what the office itself did, as office-observed evidence:
+
+- Writing the packet records LOCAL_SUBMIT, TOOL_CONFINEMENT (the scoped workspace delivery) and DELEGATION_CONTROL (the packet carries the frozen single-agent payload; the mailbox has no delegation channel), and the job is left UNKNOWN awaiting a session — a written packet is not an acceptance, and the office does not record one it did not observe.
+- Reading a fully verified `result.json` records LOCAL_OBSERVE plus LOCAL_OUTPUT_FETCH for the verified output inventory, and records MODEL_APPLICATION, EFFORT_APPLICATION or DELEGATION_CONTROL only for the self-report fields the receipt actually declared — an absent field stays absent.
+- Cancellation writes a `cancel.requested` sentinel in the packet directory and records LOCAL_CANCEL once that sentinel is on disk: ending the session is a real cancellation of that local session, honestly labeled — it is not a provider cancellation acknowledgement, and no provider-side job exists to acknowledge.
+
+The recorded route and packet identity are the durable facts, so a restart cannot duplicate a dispatch.
 
 ### What local evidence establishes
 
-Local evidence is office-observed: the office itself wrote, spawned, read or terminated, so it is recorded as OBSERVED evidence at TOOL_SUPPORTED level — never ACCOUNT_VERIFIED provider attestation. The labels mean only what they say:
+Local evidence is office-observed: the office itself wrote, spawned, read or terminated, so it is recorded as OBSERVED evidence at TOOL_SUPPORTED level — never ACCOUNT_VERIFIED provider attestation. Because the office is the observing authority on a local route, that TOOL_SUPPORTED/OBSERVED evidence is what a local readiness scope requires; hosted scopes still require provider-side ACCOUNT_VERIFIED attestation. The local and hosted families share no operations, so neither can ever satisfy the other. The labels mean only what they say:
 
 - Scoped workspace delivery, recorded under TOOL_CONFINEMENT, is not enforced isolation, sandboxing or blinding.
-- A model or effort reported by a local session is self-report unless the tool's own output verifies it.
+- A model, effort or delegation setting reported by a local session is self-report unless the tool's own output verifies it.
+- A local cancel ends that local session; it is not a provider acknowledgement.
 - No usage or allowance accounting exists for local sessions; the Devin CLI reports no usage windows to this application.
 
 Because scoped delivery is not isolation, local agents are ineligible for blinded-review, holdout-custody and independently-verified-gate roles unless enforced isolation is separately verified. Label definitions: [evidence.md](evidence.md).
