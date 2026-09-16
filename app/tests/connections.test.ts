@@ -39,7 +39,7 @@ test('sign-in and usage success alone never make a provider ready',t=>{
  const readiness=providerReadiness(state,'claude',{now:Date.parse(at(0))});
  assert.equal(readiness.signedIn,true);
  assert.equal(readiness.modelChecked,false);
- assert.equal(readiness.cloudChecked,false);
+ assert.equal(readiness.dispatchChecked,false);
  assert.equal(readiness.ready,false);
  assert.ok(readiness.blockers.some(b=>b.includes('Unverified cloud submission')));
  assert.equal(readiness.actions.automaticStart,false);

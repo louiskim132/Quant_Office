@@ -35,7 +35,7 @@ test('submission evidence alone never enables automatic start',t=>{
  const readiness=providerReadiness(state,'claude',{now:ms(0)});
  assert.equal(readiness.signedIn,true);
  assert.equal(readiness.modelChecked,true,'the catalog was actually read here');
- assert.equal(readiness.cloudChecked,false);
+ assert.equal(readiness.dispatchChecked,false);
  assert.equal(readiness.actions.automaticStart,false);
  assert.equal(readiness.actions.observe,false);
  assert.equal(readiness.actions.requestCancellation,false);
@@ -46,7 +46,7 @@ test('a fully verified transport enables start, and each action still reports se
  const s=store(t);
  const state=s.recordAccountObservation(verifiedCloud(0));
  const readiness=providerReadiness(state,'claude',{now:ms(1),model:'opus'});
- assert.equal(readiness.cloudChecked,true);
+ assert.equal(readiness.dispatchChecked,true);
  assert.equal(readiness.modelChecked,true);
  assert.equal(readiness.ready,true);
  assert.deepEqual(readiness.actions,{prepare:true,duplicate:true,viewTerminalHistory:true,handoff:true,automaticStart:true,observe:true,requestCancellation:true});
@@ -58,7 +58,7 @@ test('evidence for one model does not make another model runnable',t=>{
  const state=s.recordAccountObservation(verifiedCloud(0,'opus'));
  const other=providerReadiness(state,'claude',{now:ms(1),model:'sonnet'});
  assert.equal(other.modelChecked,false);
- assert.equal(other.cloudChecked,false,'model-scoped transport evidence does not carry to a different model');
+ assert.equal(other.dispatchChecked,false,'model-scoped transport evidence does not carry to a different model');
  assert.equal(other.actions.automaticStart,false);
  assert.ok(other.blockers.some(b=>b.includes('sonnet')));
  assert.equal(providerReadiness(state,'claude',{now:ms(1),model:'opus'}).ready,true);
@@ -75,7 +75,7 @@ test('a metadata refresh after a cloud check neither erases nor renews the trans
  assert.equal(providerReadiness(state,'claude',{now:ms(30),model:'opus'}).ready,true);
  // Expiry is measured from the real check, so the poll cannot extend eligibility.
  const expired=providerReadiness(state,'claude',{now:ms(0)+CAPABILITY_EXPIRY_MS+1000,model:'opus'});
- assert.equal(expired.cloudChecked,false);
+ assert.equal(expired.dispatchChecked,false);
  assert.equal(expired.actions.automaticStart,false);
  assert.ok(expired.blockers.some(b=>b.includes('evidence expired')));
  assert.equal(effectiveEvidence(state,connection,'CLOUD_SUBMIT',{now:ms(0)+CAPABILITY_EXPIRY_MS+1000})!.level,'ACCOUNT_VERIFIED','history stays readable after expiry');
@@ -87,13 +87,13 @@ test('a later observed result invalidates an earlier one; a tool upgrade discard
  const revoked=s.recordAccountObservation(verifiedCloud(10,'opus',{operations:[seen('ACCOUNT_STATUS',10),seen('MODEL_CATALOG',10),
   {operation:'CLOUD_SUBMIT',level:'UNAVAILABLE',detail:'The route stopped working for this account.',evidence:'OBSERVED',verifiedAt:at(10),model:'opus',source:'fixture adapter'},
   ...CLOUD.filter(o=>o!=='CLOUD_SUBMIT').map(o=>seen(o,10,{model:'opus'}))]}));
- assert.equal(providerReadiness(revoked,'claude',{now:ms(11),model:'opus'}).cloudChecked,false);
+ assert.equal(providerReadiness(revoked,'claude',{now:ms(11),model:'opus'}).dispatchChecked,false);
  const upgraded=s.recordAccountObservation(verifiedCloud(20,'opus',{toolVersion:'2.3.0'}));
  const evidence=providerReadiness(upgraded,'claude',{now:ms(21),model:'opus'});
- assert.equal(evidence.cloudChecked,true,'the new tool re-verified everything itself');
+ assert.equal(evidence.dispatchChecked,true,'the new tool re-verified everything itself');
  const stale=s.recordAccountObservation(metadata(40,{toolVersion:'2.4.0'}));
  const after=providerReadiness(stale,'claude',{now:ms(41),model:'opus'});
- assert.equal(after.cloudChecked,false,'evidence from an older tool version does not apply to a new one');
+ assert.equal(after.dispatchChecked,false,'evidence from an older tool version does not apply to a new one');
  assert.ok(after.blockers.some(b=>/^Unverified cloud submission( for these exact conditions)?: unknown, documented/.test(b)),'only the new tool version speaks for itself');
 });
 
@@ -156,16 +156,16 @@ test('a skewed or future clock never resurrects transport verification',t=>{
    ?[seen(o,10,{model:'opus',delegation:false}),seen(o,10,{model:'opus',delegation:true})]
    :o==='EFFORT_APPLICATION'?[seen(o,10,{model:'opus',effort:'default'})]
    :[seen(o,10,{model:'opus'})])]}));
- assert.equal(providerReadiness(revoked,'claude',{now:ms(11),model:'opus'}).cloudChecked,false);
+ assert.equal(providerReadiness(revoked,'claude',{now:ms(11),model:'opus'}).dispatchChecked,false);
 
  // A machine whose clock is behind still reads the record in recorded order, not wall-clock order.
- assert.equal(providerReadiness(revoked,'claude',{now:ms(-600),model:'opus'}).cloudChecked,false,
+ assert.equal(providerReadiness(revoked,'claude',{now:ms(-600),model:'opus'}).dispatchChecked,false,
   'a clock set before the observations does not undo the newest one');
  // And a check stamped in the future does not make an old, superseded success current again.
- assert.equal(providerReadiness(revoked,'claude',{now:ms(60*24*365),model:'opus'}).cloudChecked,false,
+ assert.equal(providerReadiness(revoked,'claude',{now:ms(60*24*365),model:'opus'}).dispatchChecked,false,
   'a far-future clock expires evidence rather than reviving it');
  const expired=providerReadiness(revoked,'claude',{now:ms(60*25),model:'opus'});
- assert.equal(expired.cloudChecked,false);
+ assert.equal(expired.dispatchChecked,false);
  assert.ok(expired.blockers.some(b=>/expired/.test(b)),'expiry is reported, not silently treated as unverified');
 });
 
@@ -204,7 +204,7 @@ test('a metadata-only refresh cannot redefine the environment work would run in'
  const refreshed=s2.recordAccountObservation(metadata(2));
  assert.deepEqual(scopeMismatches(refreshed,scopeFor('OFFICIAL_CLI_PTY'),{now:ms(3)}),[],
   'the transport check that authorized the work still speaks for it');
- assert.equal(providerReadiness(refreshed,'claude',{now:ms(3),model:'opus'}).cloudChecked,true,
+ assert.equal(providerReadiness(refreshed,'claude',{now:ms(3),model:'opus'}).dispatchChecked,true,
   'a metadata refresh neither erases nor renews the real transport evidence');
 });
 
@@ -221,7 +221,7 @@ test('a future-dated observation cannot defeat the invalidation that superseded 
    ?{...entry,level:'UNAVAILABLE' as const,detail:'The route stopped working for this account.'}:entry)]}));
  const problems=scopeMismatches(revoked,scopeFor('OFFICIAL_CLI_PTY'),{now:ms(21)});
  assert.ok(problems.some(problem=>/cloud submission/.test(problem)),problems.join(' | '));
- assert.equal(providerReadiness(revoked,'claude',{now:ms(21),model:'opus'}).cloudChecked,false);
+ assert.equal(providerReadiness(revoked,'claude',{now:ms(21),model:'opus'}).dispatchChecked,false);
 });
 
 test('delegation policy alone never certifies that tools were actually confined',t=>{

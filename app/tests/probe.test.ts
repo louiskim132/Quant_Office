@@ -52,7 +52,7 @@ test('a successful probe records observed submission evidence and nothing else',
  assert.equal(submit.model,'','the route selects no model, so submission evidence claims no model scope');
  assert.match(submit.detail,/selected no model/);
  assert.match(submit.source,/transport probe/);
- assert.equal(readiness.cloudChecked,false,'one verified operation is not a verified transport');
+ assert.equal(readiness.dispatchChecked,false,'one verified operation is not a verified transport');
  assert.equal(readiness.actions.automaticStart,false);
  assert.equal(readiness.actions.observe,false);
  assert.equal(readiness.actions.requestCancellation,false);
