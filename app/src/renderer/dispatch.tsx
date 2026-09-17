@@ -17,6 +17,7 @@ const jobLabels:Record<ProviderJob['state'],string>={
 export function RequestDispatch({request,state,onState}:{request:Request;state:AppState;onState:(s:AppState)=>void}){
  const [busy,setBusy]=useState('');
  const [error,setError]=useState('');
+ const [note,setNote]=useState('');
  const [plan,setPlan]=useState<Awaited<ReturnType<typeof window.office.handoffPlan>>>(null);
  const [selectedJob,setSelectedJob]=useState('');
  const [now,setNow]=useState(Date.now());
@@ -27,7 +28,7 @@ export function RequestDispatch({request,state,onState}:{request:Request;state:A
  const chosen=summaries.find(item=>item.jobId===selectedJob)??summaries.find(item=>item.unresolved)??summaries.find(item=>!item.settled)??summaries.at(-1);
  const job=(state.jobs??[]).find(item=>item.id===chosen?.jobId);
  const assignment=(state.assignments??[]).find(item=>item.id===job?.assignmentId);
- useEffect(()=>{setPlan(null);setSessionId('');setSessionUrl('');},[job?.id,request.id]);
+ useEffect(()=>{setPlan(null);setSessionId('');setSessionUrl('');setNote('');},[job?.id,request.id]);
  const snapshot:InputSnapshot|undefined=assignment?(state.snapshots??[]).find(item=>item.id===assignment.snapshotId):undefined;
  const [events,setEvents]=useState<JobEvent[]>([]);
  const [eventCursor,setEventCursor]=useState<string|null>(null);
@@ -49,8 +50,13 @@ export function RequestDispatch({request,state,onState}:{request:Request;state:A
  // controls that reconcile or end work already on record (Observe, job cancel, Link session).
  const closed=canceledRequest||projectArchived;
  async function run(label:string,action:()=>Promise<AppState|void>){
-  setBusy(label);setError('');
+  setBusy(label);setError('');setNote('');
   try{const next=await action();if(next)onState(next);}catch(e){setError((e as Error).message);}finally{setBusy('');}
+ }
+ // Reconciliation actions must always say what they found: a spinner that resolves to nothing looks
+ // like it worked. The returned state carries the job's post-action record even when nothing moved.
+ async function reportJob(label:string,action:()=>Promise<AppState>){
+  await run(label,async()=>{const next=await action();const updated=job?next.jobs?.find(item=>item.id===job.id):undefined;setNote(updated?`${jobLabels[updated.state]}${updated.detail?` — ${updated.detail}`:''}`:'The action returned without a record for this job.');return next;});
  }
  return <section className="dispatch-card">
   <h3>{local?'Local session work':'Provider work'}</h3>
@@ -67,6 +73,7 @@ export function RequestDispatch({request,state,onState}:{request:Request;state:A
   {agent&&gate&&!closed&&gate.readiness.connectionId&&!gate.readiness.accountFresh&&<p><button className="secondary" disabled={!!busy} onClick={()=>void run('recheck',async()=>{await window.office.connectionStatus(agent.provider);return window.office.getState();})}>{busy==='recheck'?'Checking…':'Re-check account'}</button> <span className="muted">The account check is stale; a live re-check refreshes it in place.</span></p>}
   {job&&<p><strong>{jobLabels[job.state]}</strong>{job.externalId?` · ${job.externalId}${job.evidence==='USER_REPORTED'?' (reported by you, unverified)':''}`:''}</p>}
   {job&&<p className="muted">{job.detail}</p>}
+  {note&&<p className="notice" role="status">{note}</p>}
   {snapshot&&<p className="muted">Snapshot {snapshot.files.length} file{snapshot.files.length===1?'':'s'} · {snapshot.totalBytes} bytes{snapshot.stagingCommit?` · commit ${snapshot.stagingCommit.slice(0,10)}`:' · no commit'}</p>}
   {snapshot?.warnings.map(warning=><p className="muted" key={warning}>{warning}</p>)}
   {plan&&<pre className="command-preview">{plan.executable} {plan.args.join(' ')}{'\n'}in {plan.cwd}</pre>}
@@ -80,9 +87,9 @@ export function RequestDispatch({request,state,onState}:{request:Request;state:A
    {assignment&&!settled&&<>
     {!closed&&!local&&<button className="secondary" disabled={!!busy} onClick={()=>void run('plan',async()=>{setPlan(await window.office.handoffPlan({assignmentId:assignment.id}));})}>Show exact command</button>}
     {!closed&&<button className="primary" disabled={!!busy||job?.state!=='INTENT'||!gate?.canHandoff} onClick={()=>void run('handoff',()=>window.office.openHandoffTerminal({assignmentId:assignment.id}))}>{busy==='handoff'?'Opening…':local?'Write local session packet':'Open official Claude terminal'}</button>}
-    <button className="secondary" disabled={!!busy||job?.state==='INTENT'} onClick={()=>void run('observe',()=>window.office.observeJob({assignmentId:assignment.id}))}>Observe</button>
+    <button className="secondary" disabled={!!busy||job?.state==='INTENT'} onClick={()=>void reportJob('observe',()=>window.office.observeJob({assignmentId:assignment.id}))}>{busy==='observe'?'Observing…':'Observe'}</button>
     {!closed&&job?.state==='INTENT'&&<button className="secondary" disabled={!!busy} onClick={()=>void run('discard',()=>window.office.discardPreparation({assignmentId:assignment.id}))}>Discard preparation to prepare again</button>}
-    <button className="cancel-request" disabled={!!busy} onClick={()=>void run('cancel',()=>window.office.cancelJob({assignmentId:assignment.id}))}>Request cancellation</button>
+    <button className="cancel-request" disabled={!!busy} onClick={()=>void reportJob('cancel',()=>window.office.cancelJob({assignmentId:assignment.id}))}>{busy==='cancel'?'Requesting…':job?.state==='CANCEL_REQUESTED'?'Cancellation requested — re-check acknowledgment':'Request cancellation'}</button>
    </>}
    {!closed&&<button className="secondary" disabled title="Automatic start needs verified submission, settings, observation, output and cancellation for this account.">Start request automatically</button>}
   </div>

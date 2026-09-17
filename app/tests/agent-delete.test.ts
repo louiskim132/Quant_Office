@@ -74,6 +74,18 @@ test('restoring a removed agent clears the removal and lands it in the archived 
  }finally{store.close();}
 });
 
+test('removing the last agent never touches the recorded connection',()=>{
+ const store=new OfficeStore(':memory:');try{
+ const profile=agent('Solo');store.confirmAgentBinding({observation:verified(0),agent:profile});
+ const before=store.snapshot().connections;
+ assert.ok(before?.length,'the binding fixture records a connection');
+ store.execute({type:'agent.remove',idempotencyKey:key(),agentId:profile.id,removed:true});
+ const removed=store.execute({type:'agent.delete',idempotencyKey:key(),agentId:profile.id});
+ assert.deepEqual(removed.connections,before,'archiving and removing an agent leave connection records byte-identical');
+ assert.deepEqual(store.snapshot().connections,before);
+ }finally{store.close();}
+});
+
 test('an archived agent whose assignment carries an unresolved provider job cannot be removed',async t=>{
  const root=mkdtempSync(path.join(tmpdir(),'qro-agent-delete-'));
  const store=new OfficeStore(path.join(root,'workspace.sqlite'));
