@@ -1,18 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
-import {mkdirSync,mkdtempSync,realpathSync,statSync,writeFileSync} from 'node:fs';
+import {existsSync,mkdirSync,mkdtempSync,realpathSync,writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {OfficeStore} from '../src/core/store';
 import {removeTreeSync} from '../src/main/fsx';
 
 /**
- * The Projects panel now edits the saved selection directly, so these cases pin the store contract
- * it relies on: location.save stores the real input paths (sorted and deduplicated), a later save
- * replaces rather than merges the list, saving a real folder creates the managed inputs directory
- * the panel advertises, and paths without a folder are refused. Byte-level preparation and transfer
- * validation of the selection stay covered in locations.test.ts.
+ * The project folder itself is the input scope: location.save records the canonical folder and
+ * stores an empty allowlist because snapshots now walk the folder's whole contents. Callers may
+ * still send legacy inputPaths — they are accepted but not stored — and no managed inputs directory
+ * is created. Folder-walk enumeration, exclusions and byte-level transfer checks live in
+ * locations.test.ts.
  */
 const key=()=>randomUUID();
 function fixture(t:any){
@@ -23,30 +23,31 @@ function fixture(t:any){
  const source=path.join(root,'source');mkdirSync(source,{recursive:true});
  return {root,source,project,store};
 }
-const save=(f:ReturnType<typeof fixture>,localFolder:string,inputPaths:string[],expectedRevision:number)=>
- f.store.execute({type:'location.save',idempotencyKey:key(),projectId:f.project.id,expectedRevision,localFolder,inputPaths,outputFolder:''});
+const save=(f:ReturnType<typeof fixture>,localFolder:string,inputPaths:string[]|undefined,expectedRevision:number)=>
+ f.store.execute({type:'location.save',idempotencyKey:key(),projectId:f.project.id,expectedRevision,localFolder,...(inputPaths?{inputPaths}:{}),outputFolder:''});
 
-test('location.save stores the real selected paths and creates the managed inputs directory',t=>{
+test('location.save records the folder as the scope and stores no per-file allowlist',t=>{
  const f=fixture(t);
  writeFileSync(path.join(f.source,'prices.csv'),'a,b\n1,2\n');
- mkdirSync(path.join(f.source,'data'),{recursive:true});
- writeFileSync(path.join(f.source,'data','notes.md'),'# notes\n');
- const state=save(f,f.source,['prices.csv','data/notes.md','prices.csv'],0);
+ const state=save(f,f.source,['prices.csv'],0);
  const location=state.locations![0];
- assert.deepEqual(location.inputPaths,['data/notes.md','prices.csv'],'the stored allowlist is deduplicated and sorted');
+ assert.deepEqual(location.inputPaths,[],'the folder is the scope; a legacy selection is not stored');
  assert.equal(location.localFolder,realpathSync(f.source),'the stored folder is canonical');
- const managed=path.join(realpathSync(f.source),'inputs');
- assert.equal(statSync(managed).isDirectory(),true,'saving a folder creates the managed inputs directory the panel names');
+ assert.equal(location.snapshotRoute,'PROJECT_FOLDER_SNAPSHOT');
+ assert.equal(existsSync(path.join(realpathSync(f.source),'inputs')),false,'no managed inputs directory is created');
 });
 
-test('the stored selection is replaced, never merged, and paths require a real folder',t=>{
+test('the folder must be real, later saves stay revision-checked, and the scope survives restart',t=>{
  const f=fixture(t);
  writeFileSync(path.join(f.source,'a.csv'),'1\n');
- writeFileSync(path.join(f.source,'b.csv'),'2\n');
- assert.throws(()=>save(f,'',['a.csv'],0),/Choose the project folder before selecting files/,'selected paths have nothing to resolve under without a folder');
- save(f,f.source,['a.csv'],0);
+ assert.throws(()=>save(f,path.join(f.root,'missing'),undefined,0),/Choose an existing project folder/,'a missing folder is still refused');
+ save(f,f.source,undefined,0);
+ assert.throws(()=>save(f,f.source,undefined,0),/changed in another view/,'a stale revision is refused');
  const second=save(f,f.source,['b.csv'],1);
- assert.deepEqual(second.locations![0].inputPaths,['b.csv'],'a later save replaces the allowlist the panel sent');
- const cleared=save(f,f.source,[],2);
- assert.deepEqual(cleared.locations![0].inputPaths,[],'an empty selection is stored honestly');
+ assert.deepEqual(second.locations![0].inputPaths,[],'a later save keeps the folder scope, not a selection');
+ assert.equal(second.locations![0].revision,2);
+ const reopened=new OfficeStore(path.join(f.root,'workspace.sqlite'));
+ const again=reopened.snapshot({history:false});
+ reopened.close();
+ assert.equal(again.locations![0].snapshotRoute,'PROJECT_FOLDER_SNAPSHOT','the folder-scope route replays');
 });

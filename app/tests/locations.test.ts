@@ -31,7 +31,8 @@ test('a location is versioned, canonical, and keeps the old cloud text as an ine
  const state=f.store.execute({type:'location.save',idempotencyKey:key(),projectId:f.project.id,expectedRevision:0,localFolder:f.source,inputPaths:['data/prices.csv'],outputFolder:''});
  const location=state.locations![0];
  assert.equal(location.revision,1);
- assert.equal(location.inputPaths.length,1);
+ assert.equal(location.inputPaths.length,0,'the folder is the scope; no per-file allowlist is stored');
+ assert.equal(location.snapshotRoute,'PROJECT_FOLDER_SNAPSHOT');
  assert.equal(location.outputFolder,'','an empty output folder means the managed app directory');
  assert.equal(location.providerTarget.host,'ANTHROPIC_MANAGED');
  assert.equal(location.providerTarget.resolved,false,'requesting managed hosting is not verified host identity');
@@ -51,31 +52,34 @@ test('selection rejects traversal, absolute paths, folders, links and missing fi
  assert.throws(()=>resolveSelection(f.source,[outside]),/inside the project folder/);
  assert.throws(()=>resolveSelection(f.source,['nested']),/not folders/);
  assert.throws(()=>resolveSelection(f.source,['gone.txt']),/missing/);
- assert.throws(()=>f.store.execute({type:'location.save',idempotencyKey:key(),projectId:f.project.id,expectedRevision:0,localFolder:f.source,inputPaths:['../outside.txt'],outputFolder:''}),/traverse/);
+ const ignored=f.store.execute({type:'location.save',idempotencyKey:key(),projectId:f.project.id,expectedRevision:0,localFolder:f.source,inputPaths:['../outside.txt'],outputFolder:''});
+ assert.deepEqual(ignored.locations![0].inputPaths,[],'a legacy selection field is accepted but never stored');
  let linked=false;
  try{symlinkSync(outside,path.join(f.source,'link.txt'));linked=true;}catch{/* symlink creation needs privileges on Windows */}
  if(linked)assert.throws(()=>resolveSelection(f.source,['link.txt']),/link/i);
  assert.deepEqual(resolveSelection(f.source,['keep.txt']).map(file=>file.relative),['keep.txt']);
 });
 
-test('preparation stages exactly the selected bytes, with spaces and Unicode, and nothing else',async t=>{
+test('preparation stages the whole project folder, with spaces and Unicode, minus skipped entries',async t=>{
  const f=fixture(t);
  write(f.source,'data/price series.csv','a,b\n1,2\n');
  write(f.source,'notes/résumé δ.md','# notes\n');
- write(f.source,'private/secret.key','not selected');
+ write(f.source,'private/secret.key','inside the folder, so it is an input');
  write(f.source,'.git/config','[core]\n');
- f.store.execute({type:'location.save',idempotencyKey:key(),projectId:f.project.id,expectedRevision:0,localFolder:f.source,inputPaths:['data/price series.csv','notes/résumé δ.md'],outputFolder:''});
+ write(f.source,'node_modules/dep/index.js','module.exports=1\n');
+ f.store.execute({type:'location.save',idempotencyKey:key(),projectId:f.project.id,expectedRevision:0,localFolder:f.source,inputPaths:[],outputFolder:''});
  const snapshot=await prepareInputSnapshot({store:f.store,stagingRoot:f.staging,projectId:f.project.id});
- assert.equal(snapshot.files.length,2);
- assert.deepEqual(snapshot.files.map(file=>file.path).sort(),['data/price series.csv','notes/résumé δ.md']);
- assert.equal(snapshot.route,'SELECTED_FILES_GIT_SNAPSHOT');
+ assert.equal(snapshot.files.length,3);
+ assert.deepEqual(snapshot.files.map(file=>file.path).sort(),['data/price series.csv','notes/résumé δ.md','private/secret.key']);
+ assert.equal(snapshot.route,'PROJECT_FOLDER_SNAPSHOT');
  assert.match(snapshot.stagingCommit,/^[a-f0-9]{40}$/);
- assert.deepEqual(snapshot.warnings,[]);
+ assert.ok(snapshot.warnings.some(w=>w.startsWith('.git/')),'the VCS subtree skip is recorded');
+ assert.ok(snapshot.warnings.some(w=>w.startsWith('node_modules/')),'the dependency subtree skip is recorded');
  const walk=(dir:string,prefix=''):string[]=>readdirSync(dir,{withFileTypes:true}).filter(entry=>entry.name!=='.git').flatMap(entry=>entry.isDirectory()?walk(path.join(dir,entry.name),prefix+entry.name+'/'):[prefix+entry.name]);
  const staged=walk(snapshot.stagingPath).sort();
- assert.deepEqual(staged,[`${RESERVED_DIRECTORY}/README.md`,'data/price series.csv','notes/résumé δ.md',MANIFEST_PATH].sort(),'only selected files, and office bookkeeping inside the reserved directory, are staged');
+ assert.deepEqual(staged,[`${RESERVED_DIRECTORY}/README.md`,'data/price series.csv','notes/résumé δ.md','private/secret.key',MANIFEST_PATH].sort(),'the folder contents, and office bookkeeping inside the reserved directory, are staged');
  assert.equal(readFileSync(path.join(snapshot.stagingPath,'.git','config'),'utf8').includes('[core]'),true,'the staging repository owns its own git directory');
- assert.equal(existsSync(path.join(snapshot.stagingPath,'private')),false,'unselected folders are never staged');
+ assert.equal(existsSync(path.join(snapshot.stagingPath,'node_modules')),false,'skipped subtrees are never staged');
  assert.deepEqual(verifyStagedSnapshot(snapshot),[]);
  assert.equal(f.store.snapshot().snapshots!.length,1);
 });
@@ -108,14 +112,17 @@ test('a text-only request prepares with no user folder at all',async t=>{
  assert.equal(manifest.files.length,0);
 });
 
-test('credentials and tool configuration cannot be selected, and a stale location blocks recording',async t=>{
+test('credentials and tool configuration in the folder are skipped and recorded, and a stale location blocks recording',async t=>{
  const f=fixture(t);
  write(f.source,'.env.local','TOKEN=value');
+ write(f.source,'.aws/credentials','[default]');
  write(f.source,'keep.txt','ok');
- f.store.execute({type:'location.save',idempotencyKey:key(),projectId:f.project.id,expectedRevision:0,localFolder:f.source,inputPaths:['.env.local'],outputFolder:''});
- await assert.rejects(prepareInputSnapshot({store:f.store,stagingRoot:f.staging,projectId:f.project.id}),/never shared/);
- assert.equal(f.store.snapshot().snapshots,undefined,'a refused preparation records nothing');
- f.store.execute({type:'location.save',idempotencyKey:key(),projectId:f.project.id,expectedRevision:1,localFolder:f.source,inputPaths:['keep.txt'],outputFolder:''});
+ f.store.execute({type:'location.save',idempotencyKey:key(),projectId:f.project.id,expectedRevision:0,localFolder:f.source,inputPaths:[],outputFolder:''});
+ const skipped=await prepareInputSnapshot({store:f.store,stagingRoot:f.staging,projectId:f.project.id});
+ assert.deepEqual(skipped.files.map(file=>file.path),['keep.txt'],'credential files never travel, even inside the folder');
+ assert.ok(skipped.warnings.some(w=>w.startsWith('.env.local')),'the skip is recorded on the snapshot');
+ assert.ok(skipped.warnings.some(w=>w.includes('.aws')),'the .aws subtree skip is recorded');
+ f.store.execute({type:'location.save',idempotencyKey:key(),projectId:f.project.id,expectedRevision:1,localFolder:f.source,inputPaths:[],outputFolder:''});
  const snapshot=await prepareInputSnapshot({store:f.store,stagingRoot:f.staging,projectId:f.project.id});
  assert.equal(snapshot.locationRevision,2);
  f.store.execute({type:'location.save',idempotencyKey:key(),projectId:f.project.id,expectedRevision:2,localFolder:f.source,inputPaths:[],outputFolder:''});
@@ -133,16 +140,18 @@ test('preparation continues with an exact record when git is unavailable',async 
  assert.deepEqual(verifyStagedSnapshot(snapshot),[],'the hashes still describe the staged bytes');
 });
 
-test('a missing input, an archived project and an oversized selection all fail before staging',async t=>{
+test('an emptied folder snapshots as request-only, and an archived project fails before staging',async t=>{
  const f=fixture(t);
  write(f.source,'data.csv','x');
- f.store.execute({type:'location.save',idempotencyKey:key(),projectId:f.project.id,expectedRevision:0,localFolder:f.source,inputPaths:['data.csv'],outputFolder:''});
+ f.store.execute({type:'location.save',idempotencyKey:key(),projectId:f.project.id,expectedRevision:0,localFolder:f.source,inputPaths:[],outputFolder:''});
  rmSync(path.join(f.source,'data.csv'));
- await assert.rejects(prepareInputSnapshot({store:f.store,stagingRoot:f.staging,projectId:f.project.id}),/missing/);
+ const empty=await prepareInputSnapshot({store:f.store,stagingRoot:f.staging,projectId:f.project.id});
+ assert.equal(empty.route,'GENERATED_REQUEST_ONLY','a folder holding nothing shareable is a request-only snapshot');
+ assert.equal(empty.files.length,0);
  write(f.source,'data.csv','x');
  f.store.execute({type:'project.archive',idempotencyKey:key(),projectId:f.project.id,archived:true});
  await assert.rejects(prepareInputSnapshot({store:f.store,stagingRoot:f.staging,projectId:f.project.id}),/Restore this project/);
- assert.equal(readdirSync(f.staging).length,0,'nothing is left behind when preparation fails');
+ assert.equal(readdirSync(f.staging).length,1,'only the completed empty snapshot is left behind');
 });
 
 test('snapshots and locations replay, back up and stay scoped to their project',async t=>{
@@ -159,7 +168,7 @@ test('snapshots and locations replay, back up and stay scoped to their project',
  await f.store.backup(copy);
  const restored=new OfficeStore(copy);t.after(()=>restored.close());
  assert.deepEqual(restored.snapshot().snapshots![0].manifestHash,snapshot.manifestHash);
- assert.deepEqual(restored.snapshot().locations![0].inputPaths,['data.csv']);
+ assert.deepEqual(restored.snapshot().locations![0].inputPaths,[]);
 });
 
 test('a selected file may be called README.md, and generated bookkeeping cannot overwrite it',async t=>{
@@ -178,12 +187,17 @@ test('a selected file may be called README.md, and generated bookkeeping cannot 
  assert.deepEqual(verifyStagedSnapshot(snapshot),[]);
 });
 
-test('selecting the reserved directory is refused before anything is copied',async t=>{
+test('a reserved-named directory in the folder is skipped and never collides with bookkeeping',async t=>{
  const f=fixture(t);
  write(f.source,`${RESERVED_DIRECTORY}/manifest.json`,'{"attacker":true}');
- f.store.execute({type:'location.save',idempotencyKey:key(),projectId:f.project.id,expectedRevision:0,localFolder:f.source,inputPaths:[`${RESERVED_DIRECTORY}/manifest.json`],outputFolder:''});
- await assert.rejects(prepareInputSnapshot({store:f.store,stagingRoot:f.staging,projectId:f.project.id}),/reserved/);
- assert.equal(f.store.snapshot().snapshots??undefined,undefined,'no snapshot record is written for a refused selection');
+ write(f.source,'keep.txt','ok');
+ f.store.execute({type:'location.save',idempotencyKey:key(),projectId:f.project.id,expectedRevision:0,localFolder:f.source,inputPaths:[],outputFolder:''});
+ const snapshot=await prepareInputSnapshot({store:f.store,stagingRoot:f.staging,projectId:f.project.id});
+ assert.deepEqual(snapshot.files.map(file=>file.path),['keep.txt'],'the reserved name cannot reach the staged payload');
+ assert.ok(snapshot.warnings.some(w=>w.startsWith(`${RESERVED_DIRECTORY}/`)),'the skip is recorded');
+ const manifest=JSON.parse(readFileSync(path.join(snapshot.stagingPath,MANIFEST_PATH),'utf8'));
+ assert.equal(manifest.attacker,undefined,'the office manifest, not the folder file, is staged');
+ assert.deepEqual(verifyStagedSnapshot(snapshot),[]);
 });
 
 test('the whole staged tree is verified, not only the selected files',async t=>{

@@ -136,6 +136,79 @@ export function excludedReason(relative: string): string | undefined {
   return EXCLUDED.some(pattern => pattern.test(relative)) ? relative : undefined;
 }
 
+/** A project-folder snapshot cannot grow past this many files, matching the record schema's cap. */
+export const MAX_SNAPSHOT_FILES = 2000;
+
+/**
+ * Whole subtrees that are never inputs: version-control internals, tool configuration, dependency
+ * and virtualenv roots, and caches. Skipping the directory once is cheaper and more honest than
+ * enumerating thousands of files that could never be shared.
+ */
+const SKIPPED_DIRS = new Set([
+  '.git', '.hg', '.svn', '.claude', '.codex', '.agents', '.devin', '.idea', '.vscode', '.vs',
+  'node_modules', '__pycache__', '.venv', 'venv', '.env', '.env.d', '.pytest_cache', '.mypy_cache',
+  '.ruff_cache', '.tox', '.next', '.nuxt', '.cache', '.parcel-cache', '.gradle', '.terraform',
+]);
+
+/** Ordinary operating-system noise files carry no research content and are skipped silently. */
+const SKIPPED_FILES = new Set(['.ds_store', 'thumbs.db', 'desktop.ini', '.localized']);
+
+interface ScanResult { files: SelectedFile[]; warnings: string[] }
+
+/**
+ * Enumerates every shareable file under the project folder: the folder's contents are the inputs.
+ * Credential patterns, tool configuration, dependency and cache subtrees, OS noise and links are
+ * skipped, and each skip that a user could care about is recorded as a warning so the snapshot
+ * honestly reports what it left behind. Byte and file-count limits refuse the whole snapshot rather
+ * than silently truncating the folder.
+ */
+export function scanProjectFolder(root: string): ScanResult {
+  const real = ensureLocalRoot(root);
+  const files: SelectedFile[] = [];
+  const skipped: string[] = [];
+  let total = 0;
+  const seen = new Set<string>();
+  const note = (entry: string, why: string) => { skipped.push(`${entry} — ${why}`); };
+  const walk = (dir: string, prefix: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+      const absolute = path.join(dir, entry.name);
+      if (entry.isSymbolicLink()) { note(relative, 'links are not shared'); continue; }
+      if (entry.isDirectory()) {
+        const lower = entry.name.toLowerCase();
+        if (SKIPPED_DIRS.has(lower)) { note(`${relative}/`, 'dependency, cache or tool folder'); continue; }
+        if (isReserved(relative)) { note(`${relative}/`, `reserved for the office's own manifest and notes`); continue; }
+        walk(absolute, relative);
+        continue;
+      }
+      if (!entry.isFile()) { note(relative, 'not a regular file'); continue; }
+      if (SKIPPED_FILES.has(entry.name.toLowerCase())) continue;
+      const excluded = excludedReason(relative);
+      if (excluded) { note(relative, 'credentials and tool configuration are never shared'); continue; }
+      const stats = lstatSync(absolute);
+      // A link planted between enumeration and stat is refused outright: this is the last cheap
+      // moment to stop a redirection before any byte of it is hashed or copied.
+      if (stats.isSymbolicLink()) { note(relative, 'links are not shared'); continue; }
+      if (!stats.isFile()) { note(relative, 'not a regular file'); continue; }
+      const resolved = realpathSync(absolute);
+      const resolvedInside = path.relative(real, resolved);
+      if (resolvedInside.startsWith('..') || path.isAbsolute(resolvedInside)) { note(relative, 'resolves outside the project folder'); continue; }
+      const dedupeKey = process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+      if (seen.has(dedupeKey)) continue;
+      seen.add(dedupeKey);
+      total += stats.size;
+      if (files.length + 1 > MAX_SNAPSHOT_FILES) throw new Error(`The project folder holds more than the ${MAX_SNAPSHOT_FILES}-file snapshot limit. Keep research inputs in a smaller folder or archive older runs elsewhere.`);
+      if (total > MAX_SNAPSHOT_BYTES) throw new Error(`The project folder exceeds the ${Math.round(MAX_SNAPSHOT_BYTES / (1024 * 1024))} MiB snapshot limit. Move large datasets or model checkpoints out of the folder and keep them out of the shared scope.`);
+      files.push({ relative, absolute: resolved, bytes: stats.size });
+    }
+  };
+  walk(real, '');
+  files.sort((a, b) => a.relative.localeCompare(b.relative));
+  // Warnings on the record are capped; an enormous skip list still says exactly how much was left out.
+  const warnings = skipped.length <= 60 ? skipped : [...skipped.slice(0, 60), `…and ${skipped.length - 60} more skipped entries.`];
+  return { files, warnings };
+}
+
 /**
  * Git for staging bookkeeping only, isolated from everything the user's environment could inject.
  *
@@ -298,12 +371,20 @@ export async function prepareInputSnapshot(input: PrepareInput): Promise<InputSn
     throw new Error('A request revision cannot be frozen without a request.');
   }
 
-  const selection = location?.localFolder && location.inputPaths.length ? resolveSelection(location.localFolder, location.inputPaths) : [];
+  // The project folder's contents are the inputs. The scan skips credentials, tool configuration,
+  // dependency trees and links, and reports each skip as a warning on the snapshot record.
+  let selection: SelectedFile[] = [];
+  if (location?.localFolder) {
+    const scan = scanProjectFolder(location.localFolder);
+    selection = scan.files;
+    warnings.push(...scan.warnings);
+  }
+  // Defense in depth: an excluded path reaching this point means the scan's filter regressed.
   for (const file of selection) {
     const excluded = excludedReason(file.relative);
     if (excluded) throw new Error(`Credentials and tool configuration are never shared through file selection: ${excluded}`);
   }
-  const route = selection.length ? 'SELECTED_FILES_GIT_SNAPSHOT' as const : 'GENERATED_REQUEST_ONLY' as const;
+  const route = selection.length ? 'PROJECT_FOLDER_SNAPSHOT' as const : 'GENERATED_REQUEST_ONLY' as const;
   const id = randomUUID();
   const staging = path.join(input.stagingRoot, id);
   mkdirSync(staging, { recursive: true });
@@ -333,7 +414,7 @@ export async function prepareInputSnapshot(input: PrepareInput): Promise<InputSn
     // byte, so tampering with it is as detectable as tampering with a selected file.
     const reserved = path.join(staging, RESERVED_DIRECTORY);
     mkdirSync(reserved, { recursive: true });
-    const readmeBody = `# Prepared request input\n\nThis directory holds only the files explicitly selected in Quant Research Office.\nIt contains no repository history, credentials or tool configuration.\nOffice bookkeeping lives under ${RESERVED_DIRECTORY}/ and is listed in ${MANIFEST_PATH}.\n\nSnapshot: ${id}\nFiles: ${files.length}\nBytes: ${totalBytes}\n`;
+    const readmeBody = `# Prepared request input\n\nThis directory holds the contents of the project folder at prepare time, minus skipped credential,\ntool, dependency and cache entries the office never shares.\nOffice bookkeeping lives under ${RESERVED_DIRECTORY}/ and is listed in ${MANIFEST_PATH}.\n\nSnapshot: ${id}\nFiles: ${files.length}\nBytes: ${totalBytes}\n`;
     const readmePath = `${RESERVED_DIRECTORY}/README.md`;
     writeFileSync(path.join(staging, readmePath), readmeBody);
     const readmeBytes = Buffer.from(readmeBody);

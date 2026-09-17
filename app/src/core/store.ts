@@ -1,5 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, realpathSync, statSync } from 'node:fs';
+
+/** stat that returns undefined for missing/unreadable paths instead of throwing raw ENOENT. */
+function safeStat(p: string) { try { return statSync(p); } catch { return undefined; } }
 import { resolve, isAbsolute } from 'node:path';
 import { DatabaseSync, backup as sqliteBackup } from 'node:sqlite';
 import { z } from 'zod';
@@ -69,7 +72,7 @@ export const commandSchema = z.discriminatedUnion('type', [
     outcome: outcomeEnum, reason: text(2000) }).strict(),
   z.object({ ...common, type: z.literal('request.grant'), requestId: id, agentId: id, capacity: z.enum(['REVIEW','WORKER','DIRECTOR','DELEGATE']), granted: z.boolean() }).strict(),
   z.object({ ...common, type: z.literal('request.slots'), requestId: id, expectedRevision: z.number().int().nonnegative(), teamId: id.nullable(), slots: z.array(z.object({role,count:z.number().int().min(1).max(64)}).strict()).max(16) }).strict(),
-  z.object({ ...common, type: z.literal('location.save'), projectId: id, expectedRevision: z.number().int().nonnegative(), localFolder: text(32000), inputPaths: z.array(z.string().min(1).max(1000)).max(2000), outputFolder: text(32000) }).strict(),
+  z.object({ ...common, type: z.literal('location.save'), projectId: id, expectedRevision: z.number().int().nonnegative(), localFolder: text(32000), inputPaths: z.array(z.string().min(1).max(1000)).max(2000).optional(), outputFolder: text(32000) }).strict(),
   z.object({ ...common, type: z.literal('experiment.create'), projectId: id, name: title, hypothesis: text(12000) }).strict(),
   z.object({ ...common, type: z.literal('contract.save'), experimentId: id, expectedRevision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER - 1), contract: contractSchema }).strict(),
   z.object({ ...common, type: z.literal('contract.submit'), experimentId: id, expectedRevision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER - 1) }).strict(),
@@ -116,11 +119,11 @@ const relativePath=z.string().min(1).max(1000)
   .refine(value=>!value.split(/[\\/]/).some(part=>part==='..'||part==='.'||part===''),'Selected file paths cannot traverse directories')
   .refine(value=>!/[\x00-\x1f]/.test(value),'Selected file paths cannot contain control characters');
 const locationSchema=z.object({id,projectId:id,localFolder:text(32000),inputPaths:z.array(relativePath).max(2000),outputFolder:text(32000),
-  sourceRepository:text(32000),snapshotRoute:z.literal('SELECTED_FILES_GIT_SNAPSHOT'),
+  sourceRepository:text(32000),snapshotRoute:z.enum(['SELECTED_FILES_GIT_SNAPSHOT','PROJECT_FOLDER_SNAPSHOT']),
   providerTarget:z.object({provider:providerEnum,host:z.enum(['ANTHROPIC_MANAGED','LOCAL_MACHINE']),selection:z.literal('PROVIDER_DEFAULT'),environmentId:secretFree(200),resolved:z.boolean()}).strict(),
   legacyNote:text(1000),revision:z.number().int().nonnegative(),createdAt:timestamp,updatedAt:timestamp}).strict();
 const snapshotSchema=z.object({objectsStored:z.literal(true).optional(),id,projectId:id,requestId:id.nullable(),locationRevision:z.number().int().nonnegative(),requestRevision:z.number().int().nonnegative().nullable(),
-  route:z.enum(['SELECTED_FILES_GIT_SNAPSHOT','GENERATED_REQUEST_ONLY']),
+  route:z.enum(['SELECTED_FILES_GIT_SNAPSHOT','PROJECT_FOLDER_SNAPSHOT','GENERATED_REQUEST_ONLY']),
   files:z.array(z.object({path:relativePath,bytes:z.number().int().min(0),sha256:hash}).strict()).max(2000),
   generated:z.array(z.object({path:relativePath,bytes:z.number().int().min(0),sha256:hash}).strict()).max(64).optional(),
   totalBytes:z.number().int().min(0).max(64*1024*1024),manifestHash:hash,stagingCommit:z.string().regex(/^([a-f0-9]{40})?$/),stagingPath:text(32000),
@@ -1708,28 +1711,28 @@ export class OfficeStore {
           const existing=(state.locations??[]).find(l=>l.projectId===project.id);
           if((existing?.revision??0)!==command.expectedRevision)throw new Error('Project location changed in another view. Reload before saving.');
           const folder=command.localFolder.trim();
-          if(folder&&(!isAbsolute(folder)||!statSync(folder).isDirectory()))throw new Error('Choose an existing project folder on this device.');
+          const folderStats=folder&&isAbsolute(folder)?safeStat(folder):undefined;
+          if(folder&&!folderStats?.isDirectory())throw new Error('Choose an existing project folder on this device.');
           const output=command.outputFolder.trim();
-          if(output&&(!isAbsolute(output)||!statSync(output).isDirectory()))throw new Error('Choose an existing output folder, or leave it empty to use the managed output directory.');
+          const outputStats=output&&isAbsolute(output)?safeStat(output):undefined;
+          if(output&&!outputStats?.isDirectory())throw new Error('Choose an existing output folder, or leave it empty to use the managed output directory.');
           const root=folder?realpathSync(folder):'';
-          const selected=[...new Set(command.inputPaths.map(value=>value.replaceAll('\\\\','/').trim()).filter(Boolean))].sort();
-          if(selected.length&&!root)throw new Error('Choose the project folder before selecting files to share.');
-          // The managed input directory lives inside the chosen project folder so the user can find
-          // it; files are shared only through the explicit selection above.
-          if(root)mkdirSync(resolve(root,'inputs'),{recursive:true});
+          // The project folder itself is the input scope: every regular file inside it is walked,
+          // hashed and inventoried when a request snapshot is prepared. Per-file selection is gone;
+          // the field stays on the record so history written under the old model still reads.
           const location:ProjectLocation={
-            id:existing?.id??randomUUID(),projectId:project.id,localFolder:root,inputPaths:selected,
+            id:existing?.id??randomUUID(),projectId:project.id,localFolder:root,inputPaths:[],
             outputFolder:output?realpathSync(output):'',
             // The source repository is recorded for provenance only. Its history is never uploaded.
             sourceRepository:root&&existsSync(resolve(root,'.git'))?resolve(root,'.git'):'',
-            snapshotRoute:'SELECTED_FILES_GIT_SNAPSHOT',
+            snapshotRoute:'PROJECT_FOLDER_SNAPSHOT',
             providerTarget:{provider:'claude',host:'ANTHROPIC_MANAGED',selection:'PROVIDER_DEFAULT',environmentId:'',resolved:false},
             // Any old free-text cloud workspace value stays an inert note; it is never parsed or trusted.
             legacyNote:existing?.legacyNote??project.cloudWorkspace??'',
             revision:(existing?.revision??0)+1,createdAt:existing?.createdAt??now,updatedAt:now,
           };
           changes.push({collection:'locations',value:location});
-          reason=`Project location saved: ${root||'no local folder'}, ${selected.length} selected file${selected.length===1?'':'s'}, output ${location.outputFolder||'managed app directory'}. Nothing was transferred.`;
+          reason=`Project location saved: ${root||'no local folder'} — its contents become each request snapshot (credentials, tool configuration and dependency folders are skipped), output ${location.outputFolder||'managed app directory'}. Nothing was transferred.`;
           break;
         }
         case 'request.create':
@@ -2154,7 +2157,7 @@ export class OfficeStore {
       if(!project)throw new Error('Project not found');
       if(project.archived)throw new Error('Archived project is read-only; restore it first');
       const location=state.locations?.find(l=>l.projectId===snapshot.projectId);
-      if(snapshot.route==='SELECTED_FILES_GIT_SNAPSHOT'&&location?.revision!==snapshot.locationRevision)throw new Error('The project location changed while preparing this snapshot. Prepare it again.');
+      if(snapshot.route!=='GENERATED_REQUEST_ONLY'&&location?.revision!==snapshot.locationRevision)throw new Error('The project location changed while preparing this snapshot. Prepare it again.');
       if(snapshot.requestId&&!state.requests?.some(r=>r.id===snapshot.requestId&&r.projectId===snapshot.projectId))throw new Error('Snapshot request does not belong to this project');
       if(state.snapshots?.some(s=>s.id===snapshot.id))throw new Error('Snapshot identities are immutable');
       this.append(state,[{collection:'snapshots',value:snapshot}],{kind:'INPUT_SNAPSHOT_PREPARED',projectId:snapshot.projectId,experimentId:null,

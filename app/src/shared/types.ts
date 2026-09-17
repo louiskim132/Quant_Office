@@ -74,7 +74,7 @@ export interface ProviderReadiness { provider: Provider; connectionId: string; i
 /** Where a project's inputs come from and where its outputs go. Versioned; edits carry an expected revision. */
 export interface ProjectLocation {
   id: string; projectId: string; localFolder: string; inputPaths: string[]; outputFolder: string;
-  sourceRepository: string; snapshotRoute: 'SELECTED_FILES_GIT_SNAPSHOT';
+  sourceRepository: string; snapshotRoute: 'SELECTED_FILES_GIT_SNAPSHOT' | 'PROJECT_FOLDER_SNAPSHOT';
   providerTarget: { provider: Provider; host: 'ANTHROPIC_MANAGED' | 'LOCAL_MACHINE'; selection: 'PROVIDER_DEFAULT'; environmentId: string; resolved: boolean };
   legacyNote: string; revision: number; createdAt: string; updatedAt: string;
 }
@@ -84,7 +84,7 @@ export interface InputSnapshot {
   /** New snapshots with durable objects require those objects in backups and restores. */
   objectsStored?: true;
   id: string; projectId: string; requestId: string | null; locationRevision: number; requestRevision: number | null;
-  route: 'SELECTED_FILES_GIT_SNAPSHOT' | 'GENERATED_REQUEST_ONLY'; files: SnapshotFile[];
+  route: 'SELECTED_FILES_GIT_SNAPSHOT' | 'PROJECT_FOLDER_SNAPSHOT' | 'GENERATED_REQUEST_ONLY'; files: SnapshotFile[];
   /** Office-written bookkeeping under the reserved directory. Absent on snapshots prepared before R2. */
   generated?: SnapshotFile[]; totalBytes: number;
   manifestHash: string; stagingCommit: string; stagingPath: string; warnings: string[]; provenance: 'OFFICE_STAGED'; createdAt: string;
