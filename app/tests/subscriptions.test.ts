@@ -71,6 +71,41 @@ test('a repeated catalog cursor degrades mid-pagination rather than shipping a t
   assert.match(connection.note,/Codex model catalog unavailable\. Refresh to retry\./);
  }finally{service.close();}
 });
+test('signIn refuses a concurrent sign-in and resolves to the verified connection',async()=>{
+ const root=mkdtempSync(path.join(tmpdir(),'qro-subscriptions-'));
+ const service=new Subscriptions(root,async()=>{});
+ (service as any).codex={async request(method:string){await new Promise(resolve=>setTimeout(resolve,25));if(method==='account/read')return {account:{type:'chatgpt',email:'research@example.test'}};if(method==='model/list')return {data:[{id:'model-a',displayName:'Model A'}],nextCursor:null};if(method==='account/rateLimits/read')return {rateLimits:{primary:{usedPercent:10,windowDurationMins:300,resetsAt:9999}}};throw new Error('Unexpected '+method);},stop(){}};
+ try{
+  const first=service.signIn('openai');
+  await assert.rejects(service.signIn('openai'),/already in progress/);
+  const connection=await first;
+  assert.equal(connection.provider,'openai');assert.equal(connection.connected,true);assert.equal(connection.account,'research@example.test');
+  assert.ok(connection.models.some(m=>m.id==='model-a'));assert.ok(Date.parse(connection.checkedAt));
+ }finally{service.close();}
+});
+test('signIn runs the official browser flow and returns the account verified afterwards',async()=>{
+ const root=mkdtempSync(path.join(tmpdir(),'qro-subscriptions-'));
+ let opened='',signedIn=false;
+ const service=new Subscriptions(root,async url=>{opened=url;signedIn=true;});
+ (service as any).codex={async request(method:string){if(method==='account/read')return signedIn?{account:{type:'chatgpt',email:'signedin@example.test'}}:{account:{type:'apiKey',email:'api@example.test'}};if(method==='account/login/start')return {loginId:'login-1',authUrl:'https://auth.openai.com/device'};if(method==='account/login/cancel')return {};if(method==='model/list')return {data:[{id:'model-a',displayName:'Model A'}],nextCursor:null};if(method==='account/rateLimits/read')return {rateLimits:{}};throw new Error('Unexpected '+method);},stop(){}};
+ try{
+  const connection=await service.signIn('openai');
+  assert.equal(opened,'https://auth.openai.com/device');
+  assert.equal(connection.connected,true);assert.equal(connection.account,'signedin@example.test');
+ }finally{service.close();}
+});
+test('a canceled sign-in rejects honestly and leaves the gate free for a later attempt',async()=>{
+ const root=mkdtempSync(path.join(tmpdir(),'qro-subscriptions-'));
+ const service=new Subscriptions(root,async()=>{});
+ (service as any).codex={async request(method:string){await new Promise(resolve=>setTimeout(resolve,25));if(method==='account/read')return {account:{type:'chatgpt',email:'research@example.test'}};if(method==='model/list')return {data:[],nextCursor:null};if(method==='account/rateLimits/read')return {rateLimits:{}};throw new Error('Unexpected '+method);},stop(){}};
+ try{
+  const pending=service.signIn('openai');
+  service.cancel();
+  await assert.rejects(pending,/canceled/i);
+  const connection=await service.signIn('openai');
+  assert.equal(connection.connected,true);assert.equal(connection.account,'research@example.test');
+ }finally{service.close();}
+});
 test('metadata child environment excludes API billing overrides',()=>{
  const original=process.env.ANTHROPIC_API_KEY;process.env.ANTHROPIC_API_KEY='test-placeholder';try{assert.equal(subscriptionEnvironment().ANTHROPIC_API_KEY,undefined);assert.equal(process.env.ANTHROPIC_API_KEY,'test-placeholder');}finally{if(original===undefined)delete process.env.ANTHROPIC_API_KEY;else process.env.ANTHROPIC_API_KEY=original;}
 });

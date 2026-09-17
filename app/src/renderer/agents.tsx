@@ -61,17 +61,22 @@ const actionNames:[keyof ReadinessActions,string][]=[['prepare','Prepare request
  * as exactly that, and never changes what the office is allowed to do.
  */
 export function ProviderConnections({state}:{state:AppState}){
- const [busy,setBusy]=useState<Partial<Record<Provider,boolean>>>({}),[errors,setErrors]=useState<Partial<Record<Provider,string>>>({}),[live,setLive]=useState<Partial<Record<Provider,string>>>({});
- async function check(provider:Provider){setBusy(b=>({...b,[provider]:true}));setErrors(e=>({...e,[provider]:''}));
+ const [busy,setBusy]=useState<Partial<Record<Provider,'check'|'signin'>>>({}),[errors,setErrors]=useState<Partial<Record<Provider,string>>>({}),[live,setLive]=useState<Partial<Record<Provider,string>>>({});
+ async function check(provider:Provider){setBusy(b=>({...b,[provider]:'check'}));setErrors(e=>({...e,[provider]:''}));
   try{const connection=await window.office.connectionStatus(provider);setLive(l=>({...l,[provider]:connection.checkedAt}));}
-  catch(e){setErrors(old=>({...old,[provider]:(e as Error).message}));}finally{setBusy(b=>({...b,[provider]:false}));}}
+  catch(e){setErrors(old=>({...old,[provider]:(e as Error).message}));}finally{setBusy(b=>({...b,[provider]:undefined}));}}
+ // Sign-in runs the provider's own login (browser flow or official terminal) in the main process and
+ // is re-observed and recorded there; the card reflects the returned connection like a check does.
+ async function signIn(provider:Provider){setBusy(b=>({...b,[provider]:'signin'}));setErrors(e=>({...e,[provider]:''}));
+  try{const connection=await window.office.loginProvider(provider);setLive(l=>({...l,[provider]:connection.checkedAt}));}
+  catch(e){setErrors(old=>({...old,[provider]:(e as Error).message}));}finally{setBusy(b=>({...b,[provider]:undefined}));}}
  return <div className="settings-card"><h2>Connections</h2>
   <p className="muted">Every check is recorded with the exact official tool version that produced it. Only an operation the office actually exercised counts as verified; documentation and sign-in never make work runnable.</p>
   {(['claude','openai','devin'] as Provider[]).map(provider=>{const readiness=providerReadiness(state,provider,provider==='devin'?{execution:'LOCAL'}:undefined);const snapshot=state.capabilities?.filter(c=>c.provider===provider).at(-1);
    const checked=live[provider];
    return <div className="setting-row connection-row" key={provider}><div>
     <strong>{providerNames[provider]}{provider==='claude'&&<span className="quiet-badge"> Primary</span>}</strong>
-    <p>{readiness.identity?`${readiness.identity} · last recorded observation ${new Date(readiness.lastObservedAt).toLocaleString()}`:'No account check recorded yet.'}</p>
+    <p>{readiness.identity?`${readiness.identity} · last recorded observation ${new Date(readiness.lastObservedAt).toLocaleString()}`:readiness.lastObservedAt?`Checked ${new Date(readiness.lastObservedAt).toLocaleString()} — ${snapshot?.operations.find(item=>item.operation==='ACCOUNT_STATUS')?.detail??'no signed-in subscription was reported.'}`:'No account check recorded yet.'}</p>
     {checked&&checked!==readiness.lastObservedAt&&<p className="muted">Last live check {new Date(checked).toLocaleString()} was not persisted as a new observation. It cannot authorize anything.</p>}
     <div className="badge-groups"><div className="badge-group"><span className="mini-label">Account</span><ul className="readiness-list">{([['Signed in',readiness.signedIn],['Account fresh',readiness.accountFresh],['Model checked',readiness.modelChecked],['Dispatch checked',readiness.dispatchChecked],['Ready',readiness.ready]] as [string,boolean][])
       .map(([label,value])=><li key={label} data-state={value?'yes':'no'}>{label}: {value?'Yes':'No'}</li>)}</ul></div><div className="badge-group"><span className="mini-label">Operations</span><ul className="readiness-list">{actionNames.map(([action,label])=><li key={action} data-state={readiness.actions[action]?'yes':'no'}>{label}: {readiness.actions[action]?'Allowed':'Blocked'}</li>)}</ul></div></div>
@@ -83,7 +88,8 @@ export function ProviderConnections({state}:{state:AppState}){
     {errors[provider]&&<p className="notice error" role="alert">{errors[provider]}</p>}
     {provider==='claude'&&TRANSPORT_PROBE_CONTAINMENT.contained&&<p className="muted">{TRANSPORT_PROBE_CONTAINMENT.status}</p>}
    </div><div className="button-row">
-    <button className="secondary" disabled={busy[provider]} onClick={()=>void check(provider)}>{busy[provider]?'Checking…':'Check account'}</button>
+    <button className="secondary" disabled={!!busy[provider]} onClick={()=>void check(provider)}>{busy[provider]==='check'?'Checking…':'Check account'}</button>
+    {!readiness.signedIn&&<button className="secondary" disabled={!!busy[provider]} onClick={()=>void signIn(provider)}>{busy[provider]==='signin'?'Signing in…':'Sign in'}</button>}
     {provider==='claude'&&<button className="text-button" disabled title={TRANSPORT_PROBE_CONTAINMENT.status}>Verify cloud transport…</button>}
    </div></div>;})}
  </div>;
