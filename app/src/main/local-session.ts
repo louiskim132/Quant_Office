@@ -11,6 +11,7 @@ export const PACKET_FILE = 'packet.json';
 export const RESULT_FILE = 'result.json';
 export const CANCEL_FILE = 'cancel.requested';
 export const CONTRACT_FILE = 'CONTRACT.md';
+export const AGENTS_FILE = 'AGENTS.md';
 export const INPUTS_DIR = 'inputs';
 
 /** A receipt is a small record; a multi-megabyte one is a defect, not a result. */
@@ -91,6 +92,20 @@ export const resultContract = (): string => [
 ].join('\n');
 
 /**
+ * The discovery file agent CLIs auto-read when the packet directory is the working directory, so
+ * an uninstructed session still finds the contract instead of needing it named in the prompt.
+ */
+export const packetAgents = (): string => [
+  '# Quant Research Office session packet',
+  '',
+  `This directory is a bounded work packet. \`${PACKET_FILE}\` is the frozen assignment and`,
+  `\`${CONTRACT_FILE}\` is the result contract — read it before doing anything else. Declared`,
+  `input files, when the snapshot carried any, are under \`${INPUTS_DIR}/\`. Report back by`,
+  `writing \`${RESULT_FILE}\` in this directory exactly as the contract specifies.`,
+  '',
+].join('\n');
+
+/**
  * The local mailbox transport (roadmap local-sessions milestone): the office writes a scoped packet
  * — packet.json, the CONTRACT.md result contract and the snapshot's declared input files, each
  * hashed — into a dedicated session
@@ -149,6 +164,7 @@ export class LocalMailboxAdapter implements ProviderAdapter {
     };
     writeFileSync(path.join(dir, PACKET_FILE), `${JSON.stringify(packet, null, 2)}\n`);
     writeFileSync(path.join(dir, CONTRACT_FILE), resultContract());
+    writeFileSync(path.join(dir, AGENTS_FILE), packetAgents());
     return {
       externalId: name,
       externalUrl: '',

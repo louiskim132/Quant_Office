@@ -180,6 +180,26 @@ test('completion requires provider output, and a late event cannot reopen the jo
  assert.throws(()=>f.store.recordJobTransition({jobId:job.id,expectedRevision:job.revision,to:'RUNNING',evidence:'PROVIDER_REPORTED',detail:'late'}),/cannot reopen/);
 });
 
+test('an adapter method fetch still retrieves declared output bytes',async t=>{
+ // LocalMailboxAdapter.fetch is a real method that reads its own session root; the controller
+ // must invoke it bound to the adapter, or every declared output fails retrieval.
+ const text='{"proof":"present"}';
+ const output=declare('proof.json',text);
+ class MethodFetchAdapter extends FakeAdapter {
+  private readonly bytes=Buffer.from(text);
+  async fetch(){return new Uint8Array(this.bytes);}
+ }
+ const adapter=new MethodFetchAdapter();
+ adapter.behaviour={observe:async()=>({state:'COMPLETED' as const,detail:'Finished.',outputs:[output]})};
+ const f=await fixture(t,adapter);
+ const {assignment}=f.controller.prepare({requestId:f.request.id,agentId:f.agent.id,snapshotId:f.snapshot.id});
+ await f.controller.dispatch(assignment.id);
+ const state=await f.controller.observe(assignment.id);
+ const job=state.jobs![0];
+ assert.equal(job.state,'COMPLETED','a declared output must be retrieved through the bound adapter method');
+ assert.deepEqual(job.outputs,[{...output,stored:true}]);
+});
+
 test('a failed cancellation stays cancel-requested and records why',async t=>{
  const adapter=new FakeAdapter({cancel:async()=>({acknowledged:false,detail:'The provider has no supported cancellation route for this session.'})});
  const f=await fixture(t,adapter);

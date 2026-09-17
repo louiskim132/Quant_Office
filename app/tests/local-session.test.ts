@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { removeTreeSync } from '../src/main/fsx';
 import { buildProviderPayload, type SubmitContext } from '../src/main/controller';
-import { CANCEL_FILE, CONTRACT_FILE, INPUTS_DIR, LocalMailboxAdapter, PACKET_FILE, RESULT_FILE, RESULT_OPTIONAL_KEYS, RESULT_REQUIRED_KEYS, RESULT_STATES } from '../src/main/local-session';
+import { AGENTS_FILE, CANCEL_FILE, CONTRACT_FILE, INPUTS_DIR, LocalMailboxAdapter, PACKET_FILE, RESULT_FILE, RESULT_OPTIONAL_KEYS, RESULT_REQUIRED_KEYS, RESULT_STATES } from '../src/main/local-session';
 import type { Assignment, InputSnapshot, ProviderJob } from '../src/shared/types';
 
 const at = (minutes: number) => new Date(Date.UTC(2026, 8, 8, 10, 0, 0) + minutes * 60000).toISOString();
@@ -109,6 +109,11 @@ test('a zero-input submit writes a valid packet directory with the result contra
   assert.equal(packet.contract, CONTRACT_FILE);
   const contract = readFileSync(path.join(dir, CONTRACT_FILE), 'utf8');
   assert.match(contract, /result\.json/);
+  // The discovery file an agent CLI auto-read points the session at the contract and packet.
+  const discovery = readFileSync(path.join(dir, AGENTS_FILE), 'utf8');
+  assert.match(discovery, /CONTRACT\.md/);
+  assert.match(discovery, /packet\.json/);
+  assert.match(discovery, /result\.json/);
 });
 
 test('the written contract names exactly the keys and states the strict parser accepts', async t => {

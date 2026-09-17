@@ -613,7 +613,9 @@ export class AssignmentController {
       const previous = names.get(output.path.toLowerCase());
       if (previous && previous !== output.sha256) { failures.push('The output inventory has conflicting paths.'); continue; }
       names.set(output.path.toLowerCase(), output.sha256);
-      const fetch = adapter.fetch ?? this.fetchOutput;
+      // adapter.fetch is a method that reads its own adapter state (the session root), so it
+      // must stay bound to the adapter — extracting it bare crashes every declared output.
+      const fetch = adapter.fetch ? adapter.fetch.bind(adapter) : this.fetchOutput;
       if (!fetch) { failures.push(`${output.path} was reported but this route cannot retrieve bytes.`); continue; }
       if (!this.storeOutput) { failures.push(`${output.path} cannot be durably stored by this route.`); continue; }
       try {
