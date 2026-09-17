@@ -2964,3 +2964,29 @@ workspace-grouping expectation, and the fetch/hash/store completion
 path; cancel idempotency is pinned on both the sentinel and vacuous
 paths. Combined verification at c1ea876: typecheck clean, 520/520
 unit, build clean, desktop e2e green.
+
+2026-09-17 (round folder-inputs) — the project folder is the input
+scope, landed on 1c7d5b7. Per-file input selection was the wrong unit
+for the real workflow: a research folder accumulates loss logs,
+validation results and backtest outputs, and any of it may be the
+next request's input. Organizer core at bfd3fea: prepareInputSnapshot
+now walks the whole project folder via scanProjectFolder instead of
+resolving a stored allowlist — credential patterns, tool
+configuration, VCS/dependency/cache subtrees, links, the reserved
+_office namespace and OS noise are skipped, each meaningful skip
+recorded as a snapshot warning; the 64 MiB cap and a new 2000-file
+cap refuse the whole snapshot rather than truncate; location.save
+accepts but no longer stores inputPaths (records keep the field for
+history) and stamps PROJECT_FOLDER_SNAPSHOT; the stale-location guard
+covers the new route; a missing folder gets the friendly refusal
+instead of raw ENOENT. Old records and packets still replay — both
+route literals stay valid. Worker packet integrated (d92ba83): the
+location panel loses the picker and file list for copy explaining
+that the folder's contents become the frozen snapshot with skips
+recorded; the detail-page disclosure is retitled 'Location & inputs';
+workflow.md describes the folder-scope contract; desktop e2e now
+asserts the picker is gone and drives a real folder pick + save.
+The office:choose-input-files IPC stays dormant in the bridge —
+bridge removal is a separate organizer change. Combined verification
+at 1c7d5b7: typecheck clean, 520/520 unit, build clean, desktop e2e
+green.
