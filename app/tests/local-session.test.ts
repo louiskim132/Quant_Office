@@ -419,3 +419,37 @@ test('cancelEvidence records an office-observed local end, never a provider ackn
   assert.match(entry.detail, /real cancellation/);
   assert.match(entry.detail, /not a provider acknowledgement/);
 });
+
+test('a second cancel on an already-signalled session stays acknowledged and rewrites the sentinel harmlessly', async t => {
+  const f = fixture(t);
+  const { externalId } = await f.adapter.submit(f.context);
+  const dir = path.join(f.sessions, externalId);
+  const job = f.job(externalId);
+  await f.adapter.cancel(job);
+  assert.ok(existsSync(path.join(dir, CANCEL_FILE)));
+  const again = await f.adapter.cancel(job);
+  assert.equal(again.acknowledged, true);
+  assert.match(again.detail, /Local session ended by the office/);
+  // The rewrite replaces the sentinel in place: it still parses and still names this job.
+  const sentinel = JSON.parse(readFileSync(path.join(dir, CANCEL_FILE), 'utf8'));
+  assert.equal(sentinel.jobId, job.id);
+  assert.equal(typeof sentinel.requestedAt, 'string');
+  const entries = f.adapter.cancelEvidence(job);
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].operation, 'LOCAL_CANCEL');
+});
+
+test('the vacuous acknowledge repeats cleanly and cancelEvidence reports nothing either time', async t => {
+  const f = fixture(t);
+  // No recorded identity and an unusable one land on the same branch: nothing external exists to
+  // signal, so the office's own acknowledgement is all a second ask can ever produce.
+  for (const externalId of ['', '../escape', 'a/b']) {
+    const job = f.job(externalId);
+    for (let i = 0; i < 2; i++) {
+      const result = await f.adapter.cancel(job);
+      assert.equal(result.acknowledged, true);
+      assert.match(result.detail, /No session was ever recorded/);
+      assert.deepEqual(f.adapter.cancelEvidence(job), [], 'no session directory means nothing was ended');
+    }
+  }
+});
