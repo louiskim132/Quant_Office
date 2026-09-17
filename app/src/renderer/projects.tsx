@@ -7,7 +7,7 @@ import './projects.css';
 const samePaths=(a:string[],b:string[])=>a.length===b.length&&a.every((value,index)=>value===b[index]);
 const childPath=(root:string,name:string)=>`${root.replace(/[\\/]+$/,'')}${root.includes('\\')?'\\':'/'}${name}`;
 
-function ProjectLocationPanel({project,saved,location,onState}:{project:Project;saved:ProjectLocation|undefined;location:string;onState:(s:AppState)=>void}){
+export function ProjectLocationPanel({project,saved,location,onState}:{project:Project;saved:ProjectLocation|undefined;location:string;onState:(s:AppState)=>void}){
  const [folder,setFolder]=useState(location);
  const [inputs,setInputs]=useState<string[]>(saved?.inputPaths??[]);
  const [busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');

@@ -19,6 +19,10 @@
 /* Branch standing sections: the same dividers everywhere a group starts. */
 .standing .standing-section{display:grid;gap:8px;border-top:1px solid var(--border);padding-top:11px}
 
+/* The pipeline is secondary tooling: a separated panel below the mandate card, matching .research-overview. */
+.pipeline{margin-top:19px;background:var(--panel);border:1px solid var(--border);border-radius:9px;padding:20px 22px}
+.pipeline .pipeline-sub{font-size:11px;color:var(--muted);margin:0}
+
 /* Research pipeline polish — every rule is scoped under .pipeline so shared rules stay untouched. */
 .pipeline .stage-steps{list-style:none;padding:0;margin:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px}
 .pipeline .stage-steps li{display:flex;gap:8px;align-items:flex-start;border:1px solid var(--border);border-radius:7px;padding:8px 12px}

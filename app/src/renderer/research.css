@@ -1,12 +1,29 @@
 /* research.css — domain styles for this surface's owner. */
 .back-link{display:inline-flex;align-items:center;gap:8px;color:var(--muted);font-size:11px;padding:0;margin:0 0 16px}
 .back-link:hover{color:var(--accent)}
-.research-overview{border:1px solid var(--border);border-radius:9px;background:var(--panel);padding:22px;display:flex;justify-content:space-between;gap:30px;align-items:center;margin-bottom:19px}
+.research-overview{border:1px solid var(--border);border-radius:9px;background:var(--panel);padding:22px;display:flex;justify-content:space-between;gap:30px;align-items:center;margin-bottom:19px;flex-wrap:wrap}
 .research-overview-body{min-width:0}
 .research-overview h2{margin:0;font-size:19px}
 .research-overview-title{display:flex;align-items:center;gap:10px;margin:8px 0}
 .research-overview p{font-size:11px;color:var(--muted);max-width:680px;white-space:pre-wrap}
 .research-overview .button-row{justify-content:flex-end;flex-wrap:wrap;flex-shrink:0}
+.location-details{flex-basis:100%;border-top:1px solid var(--border);padding-top:15px}
+.location-details>summary{display:inline-flex;align-items:center;gap:7px;font-size:11px;color:var(--muted);cursor:pointer}
+.location-details>summary:hover{color:var(--accent)}
+.location-details .project-row-panel{border:1px solid var(--border);border-radius:8px;background:var(--panel-2);margin-top:13px}
+.project-requests{margin-bottom:19px}
+.project-requests h2{font-size:13px;margin:0 0 6px}
+.project-requests>.muted{margin:0 0 12px;font-size:11px}
+.request-row-item{border:1px solid var(--border);border-radius:9px;background:var(--panel);margin-bottom:8px}
+.request-row-item>summary{display:flex;align-items:center;gap:12px;padding:12px 16px;cursor:pointer;list-style:none}
+.request-row-item>summary::-webkit-details-marker{display:none}
+.request-row-item>summary::before{content:'›';color:var(--subtle);font-size:13px;transition:transform .15s}
+.request-row-item[open]>summary::before{transform:rotate(90deg)}
+.request-row-name{flex:1;min-width:0;font-size:12px;font-weight:600}
+.request-row-lead{flex-shrink:0}
+.request-row-detail{border-top:1px solid var(--border);padding:14px 16px;display:grid;gap:10px;font-size:11px}
+.request-row-detail p{margin:0;white-space:pre-wrap}
+.request-row-detail .button-row{justify-content:flex-end}
 .experiment-tabs{display:flex;gap:4px;margin:0 0 19px;overflow-x:auto;border-bottom:1px solid var(--border)}
 .experiment-tabs button{padding:10px 14px;border-bottom:2px solid transparent;font-size:11px;text-align:left;white-space:nowrap;color:var(--muted)}
 .experiment-tabs button span{display:block;font-size:8px;color:var(--subtle);text-transform:capitalize;margin-top:5px}
