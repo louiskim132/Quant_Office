@@ -248,6 +248,8 @@ export interface OfficeAPI {
  confirmAgent(ticket: string): Promise<AppState>;
  cancelAgent(): Promise<void>;
  connectionStatus(provider: Provider): Promise<Connection>;
+ /** Run the provider's official sign-in outside the add-agent flow and record the observation. */
+ loginProvider(provider: Provider): Promise<Connection>;
  selectProviderTool(provider: Provider): Promise<void>;
  openProviderUsage(provider: Provider): Promise<void>;
  /** Freeze one request's inputs and record the intent to submit. Nothing is transferred. */

@@ -151,6 +151,11 @@ const changed=()=>win?.webContents.send('office:changed');
   // Provider evidence is persisted here, in the main process. The renderer never supplies observations.
   try{store.recordAccountObservation(observation);changed();}catch(error){connection.note=`${connection.note} Durable record not saved: ${error instanceof Error?error.message:'unknown error'}`.trim();}
   return connection;});
+ handle('office:provider-login',async value=>{const provider=providerSchema.parse(value);await subscriptions.signIn(provider);
+  // A completed sign-in is immediately re-observed and recorded like any account check.
+  const {connection,observation}=await subscriptions.observe(provider);
+  try{store.recordAccountObservation(observation);changed();}catch(error){connection.note=`${connection.note} Durable record not saved: ${error instanceof Error?error.message:'unknown error'}`.trim();}
+  return connection;});
  handle('office:provider-tool',async value=>{const provider=providerSchema.parse(value);const result=await dialog.showOpenDialog(win!,{title:'Locate the official '+(provider==='openai'?'codex.exe':'claude.exe'),properties:['openFile'],filters:[{name:'Provider executable',extensions:['exe']}]});if(!result.canceled&&result.filePaths[0])subscriptions.select(provider,result.filePaths[0]);});
  handle('office:provider-usage',value=>shell.openExternal(providerSchema.parse(value)==='claude'?'https://claude.ai/settings/usage':'https://chatgpt.com/codex/settings/usage'));
  

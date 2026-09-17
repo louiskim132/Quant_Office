@@ -6,7 +6,7 @@ const api:OfficeAPI={
  scanClaudeUsage:chooseFolder=>request('office:claude-local-usage',chooseFolder),changeAgentEffort:input=>request('office:agent-effort',input),changeAgentModel:input=>request('office:agent-model',input),getWorkLogs:()=>request('office:work-logs'),importWorkLogs:agentId=>request('office:work-log-import',agentId),
  bindAgentConnection:input=>request('office:agent-bind',input),
  connectAgent:draft=>request('office:agent-connect',draft),confirmAgent:ticket=>request('office:agent-confirm',ticket),cancelAgent:()=>request('office:agent-cancel'),
- connectionStatus:provider=>request('office:connection-status',provider),selectProviderTool:provider=>request('office:provider-tool',provider),openProviderUsage:provider=>request('office:provider-usage',provider),
+ connectionStatus:provider=>request('office:connection-status',provider),loginProvider:provider=>request('office:provider-login',provider),selectProviderTool:provider=>request('office:provider-tool',provider),openProviderUsage:provider=>request('office:provider-usage',provider),
  prepareRequest:input=>request('office:request-prepare',input),handoffPlan:input=>request('office:request-plan',input),
  discardPreparation:input=>request('office:request-discard-preparation',input),
  openHandoffTerminal:input=>request('office:request-handoff',input),observeJob:input=>request('office:request-observe',input),

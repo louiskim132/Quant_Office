@@ -199,28 +199,44 @@ export class Subscriptions {
   if(this.connecting)throw new Error('Another sign-in is already in progress. Cancel it first.');
   const draft=agentDraftSchema.parse(input);this.connecting=true;this.ticket=undefined;const generation=++this.generation;
   try{
-   let connection=await this.status(draft.provider);
-   if(!connection.connected){
-    if(draft.provider==='openai'){
-     const result=await this.client().request('account/login/start',{type:'chatgpt'});this.loginId=result.loginId;
-     const url=new URL(result.authUrl);if(url.protocol!=='https:'||!['auth.openai.com','chatgpt.com','auth.chatgpt.com'].includes(url.hostname))throw new Error('Unexpected provider sign-in URL.');
-     await this.openBrowser(url.href);
-     const deadline=Date.now()+5*60*1000;
-     do{await new Promise(resolve=>setTimeout(resolve,1500));if(generation!==this.generation)throw new Error('Sign-in canceled.');connection=await this.status('openai');}while(!connection.connected&&Date.now()<deadline);
-    }else{
-     // Never null here: openai is the only browser-flow provider and it was handled above.
-     const login=providerLogin(draft.provider)!;
-     // A visible official login terminal allows fallback code entry without exposing credentials to the renderer.
-     await this.loginWindow(this.executable(login.provider),login.args,PROVIDER_TOOL_NAME[login.provider]);
-     connection=await this.status(login.provider);
-    }
-   }
-   if(generation!==this.generation)throw new Error('Sign-in canceled.');
-   if(!connection.connected)throw new Error('Subscription sign-in could not be verified.');
+   const connection=await this.runLogin(draft.provider,generation);
    if((draft.provider==='openai'||draft.provider==='devin')&&!connection.models.some(m=>m.id===draft.model))throw new Error(`The selected model is not in your available ${PROVIDER_TOOL_NAME[draft.provider]} catalog. Refresh models and select again.`);
    this.validateEffort(draft.provider,draft.model,draft.effort??'default',connection);
    this.ticket={id:randomUUID(),draft,connection,expiresAt:Date.now()+10*60*1000};return structuredClone(this.ticket);
   }finally{this.connecting=false;this.loginProcess=undefined;this.loginId=undefined;}
+ }
+ /**
+  * A provider-level sign-in outside the add-agent flow: runs the provider's official login
+  * (browser flow for OpenAI, the official login terminal elsewhere) and reports the verified
+  * connection. No draft, model or effort is checked — this is account sign-in only.
+  */
+ async signIn(provider:Provider):Promise<Connection>{
+  if(this.connecting)throw new Error('Another sign-in is already in progress. Cancel it first.');
+  this.connecting=true;const generation=++this.generation;
+  try{return await this.runLogin(provider,generation);}
+  finally{this.connecting=false;this.loginProcess=undefined;this.loginId=undefined;}
+ }
+ /** The official sign-in for one provider, shared by connect() and the standalone sign-in. */
+ private async runLogin(provider:Provider,generation:number):Promise<Connection>{
+  let connection=await this.status(provider);
+  if(!connection.connected){
+   if(provider==='openai'){
+    const result=await this.client().request('account/login/start',{type:'chatgpt'});this.loginId=result.loginId;
+    const url=new URL(result.authUrl);if(url.protocol!=='https:'||!['auth.openai.com','chatgpt.com','auth.chatgpt.com'].includes(url.hostname))throw new Error('Unexpected provider sign-in URL.');
+    await this.openBrowser(url.href);
+    const deadline=Date.now()+5*60*1000;
+    do{await new Promise(resolve=>setTimeout(resolve,1500));if(generation!==this.generation)throw new Error('Sign-in canceled.');connection=await this.status('openai');}while(!connection.connected&&Date.now()<deadline);
+   }else{
+    // Never null here: openai is the only browser-flow provider and it was handled above.
+    const login=providerLogin(provider)!;
+    // A visible official login terminal allows fallback code entry without exposing credentials to the renderer.
+    await this.loginWindow(this.executable(login.provider),login.args,PROVIDER_TOOL_NAME[login.provider]);
+    connection=await this.status(login.provider);
+   }
+  }
+  if(generation!==this.generation)throw new Error('Sign-in canceled.');
+  if(!connection.connected)throw new Error('Subscription sign-in could not be verified.');
+  return connection;
  }
  /** A visible official login terminal allows fallback code entry without exposing credentials to the renderer. */
  private async loginWindow(executable:string,args:string[],toolName:string):Promise<void>{
