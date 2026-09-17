@@ -2990,3 +2990,18 @@ The office:choose-input-files IPC stays dormant in the bridge —
 bridge removal is a separate organizer change. Combined verification
 at 1c7d5b7: typecheck clean, 520/520 unit, build clean, desktop e2e
 green.
+
+2026-09-17 (follow-up, direct organizer fix) — split-brain project
+folder fields closed on 73c245b. The Create/Edit project dialog wrote
+project.localFolder (a display field) while prepareInputSnapshot read
+the locations record, so a folder set in the dialog silently shared
+nothing (session-9 finding #11). Both dialog paths now upsert the
+locations record in the same transaction; the location revision bumps
+only when the folder value really changes, so a mandate-only edit
+never invalidates a prepared snapshot, and a changed folder does
+invalidate one. The Edit dialog seeds its field from the location
+record first. Queue cards now render 'workType · mode · Lead' inline
+under the title rather than a separate line below the prompt.
+Regression tests cover the dialog→snapshot path, the no-bump case and
+the invalidation case. 522/522 unit, typecheck clean, build clean,
+desktop e2e green.
