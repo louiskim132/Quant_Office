@@ -16,6 +16,8 @@
 .work-queue .task-card>*{margin:0}
 .work-queue .card-heading{align-items:flex-start}
 .work-queue .card-heading h3{margin:0;line-height:1.4}
+.work-queue .card-title-block{display:flex;flex-direction:column;gap:5px;min-width:0}
+.work-queue .task-meta-inline{font-size:10px;color:var(--subtle)}
 .work-queue .task-card details{display:grid;gap:8px}
 .work-queue .task-card details>*{margin:0}
 .work-queue .task-card summary{cursor:pointer;font-size:11px;color:var(--muted)}

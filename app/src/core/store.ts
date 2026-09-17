@@ -3,6 +3,28 @@ import { existsSync, mkdirSync, realpathSync, statSync } from 'node:fs';
 
 /** stat that returns undefined for missing/unreadable paths instead of throwing raw ENOENT. */
 function safeStat(p: string) { try { return statSync(p); } catch { return undefined; } }
+
+/**
+ * The project dialog's folder field and the location record describe one scope. Writing through
+ * here keeps the record — the field snapshots actually read — in step with the display copy on the
+ * project, in the same transaction. The revision bumps only when the folder value really changes,
+ * so a mandate-only edit never invalidates a prepared snapshot.
+ */
+function upsertLocationScope(state: Projection, changes: Change[], project: Project, root: string, now: string): boolean {
+  const existing = (state.locations ?? []).find(l => l.projectId === project.id);
+  if ((existing?.localFolder ?? '') === root) return false;
+  const location: ProjectLocation = {
+    id: existing?.id ?? randomUUID(), projectId: project.id, localFolder: root, inputPaths: existing?.inputPaths ?? [],
+    outputFolder: existing?.outputFolder ?? '',
+    sourceRepository: root && existsSync(resolve(root, '.git')) ? resolve(root, '.git') : '',
+    snapshotRoute: 'PROJECT_FOLDER_SNAPSHOT',
+    providerTarget: existing?.providerTarget ?? { provider: 'claude', host: 'ANTHROPIC_MANAGED', selection: 'PROVIDER_DEFAULT', environmentId: '', resolved: false },
+    legacyNote: existing?.legacyNote ?? project.cloudWorkspace ?? '',
+    revision: (existing?.revision ?? 0) + 1, createdAt: existing?.createdAt ?? now, updatedAt: now,
+  };
+  changes.push({ collection: 'locations', value: location });
+  return true;
+}
 import { resolve, isAbsolute } from 'node:path';
 import { DatabaseSync, backup as sqliteBackup } from 'node:sqlite';
 import { z } from 'zod';
@@ -1409,14 +1431,19 @@ export class OfficeStore {
       const blockedTask = (prompt: string, recipient: ResearchTask['recipient']): z.infer<typeof taskSchema> => ({ id: randomUUID(), projectId: projectId!, experimentId, prompt, recipient, status: 'BLOCKED', blocker: state.agents?.some(a=>!a.removedAt) ? 'Provider-hosted execution is not configured' : 'No agents configured', createdAt: now, updatedAt: now });
       switch (command.type) {
         case 'project.create': {
-          if(command.localFolder&&(!isAbsolute(command.localFolder)||!statSync(command.localFolder).isDirectory()))throw new Error('Choose an existing project folder');
+          if(command.localFolder&&(!isAbsolute(command.localFolder)||!safeStat(command.localFolder)?.isDirectory()))throw new Error('Choose an existing project folder');
           const project: Project = { ...(command.localFolder?{localFolder:realpathSync(command.localFolder)}:{}),...(command.cloudWorkspace?{cloudWorkspace:command.cloudWorkspace}:{}), id: randomUUID(), name: command.name, mandate: command.mandate, budgetCents: command.budgetCents, archived: false, createdAt: now, updatedAt: now };
-          projectId = project.id; changes.push({ collection: 'projects', value: project }); reason = `Created project: ${project.name}`; break;
+          projectId = project.id; changes.push({ collection: 'projects', value: project });
+          // The dialog's folder field and the location record are one scope: create the record in
+          // the same transaction so a snapshot prepared later actually reads it.
+          if(command.localFolder)upsertLocationScope(state,changes,project,realpathSync(command.localFolder),now);
+          reason = `Created project: ${project.name}`; break;
         }
         case 'project.update': {
-          if(command.localFolder&&(!isAbsolute(command.localFolder)||!statSync(command.localFolder).isDirectory()))throw new Error('Choose an existing project folder');
+          if(command.localFolder&&(!isAbsolute(command.localFolder)||!safeStat(command.localFolder)?.isDirectory()))throw new Error('Choose an existing project folder');
           const project = this.activeProject(state, command.projectId); projectId = project.id;
-          changes.push({ collection: 'projects', value: { ...project,...(command.localFolder!==undefined?{localFolder:command.localFolder?realpathSync(command.localFolder):''}:{}),...(command.cloudWorkspace!==undefined?{cloudWorkspace:command.cloudWorkspace}:{}), name: command.name, mandate: command.mandate, budgetCents: command.budgetCents, updatedAt: now } }); reason = 'Updated project mandate and spending ceiling'; break;
+          const folderMoved=command.localFolder!==undefined&&upsertLocationScope(state,changes,project,command.localFolder.trim()?realpathSync(command.localFolder.trim()):'',now);
+          changes.push({ collection: 'projects', value: { ...project,...(command.localFolder!==undefined?{localFolder:command.localFolder?realpathSync(command.localFolder):''}:{}),...(command.cloudWorkspace!==undefined?{cloudWorkspace:command.cloudWorkspace}:{}), name: command.name, mandate: command.mandate, budgetCents: command.budgetCents, updatedAt: now } }); reason = `Updated project mandate and spending ceiling${folderMoved?' · project folder updated':''}`; break;
         }
         case 'project.archive': {
           const project = state.projects.find(item => item.id === command.projectId);

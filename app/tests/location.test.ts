@@ -6,6 +6,7 @@ import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {OfficeStore} from '../src/core/store';
 import {removeTreeSync} from '../src/main/fsx';
+import {prepareInputSnapshot} from '../src/main/locations';
 
 /**
  * The project folder itself is the input scope: location.save records the canonical folder and
@@ -50,4 +51,37 @@ test('the folder must be real, later saves stay revision-checked, and the scope 
  const again=reopened.snapshot({history:false});
  reopened.close();
  assert.equal(again.locations![0].snapshotRoute,'PROJECT_FOLDER_SNAPSHOT','the folder-scope route replays');
+});
+
+test('the project dialog folder upserts the location record snapshots actually read',async t=>{
+ const f=fixture(t);
+ writeFileSync(path.join(f.source,'losses.csv'),'epoch,loss\n1,0.4\n');
+ const staging=path.join(f.root,'staging');mkdirSync(staging,{recursive:true});
+ // The Edit project / Create project dialog field used to write only project.localFolder — a display
+ // field — while prepareInputSnapshot read the separate locations record and found nothing.
+ f.store.execute({type:'project.update',idempotencyKey:key(),projectId:f.project.id,name:'Alpha study',mandate:'Test',budgetCents:0,localFolder:f.source});
+ const location=f.store.snapshot().locations![0];
+ assert.equal(location.localFolder,realpathSync(f.source),'the dialog folder becomes the recorded scope');
+ const snapshot=await prepareInputSnapshot({store:f.store,stagingRoot:staging,projectId:f.project.id});
+ assert.deepEqual(snapshot.files.map(file=>file.path),['losses.csv'],'the folder set in Edit project is the snapshot scope');
+ // A mandate-only edit must not touch the scope record — bumping its revision would invalidate the
+ // snapshot the user just prepared for no reason.
+ f.store.execute({type:'project.update',idempotencyKey:key(),projectId:f.project.id,name:'Alpha study',mandate:'Edited mandate',budgetCents:0,localFolder:f.source});
+ assert.equal(f.store.snapshot().locations![0].revision,1,'an unchanged folder is not a scope change');
+ // Moving the folder bumps the location revision, so a snapshot prepared against the old one is stale.
+ const other=path.join(f.root,'other');mkdirSync(other,{recursive:true});
+ f.store.execute({type:'project.update',idempotencyKey:key(),projectId:f.project.id,name:'Alpha study',mandate:'Edited mandate',budgetCents:0,localFolder:other});
+ assert.equal(f.store.snapshot().locations![0].revision,2,'a changed folder invalidates prepared snapshots');
+ assert.throws(()=>f.store.recordInputSnapshot({...snapshot,id:randomUUID()}),/location changed while preparing/);
+});
+
+test('project.create with a folder creates the scope record immediately',t=>{
+ const f=fixture(t);
+ writeFileSync(path.join(f.source,'seed.csv'),'x\n');
+ const state=f.store.execute({type:'project.create',idempotencyKey:key(),name:'Scoped at birth',mandate:'Test',budgetCents:0,localFolder:f.source});
+ const created=state.projects.find(p=>p.name==='Scoped at birth')!;
+ const location=state.locations!.find(l=>l.projectId===created.id);
+ assert.equal(location?.localFolder,realpathSync(f.source),'the create-dialog folder lands in the location record');
+ assert.equal(location?.snapshotRoute,'PROJECT_FOLDER_SNAPSHOT');
+ assert.equal(location?.revision,1);
 });
