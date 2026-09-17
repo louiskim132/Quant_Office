@@ -53,6 +53,14 @@ try{
  await page.getByRole('button',{name:'Submit for review',exact:true}).click();
  await page.getByRole('button',{name:'Awaiting review',exact:true}).waitFor();
  state=await page.evaluate(()=>window.office.getState());assert.equal(state.experiments[0].stage,'CONTRACT_REVIEW');assert.equal(state.reviews.length,0);
+ // The Projects nav always lands on the list even while a project is selected; a project row reopens the detail page.
+ await page.getByRole('button',{name:'Projects',exact:true}).click();
+ const openProject=page.getByRole('button',{name:/Open project/});await openProject.first().waitFor();await openProject.first().click();
+ await page.getByText('PROJECT MANDATE',{exact:true}).waitFor();
+ // The detail page lists the project's requests and reaches the input-file picker from the mandate card.
+ await page.locator('.project-requests').getByText('Volatility estimate baseline').waitFor();
+ await page.getByText('Location & input files',{exact:true}).click();
+ await page.getByRole('button',{name:'Choose input files',exact:true}).waitFor();
  const input=path.join(data,'reference.txt');await writeFile(input,'A user reference. <script>window.compromised=true</script>');
  await application!.evaluate(({dialog},file)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[file]});},input);
  await page.getByRole('button',{name:'Artifacts',exact:true}).first().click();
@@ -119,7 +127,7 @@ try{
  assert.deepEqual(after.connections??[],before.connections??[],'no account observation was recorded');
  assert.equal(after.events.length,before.events.length,'no lineage event was appended');
  await page.getByRole('button',{name:'Office',exact:true}).click();
- const keys=await page.evaluate(()=>Object.keys(window.office));assert.deepEqual(keys.sort(),['chooseProjectFolder','chooseInputFiles','openProjectFolder','scanClaudeUsage','changeAgentEffort','changeAgentModel','getWorkLogs','importWorkLogs','bindAgentConnection','connectAgent','confirmAgent','cancelAgent','connectionStatus','selectProviderTool','openProviderUsage','backupWorkspace','restoreWorkspace','command','exportProject','getInfo','getState','migrateLegacyRecords','historyPage','logPage','jobEventPage','verifyCloudTransport','prepareRequest','discardPreparation','handoffPlan','openHandoffTerminal','observeJob','cancelJob','linkJobSession','importFiles','onChanged','previewArtifact','describeObject','readObject','queryEvidence','stagePacket','researchStatus','assignResearchFunction','migrateResearchFunctions','pipelineAction','messagePage','researchPage','researchInsights','exportResearch'].sort());
+ const keys=await page.evaluate(()=>Object.keys(window.office));assert.deepEqual(keys.sort(),['chooseProjectFolder','chooseInputFiles','openProjectFolder','scanClaudeUsage','changeAgentEffort','changeAgentModel','getWorkLogs','importWorkLogs','bindAgentConnection','connectAgent','confirmAgent','cancelAgent','connectionStatus','selectProviderTool','openProviderUsage','backupWorkspace','restoreWorkspace','command','exportProject','getInfo','getState','migrateLegacyRecords','historyPage','logPage','jobEventPage','verifyCloudTransport','prepareRequest','discardPreparation','handoffPlan','openHandoffTerminal','observeJob','cancelJob','linkJobSession','loginProvider','importFiles','onChanged','previewArtifact','describeObject','readObject','queryEvidence','stagePacket','researchStatus','assignResearchFunction','migrateResearchFunctions','pipelineAction','messagePage','researchPage','researchInsights','exportResearch'].sort());
  const globals=await page.evaluate(()=>({nodeRequire:'require' in window,nodeProcess:'process' in window,bridge:typeof window.office.command}));assert.equal(globals.nodeRequire,false);assert.equal(globals.nodeProcess,false);assert.equal(globals.bridge,'function');
  state=await page.evaluate(()=>window.office.getState());const eventCount=state.events.length;
  await application!.close();application=undefined;
@@ -159,7 +167,7 @@ try{
  assert.equal((await restoring).canceled,true);
  assert.equal((await page.evaluate(()=>window.office.getState())).agents.length,1);
  assert.deepEqual(logs,[]);
- await writeFile(path.join(output,process.env.QRO_EXECUTABLE?'packaged-desktop-report.json':'desktop-report.json'),JSON.stringify({status:'PASS',timestamp:new Date().toISOString(),packaged:Boolean(process.env.QRO_EXECUTABLE),checks:['empty office','agent setup form','project creation','blocked request','experiment and versioned contract','review cannot self-pass','reference import','safe preview','project export','subscription usage view','theme switch','narrow IPC','renderer sandbox','restart persistence','contained cloud transport verification','concurrent request admission','discard preparation guard','restore admission lock (V1)'],pageErrors:logs,testWorkspace:data},null,2));
+ await writeFile(path.join(output,process.env.QRO_EXECUTABLE?'packaged-desktop-report.json':'desktop-report.json'),JSON.stringify({status:'PASS',timestamp:new Date().toISOString(),packaged:Boolean(process.env.QRO_EXECUTABLE),checks:['empty office','agent setup form','project creation','blocked request','experiment and versioned contract','review cannot self-pass','reference import','safe preview','project export','subscription usage view','theme switch','narrow IPC','renderer sandbox','restart persistence','contained cloud transport verification','concurrent request admission','discard preparation guard','restore admission lock (V1)','projects nav lands on list','detail requests section','mandate input disclosure'],pageErrors:logs,testWorkspace:data},null,2));
  console.log('Desktop end-to-end checks passed. Screenshots and report saved in test-output.');
 }catch(error){if(application){try{const page=await application.firstWindow();await page.screenshot({path:path.join(output,'desktop-failure.png'),fullPage:true});console.error('Visible text:',(await page.locator('body').innerText()).slice(0,6000));}catch{}}throw error;}
 finally{if(application)await application.close();}
