@@ -312,7 +312,9 @@ export function agentBinding(state: Records, agent: Pick<Agent, 'provider' | 'ac
   const blockers: string[] = [];
   if (!agent.connectionId) blockers.push(`Unverified: this profile was created for ${agent.account} and has not been checked against a recorded account. Use Verify connection.`);
   else if (!bound) blockers.push('This profile references an account record that is not in this workspace.');
-  else if (!matchesActiveContext) blockers.push(`Bound to ${bound.identity}, but ${active?.identity || 'no account'} is the current context. Sign that account back in, or change the binding deliberately.`);
+  else if (!matchesActiveContext) blockers.push(active?.identity
+    ? `Bound to ${bound.identity}, but ${active.identity} is the current context. Sign that account back in, or change the binding deliberately.`
+    : `Bound to ${bound.identity}, but the current ${agent.provider} context did not report an account identity, so the binding cannot be verified. Check the account again; if the official tool still cannot name it, sign in through it.`);
   else if (active?.state !== 'SIGNED_IN') blockers.push('The bound account is not signed in right now.');
   if (agent.removedAt) blockers.push('Archived profiles are read-only until restored.');
   const setupIdentity = agent.setupAccount ?? agent.account;

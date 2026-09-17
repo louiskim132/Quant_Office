@@ -199,3 +199,26 @@ test('a deliberate rebinding moves the account and preserves the identity the pr
  assert.equal(legacy.setupIdentityKnown,false);
  assert.equal(legacy.setupIdentity,'legacy@example.com','the current account is the only thing recoverable');
 });
+
+test('a signed-in but unidentified session is one stable context, never a fake account, and verifies nothing',t=>{
+ const f=fixture(t);
+ const agent=draft();
+ f.store.confirmAgentBinding({observation:observation(0),agent});
+ // The tool reports sign-in but cannot name the account: repeated checks update one ''-identity
+ // record instead of minting a new "account" each time the output format shifts.
+ const first=f.store.recordAccountObservation(observation(1,''));
+ const second=f.store.recordAccountObservation(observation(2,''));
+ assert.equal(second.connections!.filter(c=>c.provider==='claude'&&c.identity==='').length,1,'unidentified polls share one record');
+ assert.equal(second.connections!.length,2,'the identified account record is preserved, not merged');
+ const blocker=agentBinding(second,second.agents.find(a=>a.id===agent.id)!).blockers[0];
+ assert.match(blocker,/did not report an account identity/);
+ assert.doesNotMatch(blocker,/no account/,'the tool did report a session — "no account" would misdescribe it');
+ // Binding operations refuse an unidentified session outright rather than binding to nobody.
+ assert.throws(()=>f.store.bindAgentConnection({agentId:agent.id,expectedRevision:0,intent:'VERIFY',observation:observation(3,'')}),/unidentified session/);
+ assert.throws(()=>f.store.bindAgentConnection({agentId:agent.id,expectedRevision:0,intent:'CHANGE',observation:observation(3,'')}),/unidentified session/);
+ assert.throws(()=>f.store.confirmAgentBinding({observation:observation(4,''),agent:draft()}),/unidentified session/);
+ // When the tool names the account again, the next check re-verifies the original binding.
+ const healed=f.store.recordAccountObservation(observation(5));
+ assert.equal(currentConnection(healed,'claude')!.identity,'researcher@example.com');
+ assert.equal(agentBinding(healed,healed.agents.find(a=>a.id===agent.id)!).available,true);
+});

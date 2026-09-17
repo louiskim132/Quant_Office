@@ -3005,3 +3005,26 @@ under the title rather than a separate line below the prompt.
 Regression tests cover the dialog→snapshot path, the no-bump case and
 the invalidation case. 522/522 unit, typecheck clean, build clean,
 desktop e2e green.
+2026-09-17 (follow-up, direct organizer fix) — unidentified
+provider sessions no longer mint phantom accounts. A `devin auth
+status` check that reported "Logged in (via Devin)." without an
+Email line had its status phrase recorded as the account identity,
+minting a second connection record that displaced the real bound
+account as the current context (observed live: an agent bound to
+louisnn80@gmail.com blocked by a phantom 'Logged in (via Devin).'
+record). The Devin status parse is now the pure devinStatusIdentity
+helper — labeled Email line first, any email token second, else ''
+— so a signed-in but unidentified session records connected=true
+with an empty identity against a single stable ''-identity record
+instead of inventing an account per output format. The check
+surfaces a non-zero CLI exit in the note since partial stdout is
+how the phantom arose (the User/Account section is a remote fetch
+that can truncate). agentBinding names an unidentified current
+context honestly rather than calling it 'no account'; VERIFY,
+CHANGE and confirmAgentBinding refuse ''-identity observations
+outright; connect() cannot mint a ticket for one. Provider cards
+render 'Signed in — account unidentified' with guidance, and the
+different-account warning only fires on an identified account.
+Regression tests pin the parser, the shared ''-record update path,
+the blocker copy and every refusal. 525/525 unit, typecheck clean,
+build clean, desktop e2e green.

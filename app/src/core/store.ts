@@ -2094,6 +2094,7 @@ export class OfficeStore {
     const agent=agentSchema.parse(input.agent);
     if(agent.provider!==observation.provider)throw new Error('The observation does not belong to this agent provider');
     if(observation.state!=='SIGNED_IN')throw new Error('Sign in to the subscription account before confirming this agent');
+    if(!observation.identity)throw new Error('The official tool reported a signed-in session but did not identify the account; a profile cannot be bound to an unidentified session. Sign in so the tool reports the account.');
     if(agent.account!==observation.identity)throw new Error('The signed-in account changed. Connect again before confirming.');
     return this.transaction(()=>{
       const state=this.readProjection();
@@ -2124,6 +2125,7 @@ export class OfficeStore {
       if((agent.revision??0)!==input.expectedRevision)throw new Error('Profile changed in another view. Reload before saving.');
       if(agent.provider!==observation.provider)throw new Error('This observation belongs to a different provider');
       if(observation.state!=='SIGNED_IN')throw new Error('The official tool does not report a signed-in subscription for this provider');
+      if(!observation.identity)throw new Error('The official tool reported a signed-in session but did not identify the account; a profile cannot be verified or rebound against an unidentified session. Check the account again after the tool reports it.');
       if(intent==='VERIFY'&&observation.identity!==agent.account)throw new Error(`This profile was created for ${agent.account}, but ${observation.identity} is signed in. Use Change connection to move it deliberately.`);
       if(intent==='CHANGE'&&observation.identity===agent.account&&agent.connectionId)throw new Error('This profile is already bound to the signed-in account');
       const record=this.observationRecord(state,observation);

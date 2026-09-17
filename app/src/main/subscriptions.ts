@@ -49,6 +49,16 @@ export function claudeIdentity(raw:any):string {
  if(raw?.loggedIn!==true||raw.authMethod!=='claude.ai'||typeof raw.subscriptionType!=='string'||!raw.subscriptionType||typeof raw.email!=='string'||!raw.email)throw new Error('Claude Code must report a signed-in Claude subscription. Console/API accounts cannot be added.');
  return raw.email;
 }
+/**
+ * The account a `devin auth status` report belongs to, or '' when the tool did not identify one.
+ * A signed-in session without an account is an *unidentified* context — the status line itself
+ * (e.g. "Logged in (via Devin).") is never an identity and must not mint one.
+ */
+export function devinStatusIdentity(raw:string):string {
+ if(/not logged in/i.test(raw))return '';
+ const labeled=raw.match(/^\s*Email:\s*([\w.+-]+@[\w-]+(?:\.[\w-]+)+)\s*$/im)?.[1];
+ return labeled??raw.match(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/)?.[0]??'';
+}
 class CodexMetadata {
  private child:ChildProcessWithoutNullStreams;
  private pending=new Map<number,{resolve:(value:any)=>void;reject:(error:Error)=>void;timer:ReturnType<typeof setTimeout>}>();
@@ -118,16 +128,17 @@ export class Subscriptions {
     if(!connection.windows.length&&!connection.note)connection.note='Usage unavailable from Codex for this account.';
    }catch(error){this.codex?.stop();this.codex=undefined;throw error;}
   }else if(provider==='devin'){
-   const run=(args:string[])=>new Promise<string>((resolve,reject)=>execFile(this.executable('devin'),args,{cwd:this.root,env:subscriptionEnvironment(),windowsHide:true,timeout:30000,maxBuffer:1024*1024},(error,stdout)=>{if(error&&!stdout){reject(new Error('Devin CLI unavailable. Update the official tool and retry.'));return;}resolve(stdout);}));
-   const raw=await run(['auth','status']);
+   const run=(args:string[])=>new Promise<{stdout:string;failed:boolean}>((resolve,reject)=>execFile(this.executable('devin'),args,{cwd:this.root,env:subscriptionEnvironment(),windowsHide:true,timeout:30000,maxBuffer:1024*1024},(error,stdout)=>{if(error&&!stdout){reject(new Error('Devin CLI unavailable. Update the official tool and retry.'));return;}resolve({stdout,failed:Boolean(error)});}));
+   const status=await run(['auth','status']),raw=status.stdout;
    if(/not logged in/i.test(raw)){connection.note='Sign in through the Devin CLI (devin auth login). The Devin Desktop session is a separate credential.';return connection;}
-   const identity=raw.match(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/)?.[0]??raw.split('\n').map(l=>l.trim()).find(l=>l&&!/credentials path/i.test(l))??'';
-   if(!identity){connection.note='Devin CLI auth status was not understood. Update the official tool and retry.';return connection;}
-   connection.account=z.string().min(1).max(160).parse(identity);connection.connected=true;
+   const identity=devinStatusIdentity(raw);
+   if(identity)connection.account=z.string().min(1).max(160).parse(identity);
+   connection.connected=true;
    try{
-    connection.models=devinModelCatalog(JSON.parse(await run(['models','list','--format','json'])));
+    connection.models=devinModelCatalog(JSON.parse((await run(['models','list','--format','json'])).stdout));
    }catch{connection.note='Devin model catalog unavailable. Refresh to retry.';}
-   if(!connection.note)connection.note='Devin CLI sign-in verified. Model entitlement has not been tested. Local sessions only; no usage windows are tracked.';
+   if(!identity)connection.note=`The Devin CLI reported a signed-in session but did not identify the account${status.failed?', and the check exited with an error — its output may be incomplete':''}. The office cannot verify which account is signed in; re-check, or sign in with devin auth login so the tool reports the account.${connection.models.length?'':' Model catalog is also unavailable.'}`;
+   else if(!connection.note)connection.note='Devin CLI sign-in verified. Model entitlement has not been tested. Local sessions only; no usage windows are tracked.';
   }else{
    const raw=await new Promise<string>((resolve,reject)=>execFile(this.executable('claude'),['auth','status'],{cwd:this.root,env:subscriptionEnvironment(),windowsHide:true,timeout:30000,maxBuffer:1024*1024},(error,stdout)=>{if(error&&!stdout){reject(new Error('Claude Code status unavailable. Update the official tool and retry.'));return;}resolve(stdout);}));
    try{connection.account=claudeIdentity(JSON.parse(raw));connection.connected=true;}catch{connection.note='Sign in through Claude Code with a Claude subscription.';return connection;}
@@ -155,7 +166,7 @@ export class Subscriptions {
   const documented=(operation:AccountObservation['operations'][number]['operation'],level:'DOCUMENTED'|'TOOL_SUPPORTED'|'UNAVAILABLE'|'UNKNOWN',detail:string,source:string)=>({operation,level,detail,evidence:'DOCUMENTED' as const,verifiedAt:at,source});
   const accountSource=provider==='openai'?'codex app-server account/read':provider==='devin'?'devin auth status':'claude auth status';
   const operations:AccountObservation['operations']=[
-   observed('ACCOUNT_STATUS',connection.connected?'ACCOUNT_VERIFIED':'UNAVAILABLE',connection.connected?'Official tool reported a signed-in subscription for this account.':connection.note||'No signed-in subscription reported.',accountSource),
+   observed('ACCOUNT_STATUS',connection.connected&&connection.account?'ACCOUNT_VERIFIED':'UNAVAILABLE',connection.connected?(connection.account?'Official tool reported a signed-in subscription for this account.':'Official tool reported a signed-in session but did not identify the account.'):connection.note||'No signed-in subscription reported.',accountSource),
    provider==='claude'
     ?documented('MODEL_CATALOG','TOOL_SUPPORTED','Claude Code model aliases are built into this application. They were not read from the tool and are not an entitlement check for this account.','application alias list')
     :observed('MODEL_CATALOG',connection.models.length?'ACCOUNT_VERIFIED':'UNAVAILABLE',connection.models.length?`Catalog of ${connection.models.length} models returned by the official tool for this account.`:'No catalog returned for this account.',provider==='openai'?'codex app-server model/list':'devin models list --format json'),
@@ -200,6 +211,7 @@ export class Subscriptions {
   const draft=agentDraftSchema.parse(input);this.connecting=true;this.ticket=undefined;const generation=++this.generation;
   try{
    const connection=await this.runLogin(draft.provider,generation);
+   if(!connection.account)throw new Error(`The official ${PROVIDER_TOOL_NAME[draft.provider]} reported a signed-in session but did not identify the account. A profile cannot be bound to an unidentified session — sign in so the tool reports the account.`);
    if((draft.provider==='openai'||draft.provider==='devin')&&!connection.models.some(m=>m.id===draft.model))throw new Error(`The selected model is not in your available ${PROVIDER_TOOL_NAME[draft.provider]} catalog. Refresh models and select again.`);
    this.validateEffort(draft.provider,draft.model,draft.effort??'default',connection);
    this.ticket={id:randomUUID(),draft,connection,expiresAt:Date.now()+10*60*1000};return structuredClone(this.ticket);

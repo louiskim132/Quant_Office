@@ -4,7 +4,7 @@ import { mkdtempSync } from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { Subscriptions,usageWindows,claudeIdentity,subscriptionEnvironment } from '../src/main/subscriptions.js';
+import { Subscriptions,usageWindows,claudeIdentity,devinStatusIdentity,subscriptionEnvironment } from '../src/main/subscriptions.js';
 import { OfficeStore } from '../src/core/store.js';
 import type { AgentDraft,Connection } from '../src/shared/types.js';
 const draft:AgentDraft={name:'Researcher',provider:'openai',model:'model-a',team:'Signals',role:'DIRECTOR',instructions:'Compare evidence independently.'};
@@ -108,4 +108,17 @@ test('a canceled sign-in rejects honestly and leaves the gate free for a later a
 });
 test('metadata child environment excludes API billing overrides',()=>{
  const original=process.env.ANTHROPIC_API_KEY;process.env.ANTHROPIC_API_KEY='test-placeholder';try{assert.equal(subscriptionEnvironment().ANTHROPIC_API_KEY,undefined);assert.equal(process.env.ANTHROPIC_API_KEY,'test-placeholder');}finally{if(original===undefined)delete process.env.ANTHROPIC_API_KEY;else process.env.ANTHROPIC_API_KEY=original;}
+});
+test('Devin auth status yields the account email or an empty identity, never a status phrase',()=>{
+ const full='Logged in (via Devin).\n\nCredentials:\n  File:              C:\cred.toml\n\nUser:\n  Name:              someone\n  Email:             louisnn80@gmail.com\n  User ID:           user-1\n';
+ assert.equal(devinStatusIdentity(full),'louisnn80@gmail.com','the labeled User/Email field is the account');
+ assert.equal(devinStatusIdentity('Logged in as louisnn80@gmail.com'),'louisnn80@gmail.com','an inline email still identifies the account');
+ assert.equal(devinStatusIdentity('Logged in (via Devin).\n\nCredentials:\n  File:              C:\cred.toml\n'),'','a truncated report is unidentified, not an account named after a status line');
+ assert.equal(devinStatusIdentity('Not logged in.'),'');
+});
+test('a signed-in but unidentified session cannot mint a binding ticket',async()=>{
+ const f=fixture();
+ f.setConnection({provider:'devin',connected:true,account:'',models:[{id:'swe-2-max',name:'SWE-2 Max'}]});
+ await assert.rejects(f.service.connect({...draft,provider:'devin',model:'swe-2-max'}),/unidentified session/);
+ f.service.close();
 });
