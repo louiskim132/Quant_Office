@@ -57,10 +57,17 @@ try{
  await page.getByRole('button',{name:'Projects',exact:true}).click();
  const openProject=page.getByRole('button',{name:/Open project/});await openProject.first().waitFor();await openProject.first().click();
  await page.getByText('PROJECT MANDATE',{exact:true}).waitFor();
- // The detail page lists the project's requests and reaches the input-file picker from the mandate card.
+ // The detail page lists the project's requests and reaches the folder-scope location panel from the mandate card.
  await page.locator('.project-requests').getByText('Volatility estimate baseline').waitFor();
- await page.getByText('Location & input files',{exact:true}).click();
- await page.getByRole('button',{name:'Choose input files',exact:true}).waitFor();
+ await page.getByText('Location & inputs',{exact:true}).click();
+ // There is no per-file picker: the whole chosen folder becomes the input scope, and Save sends no inputPaths.
+ await application!.evaluate(({dialog},dir)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[dir]});},data);
+ await page.getByRole('button',{name:'Choose folder',exact:true}).click();
+ await page.getByText(/Everything in this folder is shared when a request is prepared/).waitFor();
+ assert.equal(await page.getByRole('button',{name:'Choose input files'}).count(),0);
+ await page.getByRole('button',{name:'Save',exact:true}).click();
+ await page.getByText(/Saved\. Nothing has been transferred/).waitFor();
+ state=await page.evaluate(()=>window.office.getState());assert.equal(state.locations?.[0]?.inputPaths.length,0);
  const input=path.join(data,'reference.txt');await writeFile(input,'A user reference. <script>window.compromised=true</script>');
  await application!.evaluate(({dialog},file)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[file]});},input);
  await page.getByRole('button',{name:'Artifacts',exact:true}).first().click();
@@ -167,7 +174,7 @@ try{
  assert.equal((await restoring).canceled,true);
  assert.equal((await page.evaluate(()=>window.office.getState())).agents.length,1);
  assert.deepEqual(logs,[]);
- await writeFile(path.join(output,process.env.QRO_EXECUTABLE?'packaged-desktop-report.json':'desktop-report.json'),JSON.stringify({status:'PASS',timestamp:new Date().toISOString(),packaged:Boolean(process.env.QRO_EXECUTABLE),checks:['empty office','agent setup form','project creation','blocked request','experiment and versioned contract','review cannot self-pass','reference import','safe preview','project export','subscription usage view','theme switch','narrow IPC','renderer sandbox','restart persistence','contained cloud transport verification','concurrent request admission','discard preparation guard','restore admission lock (V1)','projects nav lands on list','detail requests section','mandate input disclosure'],pageErrors:logs,testWorkspace:data},null,2));
+ await writeFile(path.join(output,process.env.QRO_EXECUTABLE?'packaged-desktop-report.json':'desktop-report.json'),JSON.stringify({status:'PASS',timestamp:new Date().toISOString(),packaged:Boolean(process.env.QRO_EXECUTABLE),checks:['empty office','agent setup form','project creation','blocked request','experiment and versioned contract','review cannot self-pass','reference import','safe preview','project export','subscription usage view','theme switch','narrow IPC','renderer sandbox','restart persistence','contained cloud transport verification','concurrent request admission','discard preparation guard','restore admission lock (V1)','projects nav lands on list','detail requests section','mandate folder-scope disclosure'],pageErrors:logs,testWorkspace:data},null,2));
  console.log('Desktop end-to-end checks passed. Screenshots and report saved in test-output.');
 }catch(error){if(application){try{const page=await application.firstWindow();await page.screenshot({path:path.join(output,'desktop-failure.png'),fullPage:true});console.error('Visible text:',(await page.locator('body').innerText()).slice(0,6000));}catch{}}throw error;}
 finally{if(application)await application.close();}
