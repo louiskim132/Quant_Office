@@ -2933,3 +2933,34 @@ still-open task. The job-side path now runs the same cascade;
 task.cancel/task.delete only defer to a live parent request; contract
 writes refuse an experiment whose request is already canceled. A
 regression test pins the whole wedge. 513/513 unit, typecheck clean.
+
+2026-09-16 (round pilot-ux4) — project-detail IA and dispatch
+honesty, landed on c1ea876. Organizer prerequisites at 2473caf: the
+pilot's P0 — adapter.fetch extracted unbound in controller.ts meant a
+COMPLETED result's declared outputs all failed retrieval and
+completion was refused; it is now bound, with a regression test
+driving a method-shaped fetch end to end (storeBytes was already a
+bound arrow property). Packets now write AGENTS.md — the discovery
+file agent CLIs auto-read — so an uninstructed session finds
+CONTRACT.md and the receipt shape. A standalone provider sign-in
+route landed (subscriptions.signIn + office:provider-login +
+window.office.loginProvider), extracted from connect()'s login half.
+Worker packets integrated: project detail overhaul (a44f60d) —
+sidebar Projects always lands on the list while queue-row and topbar
+deep links still open the detail; the detail page gained a Requests
+section listing every queue row for the project (including
+no-experiment QUESTION requests) as expandable rows with an
+open-in-queue action; the mandate card mounts the shared location/
+input panel; the research pipeline renders last in a separated panel
+with a stated purpose. Dispatch/provider-card honesty (77a8474) —
+Observe and the cancel re-check always surface the job's post-action
+state and detail; CANCEL_REQUESTED relabels to the re-check it is;
+provider cards can initiate sign-in and the OpenAI card reports what
+a check actually found instead of 'no check recorded'; a test pins
+that removing the last agent never touches connection records.
+Docs + idempotency (89ddc18) — workflow.md documents all four packet
+members, the inputs/-may-be-absent rule, the Devin Desktop
+workspace-grouping expectation, and the fetch/hash/store completion
+path; cancel idempotency is pinned on both the sentinel and vacuous
+paths. Combined verification at c1ea876: typecheck clean, 520/520
+unit, build clean, desktop e2e green.
