@@ -3088,3 +3088,28 @@ desktop e2e now opens the detail page by clicking the card region
 itself (aria-label), a stronger assertion than the link click it
 replaced. Combined verification at 271cf8f: typecheck clean,
 526/526 unit tests, build clean, desktop e2e green.
+
+2026-09-18 (round agent-profile) — organizer prerequisite
+6a1281e preserved devin catalog family/variant structure: variant
+entries now carry family, their parsed effort level (swe-2-max →
+max, -fast compounds keep the base token, label-Max bare uids →
+max, unparseable suffixes declare nothing) and the family's effort
+set, mirrored through the capability schema. Worker-1 commit
+9e7f1f7 integrated at merge a0cea25. The devin effort control is
+functional in both agent creation and the profile dialog: it lists
+the model family's real effort levels and remaps the model uid to
+the matching sibling variant (preferring -fast parity), while
+draft.effort/agent.effort stays 'default' — the variant still
+encodes effort, so a devin effort choice persists as a model change.
+No-catalog keeps the Provider-default fallback; openai/claude keep
+the independent-axis path. The model/effort edit surface is
+extracted into ModelEffortEditor and renders as the second
+ProfileTabs child — directly under name/team/role + instructions,
+above the account connection. The redundant 'team · role ·
+provider / model' and 'execution · tool profile' lines are gone;
+Agent ID, instructions details and ActivityView untouched. All
+four profile dialog tabs share a fixed 58vh panel height, so tab
+switching no longer resizes the dialog. e2e asserts the editor
+ordering, the removed metadata lines and uniform tab height.
+Combined verification at a0cea25: typecheck clean, 528/528 unit
+tests, build clean, desktop e2e green.
