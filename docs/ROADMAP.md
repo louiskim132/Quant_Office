@@ -3067,3 +3067,24 @@ sessions key to cwd, so a packet dir is the natural session
 scope; `devin list --format json` is a scriptable liveness probe
 and `devin rm <id> --force` a scriptable cleanup. Live-attach
 during an in-flight -p run is unverified.
+
+2026-09-18 (round ui-polish) — worker-1 commit 4ce73db
+integrated at merge 271cf8f on parallel/next-batch-001/organizer,
+base dfdb7d6. Project-list rows: the emblem + name + mandate block
+is now a keyboard-accessible button (project-open-region, aria-label
+'Open <name>') that opens the detail page; removed rows keep a
+static block, and location text, experiment count, lifecycle badge,
+the explicit Open link, the settings gear and Remove/Restore all
+keep their own behavior. Project-detail request rows: the summary
+is a two-cluster layout — left name + status badge + request
+created time (compact locale format), right team + lead agent; team
+resolves the lead agent's team first, then request.teamId through
+state.teams, with quiet 'No team'/'No lead' fallbacks; expanded
+detail unchanged. Queue cards: 'Start request' is now primary and
+'Use as new request' secondary (previously classless); the task
+prompt renders inside a bordered panel-2 container scoped to the
+work queue; 'Cancel request' keeps its destructive styling. The
+desktop e2e now opens the detail page by clicking the card region
+itself (aria-label), a stronger assertion than the link click it
+replaced. Combined verification at 271cf8f: typecheck clean,
+526/526 unit tests, build clean, desktop e2e green.
