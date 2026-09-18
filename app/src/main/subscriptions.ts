@@ -140,6 +140,12 @@ export class Subscriptions {
    const installed=path.join(process.env.LOCALAPPDATA,'OpenAI','Codex','bin');
    try{candidates.push(...readdirSync(installed,{withFileTypes:true}).filter(d=>d.isDirectory()).map(d=>path.join(installed,d.name,name)).filter(p=>existsSync(p)).sort((a,b)=>statSync(b).mtimeMs-statSync(a).mtimeMs));}catch{}
   }
+  if(provider==='openai'&&process.env.APPDATA){
+   // npm-installed Codex hides the real exe inside the platform package — PATH only carries the
+   // codex/codex.cmd/codex.ps1 shims. Walk vendor/<triple>/bin under the default global prefix.
+   const vendor=path.join(process.env.APPDATA,'npm','node_modules','@openai','codex','node_modules','@openai','codex-win32-x64','vendor');
+   try{candidates.push(...readdirSync(vendor,{withFileTypes:true}).filter(d=>d.isDirectory()).map(d=>path.join(vendor,d.name,'bin',name)).filter(p=>existsSync(p)));}catch{}
+  }
   if(provider==='devin'&&process.env.LOCALAPPDATA)candidates.push(path.join(process.env.LOCALAPPDATA,'Programs','Devin',name));
   const found=candidates.find(p=>existsSync(p));if(!found)throw new Error(`${PROVIDER_TOOL_NAME[provider]} is not installed or could not be found. Install the official tool, then use Locate sign-in tool to select ${name}.`);return found;
  }
