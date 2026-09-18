@@ -8,6 +8,7 @@ import { Empty, label } from './components';
 import './research.css';
 
 type CommandInput = Command extends infer C ? C extends Command ? Omit<C, 'idempotencyKey'> : never : never;
+const date = (d: string) => new Date(d).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 
 const contractFields: [keyof ResearchContract, string, string][] = [
  ['objective', 'Research objective', 'What question will this experiment answer? Define the target and output meaning.'],
@@ -55,10 +56,12 @@ function ProjectRequests({ state, projectId, onOpenQueue }: { state: AppState; p
  return <section className="project-requests" aria-label="Project requests"><h2>Requests</h2><p className="muted">Every request on this project, including ones without an experiment. Expand a row for its objective and provider-job record, or manage it from the Office work queue.</p>{!rows.length ? <p className="muted">No requests on this project yet.</p> : rows.map(row => {
   const canceled = row.status === 'CANCELED';
   const name = row.request?.name ?? state.experiments.find(e => e.id === row.root.experimentId)?.name ?? 'Research request';
-  const lead = row.request?.leadAgentId ? state.agents.find(a => a.id === row.request?.leadAgentId)?.name ?? 'Not selected' : '';
+  const leadAgent = row.request?.leadAgentId ? state.agents.find(a => a.id === row.request?.leadAgentId) : undefined;
+  const lead = row.request?.leadAgentId ? leadAgent?.name ?? 'Not selected' : 'No lead';
+  const team = leadAgent ? leadAgent.team.trim() || 'No team' : row.request?.teamId ? (state.teams ?? []).find(t => t.id === row.request?.teamId)?.name ?? 'No team' : 'No team';
   const jobs = row.jobs ?? [], focus = jobs.find(j => j.unresolved) ?? jobs[jobs.length - 1];
   const blockers = [...(row.request?.blockers ?? []).map(b => `${b.code}: ${b.message}`), ...(row.root.blocker ? [row.root.blocker] : [])];
-  return <details className="request-row-item" key={row.id}><summary><span className="request-row-name">{name}</span>{lead && <span className="request-row-lead muted">{lead}</span>}<span className={`status-badge${canceled ? ' canceled' : ''}`}>{canceled ? 'Canceled' : row.status === 'ACCEPTED' ? 'Completed' : row.status.toLowerCase()}</span></summary><div className="request-row-detail"><p>{row.root.prompt}</p><p className="muted">Status: {label(row.status)}</p>{blockers.map(b => <p className="blocker" key={b}>{b}</p>)}<p className="muted">{focus ? `Provider job: ${label(focus.state)}${focus.unresolved ? ' — needs reconciliation' : ''}${jobs.length > 1 ? ` · ${jobs.length} on record` : ''}` : 'No provider job submitted'}</p><div className="button-row"><button className="secondary" onClick={onOpenQueue}>Open in work queue</button></div></div></details>;
+  return <details className="request-row-item" key={row.id}><summary><span className="request-row-left"><span className="request-row-name">{name}</span><span className={`status-badge${canceled ? ' canceled' : ''}`}>{canceled ? 'Canceled' : row.status === 'ACCEPTED' ? 'Completed' : row.status.toLowerCase()}</span><span className="request-row-time muted">{date(row.root.createdAt)}</span></span><span className="request-row-right"><span className="request-row-team muted">{team}</span><span className="request-row-lead muted">{lead}</span></span></summary><div className="request-row-detail"><p>{row.root.prompt}</p><p className="muted">Status: {label(row.status)}</p>{blockers.map(b => <p className="blocker" key={b}>{b}</p>)}<p className="muted">{focus ? `Provider job: ${label(focus.state)}${focus.unresolved ? ' — needs reconciliation' : ''}${jobs.length > 1 ? ` · ${jobs.length} on record` : ''}` : 'No provider job submitted'}</p><div className="button-row"><button className="secondary" onClick={onOpenQueue}>Open in work queue</button></div></div></details>;
  })}</section>;
 }
 

@@ -2,6 +2,7 @@
 .task-list{display:grid;gap:13px}
 .task-card{background:var(--panel);border:1px solid var(--border);border-radius:9px;padding:20px}
 .task-prompt{white-space:pre-wrap;font-size:13px;line-height:1.65;overflow-wrap:anywhere}
+.work-queue .task-prompt{border:1px solid var(--border);background:var(--panel-2);border-radius:7px;padding:12px 14px;font-size:12px}
 .task-meta{font-size:10px;color:var(--subtle);display:flex;gap:8px;margin:13px 0}
 .task-card>.text-button{margin-top:6px}
 
