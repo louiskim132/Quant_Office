@@ -65,7 +65,7 @@
 .profile-tabs .tab-row .tab{border:0;border-bottom:2px solid transparent;border-radius:7px 7px 0 0;padding:8px 14px;margin-bottom:-1px;font-size:12px;opacity:.65}
 .profile-tabs .tab-row .tab:hover{opacity:.9}
 .profile-tabs .tab-row .tab.active{opacity:1;border-bottom-color:var(--accent)}
-.profile-tabs .tab-panel{padding-top:14px}
+.profile-tabs .tab-panel{padding-top:14px;height:58vh;overflow-y:auto;align-content:start}
 .tab-panel .assignment-row{padding:10px 0;gap:4px}
 .tab-panel .assignment-row:last-child{border-bottom:0}
 .tab-panel .assignment-row strong{font-size:12px}

@@ -158,6 +158,22 @@ try{
   account:'idle-fixture@example.invalid',createdAt:new Date().toISOString(),connectionVerifiedAt:new Date().toISOString(),execution:'HOSTED_SETUP_REQUIRED'});}finally{fixtureStore.close();}
  page=await launch();
  await page.getByText('Idle · no open provider work',{exact:true}).waitFor();
+ // Profile dialog: the model/effort editor sits under the profile fields and above the connection section.
+ await page.getByRole('button',{name:'Edit Idle fixture profile'}).click();
+ const agentDialog=page.getByRole('dialog',{name:'Idle fixture'});
+ await agentDialog.locator('.effort-control').waitFor();
+ const ordered=await agentDialog.evaluate(el=>{
+  const fields=el.querySelector('.profile-fields'),effort=el.querySelector('.effort-control'),binding=el.querySelector('.binding-card');
+  return !!fields&&!!effort&&!!binding&&!!(fields.compareDocumentPosition(effort)&Node.DOCUMENT_POSITION_FOLLOWING)&&!!(effort.compareDocumentPosition(binding)&Node.DOCUMENT_POSITION_FOLLOWING);
+ });
+ assert.equal(ordered,true,'model/effort editor renders between the profile fields and the account connection');
+ await agentDialog.locator('code.hash').getByText('Agent ID:',{exact:false}).waitFor();
+ assert.equal(await agentDialog.locator('.agent-detail > p').count(),0,'agent detail keeps no redundant metadata lines');
+ const profilePanelHeight=await agentDialog.locator('.tab-panel').evaluate(el=>el.getBoundingClientRect().height);
+ await agentDialog.getByRole('tab',{name:'Logs'}).click();
+ const logsPanelHeight=await agentDialog.locator('.tab-panel').evaluate(el=>el.getBoundingClientRect().height);
+ assert.equal(logsPanelHeight,profilePanelHeight,'profile tabs keep a uniform panel height');
+ await page.getByRole('button',{name:'Close dialog'}).click();
  const restoreArchive=path.join(output,'r-local-admission-backup.zip');
  await application!.evaluate(({dialog},file)=>{dialog.showSaveDialog=async()=>({canceled:false,filePath:file});},restoreArchive);
  await page.evaluate(()=>window.office.backupWorkspace());
@@ -176,7 +192,7 @@ try{
  assert.equal((await restoring).canceled,true);
  assert.equal((await page.evaluate(()=>window.office.getState())).agents.length,1);
  assert.deepEqual(logs,[]);
- await writeFile(path.join(output,process.env.QRO_EXECUTABLE?'packaged-desktop-report.json':'desktop-report.json'),JSON.stringify({status:'PASS',timestamp:new Date().toISOString(),packaged:Boolean(process.env.QRO_EXECUTABLE),checks:['empty office','agent setup form','project creation','blocked request','experiment and versioned contract','review cannot self-pass','reference import','safe preview','project export','subscription usage view','theme switch','narrow IPC','renderer sandbox','restart persistence','contained cloud transport verification','concurrent request admission','discard preparation guard','restore admission lock (V1)','projects nav lands on list','detail requests section','mandate folder-scope disclosure'],pageErrors:logs,testWorkspace:data},null,2));
+ await writeFile(path.join(output,process.env.QRO_EXECUTABLE?'packaged-desktop-report.json':'desktop-report.json'),JSON.stringify({status:'PASS',timestamp:new Date().toISOString(),packaged:Boolean(process.env.QRO_EXECUTABLE),checks:['empty office','agent setup form','project creation','blocked request','experiment and versioned contract','review cannot self-pass','reference import','safe preview','project export','subscription usage view','theme switch','narrow IPC','renderer sandbox','restart persistence','contained cloud transport verification','concurrent request admission','discard preparation guard','restore admission lock (V1)','projects nav lands on list','detail requests section','mandate folder-scope disclosure','profile dialog model/effort order and uniform tabs'],pageErrors:logs,testWorkspace:data},null,2));
  console.log('Desktop end-to-end checks passed. Screenshots and report saved in test-output.');
 }catch(error){if(application){try{const page=await application.firstWindow();await page.screenshot({path:path.join(output,'desktop-failure.png'),fullPage:true});console.error('Visible text:',(await page.locator('body').innerText()).slice(0,6000));}catch{}}throw error;}
 finally{if(application)await application.close();}
