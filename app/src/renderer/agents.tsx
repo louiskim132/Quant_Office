@@ -89,7 +89,8 @@ export function ProviderConnections({state}:{state:AppState}){
     {provider==='claude'&&TRANSPORT_PROBE_CONTAINMENT.contained&&<p className="muted">{TRANSPORT_PROBE_CONTAINMENT.status}</p>}
    </div><div className="button-row">
     <button className="secondary" disabled={!!busy[provider]} onClick={()=>void check(provider)}>{busy[provider]==='check'?'Checking…':'Check account'}</button>
-    {!readiness.signedIn&&<button className="secondary" disabled={!!busy[provider]} onClick={()=>void signIn(provider)}>{busy[provider]==='signin'?'Signing in…':'Sign in'}</button>}
+    {!readiness.signedIn&&busy[provider]!=='signin'&&<button className="secondary" disabled={!!busy[provider]} onClick={()=>void signIn(provider)}>Sign in</button>}
+    {busy[provider]==='signin'&&<button className="secondary" onClick={()=>void window.office.cancelAgent()}>Cancel sign-in</button>}
     {provider==='claude'&&<button className="text-button" disabled title={TRANSPORT_PROBE_CONTAINMENT.status}>Verify cloud transport…</button>}
    </div></div>;})}
  </div>;

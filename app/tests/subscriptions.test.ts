@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -121,4 +121,29 @@ test('a signed-in but unidentified session cannot mint a binding ticket',async()
  f.setConnection({provider:'devin',connected:true,account:'',models:[{id:'swe-2-max',name:'SWE-2 Max'}]});
  await assert.rejects(f.service.connect({...draft,provider:'devin',model:'swe-2-max'}),/unidentified session/);
  f.service.close();
+});
+test('a negative account read re-checks on a fresh process when auth.json moved, but never while a login listener lives',async()=>{
+ const root=mkdtempSync(path.join(tmpdir(),'qro-subscriptions-'));
+ const codexHome=mkdtempSync(path.join(tmpdir(),'qro-codex-home-'));
+ const previous=process.env.CODEX_HOME;process.env.CODEX_HOME=codexHome;
+ const service=new Subscriptions(root,async()=>{throw new Error('No browser in this metadata fixture');});
+ writeFileSync(path.join(root,'codex.exe'),'not an executable');
+ (service as any).paths={openai:path.join(root,'codex.exe')};
+ let stopped=0;
+ (service as any).codex={request:async()=>({account:{type:'apikey'}}),stop(){stopped++;},spawnedAt:Date.now()-60_000};
+ try{
+  // No auth evidence on disk yet: the in-process answer stands on its own.
+  const first=await service.status('openai');
+  assert.equal(first.connected,false);assert.equal(stopped,0,'no newer auth file — the process answer stands');
+  // A login listener in flight suppresses recycling even with newer auth evidence on disk.
+  writeFileSync(path.join(codexHome,'auth.json'),'{}');
+  (service as any).loginId='login-1';
+  const during=await service.status('openai');
+  assert.equal(during.connected,false);assert.equal(stopped,0,'no recycle while a login is in flight');
+  // No login + newer auth.json: the negative is verified against a fresh process before it
+  // counts. The respawn of the bogus executable fails here, which proves the recycle ran.
+  (service as any).loginId=undefined;
+  await assert.rejects(service.status('openai'));
+  assert.equal(stopped,1,'the provably stale client was recycled exactly once');
+ }finally{service.close();if(previous===undefined)delete process.env.CODEX_HOME;else process.env.CODEX_HOME=previous;}
 });

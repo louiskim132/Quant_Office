@@ -3028,3 +3028,22 @@ different-account warning only fires on an identified account.
 Regression tests pin the parser, the shared ''-record update path,
 the blocker copy and every refusal. 525/525 unit, typecheck clean,
 build clean, desktop e2e green.
+2026-09-18 (follow-up, direct organizer fix) — stale Codex
+app-server account reads can no longer hide a completed sign-in.
+Observed live: a ChatGPT browser login wrote valid auth.json
+tokens at 01:21:51, yet the long-lived codex app-server kept
+answering account/read with its pre-login snapshot, so the office
+reported signed-out and the sign-in poll ran to deadline with no
+cancel affordance. CodexMetadata now stamps spawnedAt; a negative
+account/read is re-verified on a fresh process only when auth.json
+(CODEX_HOME-aware) is newer than the client — evidence-gated, so
+unchanged files and injected clients never spawn needlessly, and
+never while the process owns a live login listener (recycling
+would kill the OAuth callback). A timed-out login flow also takes
+one fresh-process verdict before declaring failure. The signed-out
+note now distinguishes API-key auth from no account reported, and
+the provider card shows a real Cancel sign-in button routed
+through the existing office:agent-cancel IPC. Regression tests pin
+the evidence gate, the login-listener suppression and the single
+recycle. 526/526 unit, typecheck clean, build clean, desktop e2e
+green.

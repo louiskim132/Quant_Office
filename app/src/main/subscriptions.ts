@@ -3,6 +3,7 @@ import { spawn, execFile, type ChildProcessWithoutNullStreams } from 'node:child
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { homedir } from 'node:os';
 import { z } from 'zod';
 import { agentDraftSchema, observationSchema } from '../core/store.js';
 import { efforts, PROVIDER_MODEL_SUGGESTIONS } from '../shared/effort.js';
@@ -60,6 +61,8 @@ export function devinStatusIdentity(raw:string):string {
  return labeled??raw.match(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/)?.[0]??'';
 }
 class CodexMetadata {
+ /** When this process started; an auth file newer than this is evidence the in-process answer may be stale. */
+ readonly spawnedAt=Date.now();
  private child:ChildProcessWithoutNullStreams;
  private pending=new Map<number,{resolve:(value:any)=>void;reject:(error:Error)=>void;timer:ReturnType<typeof setTimeout>}>();
  private sequence=0;
@@ -117,14 +120,22 @@ export class Subscriptions {
   const connection:Connection={provider,connected:false,account:'',models:[],windows:[],checkedAt:new Date().toISOString(),note:''};
   if(provider==='openai'){
    try{
-    const client=this.client(),raw=await client.request('account/read',{refreshToken:true});
-    if(raw.account?.type!=='chatgpt'){connection.note='Sign in with a ChatGPT subscription. API authentication is not accepted.';return connection;}
+    let raw=await this.client().request('account/read',{refreshToken:true});
+    if(raw.account?.type!=='chatgpt'&&!this.loginId&&this.codex?.spawnedAt){
+     // A long-lived app-server can keep serving the account snapshot it had at spawn. If the
+     // durable auth file changed after this process started, its answer is provably suspect —
+     // re-read once on a fresh process. Never while this process owns a live login listener:
+     // a pending OAuth callback would die with it.
+     let authMoved=0;try{authMoved=statSync(path.join(process.env.CODEX_HOME??path.join(homedir(),'.codex'),'auth.json')).mtimeMs;}catch{}
+     if(authMoved>this.codex.spawnedAt){this.codex.stop();this.codex=undefined;raw=await this.client().request('account/read',{refreshToken:true});}
+    }
+    if(raw.account?.type!=='chatgpt'){connection.note=raw.account?.type==='apikey'?'Sign in with a ChatGPT subscription. API authentication is not accepted.':'No ChatGPT subscription sign-in was reported by the official tool. Sign in with a ChatGPT account.';return connection;}
     connection.account=z.string().min(1).max(160).parse(raw.account.email);connection.connected=true;
     let cursor:string|null=null;const seen=new Set<string>();
     // A catalog failure must not discard the verified account, and a mid-pagination throw must not
     // leave a silently truncated catalog: the honest outcome is an empty list plus a note.
-    try{do{const result=await client.request('model/list',{limit:100,includeHidden:false,...(cursor?{cursor}:{})});for(const model of result.data??[])if(typeof model.id==='string'&&typeof model.displayName==='string')connection.models.push({id:model.id,name:model.displayName,efforts:['default',...(model.supportedReasoningEfforts??[]).map((e:any)=>e.reasoningEffort).filter((e:any)=>efforts.includes(e)&&e!=='default')],defaultEffort:efforts.includes(model.defaultReasoningEffort)?model.defaultReasoningEffort:undefined,effortDescriptions:(model.supportedReasoningEfforts??[]).filter((e:any)=>efforts.includes(e.reasoningEffort)&&typeof e.description==='string').map((e:any)=>({effort:e.reasoningEffort,description:e.description})),source:'Installed Codex app-server model/list; cloud application unverified'});cursor=result.nextCursor??null;if(cursor&&seen.has(cursor))throw new Error('Repeated model catalog page');if(cursor)seen.add(cursor);}while(cursor);}catch{connection.models=[];connection.note='Codex model catalog unavailable. Refresh to retry.';}
-    try{connection.windows=usageWindows(await client.request('account/rateLimits/read'));}catch{if(!connection.note)connection.note='Usage unavailable from Codex. Refresh to retry.';}
+    try{do{const result:any=await this.client().request('model/list',{limit:100,includeHidden:false,...(cursor?{cursor}:{})});for(const model of result.data??[])if(typeof model.id==='string'&&typeof model.displayName==='string')connection.models.push({id:model.id,name:model.displayName,efforts:['default',...(model.supportedReasoningEfforts??[]).map((e:any)=>e.reasoningEffort).filter((e:any)=>efforts.includes(e)&&e!=='default')],defaultEffort:efforts.includes(model.defaultReasoningEffort)?model.defaultReasoningEffort:undefined,effortDescriptions:(model.supportedReasoningEfforts??[]).filter((e:any)=>efforts.includes(e.reasoningEffort)&&typeof e.description==='string').map((e:any)=>({effort:e.reasoningEffort,description:e.description})),source:'Installed Codex app-server model/list; cloud application unverified'});cursor=result.nextCursor??null;if(cursor&&seen.has(cursor))throw new Error('Repeated model catalog page');if(cursor)seen.add(cursor);}while(cursor);}catch{connection.models=[];connection.note='Codex model catalog unavailable. Refresh to retry.';}
+    try{connection.windows=usageWindows(await this.client().request('account/rateLimits/read'));}catch{if(!connection.note)connection.note='Usage unavailable from Codex. Refresh to retry.';}
     if(!connection.windows.length&&!connection.note)connection.note='Usage unavailable from Codex for this account.';
    }catch(error){this.codex?.stop();this.codex=undefined;throw error;}
   }else if(provider==='devin'){
@@ -238,6 +249,12 @@ export class Subscriptions {
     await this.openBrowser(url.href);
     const deadline=Date.now()+5*60*1000;
     do{await new Promise(resolve=>setTimeout(resolve,1500));if(generation!==this.generation)throw new Error('Sign-in canceled.');connection=await this.status('openai');}while(!connection.connected&&Date.now()<deadline);
+    if(!connection.connected){
+     // The app-server that owns the login can keep serving its pre-login account snapshot.
+     // auth.json on disk is the durable record — a fresh process decides the verdict.
+     this.codex?.stop();this.codex=undefined;this.loginId=undefined;
+     connection=await this.status('openai');
+    }
    }else{
     // Never null here: openai is the only browser-flow provider and it was handled above.
     const login=providerLogin(provider)!;
