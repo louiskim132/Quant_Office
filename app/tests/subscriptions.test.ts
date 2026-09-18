@@ -147,3 +147,21 @@ test('a negative account read re-checks on a fresh process when auth.json moved,
   assert.equal(stopped,1,'the provably stale client was recycled exactly once');
  }finally{service.close();if(previous===undefined)delete process.env.CODEX_HOME;else process.env.CODEX_HOME=previous;}
 });
+test('a completed browser login is detected from the auth file write, verified on a probe before the listener is retired',async()=>{
+ const root=mkdtempSync(path.join(tmpdir(),'qro-subscriptions-'));
+ const codexHome=mkdtempSync(path.join(tmpdir(),'qro-codex-home-'));
+ const previous=process.env.CODEX_HOME;process.env.CODEX_HOME=codexHome;
+ const service=new Subscriptions(root,async()=>{writeFileSync(path.join(codexHome,'auth.json'),'{"tokens":{}}');});
+ let stopped=0,probed=0,probeStopped=0;
+ // The login-owning client serves its pre-login snapshot forever — account stays null.
+ (service as any).codex={async request(method:string){if(method==='account/read')return {account:null};if(method==='account/login/start')return {loginId:'login-1',authUrl:'https://auth.openai.com/device'};if(method==='account/login/cancel')return {};throw new Error('Unexpected '+method);},stop(){stopped++;}};
+ // The probe that reads the post-callback auth state is injected through spawnCodex.
+ (service as any).spawnCodex=()=>({async request(method:string){probed++;if(method==='account/read')return {account:{type:'chatgpt',email:'fresh@example.test'}};if(method==='model/list')return {data:[{id:'model-a',displayName:'Model A'}],nextCursor:null};if(method==='account/rateLimits/read')return {rateLimits:{}};throw new Error('Unexpected '+method);},stop(){probeStopped++;}});
+ try{
+  const connection=await service.signIn('openai');
+  assert.equal(connection.connected,true);assert.equal(connection.account,'fresh@example.test');
+  assert.ok(probed>0,'a fresh process verified the auth write');
+  assert.equal(stopped,1,'the stale login-owning client was retired once, after the probe verified');
+  assert.equal(probeStopped,0,'the verified probe was adopted, not discarded');
+ }finally{service.close();if(previous===undefined)delete process.env.CODEX_HOME;else process.env.CODEX_HOME=previous;}
+});
