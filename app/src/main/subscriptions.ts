@@ -39,7 +39,7 @@ export function devinModelCatalog(parsed:unknown):Connection['models'] {
   if(!token&&/\bmax$/i.test(label))return 'max';
   return undefined;
  };
- const displayName=(node:any,id:string)=>typeof node.displayName==='string'?node.displayName:typeof node.name==='string'?node.name:typeof node.label==='string'?node.label:id;
+ const displayName=(node:any,id:string)=>typeof node.displayName==='string'?node.displayName:typeof node.family_label==='string'?node.family_label:typeof node.name==='string'?node.name:typeof node.label==='string'?node.label:id;
  const collect=(node:any,family?:{id:string;efforts:Effort[]}):void=>{
   if(Array.isArray(node)){node.forEach(child=>collect(child,family));return;}
   if(!node||typeof node!=='object')return;
