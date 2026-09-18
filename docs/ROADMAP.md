@@ -3113,3 +3113,28 @@ switching no longer resizes the dialog. e2e asserts the editor
 ordering, the removed metadata lines and uniform tab height.
 Combined verification at a0cea25: typecheck clean, 528/528 unit
 tests, build clean, desktop e2e green.
+
+2026-09-18 (round model-grouping) — organizer prerequisite
+5191b64 used family_label so devin family entries display their
+provider names ('Claude Opus 5') instead of raw uids. Worker-1
+commit e5b18ab integrated at merge 95bd20c. The devin model and
+effort pickers now present two separate axes on both surfaces
+(agent creation draft and the profile ModelEffortEditor): when
+the signed-in catalog carries family data, the model dropdown
+lists only family-level entries sorted alphabetically, and a
+stored variant uid (e.g. swe-2-max) displays as its family. The
+effort dropdown becomes the variant-in-family picker — every
+sibling variant is an option labeled by its honest qualifier
+(family-name prefix strip, else capitalized uid suffix: 'Low',
+'Low Fast', 'Max', 'Medium Thinking', 'Low Priority'), plus a
+'Provider default' option valued at the family id. Choosing an
+effort stages the variant uid and persists via changeAgentModel;
+draft.effort/agent.effort stays 'default'. Raw fallback options
+survive for stored uids absent from the catalog; signed-out /
+no-family catalogs keep the prior flat list and Provider-default
+behavior; openai and claude are unchanged. No provider
+operations. Combined verification at 95bd20c: typecheck clean,
+528/528 unit tests, build clean, desktop e2e green. Caveat: the
+e2e suite does not produce a signed-in devin catalog fixture, so
+family grouping is verified by review against the real catalog
+shape rather than an automated catalog test.
