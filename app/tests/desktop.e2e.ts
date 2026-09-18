@@ -55,7 +55,9 @@ try{
  state=await page.evaluate(()=>window.office.getState());assert.equal(state.experiments[0].stage,'CONTRACT_REVIEW');assert.equal(state.reviews.length,0);
  // The Projects nav always lands on the list even while a project is selected; a project row reopens the detail page.
  await page.getByRole('button',{name:'Projects',exact:true}).click();
- const openProject=page.getByRole('button',{name:/Open project/});await openProject.first().waitFor();await openProject.first().click();
+ await page.getByRole('button',{name:'Open project',exact:true}).waitFor();
+ // The card region itself, not only the explicit link, opens the detail page.
+ await page.getByRole('button',{name:'Open Volatility research',exact:true}).click();
  await page.getByText('PROJECT MANDATE',{exact:true}).waitFor();
  // The detail page lists the project's requests and reaches the folder-scope location panel from the mandate card.
  await page.locator('.project-requests').getByText('Volatility estimate baseline').waitFor();
