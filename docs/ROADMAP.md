@@ -3047,3 +3047,23 @@ through the existing office:agent-cancel IPC. Regression tests pin
 the evidence gate, the login-listener suppression and the single
 recycle. 526/526 unit, typecheck clean, build clean, desktop e2e
 green.
+2026-09-18 (probe, no code) — headless devin sessions are
+first-class in the shared session store. Verified on devin
+3000.10.21 under the office's scrubbed environment: `devin -p`
+in a scratch dir ran non-interactively and registered a named
+session (mulberry-ferry) visible in `devin list --format json`
+with id, working_directory and last_activity. The row lives in
+%APPDATA%\devin\cli\sessions.db — the same store that holds
+Desktop-created sessions (backend_type windsurf) — so
+office-launched runs should appear in Devin Desktop's session
+list under the working directory's workspace grouping; that GUI
+display is inferred from the shared store, not yet confirmed
+on screen. `devin -r <id> -p` resumed the same session
+successfully, proving post-run attachability. Constraints for a
+future LOCAL_CLI_EXEC transport: headless mode refuses untrusted
+working directories and needs --respect-workspace-trust false
+(trusted_workspaces.json currently lists only the dev checkout);
+sessions key to cwd, so a packet dir is the natural session
+scope; `devin list --format json` is a scriptable liveness probe
+and `devin rm <id> --force` a scriptable cleanup. Live-attach
+during an in-flight -p run is unverified.
