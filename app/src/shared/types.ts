@@ -29,7 +29,7 @@ export interface AgentDraft { name: string; provider: Provider; model: string; t
  */
 export interface Agent extends AgentDraft { revision?: number; removedAt?: string; deletedAt?: string; id: string; account: string; setupAccount?: string; createdAt: string; connectionVerifiedAt: string; connectionId?: string; bindingVerifiedAt?: string; execution: ExecutionEnvironment; }
 export interface UsageWindow { label: string; remainingPercent: number; resetsAt: number; }
-export interface Connection { provider: Provider; connected: boolean; account: string; models: { id: string; name: string; efforts?: Effort[]; defaultEffort?:Effort; effortDescriptions?:{effort:Effort;description:string}[]; source?:string }[]; windows: UsageWindow[]; checkedAt: string; note: string; }
+export interface Connection { provider: Provider; connected: boolean; account: string; models: { id: string; name: string; efforts?: Effort[]; defaultEffort?:Effort; effortDescriptions?:{effort:Effort;description:string}[]; family?: string; effort?: Effort; source?:string }[]; windows: UsageWindow[]; checkedAt: string; note: string; }
 export interface WorkLog { id: string; conversationId: string; from: string; to: string; kind: 'MESSAGE' | 'TOOL' | 'STATUS'; text: string; timestamp: string; sourceHash: string; externalId: string; provenance: 'USER_IMPORTED'; }
 export interface AgentLog extends Omit<WorkLog,'provenance'> { provenance: 'USER_IMPORTED' | 'OFFICE_EVENT'; }
 export interface TokenTotals { input: number; output: number; cacheRead: number; cacheCreation: number; messages: number; }
@@ -64,7 +64,7 @@ export interface ConfinementPolicy { tools: string; filesystem: string; network:
  * back to the snapshot's own environment, because that is genuinely where the observation happened.
  */
 export interface CapabilityEvidence { operation: CapabilityOperation; level: VerificationLevel; detail: string; evidence?: EvidenceKind; verifiedAt?: string; model?: string; environment?: string; effort?: Effort; delegation?: boolean; route?: AdapterRoute; confinement?: ConfinementPolicy; source?: string }
-export interface CapabilityModel { id: string; name: string; efforts?: Effort[]; defaultEffort?: Effort; effortDescriptions?: { effort: Effort; description: string }[]; source?: string }
+export interface CapabilityModel { id: string; name: string; efforts?: Effort[]; defaultEffort?: Effort; effortDescriptions?: { effort: Effort; description: string }[]; family?: string; effort?: Effort; source?: string }
 /** Immutable evidence of what one provider tool could actually do for one account at one moment. */
 export interface ProviderCapabilitySnapshot { id: string; provider: Provider; connectionId: string; identity: string; toolVersion: string; transport: 'NONE' | 'OFFICIAL_CLI_PIPE' | 'OFFICIAL_CLI_TERMINAL' | 'LOCAL_MAILBOX' | 'LOCAL_CLI_EXEC' | 'LOCAL_ACP'; environment: string; models: CapabilityModel[]; operations: CapabilityEvidence[]; source: string; contentHash: string; observedAt: string; }
 /** Each action is decided on its own evidence. They are deliberately never collapsed into one optimistic boolean. */

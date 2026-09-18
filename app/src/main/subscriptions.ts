@@ -22,10 +22,44 @@ const PROVIDER_TOOL_NAME:Record<Provider,string>={openai:'Codex',claude:'Claude 
 export function providerLogin(provider:Provider):{provider:Provider;executable:string;args:string[]}|null {
  return provider==='openai'?null:{provider,executable:PROVIDER_EXECUTABLE[provider],args:['auth','login']};
 }
-/** Reads `devin models list --format json`: family objects and variant objects ({model_uid,label}) alike. */
+/** Reads `devin models list --format json`: family objects and variant objects ({model_uid,label}) alike.
+ * Variant entries additionally record their family and the effort level their uid encodes —
+ * Devin has no separate effort axis; the variant suffix IS the effort selector. */
 export function devinModelCatalog(parsed:unknown):Connection['models'] {
  const models:Connection['models']=[];
- const collect=(node:any):void=>{if(Array.isArray(node)){node.forEach(collect);return;}if(node&&typeof node==='object'){const id=node.id??node.slug??node.name??node.model_uid;if(typeof id==='string'&&id&&models.length<512&&!models.some(m=>m.id===id))models.push({id,name:typeof node.displayName==='string'?node.displayName:typeof node.name==='string'?node.name:typeof node.label==='string'?node.label:id,source:'Installed Devin CLI models list --format json; cloud application unverified'});Object.values(node).forEach(collect);}};
+ const source='Installed Devin CLI models list --format json; cloud application unverified';
+ const normalize=(s:string)=>s.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'');
+ const variantEffort=(family:string,variant:string,label:string):Effort|undefined=>{
+  const fam=normalize(family),uid=normalize(variant);
+  if(!fam||!uid)return undefined;
+  const suffix=uid===fam?'':uid.startsWith(fam+'-')?uid.slice(fam.length+1):undefined;
+  if(suffix===undefined)return undefined;
+  const token=suffix.endsWith('-fast')?suffix.slice(0,-5):suffix;
+  if(token&&efforts.includes(token as Effort))return token as Effort;
+  if(!token&&/\bmax$/i.test(label))return 'max';
+  return undefined;
+ };
+ const displayName=(node:any,id:string)=>typeof node.displayName==='string'?node.displayName:typeof node.name==='string'?node.name:typeof node.label==='string'?node.label:id;
+ const collect=(node:any,family?:{id:string;efforts:Effort[]}):void=>{
+  if(Array.isArray(node)){node.forEach(child=>collect(child,family));return;}
+  if(!node||typeof node!=='object')return;
+  const id=node.id??node.slug??node.name??node.model_uid;
+  if(typeof id==='string'&&id&&models.length<512&&!models.some(m=>m.id===id)){
+   const entry:Connection['models'][number]={id,name:displayName(node,id),source};
+   if(family){entry.family=family.id;const effort=variantEffort(family.id,id,displayName(node,id));if(effort)entry.effort=effort;if(family.efforts.length)entry.efforts=['default',...family.efforts];}
+   models.push(entry);
+  }
+  if(Array.isArray(node.variants)){
+   const familyId=typeof id==='string'&&id?id:normalize(String(node.family_uid??node.slug??''));
+   const variants:any[]=node.variants.filter((v:any)=>v&&typeof v==='object');
+   const set:Effort[]=[...new Set(variants.map(v=>variantEffort(familyId,String(v.model_uid??v.id??v.slug??v.name??''),displayName(v,''))).filter((e):e is Effort=>!!e))];
+   const childFamily={id:familyId,efforts:set};
+   for(const v of variants)collect(v,childFamily);
+   for(const [key,value] of Object.entries(node))if(key!=='variants')collect(value);
+   return;
+  }
+  Object.values(node).forEach(value=>collect(value,family));
+ };
  collect(parsed);
  return models;
 }
@@ -207,7 +241,7 @@ export class Subscriptions {
    provider,identity:connection.account,credentialContext:provider==='openai'?'codex-cli':provider==='devin'?'devin-cli':'claude-code-cli',
    state:connection.connected?'SIGNED_IN':'SIGNED_OUT',allowance:connection.windows,note:connection.note,
    toolVersion,transport:'NONE',environment:'',
-   models:connection.models.map(model=>({id:model.id,name:model.name,...(model.efforts?{efforts:model.efforts}:{}),...(model.defaultEffort?{defaultEffort:model.defaultEffort}:{}),...(model.effortDescriptions?.length?{effortDescriptions:model.effortDescriptions}:{}),...(model.source?{source:model.source}:{})})),
+   models:connection.models.map(model=>({id:model.id,name:model.name,...(model.efforts?{efforts:model.efforts}:{}),...(model.defaultEffort?{defaultEffort:model.defaultEffort}:{}),...(model.effortDescriptions?.length?{effortDescriptions:model.effortDescriptions}:{}),...(model.family?{family:model.family}:{}),...(model.effort?{effort:model.effort}:{}),...(model.source?{source:model.source}:{})})),
    operations,source:accountSource,
    observedAt:at,
   }};

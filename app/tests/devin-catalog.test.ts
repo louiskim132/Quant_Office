@@ -51,6 +51,47 @@ test('the collector accepts an object-wrapped catalog, stays deduped and respect
   assert.equal(new Set(models.map(m => m.id)).size, 512);
 });
 
+test('variant entries record their family and the effort level their uid encodes', () => {
+  // Devin has no separate effort axis — the variant suffix is the effort selector. The renderer
+  // groups siblings by `family` and remaps the model uid when a different effort is chosen.
+  const parsed = { families: [
+    { family_uid: 'swe-2', slug: 'swe-2', family_label: 'SWE-2', variants: [
+      { model_uid: 'swe-2-high', label: 'SWE-2 High' },
+      { model_uid: 'swe-2-medium', label: 'SWE-2 Medium' },
+      { model_uid: 'swe-2-max', label: 'SWE-2 Max' },
+    ] },
+    { family_uid: 'claude-opus-5', slug: 'claude-opus-5', family_label: 'Claude Opus 5', variants: [
+      { model_uid: 'claude-opus-5-low', label: 'Claude Opus 5 Low' },
+      { model_uid: 'claude-opus-5-low-fast', label: 'Claude Opus 5 Low Fast' },
+      { model_uid: 'claude-opus-5-ultra', label: 'Claude Opus 5 Ultra' },
+    ] },
+    { family_uid: 'swe-1.7-lightning', slug: 'swe-1.7-lightning', family_label: 'SWE-1.7 Lightning', variants: [
+      { model_uid: 'swe-1-7-lightning', label: 'SWE-1.7 Lightning Max' },
+      { model_uid: 'swe-1-7-lightning-medium', label: 'SWE-1.7 Lightning Medium' },
+    ] },
+  ] };
+  const models = devinModelCatalog(parsed);
+  const swe2max = models.find(m => m.id === 'swe-2-max')!;
+  assert.equal(swe2max.family, 'swe-2');
+  assert.equal(swe2max.effort, 'max');
+  assert.deepEqual(swe2max.efforts, ['default', 'high', 'medium', 'max'], 'a variant carries its family effort set');
+  assert.equal(models.find(m => m.id === 'swe-2')!.family, undefined, 'a family entry has no family of its own');
+  assert.equal(models.find(m => m.id === 'claude-opus-5-low-fast')!.effort, 'low', 'a -fast variant keeps its effort token');
+  assert.equal(models.find(m => m.id === 'swe-1-7-lightning')!.effort, 'max', 'a bare family uid labeled Max parses as max');
+  assert.equal(models.find(m => m.id === 'swe-1-7-lightning-medium')!.family, 'swe-1.7-lightning', 'dot/dash normalization links dotted family uids to dashed variant uids');
+});
+
+test('unparseable variant suffixes get no effort rather than an invented one', () => {
+  const parsed = [{ slug: 'custom', variants: [
+    { model_uid: 'custom-alpha', label: 'Custom Alpha' },
+    { model_uid: 'custom-low-priority', label: 'Custom Low Priority' },
+  ] }];
+  const models = devinModelCatalog(parsed);
+  assert.equal(models.find(m => m.id === 'custom-alpha')!.effort, undefined);
+  assert.equal(models.find(m => m.id === 'custom-low-priority')!.effort, undefined, 'a compound suffix is not claimed as an effort');
+  assert.equal(models.find(m => m.id === 'custom-alpha')!.efforts, undefined, 'a family with no parseable efforts declares none');
+});
+
 test('empty and shapeless catalogs collect nothing rather than fabricating entries', () => {
   assert.deepEqual(devinModelCatalog([]), []);
   assert.deepEqual(devinModelCatalog({}), []);
