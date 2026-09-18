@@ -165,3 +165,21 @@ test('a completed browser login is detected from the auth file write, verified o
   assert.equal(probeStopped,0,'the verified probe was adopted, not discarded');
  }finally{service.close();if(previous===undefined)delete process.env.CODEX_HOME;else process.env.CODEX_HOME=previous;}
 });
+test('a working access token reports the account even when the stored refresh token is dead',async()=>{
+ const root=mkdtempSync(path.join(tmpdir(),'qro-subscriptions-'));
+ const service=new Subscriptions(root,async()=>{});
+ (service as any).codex={async request(method:string,params:any){if(method==='account/read'&&params?.refreshToken===false)return {account:{type:'chatgpt',email:'alive@example.test'}};if(method==='account/read')return {account:null};if(method==='model/list')return {data:[],nextCursor:null};if(method==='account/rateLimits/read')return {rateLimits:{}};throw new Error('Unexpected '+method);},stop(){}};
+ try{
+  const connection=await service.status('openai');
+  assert.equal(connection.connected,true);assert.equal(connection.account,'alive@example.test','a dead refresh token does not void a working access token');
+ }finally{service.close();}
+});
+test('the refresh attempt remains as a recovery path when the plain read reports nothing',async()=>{
+ const root=mkdtempSync(path.join(tmpdir(),'qro-subscriptions-'));
+ const service=new Subscriptions(root,async()=>{});
+ (service as any).codex={async request(method:string,params:any){if(method==='account/read'&&params?.refreshToken===true)return {account:{type:'chatgpt',email:'recovered@example.test'}};if(method==='account/read')return {account:null};if(method==='model/list')return {data:[],nextCursor:null};if(method==='account/rateLimits/read')return {rateLimits:{}};throw new Error('Unexpected '+method);},stop(){}};
+ try{
+  const connection=await service.status('openai');
+  assert.equal(connection.connected,true);assert.equal(connection.account,'recovered@example.test','an expired access token recovered through one refresh');
+ }finally{service.close();}
+});

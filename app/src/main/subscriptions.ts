@@ -162,7 +162,11 @@ export class Subscriptions {
  /** One full account read against a given app-server: account, catalog and usage, each honestly degraded. */
  private async openAiConnection(client:CodexMetadata):Promise<Connection>{
   const connection:Connection={provider:'openai',connected:false,account:'',models:[],windows:[],checkedAt:new Date().toISOString(),note:''};
-  const raw=await client.request('account/read',{refreshToken:true});
+  // A plain read is non-mutating; a forced refresh rotates the stored token on every call, and
+  // rotations racing between processes can invalidate an otherwise working grant. The refresh
+  // attempt stays — as a one-off recovery path when the plain read reports nothing.
+  let raw=await client.request('account/read',{refreshToken:false});
+  if(raw.account?.type!=='chatgpt'){try{raw=await client.request('account/read',{refreshToken:true});}catch{}}
   if(raw.account?.type!=='chatgpt'){connection.note=raw.account?.type==='apikey'?'Sign in with a ChatGPT subscription. API authentication is not accepted.':'No ChatGPT subscription sign-in was reported by the official tool. Sign in with a ChatGPT account.';return connection;}
   connection.account=z.string().min(1).max(160).parse(raw.account.email);connection.connected=true;
   let cursor:string|null=null;const seen=new Set<string>();
@@ -302,9 +306,10 @@ export class Subscriptions {
      if(!connection.connected&&this.loginId){
       // The login-owning app-server keeps serving its pre-login snapshot; the OAuth callback's
       // auth.json write is the durable completion signal. Verify on a throwaway probe — the
-      // listener is retired only when the probe actually reads the signed-in account.
+      // listener is retired only when the probe actually reads the signed-in account. The
+      // comparison is inclusive: a write in the same millisecond still postdates the login.
       let authMoved=0;try{authMoved=statSync(this.authFile()).mtimeMs;}catch{}
-      if(authMoved>loginStartedAt){
+      if(authMoved>=loginStartedAt){
        const probe=this.spawnCodex();
        try{const probed=await this.openAiConnection(probe);if(probed.connected){this.codex?.stop();this.codex=probe;this.loginId=undefined;connection=probed;}}catch{}finally{if(this.codex!==probe)probe.stop();}
       }
