@@ -3138,3 +3138,17 @@ operations. Combined verification at 95bd20c: typecheck clean,
 e2e suite does not produce a signed-in devin catalog fixture, so
 family grouping is verified by review against the real catalog
 shape rather than an automated catalog test.
+
+2026-09-18 (cleanup finding) — office records, packet dirs on
+disk and provider session rows in devin cli sessions.db are
+three independent stores; deleting one never propagates. Two
+Devin Desktop sessions bound to moved packet dirs produced
+"does not exist" alerts on Desktop load until the dirs were
+restored, and a headless probe session survived office-side
+cleanup untouched. Only `devin rm` removes a session row, and
+it refuses while Devin Desktop holds the session open.
+Consequence for LOCAL_CLI_EXEC: every office-launched job
+leaves a provider session row behind, so the transport needs
+an explicit cleanup policy — record the session id in evidence
+first, then `devin rm` after result verification — or the
+Desktop session list accumulates one orphan per office job.
