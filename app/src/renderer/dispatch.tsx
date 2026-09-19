@@ -2,6 +2,7 @@ import React,{useEffect,useState} from 'react';
 import type {Agent,AppState,InputSnapshot,ProviderJob,Request,JobEvent} from '../shared/types';
 import {agentDispatchReadiness} from '../shared/readiness';
 import {requestJobs} from '../shared/queue';
+import {appliedField,latestAppliedReport} from './profile';
 
 const jobLabels:Record<ProviderJob['state'],string>={
  INTENT:'Prepared · nothing submitted',SUBMITTING:'Submitting',ACCEPTED:'Accepted by the provider',RUNNING:'Running',
@@ -28,6 +29,11 @@ export function RequestDispatch({request,state,onState}:{request:Request;state:A
  const chosen=summaries.find(item=>item.jobId===selectedJob)??summaries.find(item=>item.unresolved)??summaries.find(item=>!item.settled)??summaries.at(-1);
  const job=(state.jobs??[]).find(item=>item.id===chosen?.jobId);
  const assignment=(state.assignments??[]).find(item=>item.id===job?.assignmentId);
+ // The job's latest applied self-report — the session's own claim on a verified receipt, never inferred.
+ const appliedReport=latestAppliedReport(state.jobEvents,job?.id);
+ const reportedModel=appliedReport?appliedField(appliedReport.text,'appliedModel'):undefined;
+ const reportedEffort=appliedReport?appliedField(appliedReport.text,'appliedEffort'):undefined;
+ const appliedMismatch=Boolean(assignment&&appliedReport&&((reportedModel!==undefined&&reportedModel!==assignment.requestedModel)||(reportedEffort!==undefined&&reportedEffort!==assignment.requestedEffort)));
  useEffect(()=>{setPlan(null);setSessionId('');setSessionUrl('');setNote('');},[job?.id,request.id]);
  const snapshot:InputSnapshot|undefined=assignment?(state.snapshots??[]).find(item=>item.id===assignment.snapshotId):undefined;
  const [events,setEvents]=useState<JobEvent[]>([]);
@@ -73,6 +79,8 @@ export function RequestDispatch({request,state,onState}:{request:Request;state:A
   {agent&&gate&&!closed&&gate.readiness.connectionId&&!gate.readiness.accountFresh&&<p><button className="secondary" disabled={!!busy} onClick={()=>void run('recheck',async()=>{await window.office.connectionStatus(agent.provider);return window.office.getState();})}>{busy==='recheck'?'Checking…':'Re-check account'}</button> <span className="muted">The account check is stale; a live re-check refreshes it in place.</span></p>}
   {job&&<p><strong>{jobLabels[job.state]}</strong>{job.externalId?` · ${job.externalId}${job.evidence==='USER_REPORTED'?' (reported by you, unverified)':''}`:''}</p>}
   {job&&<p className="muted">{job.detail}</p>}
+  {appliedReport&&assignment&&<p className="muted">Requested {assignment.requestedModel} · effort {assignment.requestedEffort.toLowerCase()} — {appliedReport.text}</p>}
+  {appliedMismatch&&<p className="blocker">The session's self-reported applied values differ from the requested model/effort — self-reported, not office-verified.</p>}
   {note&&<p className="notice" role="status">{note}</p>}
   {snapshot&&<p className="muted">Snapshot {snapshot.files.length} file{snapshot.files.length===1?'':'s'} · {snapshot.totalBytes} bytes{snapshot.stagingCommit?` · commit ${snapshot.stagingCommit.slice(0,10)}`:' · no commit'}</p>}
   {snapshot?.warnings.map(warning=><p className="muted" key={warning}>{warning}</p>)}

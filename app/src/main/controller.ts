@@ -638,6 +638,18 @@ export class AssignmentController {
     }
     job = this.job(assignmentId);
     if (isTerminalJob(job.state)) return this.store.snapshot({history:false});
+    // A verified receipt's applied self-report is the session's own claim about what ran — recorded
+    // as a content-deduped event, so a repeated poll of an identical report adds nothing while a
+    // changed one lands as new history. It is never folded into the job's verified outcome.
+    if (result.applied && (result.applied.model !== undefined || result.applied.effort !== undefined || result.applied.delegation !== undefined)) {
+      const declared: string[] = [];
+      if (result.applied.model !== undefined) declared.push(`appliedModel=${JSON.stringify(result.applied.model)}`);
+      if (result.applied.effort !== undefined) declared.push(`appliedEffort=${JSON.stringify(result.applied.effort)}`);
+      if (result.applied.delegation !== undefined) declared.push(`delegation=${result.applied.delegation}`);
+      this.store.recordJobEvents(job.id, [{ externalId: `applied:${canonicalHash(result.applied)}`, cursor: '', kind: 'STATUS',
+        text: `Session self-reported ${declared.join(', ')} on a verified receipt — the session's own claim, not office-verified.`,
+        occurredAt: this.now(), receivedAt: this.now(), evidence: 'PROVIDER_REPORTED' }]);
+    }
     const fresh = retrieved.filter(output => !job.outputs.some(old => old.path === output.path && old.sha256 === output.sha256 && old.stored));
     if (job.state === result.state && !fresh.length) return this.store.snapshot({history:false});
     const transitioned = this.store.recordJobTransition({
