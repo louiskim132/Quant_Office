@@ -3281,3 +3281,33 @@ worktree hardening follows P2; P6 orchestration last; P7/P8
 organizer-owned routing and UI wiring; P9 docs/trials; P10
 integration. Live provider trials stay gated on explicit
 packet authorization with synthetic canaries only.
+
+2026-09-19 (round local-rev-1) — three workers integrated on
+the P0 base. worker-1 (a00fc4a): local-session-files.ts —
+GuardedLocalFileIO with component lstat walk refusing
+links/junctions at every level, handle-bound fstat size gate +
+pinned read, wx writeNew, RESIDUAL_RACE_WINDOW honestly naming
+the walk-to-open gap Node-on-Windows cannot close without a
+native primitive; FakeLocalFileIO for consumers. 11/11 tests
+with real NTFS junctions (file-symlink case skipped honestly —
+privilege unavailable). worker-2 (84b1990): records module is
+now read-only discovery (rmSync removed entirely, F01/F10
+closed at the callable surface) and local-provider-lifecycle.ts
+implements inspect/archive — devin rm via arg-array execFile
+with busy-over-missing precedence, claude/codex UNSUPPORTED
+without touching provider bytes. worker-3 (5d7bed8): docs
+corrected — local-worktree-lane.md separates storage key /
+picker scope / grouping with an evidence matrix (and a newly
+probed fact: Codex Desktop imports Claude sessions by mangled
+cwd key); local-sandbox-probe.md marks dated findings
+historical and distinguishes permission gating from
+instruction text, native Windows from WSL2, command-tool from
+all-tool confinement; workflow.md documents the current
+waiting-for-user/cancel-request truth in present tense only.
+Combined verification at 105c4bb: typecheck clean, 594/594
+unit (1 skipped: privileged symlink fixture), build clean.
+Round 2 candidates per spec section 14: P2 packet v2 (needs
+P1's guarded I/O), then P3 cancellation, P4 worktree
+hardening, P6 lifecycle orchestration; P7/P8 organizer-owned
+routing + UI wiring; F06 applied-dedup ordering rides the P8
+structured query.
