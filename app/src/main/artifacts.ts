@@ -250,6 +250,8 @@ export class ArtifactService {
   state.events.reverse();
   const grants=(state.grants??[]).filter(item=>requestIds.has(item.requestId));
   const jobEvents=(state.jobEvents??[]).filter(item=>jobIds.has(item.jobId));
+  const localSessions=(state.localSessions??[]).filter(item=>jobIds.has(item.jobId));
+  const localOps=(state.localOps??[]).filter(item=>jobIds.has(item.jobId));
   const agentIds=new Set([...requests.flatMap(r=>[r.leadAgentId,...r.participantIds]),...assignments.map(a=>a.agentId),
     ...messages.flatMap(m=>[m.fromAgentId,m.toAgentId]),...grants.map(g=>g.agentId)].filter(Boolean));
   const snapshot={schemaVersion:2,kind:'PROJECT_DRAFT_EXPORT',exportedAt:new Date().toISOString(),provenance:{producedBy:'Quant Research Office',scope:'ONE_PROJECT',includes:['project','requests','experiments','tasks','artifacts','project-scoped events','profiles referenced by these requests'],excludes:['credentials','unscoped legacy conversations','external project folder contents','other projects'],externalFoldersIncluded:false,approvals:'NONE_RECORDED: this export carries no run approval and no scientific verdict.'},project,requests,experiments:state.experiments.filter(e=>e.projectId===projectId),tasks:state.tasks.filter(t=>t.projectId===projectId),artifacts,events:state.events.filter(e=>e.projectId===projectId),approvals:[],agents:state.agents.filter(a=>agentIds.has(a.id)),conversationExport:'Unscoped legacy logs are excluded. Workspace backup preserves them.',externalFoldersIncluded:false,warning:'Research planning archive only. Not an approved executable run package.'};
@@ -261,8 +263,8 @@ export class ArtifactService {
    if(bytes.length!==item.bytes||createHash('sha256').update(bytes).digest('hex')!==hash)throw new Error('Project object integrity failure.');
    files['objects/'+hash]=bytes;
   }
-  snapshot.provenance.includes.push('assignments','jobs','snapshots','scoped messages','review decision records','job events','grants','available referenced object bytes');
-  files['project.json']=strToU8(JSON.stringify({...snapshot,assignments,jobs,snapshots,messages,decisions,grants,jobEvents,unavailableObjectHashes,...research,
+  snapshot.provenance.includes.push('assignments','jobs','snapshots','scoped messages','review decision records','job events','local session bindings','local lifecycle journals','grants','available referenced object bytes');
+  files['project.json']=strToU8(JSON.stringify({...snapshot,assignments,jobs,snapshots,messages,decisions,grants,jobEvents,localSessions,localOps,unavailableObjectHashes,...research,
     reviewMeaning:'Recorded review decisions do not establish context isolation, scientific gate approval or trading authorization.'},null,2));
   const entries=Object.entries(files).map(([name,data])=>({path:name,size:data.length,sha256:createHash('sha256').update(data).digest('hex')}));
   files['inventory.json']=strToU8(JSON.stringify({schemaVersion:1,kind:'DRAFT',entries,inventoryHash:canonicalHash(entries)},null,2));

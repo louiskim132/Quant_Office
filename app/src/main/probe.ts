@@ -132,6 +132,8 @@ export async function probeCloudTransport(input: {
     snapshot,
     objective: PROBE_OBJECTIVE,
     requestName: 'Office transport probe',
+    // A probe has no ProviderJob; the persisted attempt ID is the equivalent durable identity.
+    jobId: id,
     payload: buildProviderPayload({
       requestName: 'Office transport probe', objective: PROBE_OBJECTIVE, acceptanceCriteria: PROBE_CRITERIA,
       instructions: '', model: input.model, effort: 'default', delegation: false,

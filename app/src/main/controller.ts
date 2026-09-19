@@ -5,6 +5,7 @@ import { canonicalHash } from '../core/canonical.js';
 import { isTerminalJob, reconciliationPlan } from '../core/jobs.js';
 import { assertHostedExecution, assertLocalExecution, assertWorkerCapacity } from '../core/guards.js';
 import type { OfficeStore } from '../core/store.js';
+import type { LocalSessionRecord } from '../shared/local-session.js';
 import { agentDispatchReadiness, currentConnection, effectiveEvidence, latestCapability, scopeMismatches, supplyingSnapshotIds, type RequestedScope } from '../shared/readiness.js';
 import { dependencyStatus } from '../shared/cooperation.js';
 import { verifySnapshotForTransfer, type OutputDestination } from './locations.js';
@@ -46,7 +47,13 @@ export function buildProviderPayload(frozen: Omit<ProviderPayload, 'text'>): Pro
   return { ...frozen, text: sections.join('\n\n') };
 }
 
-export interface SubmitContext { assignment: Assignment; snapshot: InputSnapshot; objective: string; requestName: string; payload: ProviderPayload }
+export interface SubmitContext {
+  assignment: Assignment; snapshot: InputSnapshot; objective: string; requestName: string; payload: ProviderPayload;
+  /** The durable job this submission serves — created before submit so a packet can bind it. */
+  jobId: string;
+  /** The persisted local delivery binding when one exists; hosted adapters ignore it. */
+  localSession?: LocalSessionRecord;
+}
 export interface SubmitResult { externalId: string; externalUrl: string; detail: string; resolvedModel?: string; appliedEffort?: Effort | 'UNVERIFIED' }
 export interface ObserveResult {
   state: 'ACCEPTED' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'UNKNOWN'; detail: string;
@@ -467,7 +474,7 @@ export class AssignmentController {
     this.store.recordJobTransition({ jobId: job.id, expectedRevision: job.revision, to: 'SUBMITTING', evidence: 'OFFICE_LOCAL', detail: `Submitting through ${assignment.route}.`, at: this.now() });
     job = this.job(assignmentId);
     const adapter = this.adapterFor({ route: assignment.route });
-    const submitContext: SubmitContext = { assignment, snapshot: staged, objective: frozen.objective, requestName: frozen.requestName, payload: this.providerPayload(assignment) };
+    const submitContext: SubmitContext = { assignment, snapshot: staged, objective: frozen.objective, requestName: frozen.requestName, payload: this.providerPayload(assignment), jobId: job.id };
     try {
       const result = await adapter.submit(submitContext);
       if (!result.externalId) throw new UnknownDispatchError('The provider returned no identifier for this submission.');
@@ -524,7 +531,7 @@ export class AssignmentController {
     const snapshot = state.snapshots!.find(item => item.id === assignment.snapshotId)!;
     const frozen = this.frozenPayload(assignment);
     // The preview and the launch read the same frozen values, so what the user approves is what runs.
-    return { ...adapter.plan({ assignment, snapshot, objective: frozen.objective, requestName: frozen.requestName, payload: this.providerPayload(assignment) }),
+    return { ...adapter.plan({ assignment, snapshot, objective: frozen.objective, requestName: frozen.requestName, payload: this.providerPayload(assignment), jobId: this.job(assignmentId).id }),
       outputDestination: this.prepareOutputs?.(assignment, snapshot) };
   }
 
@@ -551,7 +558,7 @@ export class AssignmentController {
     job = this.job(assignmentId);
     const adapter = this.adapterFor({ route: assignment.route });
     const localRoute = assignment.route.startsWith('LOCAL_');
-    const submitContext: SubmitContext = { assignment, snapshot: staged, objective: frozen.objective, requestName: frozen.requestName, payload: this.providerPayload(assignment) };
+    const submitContext: SubmitContext = { assignment, snapshot: staged, objective: frozen.objective, requestName: frozen.requestName, payload: this.providerPayload(assignment), jobId: job.id };
     try {
       const result = await adapter.submit(submitContext);
       // For a local transport the office knows the session identity it created; recording it keeps

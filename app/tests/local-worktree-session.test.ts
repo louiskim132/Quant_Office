@@ -48,6 +48,7 @@ function fixture(t: test.TestContext) {
  const context: SubmitContext = {
   assignment, snapshot, objective: 'Summarize the fixture input.', requestName: 'Tiny local task',
   payload: buildProviderPayload({ requestName: 'Tiny local task', objective: 'Summarize the fixture input.', acceptanceCriteria: 'A summary file.', instructions: '', model: 'devin-local', effort: 'default', delegation: false }),
+  jobId: randomUUID(),
  };
  const job = (externalId: string): ProviderJob => ({
   id: randomUUID(), assignmentId: assignment.id, projectId, requestId: assignment.requestId,

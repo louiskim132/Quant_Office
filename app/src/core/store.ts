@@ -40,6 +40,7 @@ import type {HoldoutReservation,EvaluatorResult} from '../shared/holdout';
 import {shadowBatchSchema} from '../shared/shadow';
 import {replayShadow} from './shadow-ledger';
 import { nextJob } from './jobs.js';
+import { appliedReportPayloadSchema, localSessionJournalSchema, localSessionRecordSchema, transitionLocalLifecycle, type LocalSessionJournal, type LocalSessionRecord } from '../shared/local-session.js';
 import { MAX_BUDGET_CENTS } from './guards.js';
 import {pipelineRecordSchema,stageContextHash,stageContextSchema,stageReportSchema,type PipelineRecord} from '../shared/pipeline';
 import {evidenceRecordSchema,type EvidenceRecord} from '../shared/evidence';
@@ -164,7 +165,7 @@ const jobSchema=z.object({id,assignmentId:id,projectId:id,requestId:id,provider:
   detail:secretFree(2000),externalId:secretFree(200),externalUrl:secretFree(2000),outputs:z.array(jobOutputSchema).max(256),
   revision:z.number().int().nonnegative(),createdAt:timestamp,updatedAt:timestamp,dispatchedAt:z.union([timestamp,z.literal('')]),settledAt:z.union([timestamp,z.literal('')])}).strict();
 const jobEventSchema=z.object({id,jobId:id,externalId:z.string().min(1).max(200),cursor:z.string().max(200),kind:z.enum(['STATUS','MESSAGE','TOOL','OUTPUT']),
-  text:secretFree(64000),occurredAt:timestamp,receivedAt:timestamp,evidence:evidenceKindEnum}).strict();
+  text:secretFree(64000),occurredAt:timestamp,receivedAt:timestamp,evidence:evidenceKindEnum,applied:appliedReportPayloadSchema.optional()}).strict();
 const roleSlotSchema=z.object({role,count:z.number().int().min(1).max(64)}).strict();
 const teamSchema=z.object({id,projectId:id.nullable(),name:title,revision:z.number().int().nonnegative(),archived:z.boolean(),createdAt:timestamp,updatedAt:timestamp}).strict();
 const membershipSchema=z.object({id,teamId:id,agentId:id,role,createdAt:timestamp,removedAt:timestamp.optional()}).strict();
@@ -248,6 +249,8 @@ const changeSchema = z.discriminatedUnion('collection', [
   z.object({collection:z.literal('assignments'),value:assignmentSchema}).strict(),
   z.object({collection:z.literal('jobs'),value:jobSchema}).strict(),
   z.object({collection:z.literal('jobEvents'),value:jobEventSchema}).strict(),
+  z.object({collection:z.literal('localSessions'),value:localSessionRecordSchema}).strict(),
+  z.object({collection:z.literal('localOps'),value:localSessionJournalSchema}).strict(),
   z.object({collection:z.literal('locations'),value:locationSchema}).strict(),
   z.object({collection:z.literal('snapshots'),value:snapshotSchema}).strict(),
   z.object({collection:z.literal('requests'),value:requestSchema}).strict(),
@@ -264,7 +267,7 @@ const changeSchema = z.discriminatedUnion('collection', [
 type Change = z.infer<typeof changeSchema>;
 const eventSchema = z.object({ sequence: z.number().int().positive(), id, kind: text(100), projectId: id.nullable(), experimentId: id.nullable(), actor: z.literal('USER'), reason: text(4000), createdAt: timestamp, previousHash: hash, hash, payload: z.object({ command: commandSchema.nullable(), changes: z.array(changeSchema) }).strict() }).strict();
 type StoredEvent = z.infer<typeof eventSchema>;
-type Projection = Pick<AppState, 'projects' | 'experiments' | 'tasks' | 'artifacts' | 'settings'> & { pipeline?: PipelineRecord[]; evidence?: EvidenceRecord[]; requests?: Request[]; teams?: Team[]; memberships?: TeamMembership[]; messages?: Message[]; decisions?: ReviewDecision[]; grants?: RequestGrant[]; probes?: ProbeAttempt[]; branches?: ResearchBranch[]; specs?: FrozenResearchSpec[]; predictions?: PredictionRecord[]; trials?: TrialLedgerEntry[]; attempts?: StageAttempt[]; receipts?: GateReceipt[]; functions?: FunctionAssignment[]; sealed?: SealedReviewReport[]; locations?: ProjectLocation[]; snapshots?: InputSnapshot[]; assignments?: Assignment[]; jobs?: ProviderJob[]; jobEvents?: JobEvent[]; connections?: AccountConnection[]; capabilities?: ProviderCapabilitySnapshot[]; agents?: Agent[]; workLogs?: WorkLog[] };
+type Projection = Pick<AppState, 'projects' | 'experiments' | 'tasks' | 'artifacts' | 'settings'> & { pipeline?: PipelineRecord[]; evidence?: EvidenceRecord[]; requests?: Request[]; teams?: Team[]; memberships?: TeamMembership[]; messages?: Message[]; decisions?: ReviewDecision[]; grants?: RequestGrant[]; probes?: ProbeAttempt[]; branches?: ResearchBranch[]; specs?: FrozenResearchSpec[]; predictions?: PredictionRecord[]; trials?: TrialLedgerEntry[]; attempts?: StageAttempt[]; receipts?: GateReceipt[]; functions?: FunctionAssignment[]; sealed?: SealedReviewReport[]; locations?: ProjectLocation[]; snapshots?: InputSnapshot[]; assignments?: Assignment[]; jobs?: ProviderJob[]; jobEvents?: JobEvent[]; localSessions?: LocalSessionRecord[]; localOps?: LocalSessionJournal[]; connections?: AccountConnection[]; capabilities?: ProviderCapabilitySnapshot[]; agents?: Agent[]; workLogs?: WorkLog[] };
 function blank(): Projection { return { projects: [], experiments: [], tasks: [], artifacts: [], settings: { theme: 'dark', reducedMotion: false, globalBudgetCents: 0 } }; }
 function emptyContract(): ResearchContract { return { objective: '', dataPolicy: '', modelFamilies: '', evaluation: '', economics: '', protectedRegions: '', requiredChecks: '', limitations: '' }; }
 function applyChanges(current: Projection, changes: Change[]): Projection {
@@ -294,15 +297,17 @@ function applyChanges(current: Projection, changes: Change[]): Projection {
       if (change.collection === 'decisions' && !next.decisions) next.decisions = [];
       if (change.collection === 'jobs' && !next.jobs) next.jobs = [];
       if (change.collection === 'jobEvents' && !next.jobEvents) next.jobEvents = [];
+      if (change.collection === 'localSessions' && !next.localSessions) next.localSessions = [];
+      if (change.collection === 'localOps' && !next.localOps) next.localOps = [];
       if (change.collection === 'snapshots' && !next.snapshots) next.snapshots = [];
       if (change.collection === 'connections' && !next.connections) next.connections = [];
       if (change.collection === 'capabilities' && !next.capabilities) next.capabilities = [];
       if (change.collection === 'workLogs' && !next.workLogs) next.workLogs = [];
       if (change.collection === 'agents' && !next.agents) next.agents = [];
-      const items = next[change.collection] as Array<Project | Experiment | ResearchTask | Artifact | Agent | WorkLog | Request | AccountConnection | ProviderCapabilitySnapshot | ProjectLocation | InputSnapshot | Assignment | ProviderJob | JobEvent | Team | TeamMembership | Message | ReviewDecision | RequestGrant | ProbeAttempt | ResearchBranch | FrozenResearchSpec | PredictionRecord | TrialLedgerEntry | StageAttempt | GateReceipt | FunctionAssignment | SealedReviewReport | PipelineRecord | EvidenceRecord>;
+      const items = next[change.collection] as Array<Project | Experiment | ResearchTask | Artifact | Agent | WorkLog | Request | AccountConnection | ProviderCapabilitySnapshot | ProjectLocation | InputSnapshot | Assignment | ProviderJob | JobEvent | LocalSessionRecord | LocalSessionJournal | Team | TeamMembership | Message | ReviewDecision | RequestGrant | ProbeAttempt | ResearchBranch | FrozenResearchSpec | PredictionRecord | TrialLedgerEntry | StageAttempt | GateReceipt | FunctionAssignment | SealedReviewReport | PipelineRecord | EvidenceRecord>;
       let lookup=indexes.get(change.collection);if(!lookup){lookup=new Map(items.map((item,i)=>[item.id,i]));indexes.set(change.collection,lookup);}
       const index = lookup.get(change.value.id) ?? -1;
-      if (['pipeline','evidence','artifacts','workLogs','capabilities','snapshots','assignments','jobEvents','decisions','predictions','trials','receipts'].includes(change.collection) && index >= 0) {
+      if (['pipeline','evidence','artifacts','workLogs','capabilities','snapshots','assignments','jobEvents','localOps','decisions','predictions','trials','receipts'].includes(change.collection) && index >= 0) {
         const old=items[index];let lifecycle=false;
         if(change.collection==='pipeline'){
           const before=old as PipelineRecord,after=change.value;
@@ -472,7 +477,7 @@ export class OfficeStore {
     return {hash:row?eventSchema.parse(JSON.parse(row.record)).hash:null,count};
   }
   static publicState(state:AppState):AppState {
-    return {...state,events:[],messages:[],jobEvents:[],trials:[],pipeline:[],
+    return {...state,events:[],messages:[],jobEvents:[],localSessions:[],localOps:[],trials:[],pipeline:[],
       // Gate status and stage navigation are queried for the selected research branch.
       receipts:[],sealed:[]};
   }
@@ -2321,6 +2326,79 @@ export class OfficeStore {
         reason:`Recorded ${added} visible provider event${added===1?'':'s'} for this job. Hidden reasoning is never imported.`},null);
     });
     return added;
+  }
+  /**
+   * Creates the one delivery binding a job may hold (QO-LOCAL-REV §5.1). The record starts at
+   * revision 0; a second binding for the same job is refused outright rather than merged.
+   */
+  createLocalSession(record: Omit<LocalSessionRecord,'id'|'revision'|'createdAt'|'updatedAt'> & { id?: string }): LocalSessionRecord {
+    let created: LocalSessionRecord | null = null;
+    this.transaction(() => {
+      const state = this.readProjection();
+      const job = state.jobs?.find(item => item.id === record.jobId);
+      if (!job) throw new Error('Job not found');
+      if ((state.localSessions ?? []).some(item => item.jobId === record.jobId))
+        throw new Error('This job already has a local-session binding; reconcile it instead of creating a second.');
+      const at = new Date().toISOString();
+      created = localSessionRecordSchema.parse({ ...record, id: record.id ?? randomUUID(), revision: 0, createdAt: at, updatedAt: at });
+      this.append(state, [{ collection: 'localSessions', value: created }], { kind: 'LOCAL_SESSION_BOUND', projectId: record.projectId, experimentId: null,
+        reason: `Bound local session ${record.layout.toLowerCase().replaceAll('_', ' ')} for job ${record.jobId.slice(0, 8)}.` }, null);
+    });
+    return created!;
+  }
+  /**
+   * Compare-and-swap on a local-session record. The caller computes the complete next record; the
+   * store refuses stale revisions and illegal lifecycle edges — the transition table is the law.
+   */
+  updateLocalSession(input: { localSessionId: string; expectedRevision: number; next: Omit<LocalSessionRecord,'revision'|'updatedAt'> }): LocalSessionRecord {
+    let updated: LocalSessionRecord | null = null;
+    this.transaction(() => {
+      const state = this.readProjection();
+      const current = (state.localSessions ?? []).find(item => item.id === input.localSessionId);
+      if (!current) throw new Error('Local session record not found');
+      if (current.revision !== input.expectedRevision) throw new Error('This local-session record changed since it was read. Reconcile before acting again.');
+      const at = new Date().toISOString();
+      const next = localSessionRecordSchema.parse({ ...input.next, revision: current.revision + 1, updatedAt: at });
+      if (next.id !== current.id || next.jobId !== current.jobId) throw new Error('Local-session identity is immutable; create a new record instead of rebinding.');
+      const edge = transitionLocalLifecycle(current.lifecycle, next.lifecycle);
+      if (!edge.allowed) throw new Error(edge.detail);
+      updated = next;
+      this.append(state, [{ collection: 'localSessions', value: next }], { kind: 'LOCAL_SESSION_' + next.lifecycle, projectId: next.projectId, experimentId: null,
+        reason: `Local session ${current.lifecycle} → ${next.lifecycle}.` }, null);
+    });
+    return updated!;
+  }
+  /** The job's delivery binding, or null for legacy/unbound jobs. Read-only. */
+  localSessionForJob(jobId: string): LocalSessionRecord | null {
+    id.parse(jobId);
+    return (this.readProjection().localSessions ?? []).find(item => item.jobId === jobId) ?? null;
+  }
+  /** Bounded page of local-session records for one project — the query surface for summaries. */
+  localSessionPage(input: { projectId: string; limit?: number; offset?: number }): LocalSessionRecord[] {
+    id.parse(input.projectId);
+    const limit = Math.min(Math.max(input.limit ?? 50, 1), 200), offset = Math.max(input.offset ?? 0, 0);
+    return (this.readProjection().localSessions ?? []).filter(item => item.projectId === input.projectId).slice(offset, offset + limit);
+  }
+  /**
+   * Appends lifecycle journal steps. Journals are append-only evidence: durable intent first,
+   * observed outcome second. A journal row is never rewritten — reconciliation adds a new phase.
+   */
+  appendLocalJournal(input: Omit<LocalSessionJournal,'id'|'createdAt'|'schemaVersion'> & { operationId?: string }): LocalSessionJournal {
+    let written: LocalSessionJournal | null = null;
+    this.transaction(() => {
+      const state = this.readProjection();
+      const record = (state.localSessions ?? []).find(item => item.id === input.localSessionId);
+      if (!record) throw new Error('Local session record not found');
+      written = localSessionJournalSchema.parse({ ...input, schemaVersion: 1, id: randomUUID(), operationId: input.operationId ?? randomUUID(), createdAt: new Date().toISOString() });
+      this.append(state, [{ collection: 'localOps', value: written }], { kind: 'LOCAL_OP_' + input.kind + '_' + input.phase, projectId: record.projectId, experimentId: null,
+        reason: `Local-session journal ${input.kind.toLowerCase().replaceAll('_', ' ')} ${input.phase.toLowerCase()}: ${input.outcome.toLowerCase()}.` }, null);
+    });
+    return written!;
+  }
+  /** The ordered journal for one local session — reconciliation reads this, not filesystem guesses. */
+  localJournalFor(localSessionId: string): LocalSessionJournal[] {
+    id.parse(localSessionId);
+    return (this.readProjection().localOps ?? []).filter(item => item.localSessionId === localSessionId);
   }
   /**
    * Records a session identifier the user reported for a job whose dispatch result the office could
