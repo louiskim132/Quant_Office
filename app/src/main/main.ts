@@ -25,6 +25,8 @@ import { LocalMailboxAdapter } from './local-session.js';
 import { LocalWorktreeMailboxAdapter } from './local-worktree-session.js';
 import { WORKTREES_DIR } from './local-worktree-repo.js';
 import { LocalSessionRouter } from './local-session-router.js';
+import { createLocalProviderLifecycle } from './local-provider-lifecycle.js';
+import { localArchiveResultSchema } from '../shared/local-session.js';
 import { PtyCloudAdapter, transportModuleStatus } from './pty.js';
 import { probeCloudTransport } from './probe.js';
 import { currentConnection } from '../shared/readiness.js';
@@ -250,6 +252,18 @@ const changed=()=>win?.webContents.send('office:changed');
  handle('office:applied-reports',value=>{const input=z.object({jobId:id,limit:pageLimit}).strict().parse(value);return {entries:store.appliedReports(input.jobId,input.limit??50)};});
  handle('office:local-session-summary',value=>{const jobId=id.parse(value);const workspace=workspaceDirectory(app.getPath('userData'));
   return store.localSessionSummary(jobId,record=>path.join(workspace,record.layout==='PROJECT_WORKTREE'?path.join('local-repos',record.projectId,WORKTREES_DIR):'local-sessions',record.archiveRelativePath??record.storageRelativePath));});
+ // The launch plan for one bound packet — where it lives, its proven hash, and the manual steps.
+ handle('office:local-launch-plan',value=>{const jobId=id.parse(value);const workspace=workspaceDirectory(app.getPath('userData'));
+  return store.localLaunchPlan(jobId,record=>path.join(workspace,record.layout==='PROJECT_WORKTREE'?path.join('local-repos',record.projectId,WORKTREES_DIR):'local-sessions',record.archiveRelativePath??record.storageRelativePath));});
+ // Retire one settled local session: packet dir moves under archive/ (bytes retained), then a
+ // provider-side archive is attempted only through a supported exact-id verb. The result is
+ // schema-validated at the boundary with a fresh summary of the post-retire record.
+ handle('office:local-session-archive',value=>{const assignmentId=id.parse(value);return dispatch(async()=>{
+  const {state,archive}=await controller.retireLocal(assignmentId);changed();
+  const job=state.jobs?.find(item=>item.assignmentId===assignmentId);
+  const workspace=workspaceDirectory(app.getPath('userData'));
+  const summary=job?store.localSessionSummary(job.id,record=>path.join(workspace,record.layout==='PROJECT_WORKTREE'?path.join('local-repos',record.projectId,WORKTREES_DIR):'local-sessions',record.archiveRelativePath??record.storageRelativePath)):null;
+  return {state,archive:localArchiveResultSchema.parse({...archive,summary})};});});
  handle('office:migrate-legacy',value=>{noInput(value);if(transferBusy)throw new Error('Wait for the file operation to finish.');
   const result=store.migrateLegacyRequests();changed();return {...result,state:store.snapshot({history:false})};});
  handle('office:state',value=>{noInput(value);return store.snapshot({history:false});});
@@ -436,7 +450,10 @@ function buildController():AssignmentController{
    if(ref.route)return ref.route===handoff.route?handoff:ref.route===mailbox.route?mailbox:undefined;
    if(ref.agent)return ref.agent.execution==='HOSTED_SETUP_REQUIRED'?handoff:ref.agent.execution==='LOCAL'?mailbox:undefined;
    return undefined;
-  });
+  },
+  // Provider-side archive for retired packets — exact record identity, bounded output, and an
+  // honest UNSUPPORTED where the provider ships no archive verb (claude/codex keep their history).
+  createLocalProviderLifecycle());
 }
 async function transfer<T>(fn:()=>Promise<T>):Promise<T>{if(transferBusy)throw new Error('Another file dialog or transfer is already active.');transferBusy=true;try{return await fn();}finally{transferBusy=false;}}
 /**

@@ -273,6 +273,8 @@ export interface OfficeAPI {
  appliedReports(input: { jobId: string; limit?: number }): Promise<{ entries: JobEvent[] }>;
  /** The bounded local-session summary for one job, or null when the job has no local binding. */
  localSessionSummary(jobId: string): Promise<import('./local-session').LocalSessionSummary | null>;
+ localLaunchPlan(jobId: string): Promise<import('./local-session').LocalLaunchPlan | null>;
+ localSessionArchive(assignmentId: string): Promise<{ state: AppState; archive: import('./local-session').LocalArchiveResult }>;
  /** Give old task records a native request, after a database copy and replay verification. */
  migrateLegacyRecords(): Promise<{ migrated: number; skipped: number; state: AppState }>;
  getState(): Promise<AppState>;

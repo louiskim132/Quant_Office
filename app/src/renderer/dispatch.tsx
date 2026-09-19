@@ -1,6 +1,6 @@
 import React,{useEffect,useState} from 'react';
 import type {Agent,AppState,InputSnapshot,ProviderJob,Request,JobEvent} from '../shared/types';
-import type {LocalSessionSummary} from '../shared/local-session';
+import type {LocalSessionSummary,LocalLaunchPlan} from '../shared/local-session';
 import {agentDispatchReadiness} from '../shared/readiness';
 import {requestJobs} from '../shared/queue';
 
@@ -34,6 +34,7 @@ export function RequestDispatch({request,state,onState}:{request:Request;state:A
  // never carries them. Bound v2 receipts carry the structured payload the mismatch check reads.
  const [reports,setReports]=useState<JobEvent[]>([]);
  const [localSummary,setLocalSummary]=useState<LocalSessionSummary|null>(null);
+ const [localPlan,setLocalPlan]=useState<LocalLaunchPlan|null>(null);
  const appliedReport=reports.at(-1);
  const reportedModel=appliedReport?.applied?.model;
  const reportedEffort=appliedReport?.applied?.effort;
@@ -52,10 +53,11 @@ export function RequestDispatch({request,state,onState}:{request:Request;state:A
    if(job){
      void window.office.appliedReports({jobId:job.id,limit:50}).then(page=>{if(!canceled)setReports(page.entries);}).catch(()=>{});
      void window.office.localSessionSummary(job.id).then(summary=>{if(!canceled)setLocalSummary(summary);}).catch(()=>{});
+     void window.office.localLaunchPlan(job.id).then(plan=>{if(!canceled)setLocalPlan(plan);}).catch(()=>{});
    }
    return()=>{canceled=true;};
  },[job?.id,job?.revision,state]);
- useEffect(()=>{setReports([]);setLocalSummary(null);},[job?.id]);
+ useEffect(()=>{setReports([]);setLocalSummary(null);setLocalPlan(null);},[job?.id]);
  const agent:Agent|undefined=state.agents.find(item=>item.id===(assignment?.agentId??request.leadAgentId));
  // The same scope the main process gates on: the route this office would really use, the profile's
  // effort, and the collaboration policy this request authorized. Local profiles have no hosted
@@ -92,8 +94,13 @@ export function RequestDispatch({request,state,onState}:{request:Request;state:A
   {agent&&gate&&!closed&&gate.readiness.connectionId&&!gate.readiness.accountFresh&&<p><button className="secondary" disabled={!!busy} onClick={()=>void run('recheck',async()=>{await window.office.connectionStatus(agent.provider);return window.office.getState();})}>{busy==='recheck'?'Checking…':'Re-check account'}</button> <span className="muted">The account check is stale; a live re-check refreshes it in place.</span></p>}
   {job&&<p><strong>{jobLabels[job.state]}</strong>{job.externalId?` · ${job.externalId}${job.evidence==='USER_REPORTED'?' (reported by you, unverified)':''}`:''}</p>}
   {job&&<p className="muted">{job.detail}</p>}
-  {localSummary&&<p className="muted">Local session {localSummary.lifecycle.toLowerCase().replaceAll('_',' ')} · {localSummary.layout==='FLAT_PACKET'?'packet folder':'project worktree'} · {localSummary.cwdDisplay}{localSummary.stopStatus!=='NOT_REQUESTED'?` · stop ${localSummary.stopStatus.toLowerCase().replaceAll('_',' ')}`:''}{localSummary.archive.packet!=='LIVE'?` · packet ${localSummary.archive.packet.toLowerCase()}`:''}</p>}
+  {localSummary&&<p className="muted">Local session {localSummary.lifecycle.toLowerCase().replaceAll('_',' ')} · {localSummary.layout==='FLAT_PACKET'?'packet folder':'project worktree'} · {localSummary.cwdDisplay}{localSummary.stopStatus!=='NOT_REQUESTED'?` · stop ${localSummary.stopStatus.toLowerCase().replaceAll('_',' ')}`:''}{localSummary.archive.packet!=='LIVE'?` · packet ${localSummary.archive.packet.toLowerCase()}`:''}{localSummary.archive.provider!=='NOT_REQUESTED'?` · provider ${localSummary.archive.provider.toLowerCase().replaceAll('_',' ')}`:''}</p>}
   {localSummary?.blockers.map(blocker=><p className="blocker" key={blocker}>{blocker}</p>)}
+  {localPlan&&!closed&&<details><summary>How to run this packet ({localPlan.availability==='MANUAL_HANDOFF'?'manual handoff':'unavailable'})</summary>
+   <p className="muted">{localPlan.detail}</p>
+   <ul className="evidence-list">{localPlan.instructions.map((step,index)=><li key={index}>{step}</li>)}</ul>
+   <p className="muted">Packet hash {localPlan.packetHash.slice(0,16)}… — receipts verify against this exact hash.</p>
+  </details>}
   {appliedReport&&assignment&&<p className="muted">Requested {assignment.requestedModel} · effort {assignment.requestedEffort.toLowerCase()} — {appliedReport.text}</p>}
   {appliedMismatch&&<p className="blocker">The session's self-reported applied values differ from the requested model/effort — self-reported, not office-verified.</p>}
   {note&&<p className="notice" role="status">{note}</p>}
@@ -114,6 +121,9 @@ export function RequestDispatch({request,state,onState}:{request:Request;state:A
     {!closed&&job?.state==='INTENT'&&<button className="secondary" disabled={!!busy} onClick={()=>void run('discard',()=>window.office.discardPreparation({assignmentId:assignment.id}))}>Discard preparation to prepare again</button>}
     <button className="cancel-request" disabled={!!busy} onClick={()=>void reportJob('cancel',()=>window.office.cancelJob({assignmentId:assignment.id}))}>{busy==='cancel'?'Requesting…':job?.state==='CANCEL_REQUESTED'?'Cancellation requested — re-check acknowledgment':'Request cancellation'}</button>
    </>}
+   {local&&assignment&&settled&&localSummary?.lifecycle==='READY'&&<button className="secondary" disabled={!!busy} onClick={()=>void run('retire',async()=>{
+    const result=await window.office.localSessionArchive(assignment.id);
+    setNote(result.archive.detail);return result.state;})}>{busy==='retire'?'Retiring…':'Retire local session'}</button>}
    {!closed&&<button className="secondary" disabled title="Automatic start needs verified submission, settings, observation, output and cancellation for this account.">Start request automatically</button>}
   </div>
   {assignment&&!settled&&job?.state==='UNKNOWN'&&!(local&&job.externalId)&&<form className="link-session" onSubmit={e=>{e.preventDefault();void run('link',()=>window.office.linkJobSession({assignmentId:assignment.id,externalId:sessionId,externalUrl:sessionUrl}));}}>

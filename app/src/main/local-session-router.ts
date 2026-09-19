@@ -1,4 +1,4 @@
-import type { ProviderJob, Provider } from '../shared/types.js';
+import type { CapabilityEvidence, ProviderJob, Provider } from '../shared/types.js';
 import type { LocalSessionRecord, WorkspaceLayout } from '../shared/local-session.js';
 import type { ProviderAdapter, SubmitContext, SubmitResult, ObserveResult } from './controller.js';
 
@@ -75,13 +75,22 @@ export class LocalSessionRouter implements ProviderAdapter {
 
   /**
    * Packet archival delegates through the job's persisted binding — a bare directory name never
-   * decides which layout owns it. Absent on a layout is an honest refusal.
+   * decides which layout owns it, and the binding's storage path (not the external id basename)
+   * is what moves. Absent on a layout is an honest refusal.
    */
-  async retire(job: ProviderJob): Promise<{ retired: boolean; detail: string }> {
+  async retire(job: ProviderJob): Promise<{ retired: boolean; alreadyArchived?: boolean; archivedAs?: string; detail: string }> {
     const { adapter, binding } = this.resolve(job);
-    const retiring = adapter as ProviderAdapter & { retire?: (id: string) => Promise<{ retired: boolean; detail: string }> };
+    const retiring = adapter as ProviderAdapter & {
+      retire?: (id: string, local?: LocalSessionRecord | null) => Promise<{ retired: boolean; alreadyArchived?: boolean; archivedAs?: string; detail: string }>
+    };
     if (typeof retiring.retire !== 'function') return { retired: false, detail: `The ${binding?.layout ?? 'legacy flat'} layout carries no retire operation.` };
-    if (!job.externalId) return { retired: false, detail: 'The job records no packet directory name; nothing can be moved.' };
-    return retiring.retire(job.externalId);
+    const packetKey = binding?.storageRelativePath ?? job.externalId;
+    if (!packetKey) return { retired: false, detail: 'Neither the binding nor the job records a packet directory; nothing can be moved.' };
+    return retiring.retire(packetKey, binding);
+  }
+
+  /** Retirement evidence names a directory under the flat archive root — the only archive that exists. */
+  retireEvidence(externalId: string) {
+    return (this.adapters.FLAT_PACKET as { retireEvidence?: (id: string) => CapabilityEvidence[] }).retireEvidence?.(externalId) ?? [];
   }
 }

@@ -370,13 +370,20 @@ export class LocalMailboxAdapter implements ProviderAdapter {
    * the caller's decision; this operation only moves bytes and reports what it did, and an absent
    * or already-retired directory is reported rather than thrown.
    */
-  async retire(externalId: string): Promise<{ retired: boolean; detail: string }> {
+  async retire(externalId: string, local?: LocalSessionRecord | null): Promise<{ retired: boolean; alreadyArchived?: boolean; archivedAs?: string; detail: string }> {
+    // A bound retire moves the binding's own storage path — never a caller-supplied name that
+    // merely resembles it — and only ever a flat packet: another layout's bytes are not ours.
+    if (local && local.layout !== 'FLAT_PACKET')
+      return { retired: false, detail: `The binding records the ${local.layout} layout — this adapter only archives flat packets; nothing was moved.` };
+    if (local && local.storageRelativePath !== externalId)
+      return { retired: false, detail: 'The binding\'s storage path does not match the requested directory; nothing was moved.' };
     const dir = this.sessionDir(externalId);
     if (!dir) return { retired: false, detail: 'Not a session directory name under the workspace sessions root; nothing was moved.' };
     // 'archive' names the archive root itself, never a session directory to move.
     if (externalId === 'archive') return { retired: false, detail: 'The archive root is not a session directory; nothing was moved.' };
+    const archivedAs = `archive/${externalId}`;
     const archived = path.join(this.sessionsRoot(), 'archive', externalId);
-    if (existsSync(archived)) return { retired: true, detail: `The session directory is already retired under ${archived}; nothing was moved.` };
+    if (existsSync(archived)) return { retired: true, alreadyArchived: true, archivedAs, detail: `The session directory is already retired under ${archived}; nothing was moved.` };
     if (!existsSync(dir)) return { retired: false, detail: `No session directory named ${externalId} exists under the sessions root; nothing was moved.` };
     try {
       mkdirSync(path.dirname(archived), { recursive: true });
@@ -384,7 +391,7 @@ export class LocalMailboxAdapter implements ProviderAdapter {
     } catch (error) {
       return { retired: false, detail: `The session directory could not be moved into the archive: ${error instanceof Error ? error.message : 'unknown error'}` };
     }
-    return { retired: true, detail: `Session directory moved to ${archived}. The packet bytes are retained; provider-side records may still reference it.` };
+    return { retired: true, archivedAs, detail: `Session directory moved to ${archived}. The packet bytes are retained; provider-side records may still reference it.` };
   }
 
   /** Reads one declared output back from the session directory; the caller re-verifies its identity. */

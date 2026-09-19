@@ -78,7 +78,7 @@ class HostedStub implements ProviderAdapter {
   async cancel(_job: ProviderJob) { return { acknowledged: true, detail: 'Hosted cancel acknowledged.' }; }
 }
 
-async function fixture(t: any, opts: { discover?: (dir: string, provider: Provider) => Discovery } = {}) {
+async function fixture(t: any, opts: { discover?: (dir: string, provider: Provider) => Discovery; lifecycle?: import('../src/main/local-provider-lifecycle').ProviderLifecycle } = {}) {
   const root = mkdtempSync(path.join(tmpdir(), 'qro-local-orch-'));
   const store = new OfficeStore(path.join(root, 'workspace.sqlite'));
   t.after(() => { try { store.close(); } catch {} removeTreeSync(root); });
@@ -98,7 +98,8 @@ async function fixture(t: any, opts: { discover?: (dir: string, provider: Provid
   const hosted = new HostedStub();
   const controller = new AssignmentController(store, mailbox, clock, undefined, undefined, undefined, undefined, new OutputService(store, root).storeBytes, undefined,
     ref => ref.route ? (ref.route === 'LOCAL_MAILBOX' ? mailbox : ref.route === hosted.route ? hosted : undefined)
-      : ref.agent?.execution === 'LOCAL' ? mailbox : hosted);
+      : ref.agent?.execution === 'LOCAL' ? mailbox : hosted,
+    opts.lifecycle);
   return { root, store, project, agent, request, snapshot, sessionsRoot, mailbox, hosted, controller };
 }
 
@@ -380,4 +381,133 @@ test('a pre-binding legacy job still observes through the explicit legacy rule',
   const after = observed.jobs![0];
   assert.equal(after.state, 'RUNNING');
   assert.match(after.detail, /legacy binding/, 'the explicit legacy rule is named, never a silent fallback');
+});
+
+test('retireLocal archives the packet under archive/, journals both phases, and honestly reports no provider request', async t => {
+  const f = await fixture(t);
+  const { assignment, job } = await prepared(f);
+  await f.controller.dispatch(assignment.id);
+  const bound = f.store.localSessionForJob(job.id)!;
+  const dir = path.join(f.sessionsRoot, bound.storageRelativePath);
+  // A terminal job is the eligibility gate — drive it there with a FAILED receipt.
+  writeFileSync(path.join(dir, RESULT_FILE), receipt(job, bound, 1, 'FAILED', 'the session reported failure'));
+  await f.controller.observe(assignment.id);
+  assert.equal(f.store.snapshot({ history: false }).jobs![0].state, 'FAILED');
+  const result = await f.controller.retireLocal(assignment.id);
+  assert.equal(result.archive.packetOutcome, 'ARCHIVED');
+  assert.equal(result.archive.providerOutcome, 'NOT_REQUESTED', 'no provider record was ever observed — nothing was requested');
+  assert.match(result.archive.detail, /No provider-side record identity/);
+  const retired = f.store.localSessionForJob(job.id)!;
+  assert.equal(retired.lifecycle, 'ARCHIVED');
+  assert.equal(retired.archiveRelativePath, `archive/${bound.storageRelativePath}`);
+  assert.ok(!existsSync(dir), 'the live packet dir moved');
+  assert.ok(existsSync(path.join(f.sessionsRoot, 'archive', bound.storageRelativePath)), 'the bytes are retained under archive/');
+  assert.deepEqual(f.store.localJournalFor(bound.id).filter(e => e.kind === 'PACKET_ARCHIVE').map(e => `${e.phase}/${e.outcome}`),
+    ['INTENT/NONE', 'EXECUTED/SUCCESS'], 'durable intent first, executed outcome second');
+  // The summary reads the archived record — packet archived, provider untouched.
+  const summary = f.store.localSessionSummary(job.id, record => record.storageRelativePath)!;
+  assert.deepEqual(summary.archive, { packet: 'ARCHIVED', provider: 'NOT_REQUESTED' });
+});
+
+test('retireLocal runs provider archive only through the injected lifecycle, keeping the outcomes separate', async t => {
+  const calls: { provider: string; providerSessionId: string }[] = [];
+  const discovery = { records: [{ provider: 'claude' as const, kind: 'claude-project' as const, id: 'C--packet-dir', detail: 'provider record', location: 'records-root' }], notes: [] };
+  const f = await fixture(t, {
+    discover: () => discovery,
+    lifecycle: {
+      async inspect() { return { status: 'UNSUPPORTED' as const, detail: 'claude history is preserved' }; },
+      async archive(binding: { provider: string; providerSessionId: string }, _op: string) {
+        calls.push(binding);
+        return { status: 'UNSUPPORTED' as const, detail: 'claude has no archive verb — history preserved' };
+      },
+    },
+  });
+  const { assignment, job } = await prepared(f);
+  await f.controller.dispatch(assignment.id);
+  const bound = f.store.localSessionForJob(job.id)!;
+  // Grouping discovery on observe pins the provider's record identity onto the binding.
+  await f.controller.observe(assignment.id);
+  assert.equal(f.store.localSessionForJob(job.id)!.providerSessionId, 'C--packet-dir');
+  const dir = path.join(f.sessionsRoot, bound.storageRelativePath);
+  writeFileSync(path.join(dir, RESULT_FILE), receipt(job, bound, 1, 'FAILED', 'done'));
+  await f.controller.observe(assignment.id);
+  const result = await f.controller.retireLocal(assignment.id);
+  assert.equal(result.archive.packetOutcome, 'ARCHIVED');
+  assert.equal(result.archive.providerOutcome, 'UNSUPPORTED', 'provider archive ran but the provider has no verb');
+  assert.deepEqual(calls, [{ provider: 'claude', providerSessionId: 'C--packet-dir' }], 'the exact observed record identity was the archive target');
+  assert.deepEqual(f.store.localJournalFor(bound.id).filter(e => e.kind === 'PROVIDER_ARCHIVE').map(e => `${e.phase}/${e.outcome}`),
+    ['EXECUTED/UNSUPPORTED'], 'the provider outcome is journaled independently of the packet');
+  const summary = f.store.localSessionSummary(job.id, record => record.storageRelativePath)!;
+  assert.deepEqual(summary.archive, { packet: 'ARCHIVED', provider: 'UNSUPPORTED' });
+});
+
+test('retireLocal journals BUSY and UNKNOWN provider outcomes without conflating them with the packet', async t => {
+  const f = await fixture(t, {
+    discover: () => ({ records: [{ provider: 'claude' as const, kind: 'claude-project' as const, id: 'C--dir', detail: 'r', location: 'l' }], notes: [] }),
+    lifecycle: {
+      async inspect() { return { status: 'BUSY' as const, detail: 'in use' }; },
+      async archive() { return { status: 'BUSY' as const, detail: 'the provider reports the record busy' }; },
+    },
+  });
+  const { assignment, job } = await prepared(f);
+  await f.controller.dispatch(assignment.id);
+  const bound = f.store.localSessionForJob(job.id)!;
+  await f.controller.observe(assignment.id);
+  writeFileSync(path.join(f.sessionsRoot, bound.storageRelativePath, RESULT_FILE), receipt(job, bound, 1, 'FAILED', 'done'));
+  await f.controller.observe(assignment.id);
+  const result = await f.controller.retireLocal(assignment.id);
+  assert.equal(result.archive.packetOutcome, 'ARCHIVED');
+  assert.equal(result.archive.providerOutcome, 'BUSY', 'busy is reported as busy — never as archived');
+  const providerRow = f.store.localJournalFor(bound.id).find(e => e.kind === 'PROVIDER_ARCHIVE')!;
+  assert.equal(providerRow.outcome, 'REFUSED');
+  assert.match(providerRow.failureDetail ?? '', /busy/i);
+});
+
+test('retireLocal refuses non-terminal jobs, missing packets and unbound work before touching anything', async t => {
+  const f = await fixture(t);
+  const { assignment, job } = await prepared(f);
+  // No binding at all.
+  await assert.rejects(() => f.controller.retireLocal(assignment.id), /no local-session binding/);
+  await f.controller.dispatch(assignment.id);
+  const bound = f.store.localSessionForJob(job.id)!;
+  // A live job never retires — a packet under an active session must not move.
+  await assert.rejects(() => f.controller.retireLocal(assignment.id), /only finished work retires/);
+  assert.deepEqual(f.store.localJournalFor(bound.id).filter(e => e.kind === 'PACKET_ARCHIVE'), [], 'a refused gate writes no archive journal');
+  assert.equal(f.store.localSessionForJob(job.id)!.lifecycle, 'READY');
+  // Missing packet directory: terminal job, but the dir is gone — honest REFUSED, back to READY.
+  const dir = path.join(f.sessionsRoot, bound.storageRelativePath);
+  writeFileSync(path.join(dir, RESULT_FILE), receipt(job, bound, 1, 'FAILED', 'done'));
+  await f.controller.observe(assignment.id);
+  assert.equal(f.store.snapshot({ history: false }).jobs![0].state, 'FAILED');
+  rmSync(dir, { recursive: true, force: true });
+  const result = await f.controller.retireLocal(assignment.id);
+  assert.equal(result.archive.packetOutcome, 'REFUSED');
+  assert.equal(f.store.localSessionForJob(job.id)!.lifecycle, 'READY', 'a refused move restores READY — it never claims ARCHIVED');
+  assert.deepEqual(f.store.localJournalFor(bound.id).filter(e => e.kind === 'PACKET_ARCHIVE').map(e => `${e.phase}/${e.outcome}`),
+    ['INTENT/NONE', 'EXECUTED/REFUSED']);
+});
+
+test('the launch plan surfaces the packet location, hash and manual steps — and goes UNSUPPORTED once archived', async t => {
+  const f = await fixture(t);
+  const { assignment, job } = await prepared(f);
+  assert.equal(f.store.localLaunchPlan(job.id, record => record.storageRelativePath), null, 'no plan before a binding');
+  await f.controller.dispatch(assignment.id);
+  const bound = f.store.localSessionForJob(job.id)!;
+  const plan = f.store.localLaunchPlan(job.id, record => `root/${record.storageRelativePath}`)!;
+  assert.equal(plan.jobId, job.id);
+  assert.equal(plan.revision, bound.revision);
+  assert.equal(plan.packetHash, bound.packetHash);
+  assert.equal(plan.availability, 'MANUAL_HANDOFF');
+  assert.match(plan.cwdDisplay, /^root\//);
+  assert.ok(plan.instructions.length >= 3);
+  assert.match(plan.instructions[0], /open a terminal/i);
+  assert.match(plan.instructions[1], /claude/, 'the provider CLI is named');
+  // Archived packets report UNSUPPORTED, not a runnable handoff.
+  const dir = path.join(f.sessionsRoot, bound.storageRelativePath);
+  writeFileSync(path.join(dir, RESULT_FILE), receipt(job, bound, 1, 'FAILED', 'done'));
+  await f.controller.observe(assignment.id);
+  await f.controller.retireLocal(assignment.id);
+  const retiredPlan = f.store.localLaunchPlan(job.id, record => `root/${record.archiveRelativePath ?? record.storageRelativePath}`)!;
+  assert.equal(retiredPlan.availability, 'UNSUPPORTED');
+  assert.match(retiredPlan.detail, /archived/i);
 });

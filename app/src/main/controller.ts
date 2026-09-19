@@ -195,6 +195,11 @@ export class AssignmentController {
      * configured, a miss is a hard failure — there is never a silent fallback to another route.
      */
     private readonly adapters?: (ref: { agent?: Agent; route?: AdapterRoute }) => ProviderAdapter | undefined,
+    /**
+     * Provider-side session lifecycle for local packets — inspect/archive against the provider's
+     * own record identity. Absent means provider archive is never attempted and honestly says so.
+     */
+    private readonly providerLifecycle?: import('./local-provider-lifecycle.js').ProviderLifecycle,
   ) {}
 
   /** One clock for gates and records, so evidence freshness never depends on the wall calendar. */
@@ -734,8 +739,13 @@ export class AssignmentController {
     if (result.receipt) next.lastReceipt = { sequence: result.receipt.sequence, hash: result.receipt.hash, observedAt: this.now() };
     if (result.cancelAck) next.stopStatus = 'SESSION_REPORTED_STOPPED';
     // A resolved provider record upgrades the grouping claim only — a later observe that finds
-    // nothing reports no field and downgrades nothing.
-    if (result.providerGrouping) { next.groupingStatus = 'OBSERVED'; next.providerProjectId = result.providerGrouping.key; }
+    // nothing reports no field and downgrades nothing. The record's own key is also the exact
+    // identity provider-side inspect/archive needs (session id, project key or rollout name).
+    if (result.providerGrouping) {
+      next.groupingStatus = 'OBSERVED';
+      next.providerProjectId = result.providerGrouping.key;
+      next.providerSessionId = result.providerGrouping.key;
+    }
     this.store.updateLocalSession({ localSessionId: binding.id, expectedRevision: binding.revision, next });
   }
 
@@ -902,6 +912,102 @@ export class AssignmentController {
       evidence: job.route.startsWith('LOCAL_') ? 'OFFICE_LOCAL' : 'PROVIDER_REPORTED', detail: result.detail, at: this.now() });
     this.noteLocalEvidence(job, adapter.cancelEvidence?.(job) ?? []);
     return acknowledged;
+  }
+
+  /**
+   * Retires one settled local session: the packet directory moves under archive/ (bytes retained,
+   * never deleted), and the provider-side record is archived only through a supported exact-id
+   * verb — providers without one report UNSUPPORTED and are never touched. The journal records
+   * durable intent before anything moves, so a crash mid-retire leaves a reconcilable record
+   * instead of a half-moved packet. Retirement changes the packet's storage, never the job's
+   * recorded outcome.
+   */
+  async retireLocal(assignmentId: string): Promise<{
+    state: AppState;
+    archive: { operationId: string; packetOutcome: 'ARCHIVED' | 'ALREADY_ARCHIVED' | 'REFUSED' | 'UNKNOWN'; providerOutcome: 'NOT_REQUESTED' | 'ARCHIVED' | 'ALREADY_ARCHIVED' | 'UNSUPPORTED' | 'BUSY' | 'UNKNOWN'; detail: string };
+  }> {
+    const job = this.job(assignmentId);
+    const binding = this.store.localSessionForJob(job.id);
+    if (!binding) throw new Error('This job has no local-session binding — nothing to retire.');
+    if (!isTerminalJob(job.state))
+      throw new Error(`This job is ${job.state.toLowerCase().replaceAll('_', ' ')} — only finished work retires; observe or cancel it first.`);
+    if (binding.lifecycle !== 'READY')
+      throw new Error(`This packet is ${binding.lifecycle.toLowerCase().replaceAll('_', ' ')} — only a ready packet archives; reconcile the record first if it disagrees.`);
+    if (binding.layout !== 'FLAT_PACKET')
+      throw new Error('The worktree layout carries no retire operation — reconcile it manually.');
+    const operationId = randomUUID();
+    const destination = `archive/${binding.storageRelativePath}`;
+    this.store.appendLocalJournal({
+      operationId, localSessionId: binding.id, jobId: job.id, kind: 'PACKET_ARCHIVE', phase: 'INTENT',
+      expectedRevision: binding.revision, source: binding.storageRelativePath, destination, outcome: 'NONE', failureDetail: null,
+    });
+    const { revision: _r0, updatedAt: _u0, ...rest0 } = binding;
+    let current = this.store.updateLocalSession({
+      localSessionId: binding.id, expectedRevision: binding.revision, next: { ...rest0, lifecycle: 'ARCHIVING' },
+    });
+    const adapter = this.adapterFor({ route: job.route });
+    const retiring = adapter as ProviderAdapter & { retire?: (job: ProviderJob) => Promise<{ retired: boolean; alreadyArchived?: boolean; archivedAs?: string; detail: string }> };
+    let retired: { retired: boolean; alreadyArchived?: boolean; archivedAs?: string; detail: string };
+    try {
+      retired = typeof retiring.retire === 'function'
+        ? await retiring.retire(job)
+        : { retired: false, detail: 'This route carries no retire operation.' };
+    } catch (error) {
+      // A thrown retire may have partially moved the packet — the record claims neither side.
+      const message = error instanceof Error ? error.message : 'unknown error';
+      const { revision: _rx, updatedAt: _ux, ...restx } = current;
+      current = this.store.updateLocalSession({
+        localSessionId: current.id, expectedRevision: current.revision, next: { ...restx, lifecycle: 'RECONCILE_REQUIRED' },
+      });
+      this.store.appendLocalJournal({
+        operationId, localSessionId: binding.id, jobId: job.id, kind: 'PACKET_ARCHIVE', phase: 'FAILED',
+        expectedRevision: current.revision, source: binding.storageRelativePath, destination,
+        outcome: 'UNKNOWN', failureDetail: `The packet move threw (${message.slice(0, 1900)}) — the directory may be partially moved; reconcile before trusting either side.`,
+      });
+      return { state: this.store.snapshot({ history: false }),
+        archive: { operationId, packetOutcome: 'UNKNOWN', providerOutcome: 'NOT_REQUESTED',
+          detail: `The packet move threw: ${message.slice(0, 1800)} The record is reconcile-required; provider archive was not attempted.` } };
+    }
+    const packetOutcome = retired.retired ? (retired.alreadyArchived ? 'ALREADY_ARCHIVED' : 'ARCHIVED') : 'REFUSED';
+    {
+      const { revision: _r1, updatedAt: _u1, ...rest1 } = current;
+      current = this.store.updateLocalSession({
+        localSessionId: current.id, expectedRevision: current.revision,
+        next: retired.retired
+          ? { ...rest1, lifecycle: 'ARCHIVED', archiveRelativePath: retired.archivedAs ?? destination }
+          : { ...rest1, lifecycle: 'READY' },
+      });
+      this.store.appendLocalJournal({
+        operationId, localSessionId: binding.id, jobId: job.id, kind: 'PACKET_ARCHIVE', phase: 'EXECUTED',
+        expectedRevision: current.revision, source: binding.storageRelativePath, destination,
+        outcome: retired.retired ? 'SUCCESS' : 'REFUSED', failureDetail: retired.retired ? null : retired.detail.slice(0, 2000),
+      });
+    }
+    // Provider-side archive runs only when discovery recorded an exact record identity, and only
+    // through a supported verb — an unobserved or unsupported record is honestly NOT_REQUESTED or
+    // UNSUPPORTED, and no provider bytes are ever deleted by the office.
+    let providerOutcome: 'NOT_REQUESTED' | 'ARCHIVED' | 'ALREADY_ARCHIVED' | 'UNSUPPORTED' | 'BUSY' | 'UNKNOWN' = 'NOT_REQUESTED';
+    let detail = retired.detail;
+    if (!binding.providerSessionId) {
+      detail += ' No provider-side record identity was observed for this session — provider archive was not requested.';
+    } else if (!this.providerLifecycle) {
+      providerOutcome = 'UNKNOWN';
+      detail += ' No provider lifecycle service is configured — provider archive was not attempted.';
+    } else {
+      const outcome = await this.providerLifecycle.archive({ provider: binding.provider, providerSessionId: binding.providerSessionId }, operationId);
+      providerOutcome = outcome.status;
+      detail += ` ${outcome.detail}`;
+      this.store.appendLocalJournal({
+        operationId, localSessionId: binding.id, jobId: job.id, kind: 'PROVIDER_ARCHIVE', phase: 'EXECUTED',
+        expectedRevision: current.revision, source: null, destination: null,
+        outcome: outcome.status === 'ARCHIVED' || outcome.status === 'ALREADY_ARCHIVED' ? 'SUCCESS'
+          : outcome.status === 'UNSUPPORTED' ? 'UNSUPPORTED' : outcome.status === 'BUSY' ? 'REFUSED' : 'UNKNOWN',
+        failureDetail: outcome.status === 'ARCHIVED' || outcome.status === 'ALREADY_ARCHIVED' ? null : outcome.detail.slice(0, 2000),
+      });
+    }
+    this.noteLocalEvidence(job, (adapter as { retireEvidence?: (id: string) => CapabilityEvidence[] }).retireEvidence?.(job.externalId) ?? []);
+    return { state: this.store.snapshot({ history: false }),
+      archive: { operationId, packetOutcome, providerOutcome, detail: detail.slice(0, 2000) } };
   }
 
   /** Retire only a proven-undispatched preparation so a new revision can be prepared. */

@@ -40,7 +40,7 @@ import type {HoldoutReservation,EvaluatorResult} from '../shared/holdout';
 import {shadowBatchSchema} from '../shared/shadow';
 import {replayShadow} from './shadow-ledger';
 import { nextJob } from './jobs.js';
-import { appliedReportPayloadSchema, localSessionJournalSchema, localSessionRecordSchema, localSessionSummarySchema, transitionLocalLifecycle, type LocalSessionJournal, type LocalSessionRecord, type LocalSessionSummary } from '../shared/local-session.js';
+import { appliedReportPayloadSchema, localLaunchPlanSchema, localSessionJournalSchema, localSessionRecordSchema, localSessionSummarySchema, transitionLocalLifecycle, type LocalLaunchPlan, type LocalSessionJournal, type LocalSessionRecord, type LocalSessionSummary } from '../shared/local-session.js';
 import { MAX_BUDGET_CENTS } from './guards.js';
 import {pipelineRecordSchema,stageContextHash,stageContextSchema,stageReportSchema,type PipelineRecord} from '../shared/pipeline';
 import {evidenceRecordSchema,type EvidenceRecord} from '../shared/evidence';
@@ -2453,6 +2453,34 @@ export class OfficeStore {
           : providerOp.outcome === 'UNSUPPORTED' ? 'UNSUPPORTED' : providerOp.outcome === 'REFUSED' ? 'BUSY' : 'UNKNOWN',
       },
       blockers,
+    });
+  }
+  /**
+   * The bounded launch plan for one bound packet: where the packet lives, its proven hash, and
+   * the honest manual steps to run it in the provider's own client. Launching a local packet is
+   * always a manual handoff — the office never starts the session — so availability is
+   * MANUAL_HANDOFF while the packet is ready and UNSUPPORTED once it is archived or unready.
+   */
+  localLaunchPlan(jobId: string, resolveDir: (record: LocalSessionRecord) => string): LocalLaunchPlan | null {
+    id.parse(jobId); this.assertOpen();
+    const binding = (this.readProjection().localSessions ?? []).find(record => record.jobId === jobId);
+    if (!binding || !binding.packetHash) return null;
+    const cwd = resolveDir(binding).slice(0, 1000);
+    const cli = binding.provider === 'claude' ? 'claude' : binding.provider === 'openai' ? 'codex' : 'devin';
+    const ready = binding.lifecycle === 'READY' || binding.lifecycle === 'RESTORED_UNBOUND';
+    const instructions = [
+      `Open a terminal in ${cwd}.`,
+      `Start the ${binding.provider} client there (${cli}) — the packet's AGENTS.md and CONTRACT.md carry the task and the required result shape.`,
+      'Let the session write result.json plus any files under outputs/ inside this same directory.',
+      'Return to this office and Observe the job — a receipt is verified against this packet\'s recorded hash before anything is recorded.',
+    ];
+    return localLaunchPlanSchema.parse({
+      jobId, revision: binding.revision, surface: binding.surface, cwdDisplay: cwd,
+      packetHash: binding.packetHash, instructions,
+      availability: ready ? 'MANUAL_HANDOFF' : 'UNSUPPORTED',
+      detail: ready
+        ? 'Manual handoff: the office prepared and verified this packet; running it is your action in the provider\'s own client.'
+        : `This packet is ${binding.lifecycle.toLowerCase().replaceAll('_', ' ')} — ${binding.lifecycle === 'ARCHIVED' ? 'it was retired into the archive and is retained, not runnable.' : 'it is not in a runnable state; reconcile the record first.'}`,
     });
   }
   /**

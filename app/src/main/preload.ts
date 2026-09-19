@@ -14,6 +14,7 @@ const api:OfficeAPI={
  verifyCloudTransport:input=>request('office:verify-transport',input),
  historyPage:input=>request('office:history-page',input),logPage:input=>request('office:log-page',input),jobEventPage:input=>request('office:job-events',input),
  appliedReports:input=>request('office:applied-reports',input),localSessionSummary:jobId=>request('office:local-session-summary',jobId),
+ localLaunchPlan:jobId=>request('office:local-launch-plan',jobId),localSessionArchive:assignmentId=>request('office:local-session-archive',assignmentId),
  migrateLegacyRecords:()=>request('office:migrate-legacy'),
  getState:()=>request('office:state'),getInfo:()=>request('office:info'),
  messagePage:input=>request('office:message-page',input),researchPage:input=>request('office:research-page',input),
