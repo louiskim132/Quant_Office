@@ -3152,3 +3152,36 @@ leaves a provider session row behind, so the transport needs
 an explicit cleanup policy — record the session id in evidence
 first, then `devin rm` after result verification — or the
 Desktop session list accumulates one orphan per office job.
+
+2026-09-19 (post-round interactive fixes) — Codex CLI
+integration and local-provider scope. 8c58b58 discovers the
+npm-installed Codex binary under
+%APPDATA%\npm\node_modules\@openai\codex\...\vendor\<triple>\bin
+since the npm install exposes only shim commands on PATH.
+b191cc3 + 365b479 fix the Codex sign-in stall: a completed
+browser login is detected from the auth.json write and verified
+on a probe process before the stale login-owner listener is
+retired, and account/read no longer forces a token refresh on
+every read — a plain read reports first, with refresh kept only
+as a recovery path when the read returns nothing (a working
+access token with a dead refresh token now reports the account;
+stacked forced rotations were plausibly invalidating stored
+grants). fcedfb5 + 1d0f6b0 surface Claude Code's published
+effort axis — claude.exe 2.1.273's --effort flag rejects invalid
+values with the enum {low, medium, high, xhigh, max} — as a
+session-level preference labeled honestly (model honoring
+unverified upfront; result self-report stays authoritative);
+openai/devin keep strict per-model scales and unknown model ids
+still refuse invented levels. 3aaca24 widens
+LocalMailboxAdapter.providers from ['devin'] to
+['devin','claude','openai']: the packet contract
+(packet.json + CONTRACT.md + AGENTS.md + hash-verified
+result.json) is provider-agnostic and controller routing already
+sends every LOCAL agent to this adapter, so the declared scope
+was the only gate; a new test proves a non-devin job writes a
+packet and round-trips a verified result with office-local
+evidence. Verification at 3aaca24: typecheck clean, 533/533
+unit, build clean; packaged and swapped into the installed App/
+copy. No provider operations claimed; the user-run pilot for
+claude/openai local agents is now unblocked at the dispatch
+gate but still untested end-to-end.
