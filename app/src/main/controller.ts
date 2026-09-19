@@ -54,7 +54,14 @@ export interface SubmitContext {
   /** The persisted local delivery binding when one exists; hosted adapters ignore it. */
   localSession?: LocalSessionRecord;
 }
-export interface SubmitResult { externalId: string; externalUrl: string; detail: string; resolvedModel?: string; appliedEffort?: Effort | 'UNVERIFIED' }
+export interface SubmitResult {
+  externalId: string; externalUrl: string; detail: string; resolvedModel?: string; appliedEffort?: Effort | 'UNVERIFIED';
+  /**
+   * Set only by local-layout adapters that wrote a versioned packet: the verified packet hash the
+   * service persists on the binding before reporting delivery. Hosted adapters never set it.
+   */
+  localPacket?: { packetHash: string };
+}
 export interface ObserveResult {
   state: 'ACCEPTED' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'UNKNOWN'; detail: string;
   events?: Omit<JobEvent, 'id' | 'jobId'>[];
@@ -93,6 +100,8 @@ export interface ProviderAdapter {
   readonly route: AdapterRoute;
   /** Which providers this adapter can actually reach. Omitted means the route's default below. */
   readonly providers?: readonly Provider[];
+  /** The packet contract version a local adapter writes; the binding records it at preparation. */
+  readonly packetVersion?: 1 | 2;
   submit(context: SubmitContext): Promise<SubmitResult>;
   observe(job: ProviderJob): Promise<ObserveResult>;
   cancel(job: ProviderJob): Promise<{ acknowledged: boolean; detail: string }>;
