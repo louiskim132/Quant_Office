@@ -119,7 +119,10 @@ export const packetAgents = (): string => [
  */
 export class LocalMailboxAdapter implements ProviderAdapter {
   readonly route = 'LOCAL_MAILBOX' as const;
-  readonly providers: readonly Provider[] = ['devin'];
+  // The packet contract is provider-agnostic — packet.json, CONTRACT.md, AGENTS.md and the
+  // hash-verified result.json carry no provider semantics; the user runs whichever local CLI
+  // on the directory. Evidence stays office-observed regardless of which provider the session used.
+  readonly providers: readonly Provider[] = ['devin','claude','openai'];
   constructor(private readonly sessionsRoot: () => string, private readonly now: () => string = () => new Date().toISOString()) {}
 
   /** The recorded identity is a directory name only, so a stored job can never point outside the root. */

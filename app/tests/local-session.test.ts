@@ -62,10 +62,27 @@ function report(dir: string, result: { state: string; detail: string; outputs: {
   writeFileSync(path.join(dir, RESULT_FILE), JSON.stringify(result));
 }
 
-test('the adapter declares the LOCAL_MAILBOX route and carries devin work', async t => {
+test('the adapter declares the LOCAL_MAILBOX route and carries every local provider', async t => {
   const f = fixture(t);
   assert.equal(f.adapter.route, 'LOCAL_MAILBOX');
-  assert.ok(f.adapter.providers!.includes('devin'));
+  assert.deepEqual([...f.adapter.providers!].sort(), ['claude', 'devin', 'openai'],
+    'the packet contract is provider-agnostic — the user runs whichever CLI on the directory');
+});
+
+test('a non-devin job writes a packet and round-trips a verified result with office-local evidence', async t => {
+  const f = fixture(t);
+  const submitted = await f.adapter.submit(f.context);
+  const dir = path.join(f.sessions, submitted.externalId);
+  assert.ok(existsSync(path.join(dir, PACKET_FILE)), 'the packet directory is identical for a non-devin assignment');
+  // The job's provider field is a durable record, never a branch the mailbox consults.
+  const claudeJob: ProviderJob = { ...f.job(submitted.externalId), provider: 'claude' };
+  report(dir, { state: 'COMPLETED', detail: 'Claude session finished the bounded work.', outputs: [{ path: 'out.txt', sha256: sha('result bytes'), bytes: Buffer.byteLength('result bytes') }] }, { 'out.txt': 'result bytes' });
+  const observed = await f.adapter.observe(claudeJob);
+  assert.equal(observed.state, 'COMPLETED');
+  assert.equal(observed.provenance, 'PROVIDER_REPORTED');
+  const evidence = f.adapter.observeEvidence(claudeJob, observed);
+  assert.ok(evidence.length > 0 && evidence.every(item => item.evidence === 'OBSERVED' && item.route === 'LOCAL_MAILBOX' && item.environment === 'LOCAL_MACHINE' && item.source === 'office-local-mailbox@1'),
+    'evidence stays office-observed whichever provider ran the session');
 });
 
 test('submit writes a hash-manifested packet under the sessions root', async t => {
