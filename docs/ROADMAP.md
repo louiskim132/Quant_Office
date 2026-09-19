@@ -3410,3 +3410,31 @@ status (conservative — REQUESTED stays until a receipt
 lands); the worktree layout remains registered-but-unselected
 pending a user-level layout choice; provider grouping trials
 (P9) and UI surfacing (P8) remain.
+
+2026-09-19 (organizer revision d7f6f4a) — P8 UI wiring and the
+F05/F06 applied-report fixes landed directly (organizer-owned
+per spec section 14; no worker round was published). F05:
+publicState() strips jobEvents, so the applied-report UI that
+read state.jobEvents and parsed event text was dead code; the
+renderer now reads office:applied-reports, a bounded
+job-scoped chronological query returning JobEvent rows with
+the structured applied payload. F06: applied events were
+deduped by content hash, losing an A->B->A sequence; bound v2
+receipts now key the event on the receipt hash (replays
+dedupe, fresh receipts always land) and carry the
+office-applied-report@1 payload pinned to
+attemptId/receiptSequence/receiptHash, while unbound reports
+dedupe against the latest report instead of the content hash
+alone. store.localSessionSummary assembles the bounded
+summary contract (layout/surface/lifecycle/stopStatus,
+resolved display cwd, requested scope from the frozen
+assignment, newest structured applied report, provider-
+archive status from the journal, honest blockers) and
+validates it against localSessionSummarySchema; dispatch and
+profile render it plus a per-row structured applied line.
+Text parsing of applied reports is removed. Combined
+verification at d7f6f4a: typecheck clean, 650/651 unit (1
+skipped: privileged symlink fixture), build clean. Remaining:
+P9 provider grouping trials and P10 final integration/
+retirement polish; the worktree layout is still
+registered-but-unselected pending a user-level layout choice.
