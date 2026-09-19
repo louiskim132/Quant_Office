@@ -8,7 +8,10 @@ import path from 'node:path';
 import { removeTreeSync } from '../src/main/fsx';
 import { buildProviderPayload, type SubmitContext } from '../src/main/controller';
 import { AGENTS_FILE, CANCEL_FILE, CONTRACT_FILE, PACKET_FILE, RESULT_FILE } from '../src/main/local-session';
+import { CLAUDE_FILE, PACKET_HASH_FILE, PACKET_READY_FILE } from '../src/main/local-packet';
 import { LocalWorktreeMailboxAdapter } from '../src/main/local-worktree-session';
+import { ensureRepo, resolveHeadCommit } from '../src/main/local-worktree-repo';
+import { localPacketV2Schema, type LocalSessionRecord } from '../src/shared/local-session';
 import type { Assignment, InputSnapshot, ProviderJob } from '../src/shared/types';
 
 const at = (minutes: number) => new Date(Date.UTC(2026, 8, 8, 10, 0, 0) + minutes * 60000).toISOString();
@@ -183,4 +186,120 @@ test('a staged input that drifted fails the submit loudly, worktree or not', asy
  const f = fixture(t);
  writeFileSync(path.join(f.staging, 'notes.txt'), 'changed after freezing');
  await assert.rejects(f.adapter.submit(f.context), /no longer matches the bytes that were frozen/);
+});
+
+/** A PROJECT_WORKTREE binding for the fixture's context — callers override what they attack. */
+function boundFixture(t: test.TestContext, overrides: Partial<LocalSessionRecord> = {}) {
+ const f = fixture(t);
+ const binding: LocalSessionRecord = {
+  schemaVersion: 1, id: randomUUID(), jobId: f.context.jobId, assignmentId: f.assignment.id,
+  projectId: f.assignment.projectId, attemptId: randomUUID(), revision: 0,
+  provider: 'devin', surface: 'DEVIN_CLI', layout: 'PROJECT_WORKTREE', packetVersion: 2,
+  packetHash: null, storageRelativePath: 'bound-worktree', originalCwd: null,
+  repoRelativePath: `repos/${f.projectId}`, seedCommit: 'a'.repeat(40), worktreeOwner: 'OFFICE',
+  providerSessionId: null, providerProjectId: null, bindingEvidence: 'UNBOUND',
+  groupingStatus: 'UNKNOWN', requirement: 'SCOPED_DELIVERY', confinementStatus: 'UNVERIFIED',
+  confinementEvidenceId: null, lifecycle: 'READY', archiveRelativePath: null,
+  lastReceipt: null, cancelRequestId: null, stopStatus: 'NOT_REQUESTED',
+  createdAt: at(0), updatedAt: at(0), ...overrides,
+ };
+ const context: SubmitContext = { ...f.context, localSession: binding };
+ const dir = path.join(f.repoDir, 'worktrees', binding.storageRelativePath);
+ return { ...f, binding, context, dir };
+}
+
+test('the adapter declares packet contract version 2 for bound submissions', async t => {
+ const f = fixture(t);
+ assert.equal(f.adapter.packetVersion, 2);
+});
+
+test('a bound submit creates the worktree from the recorded seed and writes a schema-valid v2 packet inside it', async t => {
+ const f = boundFixture(t);
+ await ensureRepo(f.reposRoot, f.projectId);
+ const seed = await resolveHeadCommit(f.repoDir);
+ // Move the repo's HEAD after the seed was recorded — the worktree must not drift to it.
+ execFileSync('git', ['-c', 'user.email=office@localhost', '-c', 'user.name=Quant Research Office', 'commit', '--allow-empty', '-m', 'a later commit'], { cwd: f.repoDir });
+ f.binding.seedCommit = seed;
+ const result = await f.adapter.submit(f.context);
+ assert.equal(result.externalId, 'bound-worktree');
+ assert.equal(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: f.dir, encoding: 'utf8' }).trim(), seed,
+  'the worktree is pinned to the recorded seed, not the moved HEAD');
+ assert.ok(result.localPacket, 'a bound submit reports the verified packet hash');
+ const packet = localPacketV2Schema.parse(JSON.parse(readFileSync(path.join(f.dir, PACKET_FILE), 'utf8')));
+ assert.equal(packet.schema, 'office-local-session@2');
+ assert.equal(packet.jobId, f.binding.jobId);
+ assert.equal(packet.attemptId, f.binding.attemptId);
+ assert.equal(packet.projectId, f.projectId);
+ assert.ok(packet.files.every(file => file.path.startsWith('inputs/')));
+ assert.equal(readFileSync(path.join(f.dir, PACKET_HASH_FILE), 'utf8').trim(), result.localPacket.packetHash);
+ const ready = JSON.parse(readFileSync(path.join(f.dir, PACKET_READY_FILE), 'utf8'));
+ assert.deepEqual(ready, { attemptId: f.binding.attemptId, packetHash: result.localPacket.packetHash });
+ assert.ok(existsSync(path.join(f.dir, CLAUDE_FILE)));
+ assert.match(result.detail, /worktree/);
+ assert.match(result.detail, new RegExp(seed), 'the detail names the recorded seed commit');
+});
+
+test('a bound submit refuses a wrong layout, a nested storage path and a malformed seed before anything is created', async t => {
+ for (const [label, overrides, pattern] of [
+  ['flat layout', { layout: 'FLAT_PACKET' }, /require a PROJECT_WORKTREE/],
+  ['nested path', { storageRelativePath: 'nested/bound-worktree' }, /single safe worktree name/],
+  ['null seed', { seedCommit: null }, /not a full sha1 commit id/],
+  ['short seed', { seedCommit: 'abc123' }, /not a full sha1 commit id/],
+  ['ref seed', { seedCommit: 'HEAD' }, /not a full sha1 commit id/],
+ ] as const) {
+  const f = boundFixture(t, overrides);
+  await assert.rejects(f.adapter.submit(f.context), pattern, label);
+  assert.equal(existsSync(f.dir), false, `${label}: no worktree directory was created`);
+ }
+});
+
+test('an unbound submit still writes the v1 packet but names the explicitly resolved seed commit', async t => {
+ const f = fixture(t);
+ const result = await f.adapter.submit(f.context);
+ const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: f.repoDir, encoding: 'utf8' }).trim();
+ assert.match(result.detail, new RegExp(`resolved commit ${head}`), 'the detail names the resolved seed honestly');
+ const packet = JSON.parse(readFileSync(path.join(f.sessionDir(result.externalId), PACKET_FILE), 'utf8'));
+ assert.equal(packet.schema, 'office-local-session@1');
+});
+
+test('observe, cancel and fetch forward the resolved binding into the bound project adapter', async t => {
+ const f = boundFixture(t);
+ await ensureRepo(f.reposRoot, f.projectId);
+ f.binding.seedCommit = await resolveHeadCommit(f.repoDir);
+ const result = await f.adapter.submit(f.context);
+ // Mimic the organizer persisting the verified packet hash onto the binding.
+ f.binding.packetHash = result.localPacket!.packetHash;
+ // A job whose recorded projectId is wrong: only the binding names where the packet lives.
+ const job = { ...f.job('bound-worktree'), projectId: randomUUID() };
+ const observed = await f.adapter.observe(job, f.binding);
+ assert.equal(observed.state, 'UNKNOWN');
+ assert.match(observed.detail, /waiting for the user-launched local session/,
+  'the binding selected the real project worktrees root, not the job\'s wrong project');
+ // A v2 receipt bound to this attempt is verified through the forwarded binding.
+ const output = { path: 'outputs/summary.json', sha256: sha('{"summary":"done"}'), bytes: Buffer.byteLength('{"summary":"done"}') };
+ mkdirSync(path.join(f.dir, 'outputs'), { recursive: true });
+ writeFileSync(path.join(f.dir, 'outputs', 'summary.json'), '{"summary":"done"}');
+ writeFileSync(path.join(f.dir, RESULT_FILE), JSON.stringify({
+  schema: 'office-local-result@2', jobId: f.binding.jobId, assignmentId: f.binding.assignmentId,
+  attemptId: f.binding.attemptId, packetHash: f.binding.packetHash, sequence: 1,
+  state: 'COMPLETED', detail: 'Done.', outputs: [output],
+ }));
+ const reported = await f.adapter.observe(job, f.binding);
+ assert.equal(reported.state, 'COMPLETED');
+ assert.equal(reported.provenance, 'PROVIDER_REPORTED');
+ assert.deepEqual(reported.outputs, [output]);
+ assert.equal(Buffer.from(await f.adapter.fetch(job, output, f.binding)).toString('utf8'), '{"summary":"done"}');
+ const cancelled = await f.adapter.cancel(job, f.binding);
+ assert.equal(cancelled.acknowledged, true);
+ assert.ok(existsSync(path.join(f.dir, CANCEL_FILE)), 'the sentinel landed inside the real worktree');
+});
+
+test('bound submit evidence resolves through the binding and keeps the worktree confinement wording', async t => {
+ const f = boundFixture(t);
+ await ensureRepo(f.reposRoot, f.projectId);
+ f.binding.seedCommit = await resolveHeadCommit(f.repoDir);
+ const result = await f.adapter.submit(f.context);
+ const entries = f.adapter.submitEvidence(f.context, result);
+ assert.deepEqual(entries.map(entry => entry.operation), ['LOCAL_SUBMIT', 'TOOL_CONFINEMENT', 'DELEGATION_CONTROL']);
+ assert.match(entries[1].confinement!.filesystem, /shared project-root worktree/);
 });
