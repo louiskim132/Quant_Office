@@ -3343,3 +3343,35 @@ verification at 58a5c57: typecheck clean, 623/624 unit (1
 skipped: privileged symlink fixture), build clean. Round 3
 per spec section 14: P3 cancel request/ack + P4 pinned-seed
 worktree hardening, both now unblocked.
+
+2026-09-19 (round local-rev-3) — two workers integrated on
+the f76a680 contract base. worker-1 (eac625a): P3 cooperative
+cancel request/ack on the flat lane — bound cancel writes
+cancel.requested as a cancelRequestV1Schema-validated body via
+io.writeNew and returns the requestId; read-first idempotency
+returns an existing request's id, malformed or misbound
+residue refuses and is never overwritten; bound observe
+validates cancel.ack.json before the receipt read — absent
+passes, ack-without-recorded-request is a tamper defect,
+malformed/misbound is UNKNOWN even beside a valid receipt,
+valid sets observed.cancelAck. Legacy paths byte-identical;
+every detail keeps saying delivered-a-request is not a stop.
+worker-2 (7e9a957): P4 pinned-seed worktree lane — F08 closed
+at the repo layer: createWorktree requires an explicit
+validated 40-hex commit (bare HEAD unreachable),
+resolveHeadCommit validates its answer; bound submit requires
+PROJECT_WORKTREE layout + single-segment storage path +
+recorded 40-hex seedCommit, builds the worktree from that
+seed and writes the v2 packet inside it through the shared
+builder; the pinning test moves HEAD after the seed and
+proves the worktree stays put; unbound submits pin and name
+the resolved seed; observe/cancel/fetch forward the resolved
+binding into the per-project adapter; packetVersion=2.
+Combined verification at 5be9b64: typecheck clean, 639/640
+unit (1 skipped: privileged symlink fixture), build clean.
+Remaining organizer wiring before v2 goes live (P6, next
+round): controller creates the LocalSessionRecord in the
+dispatch intent transaction (seedCommit resolved and recorded
+for worktree bindings), persists packetHash + READY on submit
+success and cancelRequestId/stopStatus on cancel, and routes
+LOCAL_MAILBOX through LocalSessionRouter in main.ts.
