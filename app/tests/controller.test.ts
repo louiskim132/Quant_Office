@@ -218,6 +218,27 @@ test('an absent applied self-report records nothing; a changed one lands as a ne
  assert.match(applied[1].text,/appliedEffort="high"/);
 });
 
+test('a self-report returning to an earlier value still lands — content-hash dedup must not lose A→B→A',async t=>{
+ let report:ObserveResult={state:'RUNNING',detail:'Working.',applied:{effort:'low'}};
+ const adapter=new FakeAdapter({observe:async()=>report});
+ const f=await fixture(t,adapter);
+ const {assignment}=f.controller.prepare({requestId:f.request.id,agentId:f.agent.id,snapshotId:f.snapshot.id});
+ await f.controller.dispatch(assignment.id);
+ await f.controller.observe(assignment.id);
+ report={state:'RUNNING',detail:'Working.',applied:{effort:'high'}};
+ await f.controller.observe(assignment.id);
+ report={state:'RUNNING',detail:'Working.',applied:{effort:'low'}};
+ await f.controller.observe(assignment.id);
+ const applied=(f.store.snapshot().jobEvents??[]).filter(e=>e.externalId.startsWith('applied:'));
+ assert.equal(applied.length,3,'a return to an earlier value is a new report, not a duplicate of the first');
+ assert.match(applied[2].text,/appliedEffort="low"/);
+ assert.equal(applied[2].applied,undefined,'an unbound receipt carries no receipt identity — no structured payload');
+ // A repeated poll of an unchanged report still records nothing.
+ await f.controller.observe(assignment.id);
+ assert.equal((f.store.snapshot().jobEvents??[]).filter(e=>e.externalId.startsWith('applied:')).length,3);
+ assert.equal(f.store.appliedReports(f.store.snapshot().jobs![0].id).length,3,'the structured query returns the same chronological reports');
+});
+
 test('an adapter method fetch still retrieves declared output bytes',async t=>{
  // LocalMailboxAdapter.fetch is a real method that reads its own session root; the controller
  // must invoke it bound to the adapter, or every declared output fails retrieval.

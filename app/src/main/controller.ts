@@ -5,7 +5,7 @@ import { canonicalHash } from '../core/canonical.js';
 import { isTerminalJob, reconciliationPlan } from '../core/jobs.js';
 import { assertHostedExecution, assertLocalExecution, assertWorkerCapacity } from '../core/guards.js';
 import type { OfficeStore } from '../core/store.js';
-import type { LocalSessionRecord } from '../shared/local-session.js';
+import { appliedReportPayloadSchema, type LocalSessionRecord } from '../shared/local-session.js';
 import { agentDispatchReadiness, currentConnection, effectiveEvidence, latestCapability, scopeMismatches, supplyingSnapshotIds, type RequestedScope } from '../shared/readiness.js';
 import { dependencyStatus } from '../shared/cooperation.js';
 import { verifySnapshotForTransfer, type OutputDestination } from './locations.js';
@@ -788,17 +788,43 @@ export class AssignmentController {
     }
     job = this.job(assignmentId);
     if (isTerminalJob(job.state)) return this.store.snapshot({history:false});
-    // A verified receipt's applied self-report is the session's own claim about what ran — recorded
-    // as a content-deduped event, so a repeated poll of an identical report adds nothing while a
-    // changed one lands as new history. It is never folded into the job's verified outcome.
+    // A verified receipt's applied self-report is the session's own claim about what ran — never
+    // folded into the job's verified outcome. A bound v2 receipt names its own event identity
+    // (the receipt hash), so replaying the same receipt dedupes while a fresh receipt reporting
+    // identical values still lands. An unbound report has no receipt identity, so it dedupes
+    // against the latest report instead of the content hash alone — that keeps repeated polls of
+    // an unchanged file quiet while a return to an earlier value (A→B→A) still lands.
     if (result.applied && (result.applied.model !== undefined || result.applied.effort !== undefined || result.applied.delegation !== undefined)) {
       const declared: string[] = [];
       if (result.applied.model !== undefined) declared.push(`appliedModel=${JSON.stringify(result.applied.model)}`);
       if (result.applied.effort !== undefined) declared.push(`appliedEffort=${JSON.stringify(result.applied.effort)}`);
       if (result.applied.delegation !== undefined) declared.push(`delegation=${result.applied.delegation}`);
-      this.store.recordJobEvents(job.id, [{ externalId: `applied:${canonicalHash(result.applied)}`, cursor: '', kind: 'STATUS',
-        text: `Session self-reported ${declared.join(', ')} on a verified receipt — the session's own claim, not office-verified.`,
-        occurredAt: this.now(), receivedAt: this.now(), evidence: 'PROVIDER_REPORTED' }]);
+      const text = `Session self-reported ${declared.join(', ')} on a verified receipt — the session's own claim, not office-verified.`;
+      // Present-but-undefined fields are stripped before hashing — canonical values carry none.
+      const stripped = {
+        ...(result.applied.model !== undefined ? { model: result.applied.model } : {}),
+        ...(result.applied.effort !== undefined ? { effort: result.applied.effort } : {}),
+        ...(result.applied.delegation !== undefined ? { delegation: result.applied.delegation } : {}),
+      };
+      const latest = this.store.appliedReports(job.id, 1).at(-1);
+      let externalId: string | null;
+      let applied;
+      if (result.receipt) {
+        externalId = `applied:${result.receipt.hash}`;
+        const binding = this.store.localSessionForJob(job.id);
+        applied = binding ? appliedReportPayloadSchema.parse({
+          schema: 'office-applied-report@1', attemptId: binding.attemptId,
+          receiptSequence: result.receipt.sequence, receiptHash: result.receipt.hash, ...stripped,
+        }) : undefined;
+      } else {
+        externalId = latest?.text === text ? null
+          : `applied:${canonicalHash({ report: stripped, after: latest?.id ?? 'none' })}`;
+        applied = undefined;
+      }
+      if (externalId) this.store.recordJobEvents(job.id, [{ externalId, cursor: '', kind: 'STATUS', text,
+        occurredAt: this.now(), receivedAt: this.now(), evidence: 'PROVIDER_REPORTED',
+        // A present-but-undefined key would survive zod and poison the change's canonical hash.
+        ...(applied ? { applied } : {}) }]);
     }
     const fresh = retrieved.filter(output => !job.outputs.some(old => old.path === output.path && old.sha256 === output.sha256 && old.stored));
     if (job.state === result.state && !fresh.length) return this.store.snapshot({history:false});

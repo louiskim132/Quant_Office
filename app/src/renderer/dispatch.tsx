@@ -1,8 +1,8 @@
 import React,{useEffect,useState} from 'react';
 import type {Agent,AppState,InputSnapshot,ProviderJob,Request,JobEvent} from '../shared/types';
+import type {LocalSessionSummary} from '../shared/local-session';
 import {agentDispatchReadiness} from '../shared/readiness';
 import {requestJobs} from '../shared/queue';
-import {appliedField,latestAppliedReport} from './profile';
 
 const jobLabels:Record<ProviderJob['state'],string>={
  INTENT:'Prepared · nothing submitted',SUBMITTING:'Submitting',ACCEPTED:'Accepted by the provider',RUNNING:'Running',
@@ -29,11 +29,15 @@ export function RequestDispatch({request,state,onState}:{request:Request;state:A
  const chosen=summaries.find(item=>item.jobId===selectedJob)??summaries.find(item=>item.unresolved)??summaries.find(item=>!item.settled)??summaries.at(-1);
  const job=(state.jobs??[]).find(item=>item.id===chosen?.jobId);
  const assignment=(state.assignments??[]).find(item=>item.id===job?.assignmentId);
- // The job's latest applied self-report — the session's own claim on a verified receipt, never inferred.
- const appliedReport=latestAppliedReport(state.jobEvents,job?.id);
- const reportedModel=appliedReport?appliedField(appliedReport.text,'appliedModel'):undefined;
- const reportedEffort=appliedReport?appliedField(appliedReport.text,'appliedEffort'):undefined;
- const appliedMismatch=Boolean(assignment&&appliedReport&&((reportedModel!==undefined&&reportedModel!==assignment.requestedModel)||(reportedEffort!==undefined&&reportedEffort!==assignment.requestedEffort)));
+ // The job's latest applied self-report — the session's own claim on a verified receipt, never
+ // inferred. It comes from the structured query: publicState strips jobEvents, so the snapshot
+ // never carries them. Bound v2 receipts carry the structured payload the mismatch check reads.
+ const [reports,setReports]=useState<JobEvent[]>([]);
+ const [localSummary,setLocalSummary]=useState<LocalSessionSummary|null>(null);
+ const appliedReport=reports.at(-1);
+ const reportedModel=appliedReport?.applied?.model;
+ const reportedEffort=appliedReport?.applied?.effort;
+ const appliedMismatch=Boolean(assignment&&appliedReport?.applied&&((reportedModel!==undefined&&reportedModel!==assignment.requestedModel)||(reportedEffort!==undefined&&reportedEffort!==assignment.requestedEffort)));
  useEffect(()=>{setPlan(null);setSessionId('');setSessionUrl('');setNote('');},[job?.id,request.id]);
  const snapshot:InputSnapshot|undefined=assignment?(state.snapshots??[]).find(item=>item.id===assignment.snapshotId):undefined;
  const [events,setEvents]=useState<JobEvent[]>([]);
@@ -43,6 +47,15 @@ export function RequestDispatch({request,state,onState}:{request:Request;state:A
    if(job)void window.office.jobEventPage({jobId:job.id,limit:50}).then(page=>{if(!canceled){setEvents(page.entries);setEventCursor(page.nextCursor);}}).catch(e=>{if(!canceled)setError((e as Error).message);});
    return()=>{canceled=true;};
  },[job?.id,job?.revision]);
+ useEffect(()=>{
+   let canceled=false;
+   if(job){
+     void window.office.appliedReports({jobId:job.id,limit:50}).then(page=>{if(!canceled)setReports(page.entries);}).catch(()=>{});
+     void window.office.localSessionSummary(job.id).then(summary=>{if(!canceled)setLocalSummary(summary);}).catch(()=>{});
+   }
+   return()=>{canceled=true;};
+ },[job?.id,job?.revision,state]);
+ useEffect(()=>{setReports([]);setLocalSummary(null);},[job?.id]);
  const agent:Agent|undefined=state.agents.find(item=>item.id===(assignment?.agentId??request.leadAgentId));
  // The same scope the main process gates on: the route this office would really use, the profile's
  // effort, and the collaboration policy this request authorized. Local profiles have no hosted
@@ -79,6 +92,8 @@ export function RequestDispatch({request,state,onState}:{request:Request;state:A
   {agent&&gate&&!closed&&gate.readiness.connectionId&&!gate.readiness.accountFresh&&<p><button className="secondary" disabled={!!busy} onClick={()=>void run('recheck',async()=>{await window.office.connectionStatus(agent.provider);return window.office.getState();})}>{busy==='recheck'?'Checking…':'Re-check account'}</button> <span className="muted">The account check is stale; a live re-check refreshes it in place.</span></p>}
   {job&&<p><strong>{jobLabels[job.state]}</strong>{job.externalId?` · ${job.externalId}${job.evidence==='USER_REPORTED'?' (reported by you, unverified)':''}`:''}</p>}
   {job&&<p className="muted">{job.detail}</p>}
+  {localSummary&&<p className="muted">Local session {localSummary.lifecycle.toLowerCase().replaceAll('_',' ')} · {localSummary.layout==='FLAT_PACKET'?'packet folder':'project worktree'} · {localSummary.cwdDisplay}{localSummary.stopStatus!=='NOT_REQUESTED'?` · stop ${localSummary.stopStatus.toLowerCase().replaceAll('_',' ')}`:''}{localSummary.archive.packet!=='LIVE'?` · packet ${localSummary.archive.packet.toLowerCase()}`:''}</p>}
+  {localSummary?.blockers.map(blocker=><p className="blocker" key={blocker}>{blocker}</p>)}
   {appliedReport&&assignment&&<p className="muted">Requested {assignment.requestedModel} · effort {assignment.requestedEffort.toLowerCase()} — {appliedReport.text}</p>}
   {appliedMismatch&&<p className="blocker">The session's self-reported applied values differ from the requested model/effort — self-reported, not office-verified.</p>}
   {note&&<p className="notice" role="status">{note}</p>}

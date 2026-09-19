@@ -107,8 +107,9 @@ async function prepared(f: Awaited<ReturnType<typeof fixture>>, research?: Param
   return { assignment, job };
 }
 
-const receipt = (job: ProviderJob, bound: { assignmentId: string; attemptId: string; packetHash: string | null }, sequence: number, state: 'RUNNING' | 'FAILED', detail: string) =>
-  JSON.stringify({ schema: 'office-local-result@2', jobId: job.id, assignmentId: bound.assignmentId, attemptId: bound.attemptId, packetHash: bound.packetHash, sequence, state, detail, outputs: [] }, null, 2);
+const receipt = (job: ProviderJob, bound: { assignmentId: string; attemptId: string; packetHash: string | null }, sequence: number, state: 'RUNNING' | 'FAILED', detail: string,
+  applied?: { model?: string; effort?: 'default' | 'low' | 'medium' | 'high' | 'max'; delegation?: boolean }) =>
+  JSON.stringify({ schema: 'office-local-result@2', jobId: job.id, assignmentId: bound.assignmentId, attemptId: bound.attemptId, packetHash: bound.packetHash, sequence, state, detail, outputs: [], ...(applied ? { applied } : {}) }, null, 2);
 
 test('dispatch prepares a PREPARING binding, submits against it and readies it with the packet hash', async t => {
   const f = await fixture(t);
@@ -196,6 +197,56 @@ test('a verified v2 receipt persists lastReceipt and a replayed sequence defects
   assert.equal(after.lastReceipt?.sequence, 1, 'the replayed receipt was refused, not persisted');
   assert.notEqual(after.lastReceipt?.hash, createHash('sha256').update(readFileSync(path.join(dir, RESULT_FILE))).digest('hex'));
   assert.equal(f.store.snapshot({ history: false }).jobs![0].state, 'RUNNING', 'a defect observation moves nothing');
+});
+
+test('a v2 applied self-report binds to its receipt, and a return to an earlier value still lands (A→B→A)', async t => {
+  const f = await fixture(t);
+  const { assignment, job } = await prepared(f);
+  await f.controller.dispatch(assignment.id);
+  const bound = f.store.localSessionForJob(job.id)!;
+  const dir = path.join(f.sessionsRoot, bound.storageRelativePath);
+  for (const [sequence, effort] of [[1, 'low'], [2, 'high'], [3, 'low']] as const) {
+    writeFileSync(path.join(dir, RESULT_FILE), receipt(job, bound, sequence, 'RUNNING', `receipt ${sequence}`, { model: 'opus', effort }));
+    await f.controller.observe(assignment.id);
+  }
+  const applied = f.store.appliedReports(job.id);
+  assert.equal(applied.length, 3, 'each receipt is its own verified claim — a repeated value on a new receipt is not a duplicate');
+  assert.equal(applied[0].applied?.effort, 'low');
+  assert.equal(applied[1].applied?.effort, 'high');
+  assert.equal(applied[2].applied?.effort, 'low', 'the third report lands even though its content equals the first');
+  assert.equal(applied[2].applied?.attemptId, bound.attemptId, 'the structured payload binds to the exact attempt');
+  assert.equal(applied[2].applied?.receiptSequence, 3);
+  assert.equal(applied[2].applied?.receiptHash, createHash('sha256').update(readFileSync(path.join(dir, RESULT_FILE))).digest('hex'),
+    'the payload names the exact receipt bytes it rode in on');
+});
+
+test('the local-session summary surfaces binding, requested scope, applied report and honest blockers', async t => {
+  const f = await fixture(t);
+  const { assignment, job } = await prepared(f);
+  assert.equal(f.store.localSessionSummary(job.id, record => record.storageRelativePath), null, 'no summary exists before a binding does');
+  await f.controller.dispatch(assignment.id);
+  const bound = f.store.localSessionForJob(job.id)!;
+  const dir = path.join(f.sessionsRoot, bound.storageRelativePath);
+  writeFileSync(path.join(dir, RESULT_FILE), receipt(job, bound, 1, 'RUNNING', 'working', { model: 'opus', effort: 'high' }));
+  await f.controller.observe(assignment.id);
+  const summary = f.store.localSessionSummary(job.id, record => `root/${record.storageRelativePath}`)!;
+  assert.equal(summary.jobId, job.id);
+  assert.equal(summary.localSessionId, bound.id);
+  assert.equal(summary.lifecycle, 'READY');
+  assert.equal(summary.layout, 'FLAT_PACKET');
+  assert.equal(summary.stopStatus, 'NOT_REQUESTED');
+  assert.equal(summary.cwdDisplay, `root/${bound.storageRelativePath}`, 'the display path resolves through the injected root');
+  assert.equal(summary.requested.model, 'opus');
+  assert.equal(summary.requested.effort, 'default');
+  assert.equal(summary.applied?.receiptSequence, 1);
+  assert.equal(summary.applied?.model, 'opus');
+  assert.deepEqual(summary.archive, { packet: 'LIVE', provider: 'NOT_REQUESTED' });
+  assert.deepEqual(summary.blockers, []);
+  // A delivered cancel request is outstanding, not a stopped session — the summary says so.
+  await f.controller.cancel(assignment.id);
+  const requested = f.store.localSessionSummary(job.id, record => record.storageRelativePath)!;
+  assert.equal(requested.stopStatus, 'REQUESTED');
+  assert.ok(requested.blockers.some(blocker => /cancellation request/i.test(blocker)));
 });
 
 test('cancel persists the request id and REQUESTED; the session acknowledgement persists SESSION_REPORTED_STOPPED', async t => {

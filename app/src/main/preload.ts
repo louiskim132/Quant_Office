@@ -13,6 +13,7 @@ const api:OfficeAPI={
  cancelJob:input=>request('office:request-cancel-job',input),linkJobSession:input=>request('office:request-link',input),
  verifyCloudTransport:input=>request('office:verify-transport',input),
  historyPage:input=>request('office:history-page',input),logPage:input=>request('office:log-page',input),jobEventPage:input=>request('office:job-events',input),
+ appliedReports:input=>request('office:applied-reports',input),localSessionSummary:jobId=>request('office:local-session-summary',jobId),
  migrateLegacyRecords:()=>request('office:migrate-legacy'),
  getState:()=>request('office:state'),getInfo:()=>request('office:info'),
  messagePage:input=>request('office:message-page',input),researchPage:input=>request('office:research-page',input),

@@ -40,7 +40,7 @@ import type {HoldoutReservation,EvaluatorResult} from '../shared/holdout';
 import {shadowBatchSchema} from '../shared/shadow';
 import {replayShadow} from './shadow-ledger';
 import { nextJob } from './jobs.js';
-import { appliedReportPayloadSchema, localSessionJournalSchema, localSessionRecordSchema, transitionLocalLifecycle, type LocalSessionJournal, type LocalSessionRecord } from '../shared/local-session.js';
+import { appliedReportPayloadSchema, localSessionJournalSchema, localSessionRecordSchema, localSessionSummarySchema, transitionLocalLifecycle, type LocalSessionJournal, type LocalSessionRecord, type LocalSessionSummary } from '../shared/local-session.js';
 import { MAX_BUDGET_CENTS } from './guards.js';
 import {pipelineRecordSchema,stageContextHash,stageContextSchema,stageReportSchema,type PipelineRecord} from '../shared/pipeline';
 import {evidenceRecordSchema,type EvidenceRecord} from '../shared/evidence';
@@ -2399,6 +2399,61 @@ export class OfficeStore {
   localJournalFor(localSessionId: string): LocalSessionJournal[] {
     id.parse(localSessionId);
     return (this.readProjection().localOps ?? []).filter(item => item.localSessionId === localSessionId);
+  }
+  /**
+   * Chronological applied self-report events for one job, oldest-first and bounded. This is the
+   * structured query the renderer reads: publicState strips jobEvents entirely, so parsing event
+   * text from a pushed snapshot was always dead code. The controller also uses it for ordering
+   * dedup — a repeated identical report is a re-polled file, while a return to an earlier value
+   * (A→B→A) is a new claim and must land.
+   */
+  appliedReports(jobId: string, limit = 50): JobEvent[] {
+    id.parse(jobId); this.assertOpen();
+    const events = (this.readProjection().jobEvents ?? []).filter(event => event.jobId === jobId && event.externalId.startsWith('applied:'));
+    return events.slice(-Math.min(Math.max(limit, 1), 500));
+  }
+  /**
+   * The bounded local-session summary the UI renders. The record carries machine fields; this
+   * assembles the display shape — requested values from the frozen assignment, the newest
+   * structured applied report when one exists (v1 receipts carry none), provider-archive status
+   * from the journal, and the honest blockers. `resolveDir` is injected by main because the
+   * store never knows where the mailbox and worktree roots live.
+   */
+  localSessionSummary(jobId: string, resolveDir: (record: LocalSessionRecord) => string): LocalSessionSummary | null {
+    id.parse(jobId); this.assertOpen();
+    const state = this.readProjection();
+    const binding = (state.localSessions ?? []).find(record => record.jobId === jobId);
+    if (!binding) return null;
+    const assignment = (state.assignments ?? []).find(item => item.id === binding.assignmentId);
+    const applied = (state.jobEvents ?? []).filter(event => event.jobId === jobId && event.applied).at(-1)?.applied ?? null;
+    const providerOp = this.localJournalFor(binding.id).filter(entry => entry.kind === 'PROVIDER_ARCHIVE').at(-1);
+    const blockers: string[] = [];
+    if (binding.lifecycle === 'RECONCILE_REQUIRED') blockers.push('This session record needs reconciliation before it can change state again.');
+    if (binding.lifecycle === 'PREPARATION_FAILED') blockers.push('Preparation failed — the next dispatch starts a fresh attempt.');
+    if (binding.stopStatus === 'REQUESTED') blockers.push('A cancellation request was delivered into the packet; the session has not acknowledged it.');
+    if (binding.requirement === 'READ_CONFINEMENT_REQUIRED' && binding.confinementStatus !== 'VERIFIED')
+      blockers.push('This context requires read confinement that has not been verified — the worktree lane stays unavailable.');
+    const confinementDetail =
+      binding.confinementStatus === 'VERIFIED' ? 'Confinement was verified by recorded office evidence.'
+      : binding.confinementStatus === 'FAILED' ? 'A confinement check failed — this session is not confined.'
+      : binding.confinementStatus === 'STALE' ? 'Confinement verification is stale and must be renewed before relying on it.'
+      : binding.requirement === 'READ_CONFINEMENT_REQUIRED' ? 'Read confinement is required but has not been verified.'
+      : 'Scoped delivery only — no confinement requirement applies.';
+    return localSessionSummarySchema.parse({
+      jobId, localSessionId: binding.id, revision: binding.revision,
+      layout: binding.layout, surface: binding.surface, lifecycle: binding.lifecycle, stopStatus: binding.stopStatus,
+      cwdDisplay: resolveDir(binding).slice(0, 1000),
+      grouping: { status: binding.groupingStatus, label: binding.providerProjectId },
+      confinement: { required: binding.requirement, status: binding.confinementStatus, detail: confinementDetail },
+      requested: { model: assignment?.requestedModel ?? 'unknown', effort: assignment?.requestedEffort ?? 'default', delegation: assignment?.delegation ?? false },
+      applied,
+      archive: {
+        packet: binding.lifecycle === 'ARCHIVED' ? 'ARCHIVED' : 'LIVE',
+        provider: !providerOp ? 'NOT_REQUESTED' : providerOp.outcome === 'SUCCESS' ? 'ARCHIVED'
+          : providerOp.outcome === 'UNSUPPORTED' ? 'UNSUPPORTED' : providerOp.outcome === 'REFUSED' ? 'BUSY' : 'UNKNOWN',
+      },
+      blockers,
+    });
   }
   /**
    * Records a session identifier the user reported for a job whose dispatch result the office could
