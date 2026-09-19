@@ -3438,3 +3438,27 @@ skipped: privileged symlink fixture), build clean. Remaining:
 P9 provider grouping trials and P10 final integration/
 retirement polish; the worktree layout is still
 registered-but-unselected pending a user-level layout choice.
+
+2026-09-19 (organizer revision 260107a) — P9 provider grouping
+trials and wiring landed directly (organizer-owned). Bound
+observe now runs read-only discover() on the session dir and
+carries providerGrouping on every return path including
+UNKNOWN — a started session's provider record is evidence
+independent of receipt state. The controller persists
+groupingStatus OBSERVED + providerProjectId (the record's own
+key) through the same CAS seam as lastReceipt; absence infers
+nothing, nothing downgrades, and OBSERVED bindings are never
+rescanned. The worktree lane inherits it through the
+forwarded binding. Trials were read-only against records that
+already exist — no canaries were created: batch checkouts
+resolve devin working_directory rows (organizer ballistic-
+bonobo, worker-1 sparkly-rover, worker-2 heathered-
+mapusaurus) and the claude project dir for organizer; six
+real packet dirs in the installed workspace resolve four live
+devin session ids with two never-run; an empty control dir
+resolves none. Evidence matrix updated; Codex/Claude/Devin
+Desktop GUI grouping claims stay UNKNOWN pending on-screen
+confirmation only the user can supply. Combined verification
+at 260107a: typecheck clean, 651/652 unit (1 skipped:
+privileged symlink fixture), build clean. Remaining: P10
+final integration/retirement polish.
