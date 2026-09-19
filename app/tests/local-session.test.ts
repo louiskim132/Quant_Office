@@ -8,7 +8,7 @@ import { removeTreeSync } from '../src/main/fsx';
 import { buildProviderPayload, type SubmitContext } from '../src/main/controller';
 import { AGENTS_FILE, CANCEL_FILE, CONTRACT_FILE, INPUTS_DIR, LocalMailboxAdapter, PACKET_FILE, RESULT_FILE, RESULT_OPTIONAL_KEYS, RESULT_REQUIRED_KEYS, RESULT_STATES } from '../src/main/local-session';
 import { CLAUDE_FILE, PACKET_HASH_FILE, PACKET_READY_FILE } from '../src/main/local-packet';
-import { localPacketV2Schema, type LocalSessionRecord } from '../src/shared/local-session';
+import { cancelRequestV1Schema, localPacketV2Schema, type LocalSessionRecord } from '../src/shared/local-session';
 import type { Assignment, InputSnapshot, ProviderJob } from '../src/shared/types';
 
 const at = (minutes: number) => new Date(Date.UTC(2026, 8, 8, 10, 0, 0) + minutes * 60000).toISOString();
@@ -679,4 +679,138 @@ test('fetch on a v2 binding returns the verified bytes and refuses drift', async
   assert.equal(Buffer.from(await f.adapter.fetch!(job, output, bound)).toString(), 'done bytes');
   await assert.rejects(f.adapter.fetch!(job, { ...output, bytes: 999 }, bound), /bytes/);
   await assert.rejects(f.adapter.fetch!(job, { ...output, sha256: sha('forged') }, bound), /hashes to/);
+});
+
+test('a bound cancel writes a schema-valid cooperative request and returns its requestId', async t => {
+  const f = boundFixture(t);
+  const result = await f.adapter.submit(f.context);
+  const bound = { ...f.binding, packetHash: result.localPacket!.packetHash };
+  const job = f.job(result.externalId);
+  const cancelled = await f.adapter.cancel(job, bound);
+  assert.equal(cancelled.acknowledged, true);
+  assert.ok(cancelled.requestId, 'the office names the request it wrote');
+  // The on-disk request body satisfies the contract and binds exactly this attempt.
+  const request = JSON.parse(readFileSync(path.join(f.dir, 'cancel.requested'), 'utf8'));
+  const parsed = cancelRequestV1Schema.parse(request);
+  assert.equal(parsed.schema, 'office-local-cancel-request@1');
+  assert.equal(parsed.requestId, cancelled.requestId);
+  assert.equal(parsed.jobId, bound.jobId);
+  assert.equal(parsed.assignmentId, bound.assignmentId);
+  assert.equal(parsed.attemptId, bound.attemptId);
+  assert.equal(parsed.packetHash, bound.packetHash);
+  // Honesty: a delivered request is not a stopped session and not a provider acknowledgement.
+  assert.match(cancelled.detail, /delivered|request/);
+  assert.match(cancelled.detail, /nothing has stopped/i);
+  assert.match(cancelled.detail, /not a provider acknowledgement/);
+});
+
+test('a second bound cancel is idempotent and names the recorded requestId', async t => {
+  const f = boundFixture(t);
+  const result = await f.adapter.submit(f.context);
+  const bound = { ...f.binding, packetHash: result.localPacket!.packetHash };
+  const job = f.job(result.externalId);
+  const first = await f.adapter.cancel(job, bound);
+  const second = await f.adapter.cancel(job, bound);
+  assert.equal(second.acknowledged, true);
+  assert.equal(second.requestId, first.requestId, 'the already-delivered request is named, not rewritten');
+  assert.match(second.detail, /already/i);
+  // The file still carries the first request — nothing was overwritten.
+  const request = cancelRequestV1Schema.parse(JSON.parse(readFileSync(path.join(f.dir, 'cancel.requested'), 'utf8')));
+  assert.equal(request.requestId, first.requestId);
+});
+
+test('a bound cancel refuses when the binding carries no packet hash', async t => {
+  const f = boundFixture(t);
+  await f.adapter.submit(f.context);
+  const job = f.job('bound-session');
+  const cancelled = await f.adapter.cancel(job, f.binding);
+  assert.equal(cancelled.acknowledged, false);
+  assert.equal(cancelled.requestId, undefined);
+  assert.match(cancelled.detail, /packet hash/i);
+  assert.equal(existsSync(path.join(f.dir, 'cancel.requested')), false, 'nothing was written');
+});
+
+test('a malformed or differently-bound existing request file is refused, never overwritten', async t => {
+  const f = boundFixture(t);
+  const result = await f.adapter.submit(f.context);
+  const bound = { ...f.binding, packetHash: result.localPacket!.packetHash };
+  const job = f.job(result.externalId);
+  writeFileSync(path.join(f.dir, 'cancel.requested'), 'not json {');
+  let cancelled = await f.adapter.cancel(job, bound);
+  assert.equal(cancelled.acknowledged, false);
+  assert.match(cancelled.detail, /malformed|not valid JSON|cannot be trusted/i);
+  assert.equal(readFileSync(path.join(f.dir, 'cancel.requested'), 'utf8'), 'not json {', 'the malformed file was left untouched');
+  // A schema-valid request bound to a different attempt is a defect, not an idempotent hit.
+  writeFileSync(path.join(f.dir, 'cancel.requested'), JSON.stringify({
+    schema: 'office-local-cancel-request@1', requestId: randomUUID(), jobId: bound.jobId,
+    assignmentId: bound.assignmentId, attemptId: randomUUID(), packetHash: bound.packetHash,
+    requestedAt: at(0),
+  }));
+  cancelled = await f.adapter.cancel(job, bound);
+  assert.equal(cancelled.acknowledged, false);
+  assert.match(cancelled.detail, /attemptId/);
+});
+
+test('observe surfaces a valid cancel acknowledgement bound to the recorded request', async t => {
+  const f = boundFixture(t);
+  const result = await f.adapter.submit(f.context);
+  const bound = { ...f.binding, packetHash: result.localPacket!.packetHash };
+  const job = f.job(result.externalId);
+  const cancelled = await f.adapter.cancel(job, bound);
+  const requested = { ...bound, cancelRequestId: cancelled.requestId! };
+  const output = { path: 'outputs/summary.txt', sha256: sha('done bytes'), bytes: Buffer.byteLength('done bytes') };
+  mkdirSync(path.join(f.dir, 'outputs'), { recursive: true });
+  writeFileSync(path.join(f.dir, 'outputs', 'summary.txt'), 'done bytes');
+  writeFileSync(path.join(f.dir, RESULT_FILE), JSON.stringify(v2Receipt(requested, { outputs: [output] })));
+  writeFileSync(path.join(f.dir, 'cancel.ack.json'), JSON.stringify({
+    schema: 'office-local-cancel-ack@1', requestId: cancelled.requestId, jobId: bound.jobId,
+    assignmentId: bound.assignmentId, attemptId: bound.attemptId, packetHash: bound.packetHash,
+    outcome: 'STOPPED', detail: 'Stopped after the request.',
+  }));
+  const observed = await f.adapter.observe(job, requested);
+  assert.equal(observed.state, 'COMPLETED');
+  assert.equal(observed.provenance, 'PROVIDER_REPORTED');
+  assert.deepEqual(observed.outputs, [output]);
+  assert.deepEqual(observed.cancelAck, { requestId: cancelled.requestId, outcome: 'STOPPED', detail: 'Stopped after the request.' });
+});
+
+test('observe on a v2 binding defects an ack for a request the office never recorded', async t => {
+  const f = boundFixture(t);
+  const result = await f.adapter.submit(f.context);
+  const bound = { ...f.binding, packetHash: result.localPacket!.packetHash };
+  const job = f.job(result.externalId);
+  writeFileSync(path.join(f.dir, RESULT_FILE), JSON.stringify(v2Receipt(bound)));
+  writeFileSync(path.join(f.dir, 'cancel.ack.json'), JSON.stringify({
+    schema: 'office-local-cancel-ack@1', requestId: randomUUID(), jobId: bound.jobId,
+    assignmentId: bound.assignmentId, attemptId: bound.attemptId, packetHash: bound.packetHash,
+    outcome: 'STOPPED', detail: 'Claimed stop.',
+  }));
+  const observed = await f.adapter.observe(job, bound);
+  assert.equal(observed.state, 'UNKNOWN');
+  assert.equal(observed.provenance, 'OFFICE_LOCAL');
+  assert.match(observed.detail, /cancel\.ack\.json/);
+  assert.match(observed.detail, /never recorded|no cancel request/i);
+});
+
+test('observe defects a malformed or misbound ack even beside a valid receipt', async t => {
+  const f = boundFixture(t);
+  const result = await f.adapter.submit(f.context);
+  const bound = { ...f.binding, packetHash: result.localPacket!.packetHash };
+  const job = f.job(result.externalId);
+  const cancelled = await f.adapter.cancel(job, bound);
+  const requested = { ...bound, cancelRequestId: cancelled.requestId! };
+  writeFileSync(path.join(f.dir, RESULT_FILE), JSON.stringify(v2Receipt(requested)));
+  writeFileSync(path.join(f.dir, 'cancel.ack.json'), 'garbage {');
+  let observed = await f.adapter.observe(job, requested);
+  assert.equal(observed.state, 'UNKNOWN');
+  assert.match(observed.detail, /cancel\.ack\.json/);
+  // A schema-valid ack naming a different request is still a defect — the receipt stays untrusted.
+  writeFileSync(path.join(f.dir, 'cancel.ack.json'), JSON.stringify({
+    schema: 'office-local-cancel-ack@1', requestId: randomUUID(), jobId: requested.jobId,
+    assignmentId: requested.assignmentId, attemptId: requested.attemptId, packetHash: requested.packetHash,
+    outcome: 'STOPPED', detail: 'Wrong request.',
+  }));
+  observed = await f.adapter.observe(job, requested);
+  assert.equal(observed.state, 'UNKNOWN');
+  assert.match(observed.detail, /requestId/);
 });
