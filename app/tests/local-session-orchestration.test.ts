@@ -10,12 +10,13 @@ import { prepareInputSnapshot } from '../src/main/locations';
 import { removeTreeSync } from '../src/main/fsx';
 import { AssignmentController, type ObserveResult, type ProviderAdapter, type SubmitContext, type SubmitResult } from '../src/main/controller';
 import { LocalMailboxAdapter } from '../src/main/local-session';
+import type { Discovery } from '../src/main/local-provider-records';
 import { LocalWorktreeMailboxAdapter } from '../src/main/local-worktree-session';
 import { LocalSessionRouter } from '../src/main/local-session-router';
 import { CANCEL_ACK_FILE, CANCEL_FILE, PACKET_FILE, PACKET_HASH_FILE, PACKET_READY_FILE, RESULT_FILE } from '../src/main/local-packet';
 import { localPacketV2Schema } from '../src/shared/local-session';
 import { stageContextHash } from '../src/shared/pipeline';
-import type { Agent, CapabilityOperation, ProviderJob } from '../src/shared/types';
+import type { Agent, CapabilityOperation, Provider, ProviderJob } from '../src/shared/types';
 
 const key = () => randomUUID();
 const at = (minutes: number) => new Date(Date.UTC(2026, 8, 19, 10, 0, 0) + minutes * 60000).toISOString();
@@ -77,7 +78,7 @@ class HostedStub implements ProviderAdapter {
   async cancel(_job: ProviderJob) { return { acknowledged: true, detail: 'Hosted cancel acknowledged.' }; }
 }
 
-async function fixture(t: any) {
+async function fixture(t: any, opts: { discover?: (dir: string, provider: Provider) => Discovery } = {}) {
   const root = mkdtempSync(path.join(tmpdir(), 'qro-local-orch-'));
   const store = new OfficeStore(path.join(root, 'workspace.sqlite'));
   t.after(() => { try { store.close(); } catch {} removeTreeSync(root); });
@@ -91,7 +92,7 @@ async function fixture(t: any) {
   store.confirmAgentBinding({ observation: localObservation(0), agent });
   const request = store.execute({ type: 'request.create', idempotencyKey: key(), projectId: project.id, name: 'Local question', hypothesis: 'h', workType: 'QUESTION', mode: 'SINGLE', leadAgentId: agent.id, participantIds: [] }).requests![0];
   const snapshot = await prepareInputSnapshot({ store, objectRoot: root, stagingRoot: path.join(root, 'staging'), projectId: project.id, requestId: request.id, requestRevision: request.revision });
-  const flat = new LocalMailboxAdapter(() => sessionsRoot, clock);
+  const flat = new LocalMailboxAdapter(() => sessionsRoot, clock, undefined, opts.discover);
   const tree = new LocalWorktreeMailboxAdapter(() => path.join(root, 'local-repos'), clock);
   const mailbox = new LocalSessionRouter(id => store.localSessionForJob(id), { FLAT_PACKET: flat, PROJECT_WORKTREE: tree });
   const hosted = new HostedStub();
@@ -247,6 +248,33 @@ test('the local-session summary surfaces binding, requested scope, applied repor
   const requested = f.store.localSessionSummary(job.id, record => record.storageRelativePath)!;
   assert.equal(requested.stopStatus, 'REQUESTED');
   assert.ok(requested.blockers.some(blocker => /cancellation request/i.test(blocker)));
+});
+
+test('a resolved provider record upgrades grouping to OBSERVED — absence stays UNKNOWN and downgrades nothing', async t => {
+  let found = false;
+  const discovery = { records: [{ provider: 'claude' as const, kind: 'claude-project' as const, id: 'C--packet-dir', detail: 'provider record', location: 'records-root' }], notes: [] };
+  const f = await fixture(t, { discover: () => (found ? discovery : { records: [], notes: [] }) });
+  const { assignment, job } = await prepared(f);
+  await f.controller.dispatch(assignment.id);
+  const bound = f.store.localSessionForJob(job.id)!;
+  assert.equal(bound.groupingStatus, 'UNKNOWN');
+  // A resolved record is real evidence even before any receipt exists — the job is UNKNOWN
+  // awaiting the session, but the office observed the provider-side grouping.
+  await f.controller.observe(assignment.id);
+  assert.equal(f.store.localSessionForJob(job.id)!.groupingStatus, 'UNKNOWN', 'no record found — nothing inferred');
+  found = true;
+  await f.controller.observe(assignment.id);
+  const observed = f.store.localSessionForJob(job.id)!;
+  assert.equal(observed.groupingStatus, 'OBSERVED', 'the resolved record upgrades the claim on the binding');
+  assert.equal(observed.providerProjectId, 'C--packet-dir', 'the provider\'s own record identity is the label');
+  const summary = f.store.localSessionSummary(job.id, record => record.storageRelativePath)!;
+  assert.deepEqual(summary.grouping, { status: 'OBSERVED', label: 'C--packet-dir' });
+  // A later observe finding nothing downgrades nothing — OBSERVED stays.
+  found = false;
+  const dir = path.join(f.sessionsRoot, bound.storageRelativePath);
+  writeFileSync(path.join(dir, RESULT_FILE), receipt(job, bound, 1, 'RUNNING', 'working'));
+  await f.controller.observe(assignment.id);
+  assert.equal(f.store.localSessionForJob(job.id)!.groupingStatus, 'OBSERVED');
 });
 
 test('cancel persists the request id and REQUESTED; the session acknowledgement persists SESSION_REPORTED_STOPPED', async t => {

@@ -8,6 +8,7 @@ import { cancelAckV1Schema, cancelRequestV1Schema, type LocalSessionRecord } fro
 import { MAX_FILE, safeEntry } from './artifacts.js';
 import { GuardedLocalFileIO, type LocalFileIO } from './local-session-files.js';
 import { AGENTS_FILE, CANCEL_ACK_FILE, CANCEL_FILE, CONTRACT_FILE, INPUTS_DIR, MAX_OUTPUTS, MAX_RESULT_BYTES, PACKET_FILE, RESULT_FILE, RESULT_OPTIONAL_KEYS, RESULT_REQUIRED_KEYS, RESULT_STATES, prepareLocalPacket, readLocalResult, readLocalResultV1 } from './local-packet.js';
+import { discover, type Discovery } from './local-provider-records.js';
 import type { ObserveResult, ProviderAdapter, SubmitContext, SubmitResult } from './controller.js';
 
 // The packet/receipt contract constants live in local-packet.ts with both readers; they are
@@ -113,6 +114,7 @@ export class LocalMailboxAdapter implements ProviderAdapter {
     private readonly sessionsRoot: () => string,
     private readonly now: () => string = () => new Date().toISOString(),
     private readonly io: LocalFileIO = new GuardedLocalFileIO(),
+    private readonly discoverRecords: (dir: string, provider: Provider) => Discovery = discover,
   ) {}
 
   /** The recorded identity is a directory name only, so a stored job can never point outside the root. */
@@ -190,16 +192,21 @@ export class LocalMailboxAdapter implements ProviderAdapter {
       ? 'The recorded session identity is not a session directory name under the workspace sessions root; nothing has been heard from a local session.'
       : 'No session directory is recorded for this job.');
     if (!existsSync(dir)) return unknown('The session directory for this job is not present under the workspace sessions root — it may have been retired or removed externally; nothing has been heard from a local session.');
+    // Read-only discovery of the provider's own record for this exact directory — an office
+    // observation of provider-side grouping, independent of receipt state. Once a record has
+    // resolved, OBSERVED is pinned on the binding and rescanning is pointless.
+    const grouping = local && local.groupingStatus !== 'OBSERVED' ? this.discoverGrouping(dir, local) : undefined;
+    const attach = (result: ObserveResult): ObserveResult => grouping ? { ...result, providerGrouping: grouping } : result;
     if (local?.packetVersion === 2) {
       // A cancel acknowledgement is a control file: it is validated before the receipt is read,
       // and a malformed or misbound one makes the whole observation UNKNOWN — a bad control file
       // is never ignored to reach a good receipt.
       const ack = this.readCancelAck(dir, local);
-      if ('defect' in ack) return unknown(ack.defect);
+      if ('defect' in ack) return attach(unknown(ack.defect));
       // The v2 reader proves the ready marker, the attempt binding, the sequence and every
       // declared output byte before anything is reported. A v1-shaped receipt here is a defect.
       const read = readLocalResult(dir, local, this.io);
-      if ('defect' in read) return unknown(read.defect);
+      if ('defect' in read) return attach(unknown(read.defect));
       const result = read.value.result;
       const observed: ObserveResult & { applied?: AppliedReport } = {
         state: result.state, detail: result.detail,
@@ -217,13 +224,13 @@ export class LocalMailboxAdapter implements ProviderAdapter {
       // The verified receipt's identity rides to the caller — the binding persists it as
       // lastReceipt so a replayed or rewound receipt is refused on the next observation.
       observed.receipt = { sequence: result.sequence, hash: read.value.receiptHash };
-      return observed;
+      return attach(observed);
     }
     const resultPath = path.join(dir, RESULT_FILE);
     if (!existsSync(resultPath))
-      return unknown(`No ${RESULT_FILE} yet. The packet is still waiting for the user-launched local session to report.`);
+      return attach(unknown(`No ${RESULT_FILE} yet. The packet is still waiting for the user-launched local session to report.`));
     const result = readLocalResultV1(resultPath);
-    if ('defect' in result) return unknown(result.defect);
+    if ('defect' in result) return attach(unknown(result.defect));
     for (const output of result.value.outputs) {
       const target = path.join(dir, output.path);
       if (!existsSync(target) || !statSync(target).isFile())
@@ -246,7 +253,19 @@ export class LocalMailboxAdapter implements ProviderAdapter {
     if (result.value.appliedEffort !== undefined) applied.effort = result.value.appliedEffort;
     if (result.value.delegation !== undefined) applied.delegation = result.value.delegation;
     if (applied.model !== undefined || applied.effort !== undefined || applied.delegation !== undefined) observed.applied = applied;
-    return observed;
+    return attach(observed);
+  }
+
+  /**
+   * Read-only discovery of the provider's own record bound to this session's directory. A
+   * resolved record is an office observation of provider-side grouping; nothing is inferred
+   * from absence, and a discovery failure is not a defect — the binding stays UNKNOWN.
+   */
+  private discoverGrouping(dir: string, binding: LocalSessionRecord): { key: string; kind: string } | undefined {
+    try {
+      const found = this.discoverRecords(dir, binding.provider);
+      return found.records.length ? { key: found.records[0].id, kind: found.records[0].kind } : undefined;
+    } catch { return undefined; }
   }
 
   /**

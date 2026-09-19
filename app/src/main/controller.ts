@@ -93,6 +93,14 @@ export interface ObserveResult {
    * replayed or rewound receipt is refused next time. Hosted adapters never set it.
    */
   receipt?: { sequence: number; hash: string };
+  /**
+   * An office-observed provider-side record for this session's directory — the record's own
+   * identity (session id, project key, rollout name), found by read-only discovery. Present only
+   * when discovery actually resolved a record; absence downgrades nothing. This observation is
+   * independent of receipt state — a started session's record is real even while the receipt is
+   * absent or defective.
+   */
+  providerGrouping?: { key: string; kind: string };
 }
 
 /** Fetches the bytes an output claims to be, so a deliverable is never certified by a hash alone. */
@@ -718,13 +726,16 @@ export class AssignmentController {
    * observation handling is unchanged.
    */
   private recordLocalObservation(job: ProviderJob, result: ObserveResult): void {
-    if (!result.receipt && !result.cancelAck) return;
+    if (!result.receipt && !result.cancelAck && !result.providerGrouping) return;
     const binding = this.store.localSessionForJob(job.id);
     if (!binding) return;
     const { revision: _revision, updatedAt: _updatedAt, ...rest } = binding;
     const next = { ...rest };
     if (result.receipt) next.lastReceipt = { sequence: result.receipt.sequence, hash: result.receipt.hash, observedAt: this.now() };
     if (result.cancelAck) next.stopStatus = 'SESSION_REPORTED_STOPPED';
+    // A resolved provider record upgrades the grouping claim only — a later observe that finds
+    // nothing reports no field and downgrades nothing.
+    if (result.providerGrouping) { next.groupingStatus = 'OBSERVED'; next.providerProjectId = result.providerGrouping.key; }
     this.store.updateLocalSession({ localSessionId: binding.id, expectedRevision: binding.revision, next });
   }
 

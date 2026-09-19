@@ -263,8 +263,10 @@ of this document, not a guarantee about other versions.
 | Claude Code | CLI grouping command | — | Groups multiple folders under one project | UNSUPPORTED | 2026-09-19 — absent across probed help surface |
 | Claude Desktop | parallel-session UI | separate surface | Parallel sessions under its own grouping | DOCUMENTED; office-integration UNKNOWN | 2026-09-19 — vendor surface; no office trial |
 | Devin | CLI `list`/`resume`/`rm` | `sessions.working_directory` | List scoped to cwd; resume/remove by id | OBSERVED | 2026-09-19 — `devin --help`, read-only `node:sqlite` query (3000.10.21) |
+| Devin | Office-bound packet dir → `sessions.db` row | `sessions.working_directory` | The office resolves a packet dir's own session row on observe | OBSERVED | 2026-09-19 — read-only `discover()` trial against six real packet dirs: four resolve live devin session ids (`ribbon-museum`, `honey-almanac`, `fortunate-charger`, `hammerhead-fisher`); two have none (never ran); an empty control dir resolves none |
 | Devin | Desktop session list | shared `sessions.db` | Groups by the working directory's workspace | UNKNOWN | 2026-09-19 — inferred from the shared store on 2026-09-18; GUI never confirmed on screen |
 | Devin | CLI grouping command | — | Groups sessions across cwds | UNSUPPORTED | 2026-09-19 — absent across probed help surface |
+| Office | Bound `observe()` → `groupingStatus`/`providerProjectId` | per-provider record key | A resolved provider record upgrades the binding's grouping to OBSERVED; absence infers nothing and never downgrades | OBSERVED | 2026-09-19 — wired in `LocalMailboxAdapter.observe` via `discover()`; batch-checkout trials resolved devin `working_directory` rows for organizer/worker-1/worker-2 and the claude project dir for organizer |
 
 So the lane delivers "one provider project, session-per-worktree" only
 where a repo/workspace-root grouping exists — Codex Desktop's project
