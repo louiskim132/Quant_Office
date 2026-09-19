@@ -3375,3 +3375,38 @@ dispatch intent transaction (seedCommit resolved and recorded
 for worktree bindings), persists packetHash + READY on submit
 success and cancelRequestId/stopStatus on cancel, and routes
 LOCAL_MAILBOX through LocalSessionRouter in main.ts.
+
+2026-09-19 (round local-rev-4) — P6 orchestration landed;
+the local-session revision is now live end-to-end.
+worker-1 (b70c4f5): AssignmentController prepares the
+durable binding before any local submit — one helper shared
+by dispatch and handoff classifies localRequirementFor
+(refusals throw before SUBMITTING; READ_CONFINEMENT_REQUIRED
+has no permitted layout and refuses; SCOPED_DELIVERY selects
+FLAT_PACKET only — the worktree lane stays unreached until a
+user-level layout choice exists), creates PREPARING bindings
+with PREPARE/INTENT journal entries, re-attempts
+PREPARATION_FAILED under a fresh attemptId + fresh storage
+path through the declared edge, and refuses every other
+existing binding reconcile-first. Submit settles READY with
+the proven packetHash (packetVersion recorded as proven, not
+declared) or PREPARATION_FAILED+journal. observe persists
+lastReceipt and SESSION_REPORTED_STOPPED via same-lifecycle
+CAS; bound cancel persists requestId+REQUESTED with a
+CANCEL_REQUEST journal entry and the job honestly stays
+CANCEL_REQUESTED until the session's own receipt lands.
+Organizer wiring: main.ts registers LocalSessionRouter over
+both layouts (75e6d9e); the legacy unbound cancel path now
+records OFFICE_LOCAL evidence instead of PROVIDER_REPORTED
+(aa418cd, closing F02 for the pre-binding cohort).
+Combined verification at aa418cd: typecheck clean, 647/648
+unit (1 skipped: privileged symlink fixture), build clean.
+Every new LOCAL_MAILBOX job now runs through a persisted v2
+binding: packet.sha256 + ready marker + attempt-bound
+receipts + sequence enforcement + cooperative cancel. Known
+residual for P8/P10: a valid ack beside an absent or
+malformed receipt validates but does not persist the stop
+status (conservative — REQUESTED stays until a receipt
+lands); the worktree layout remains registered-but-unselected
+pending a user-level layout choice; provider grouping trials
+(P9) and UI surfacing (P8) remain.
