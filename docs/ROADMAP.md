@@ -3235,3 +3235,49 @@ build clean. Not wired yet (organizer integration steps, next
 round): retire()/provider-record cleanup IPC, worktree-lane
 adapter selection via localLaneFor, and the office-side retire
 action.
+
+2026-09-19 (revision spec accepted; P0 prerequisite landed) —
+QO-LOCAL-REV-20260919 reviewed the local-lifecycle round at
+d1e1eba and confirmed real defects in merged work, all
+independently verified against HEAD before acceptance: F01
+(Claude project-dir removal by lossy inferred path key),
+F02 (the office-written cancel sentinel returns an
+acknowledgement the controller settles as provider-reported),
+F03 (junction/symlink escape inside packet dirs during
+observe/fetch), F04 (localLaneFor's ISOLATED label promises an
+unenforced property), F05 (applied-model UI reads
+state.jobEvents, which publicState() strips — the w1 surface
+is dead in production), F06 (content-hash dedup loses A→B→A
+applied changes), F07 (both mailbox adapters share
+LOCAL_MAILBOX so restart cannot route by layout), F08
+(worktree seed reads mutable HEAD), F09 (receipts not
+attempt-bound), F10 (raw Codex rollout deletion bypasses
+supported lifecycle), F11 (archive conflicts misreported,
+worktree archival missing), F12 (storage-key observations
+over-generalized into UI impossibility claims), F13
+(AGENTS.md auto-load assumed for probed Claude versions).
+Accepted design: LocalSessionRecord v1 separating layout /
+provider binding / confinement requirement / confinement
+status; append-only lifecycle journals; packet+result v2 with
+attempt binding and sequenced receipts; cooperative cancel
+request/ack pair; guarded file I/O boundary; pinned-seed
+worktrees with per-repo locks; provider lifecycle restricted
+to supported exact-session archive or honest UNSUPPORTED —
+permanent provider-history deletion removed from the callable
+surface; archive-first, restart-safe journalling; structured
+applied-report query instead of parsing event text;
+confinement admission separated from delivery scope.
+P0 (organizer prerequisite, 3a2c49b): shared/local-session.ts
+contracts + transitionLocalLifecycle; store collections
+localSessions (CAS) and localOps (append-only) with
+one-binding-per-job; JobEvent.applied structured payload;
+publicState strips both collections; project export carries
+them scoped by jobId; SubmitContext.jobId so packet builders
+bind real jobs. New contract tests 7/7; full suite 576/576;
+typecheck clean. Worker packet order per spec section 14:
+P1 safe I/O, P5 provider lifecycle, docs corrections first;
+P2 packet v2 follows P1; P3 cancellation follows P2; P4
+worktree hardening follows P2; P6 orchestration last; P7/P8
+organizer-owned routing and UI wiring; P9 docs/trials; P10
+integration. Live provider trials stay gated on explicit
+packet authorization with synthetic canaries only.
