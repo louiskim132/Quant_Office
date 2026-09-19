@@ -3185,3 +3185,53 @@ unit, build clean; packaged and swapped into the installed App/
 copy. No provider operations claimed; the user-run pilot for
 claude/openai local agents is now unblocked at the dispatch
 gate but still untested end-to-end.
+
+2026-09-19 (round local-lifecycle) — all seven workers
+integrated. Prerequisite 97d4686 added CapabilityOperation
+LOCAL_RETIRE (bookkeeping only, outside LOCAL_DISPATCH).
+worker-1 (4997437): observe() now records a verified receipt's
+applied self-report as a content-deduped PROVIDER_REPORTED
+STATUS JobEvent ('applied:' + canonicalHash; placed before the
+no-change return so a changed self-report still lands), and
+profile.tsx/dispatch.tsx surface requested-vs-applied with a
+.blocker warning only on genuine mismatch — self-report
+qualifier kept, absent reports render nothing. worker-2
+(eb3854b): LocalMailboxAdapter.retire() moves a packet dir into
+archive/ by same-fs rename (never delete; honest on missing or
+already-retired), retireEvidence() emits office-observed
+LOCAL_RETIRE, missing-dir observe now names retired-or-removed
+externally, and TOOL_CONFINEMENT describes delivery scope vs
+real permissions ('the office confines nothing — can read
+sibling directories') instead of implying a boundary. worker-3
+(8b56db4): local-provider-records.ts maps a packet dir to its
+provider-side session records — devin sessions.db rows by
+working_directory (readOnly node:sqlite; devin rm --force with
+honest busy-refusal), claude ~/.claude/projects/<path-mangled>,
+codex rollout-*.jsonl by recorded cwd — and retires exactly
+those, injected roots only, removal explicit-only. worker-4
+(634a054): docs/local-sandbox-probe.md — surface-probed
+confinement tiers per CLI (claude --restricted tool-layer
+claim, codex restricted-token sandbox + readable roots, devin
+--sandbox research preview; the mailbox route passes no flags,
+so effective policy stays user-side). worker-5 (2946425):
+local-worktree-repo.ts (git repo per office project, --detach
+worktrees, prune) + LocalWorktreeMailboxAdapter composing the
+base adapter so packet dirs ARE worktrees — identical packet
+contract, confinement evidence declares the shared-root scope.
+worker-6 (c7091c8): docs/local-worktree-lane.md — grouping
+truth per provider (codex CLI is cwd-keyed too; the Desktop
+project layer is the only 'one project' surface and repo
+grouping there stays inferred pending one on-screen
+confirmation; claude is per-cwd; devin binds working_directory
+only). worker-7 (fad4d7d): localLaneFor() — ISOLATED for every
+research-context or ambiguous assignment, ROUTINE_ALLOWED only
+for plain request assignments; pure, total, sealed reviews can
+never land on a shared root. The three-layer model (grouping /
+workdir / sandbox) is adopted: per-packet cwd gives scoping not
+confinement; sealed reviews remain instruction-level isolation
+until a probed confinement tier is wired. Combined verification
+at HEAD after all merges: typecheck clean, 569/569 unit tests,
+build clean. Not wired yet (organizer integration steps, next
+round): retire()/provider-record cleanup IPC, worktree-lane
+adapter selection via localLaneFor, and the office-side retire
+action.
