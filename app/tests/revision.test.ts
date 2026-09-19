@@ -58,7 +58,13 @@ test('native requests and old event hashes survive reopen and backup restore',as
  const destination=path.join(root,'backup.zip');await new ArtifactService(store,root).backup(destination);const prepared=await prepareRestore(destination,root),restored=new OfficeStore(path.join(prepared.candidate,'workspace.sqlite'));try{assert.equal(restored.snapshot().requests!.length,1);assert.deepEqual(restored.snapshot().events.slice(0,old.length).map(e=>e.hash),old);}finally{restored.close();await discardCandidate(prepared.candidate,root);}store.close();const reopened=new OfficeStore(file);try{assert.equal(reopened.snapshot().requests!.length,1);}finally{reopened.close();}
 });
 
-test('unknown provider model and aliases never offer an inferred effort scale',()=>{for(const provider of ['openai','claude'] as const)for(const model of ['unknown','opus','claude-opus-4-6'])assert.deepEqual(suggestedEfforts(provider,model),['default']);});
+test('unknown provider model and aliases never offer an inferred effort scale',()=>{
+ // An inferred scale is never invented: providers whose effort data comes from a catalog offer
+ // nothing for a model the catalog does not know. Claude is the one published exception — its
+ // enum comes from the CLI's own --effort flag, a session-level axis that applies to any model id.
+ for(const provider of ['openai','devin'] as const)for(const model of ['unknown','opus','claude-opus-4-6'])assert.deepEqual(suggestedEfforts(provider,model),['default']);
+ for(const model of ['unknown','opus','claude-opus-4-6'])assert.deepEqual(suggestedEfforts('claude',model),['default','low','medium','high','xhigh','max']);
+});
 test('archive writer accounts for manifests and entry count before announcing success',()=>{const files=Object.fromEntries(Array.from({length:513},(_,i)=>['file'+i,new Uint8Array()]));assert.throws(()=>validateArchiveFiles(files),/512 entries/);assert.throws(()=>validateArchiveFiles({'backup.json':new Uint8Array(1024*1024+1)}),/manifest/);});
 
 test('editing a request requires its revision and supersedes review children without canceling parent',t=>{

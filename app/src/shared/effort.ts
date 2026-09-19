@@ -1,11 +1,14 @@
 import type {Effort,Provider} from './types.js';
 export const efforts:Effort[]=['default','none','minimal','low','medium','high','xhigh','max','ultra'];
 /** No inferred capability: aliases and missing catalogs remain unresolved. */
+// Claude Code publishes a session effort axis on the CLI itself — `--effort` rejects invalid
+// values with this exact enum (verified 2026-09-18 on claude.exe 2.1.273). It is session-level,
+// not per-model: which models honor it stays provider-side, exactly like a declared preference.
+export const CLAUDE_EFFORT_LEVELS:Effort[]=['low','medium','high','xhigh','max'];
 // Devin encodes effort in the model variant (e.g. swe-2-max is the max-effort variant), so a
 // separate effort axis cannot be honored there — 'default' is the honest answer until a catalog
-// entry declares real levels. OpenAI entries carry levels from the signed-in catalog; Claude's
-// aliases expose none.
-export function suggestedEfforts(_provider:Provider,_model:string):Effort[]{return ['default'];}
+// entry declares real levels. OpenAI entries carry levels from the signed-in catalog.
+export function suggestedEfforts(provider:Provider,_model:string):Effort[]{return provider==='claude'?['default',...CLAUDE_EFFORT_LEVELS]:['default'];}
 /** Whether the provider exposes effort as a control separate from the model choice. Devin encodes
  * effort in the model variant itself, so its effort field is Provider default by construction. */
 export function effortIsIndependentAxis(provider:Provider):boolean{return provider!=='devin';}

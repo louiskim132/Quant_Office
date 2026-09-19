@@ -29,6 +29,16 @@ test('cancel, expired confirmations and changed account or model fail closed',as
  assert.equal(saved,0);f.service.close();
 });
 test('unavailable OpenAI model cannot be silently substituted',async()=>{const f=fixture();await assert.rejects(f.service.connect({...draft,model:'other-model'}),/selected model/);f.service.close();});
+test('claude agents can select the CLI-published effort levels, including unlisted model ids',async()=>{
+ const f=fixture();
+ f.setConnection({provider:'claude',account:'louis@example.test',models:[{id:'opus',name:'Opus alias',efforts:['default','low','medium','high','xhigh','max']}]});
+ const ticket=await f.service.connect({...draft,provider:'claude',model:'opus',effort:'high'});
+ assert.equal(ticket.draft.effort,'high');
+ const custom=await f.service.connect({...draft,provider:'claude',model:'claude-opus-9-9-pinned',effort:'xhigh'});
+ assert.equal(custom.draft.effort,'xhigh','a free-text claude model still gets the session-level enum');
+ await assert.rejects(f.service.connect({...draft,provider:'claude',model:'opus',effort:'ultra'}),/not supported/);
+ f.service.close();
+});
 test('unlimited same-role agents persist through restart with event verification',()=>{
  const f=fixture(),file=path.join(f.root,'workspace.sqlite');let store=new OfficeStore(file);
  for(let i=0;i<30;i++)store.addAgent({...draft,id:randomUUID(),name:'Director '+i,account:'shared@example.test',createdAt:new Date().toISOString(),connectionVerifiedAt:new Date().toISOString(),execution:'HOSTED_SETUP_REQUIRED'});

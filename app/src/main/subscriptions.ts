@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { z } from 'zod';
 import { agentDraftSchema, observationSchema } from '../core/store.js';
-import { efforts, PROVIDER_MODEL_SUGGESTIONS } from '../shared/effort.js';
+import { efforts, PROVIDER_MODEL_SUGGESTIONS, CLAUDE_EFFORT_LEVELS } from '../shared/effort.js';
 import type { Effort, Agent, AgentTicket, Connection, Provider, UsageWindow } from '../shared/types.js';
 export type AccountObservation=z.infer<typeof observationSchema>;
 
@@ -207,7 +207,9 @@ export class Subscriptions {
   }else{
    const raw=await new Promise<string>((resolve,reject)=>execFile(this.executable('claude'),['auth','status'],{cwd:this.root,env:subscriptionEnvironment(),windowsHide:true,timeout:30000,maxBuffer:1024*1024},(error,stdout)=>{if(error&&!stdout){reject(new Error('Claude Code status unavailable. Update the official tool and retry.'));return;}resolve(stdout);}));
    try{connection.account=claudeIdentity(JSON.parse(raw));connection.connected=true;}catch{connection.note='Sign in through Claude Code with a Claude subscription.';return connection;}
-   connection.models=[...PROVIDER_MODEL_SUGGESTIONS.claude];
+   // The effort axis comes from the CLI's own `--effort` enum — a session-level preference the
+   // provider applies per its own rules, not a per-model entitlement the office verified.
+   connection.models=PROVIDER_MODEL_SUGGESTIONS.claude.map(m=>({...m,efforts:['default',...CLAUDE_EFFORT_LEVELS] as Effort[],source:'Claude Code --effort flag enum (claude.exe rejects other values)'}));
    connection.note='Account sign-in verified. Model entitlement has not been tested. Automatic usage retrieval is unavailable; open Claude usage to see the official limits.';
   }
   return connection;
@@ -268,7 +270,9 @@ export class Subscriptions {
  }
  validateEffort(provider:Provider,model:string,effort:Effort,connection?:Connection):void {
   if(effort==='default')return;
-  const supported=connection?.provider===provider?connection.models.find(m=>m.id===model)?.efforts??['default']:['default'];
+  // Claude's model input is free-text: an unlisted id still gets the session-level effort enum
+  // the CLI publishes. OpenAI/Devin stay strict — an unlisted model offers only Provider default.
+  const supported=connection?.provider===provider?(connection.models.find(m=>m.id===model)?.efforts??(provider==='claude'?['default',...CLAUDE_EFFORT_LEVELS]:['default'])):['default'];
   if(!supported.includes(effort))throw new Error('This effort level is not supported by the selected model. Refresh model options or choose Default.');
  }
  async connect(input:unknown):Promise<AgentTicket>{
