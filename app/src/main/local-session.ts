@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import type { CapabilityEvidence, Effort, Provider, ProviderJob } from '../shared/types.js';
 import { parseStrictJson } from '../core/strict-json.js';
@@ -178,9 +178,10 @@ export class LocalMailboxAdapter implements ProviderAdapter {
   async observe(job: ProviderJob): Promise<ObserveResult> {
     const unknown = (detail: string): ObserveResult => ({ state: 'UNKNOWN', detail, provenance: 'OFFICE_LOCAL' });
     const dir = job.externalId ? this.sessionDir(job.externalId) : null;
-    if (!dir || !existsSync(dir)) return unknown(job.externalId
-      ? 'The session directory for this job is not a session folder under the workspace sessions root; nothing has been heard from a local session.'
+    if (!dir) return unknown(job.externalId
+      ? 'The recorded session identity is not a session directory name under the workspace sessions root; nothing has been heard from a local session.'
       : 'No session directory is recorded for this job.');
+    if (!existsSync(dir)) return unknown('The session directory for this job is not present under the workspace sessions root — it may have been retired or removed externally; nothing has been heard from a local session.');
     const resultPath = path.join(dir, RESULT_FILE);
     if (!existsSync(resultPath))
       return unknown(`No ${RESULT_FILE} yet. The packet is still waiting for the user-launched local session to report.`);
@@ -281,6 +282,30 @@ export class LocalMailboxAdapter implements ProviderAdapter {
     return { acknowledged: true, detail: 'Local session ended by the office. A local cancel stops this session; it is not a provider acknowledgement.' };
   }
 
+  /**
+   * Retires one packet directory by moving it under archive/ inside the sessions root. The archive
+   * is a subdirectory of the root itself, so retiring is a rename on one filesystem — never a
+   * copy-and-delete; every packet byte survives by construction. Whether a job may be retired is
+   * the caller's decision; this operation only moves bytes and reports what it did, and an absent
+   * or already-retired directory is reported rather than thrown.
+   */
+  async retire(externalId: string): Promise<{ retired: boolean; detail: string }> {
+    const dir = this.sessionDir(externalId);
+    if (!dir) return { retired: false, detail: 'Not a session directory name under the workspace sessions root; nothing was moved.' };
+    // 'archive' names the archive root itself, never a session directory to move.
+    if (externalId === 'archive') return { retired: false, detail: 'The archive root is not a session directory; nothing was moved.' };
+    const archived = path.join(this.sessionsRoot(), 'archive', externalId);
+    if (existsSync(archived)) return { retired: true, detail: `The session directory is already retired under ${archived}; nothing was moved.` };
+    if (!existsSync(dir)) return { retired: false, detail: `No session directory named ${externalId} exists under the sessions root; nothing was moved.` };
+    try {
+      mkdirSync(path.dirname(archived), { recursive: true });
+      renameSync(dir, archived);
+    } catch (error) {
+      return { retired: false, detail: `The session directory could not be moved into the archive: ${error instanceof Error ? error.message : 'unknown error'}` };
+    }
+    return { retired: true, detail: `Session directory moved to ${archived}. The packet bytes are retained; provider-side records may still reference it.` };
+  }
+
   /** Reads one declared output back from the session directory; the caller re-verifies its identity. */
   async fetch(job: ProviderJob, output: { path: string; sha256: string; bytes: number }): Promise<Uint8Array> {
     const dir = job.externalId ? this.sessionDir(job.externalId) : null;
@@ -310,10 +335,10 @@ export class LocalMailboxAdapter implements ProviderAdapter {
       },
       {
         ...scope, operation: 'TOOL_CONFINEMENT',
-        detail: 'Scoped workspace delivery: the session received only the packet directory.',
+        detail: 'Delivery scope, not an enforced boundary: the office delivered the packet into one dedicated session directory; the session it launches runs under the user\'s own permissions.',
         confinement: {
-          tools: 'packet contents only: packet.json, the result contract and declared snapshot inputs',
-          filesystem: 'one dedicated session directory under the workspace sessions root',
+          tools: 'packet contents delivered: packet.json, the result contract and declared snapshot inputs',
+          filesystem: 'the packet was written to one dedicated session directory; the office confines nothing — the session runs under the user\'s filesystem permissions and can read sibling directories',
           network: 'not restricted by the office; the packet declares what the session may read',
           environment: 'user-launched official CLI session on this machine',
         },
@@ -373,6 +398,25 @@ export class LocalMailboxAdapter implements ProviderAdapter {
     return [{
       ...this.evidenceScope(this.now()), operation: 'LOCAL_CANCEL',
       detail: 'The office ended the local session by writing the cancel sentinel in the packet directory. A real cancellation of that session, not a provider acknowledgement.',
+    }];
+  }
+
+  /**
+   * Office-observed evidence for one directory retirement. A live dir and an archived one each get
+   * a single LOCAL_RETIRE entry naming what the office did; a dir that is neither records nothing —
+   * there is no move to testify about.
+   */
+  retireEvidence(externalId: string): CapabilityEvidence[] {
+    const dir = this.sessionDir(externalId);
+    if (!dir || externalId === 'archive') return [];
+    const live = existsSync(dir);
+    const archived = existsSync(path.join(this.sessionsRoot(), 'archive', externalId));
+    if (!live && !archived) return [];
+    return [{
+      ...this.evidenceScope(this.now()), operation: 'LOCAL_RETIRE',
+      detail: archived
+        ? 'The office moved the session packet directory into the archive under the sessions root. The bytes are retained; provider-side records may still reference it.'
+        : 'The session packet directory is still live under the sessions root; no retirement move has been recorded for it.',
     }];
   }
 }

@@ -470,3 +470,79 @@ test('the vacuous acknowledge repeats cleanly and cancelEvidence reports nothing
     }
   }
 });
+
+test('retire moves the packet directory into the archive and retireEvidence reports the move', async t => {
+  const f = fixture(t);
+  const { externalId } = await f.adapter.submit(f.context);
+  const dir = path.join(f.sessions, externalId);
+  const result = await f.adapter.retire(externalId);
+  assert.equal(result.retired, true);
+  assert.equal(existsSync(dir), false, 'the live directory is gone');
+  const archived = path.join(f.sessions, 'archive', externalId);
+  assert.ok(existsSync(path.join(archived, PACKET_FILE)), 'the move carried every byte — nothing was deleted');
+  assert.ok(existsSync(path.join(archived, INPUTS_DIR, 'notes.txt')));
+  const entries = f.adapter.retireEvidence(externalId);
+  assert.equal(entries.length, 1);
+  const [entry] = entries;
+  assert.equal(entry.operation, 'LOCAL_RETIRE');
+  assert.equal(entry.level, 'TOOL_SUPPORTED');
+  assert.equal(entry.evidence, 'OBSERVED');
+  assert.equal(entry.route, 'LOCAL_MAILBOX');
+  assert.equal(entry.environment, 'LOCAL_MACHINE');
+  assert.equal(entry.source, 'office-local-mailbox@1');
+  assert.equal(entry.verifiedAt, at(1));
+  assert.match(entry.detail, /moved the session packet directory/);
+});
+
+test('retire reports honestly on missing, invalid and already-retired directories without throwing', async t => {
+  const f = fixture(t);
+  const missing = await f.adapter.retire('not-created');
+  assert.equal(missing.retired, false);
+  assert.match(missing.detail, /No session directory/);
+  for (const externalId of ['../escape', 'a/b', 'archive']) {
+    const invalid = await f.adapter.retire(externalId);
+    assert.equal(invalid.retired, false);
+  }
+  const { externalId } = await f.adapter.submit(f.context);
+  await f.adapter.retire(externalId);
+  const again = await f.adapter.retire(externalId);
+  assert.equal(again.retired, true, 'an already-retired directory reports its state honestly');
+  assert.match(again.detail, /already retired/);
+});
+
+test('observe on a retired directory reports the missing live dir, naming retirement', async t => {
+  const f = fixture(t);
+  const { externalId } = await f.adapter.submit(f.context);
+  await f.adapter.retire(externalId);
+  const result = await f.adapter.observe(f.job(externalId));
+  assert.equal(result.state, 'UNKNOWN');
+  assert.equal(result.provenance, 'OFFICE_LOCAL');
+  assert.match(result.detail, /retired or removed externally/);
+});
+
+test('retireEvidence names a still-live directory and records nothing when none exists', async t => {
+  const f = fixture(t);
+  assert.deepEqual(f.adapter.retireEvidence('not-created'), []);
+  assert.deepEqual(f.adapter.retireEvidence('archive'), []);
+  const { externalId } = await f.adapter.submit(f.context);
+  const entries = f.adapter.retireEvidence(externalId);
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].operation, 'LOCAL_RETIRE');
+  assert.match(entries[0].detail, /still live/);
+});
+
+test('the confinement record names delivery scope honestly and still describes every axis', async t => {
+  const f = fixture(t);
+  const submitted = await f.adapter.submit(f.context);
+  const entry = f.adapter.submitEvidence(f.context, submitted).find(item => item.operation === 'TOOL_CONFINEMENT')!;
+  assert.match(entry.detail, /delivery scope/i);
+  const policy = entry.confinement!;
+  assert.match(policy.filesystem, /dedicated session directory/);
+  assert.match(policy.filesystem, /confines nothing/);
+  assert.match(policy.network, /not restricted/);
+  assert.match(policy.environment, /user-launched/);
+  // confinementDescribed (readiness.ts) is not exported; mirror its check — every axis must say
+  // what was and wasn't restricted, which the honest record still satisfies.
+  assert.ok([policy.tools, policy.filesystem, policy.network, policy.environment].every(field => field.trim()),
+    'every confinement axis is described');
+});
