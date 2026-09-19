@@ -44,7 +44,7 @@ import type { ObjectDescription, ReadResult, SearchResult, StagePacket } from '.
 import type { ResearchBranch, FrozenResearchSpec, PredictionRecord, TrialLedgerEntry, StageAttempt, GateReceipt, FunctionAssignment, StageFunction, Stage as ResearchStage, GateId, SpecSections, ScientificOutcome } from './research.js';
 export type { ResearchBranch, FrozenResearchSpec, PredictionRecord, TrialLedgerEntry, StageAttempt, GateReceipt };
 
-export type CapabilityOperation = 'ACCOUNT_STATUS' | 'MODEL_CATALOG' | 'ALLOWANCE_READ' | 'CLOUD_SUBMIT' | 'CLOUD_OBSERVE' | 'CLOUD_FOLLOW_UP' | 'CLOUD_OUTPUT_FETCH' | 'CLOUD_CANCEL_REQUEST' | 'CLOUD_CANCEL_ACK' | 'MODEL_APPLICATION' | 'EFFORT_APPLICATION' | 'ENVIRONMENT_IDENTITY' | 'DELEGATION_CONTROL' | 'TOOL_CONFINEMENT' | 'CLOUD_CANCEL' | 'LOCAL_SUBMIT' | 'LOCAL_OBSERVE' | 'LOCAL_OUTPUT_FETCH' | 'LOCAL_CANCEL';
+export type CapabilityOperation = 'ACCOUNT_STATUS' | 'MODEL_CATALOG' | 'ALLOWANCE_READ' | 'CLOUD_SUBMIT' | 'CLOUD_OBSERVE' | 'CLOUD_FOLLOW_UP' | 'CLOUD_OUTPUT_FETCH' | 'CLOUD_CANCEL_REQUEST' | 'CLOUD_CANCEL_ACK' | 'MODEL_APPLICATION' | 'EFFORT_APPLICATION' | 'ENVIRONMENT_IDENTITY' | 'DELEGATION_CONTROL' | 'TOOL_CONFINEMENT' | 'CLOUD_CANCEL' | 'LOCAL_SUBMIT' | 'LOCAL_OBSERVE' | 'LOCAL_OUTPUT_FETCH' | 'LOCAL_CANCEL' | 'LOCAL_RETIRE';
 /** The adapter route an observation was taken through. Two routes sharing a transport are not equivalent. */
 export type AdapterRoute = 'FAKE_ADAPTER' | 'OFFICIAL_TERMINAL_HANDOFF' | 'OFFICIAL_CLI_PTY' | 'LOCAL_MAILBOX' | 'LOCAL_CLI_EXEC' | 'LOCAL_ACP';
 /**

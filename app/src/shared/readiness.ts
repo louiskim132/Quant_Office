@@ -211,7 +211,7 @@ const LABEL: Record<CapabilityOperation, string> = {
   CLOUD_OUTPUT_FETCH: 'output retrieval', CLOUD_CANCEL_REQUEST: 'cancellation request', CLOUD_CANCEL_ACK: 'cancellation acknowledgement',
   MODEL_APPLICATION: 'applied model', EFFORT_APPLICATION: 'applied effort', ENVIRONMENT_IDENTITY: 'environment identity',
   DELEGATION_CONTROL: 'delegation control', TOOL_CONFINEMENT: 'tool, filesystem and network confinement', CLOUD_CANCEL: 'cancellation (legacy record)',
-  LOCAL_SUBMIT: 'local session submission', LOCAL_OBSERVE: 'local session observation', LOCAL_OUTPUT_FETCH: 'local output retrieval', LOCAL_CANCEL: 'local session cancellation',
+  LOCAL_SUBMIT: 'local session submission', LOCAL_OBSERVE: 'local session observation', LOCAL_OUTPUT_FETCH: 'local output retrieval', LOCAL_CANCEL: 'local session cancellation', LOCAL_RETIRE: 'local session retirement',
 };
 
 /**
