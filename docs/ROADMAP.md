@@ -3462,3 +3462,41 @@ confirmation only the user can supply. Combined verification
 at 260107a: typecheck clean, 651/652 unit (1 skipped:
 privileged symlink fixture), build clean. Remaining: P10
 final integration/retirement polish.
+
+2026-09-19 (organizer revision f4a14c1) — P10 final
+integration and retirement polish landed directly
+(organizer-owned). Retirement is now reachable end-to-end:
+controller.retireLocal gates on a terminal job, a READY
+binding and the flat layout, writes PACKET_ARCHIVE INTENT
+before the move and EXECUTED after, restores READY on a
+refused move and lands RECONCILE_REQUIRED when the move
+throws — a half-moved packet is never claimed either way.
+Provider archive is a separate outcome: it runs only through
+the injected lifecycle service with the exact record
+identity grouping discovery observed, journaled as
+PROVIDER_ARCHIVE with SUCCESS/UNSUPPORTED/REFUSED/UNKNOWN
+kept distinct from the packet outcome — devin rm is the only
+verb; claude/codex stay UNSUPPORTED and their history is
+never touched. The router's retire now forwards the persisted
+binding's storage path, so a bare externalId basename never
+picks the layout. Bound observe also persists
+providerSessionId (the discovered record key) so archive
+targets the provider's own identity. New IPC: office:
+local-launch-plan returns the bounded LocalLaunchPlan (packet
+dir, proven hash, manual steps — always a handoff, never an
+office-run session) and office:local-session-archive returns
+the schema-validated LocalArchiveResult with a fresh summary;
+both unused contracts are now live. dispatch.tsx renders the
+launch instructions, packet/provider archive status on the
+summary line, and a retire action for settled local jobs.
+Verification at f4a14c1: typecheck clean, 656/657 unit (1
+skipped: privileged symlink fixture), build clean; the five
+new orchestration tests cover archived/refused outcomes,
+provider UNSUPPORTED and BUSY journal rows, eligibility
+gates, and the launch plan's MANUAL_HANDOFF→UNSUPPORTED
+transition. No live-provider operations ran — the lifecycle
+runner is injected and faked in tests. Residual: the
+worktree lane stays registered-but-unselected — flat packets
+remain the only user-reachable layout until a user-level
+layout choice and a verified read-confinement path exist;
+the GUI-side grouping claims likewise stay UNKNOWN.
