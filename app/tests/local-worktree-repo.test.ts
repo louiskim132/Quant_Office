@@ -6,7 +6,7 @@ import { existsSync, mkdtempSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { removeTreeSync } from '../src/main/fsx';
-import { createWorktree, ensureRepo, listWorktrees, removeWorktreeRegistration } from '../src/main/local-worktree-repo';
+import { createWorktree, ensureRepo, listWorktrees, removeWorktreeRegistration, resolveHeadCommit } from '../src/main/local-worktree-repo';
 
 const git = (args: string[], cwd: string) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
 
@@ -33,7 +33,8 @@ test('ensureRepo creates a repo with one office-named initial commit and is idem
 
 test('createWorktree materializes a detached worktree registered with the project repo', async t => {
  const f = fixture(t);
- const dir = await createWorktree(f.reposRoot, f.projectId, 'session-alpha');
+ await ensureRepo(f.reposRoot, f.projectId);
+ const dir = await createWorktree(f.reposRoot, f.projectId, 'session-alpha', await resolveHeadCommit(f.repoDir));
  assert.equal(dir, path.join(f.repoDir, 'worktrees', 'session-alpha'));
  assert.ok(existsSync(dir));
  assert.ok(existsSync(path.join(dir, '.git')), 'a worktree directory carries its .git gitlink');
@@ -47,9 +48,41 @@ test('createWorktree materializes a detached worktree registered with the projec
  assert.equal(registered.head, git(['rev-parse', 'HEAD'], f.repoDir));
 });
 
+test('a worktree is pinned to the explicit seed commit and never follows a moved HEAD', async t => {
+ const f = fixture(t);
+ await ensureRepo(f.reposRoot, f.projectId);
+ const seed = await resolveHeadCommit(f.repoDir);
+ // Advance the repo's HEAD after the seed was recorded — the worktree must not drift to it.
+ git(['-c', 'user.email=office@localhost', '-c', 'user.name=Quant Research Office', 'commit', '--allow-empty', '-m', 'a later office commit'], f.repoDir);
+ const moved = git(['rev-parse', 'HEAD'], f.repoDir);
+ assert.notEqual(moved, seed, 'the repo HEAD genuinely moved');
+ const dir = await createWorktree(f.reposRoot, f.projectId, 'session-pinned', seed);
+ assert.equal(git(['rev-parse', 'HEAD'], dir), seed, 'the worktree HEAD is the recorded seed, not the moved HEAD');
+ const registered = (await listWorktrees(f.repoDir)).find(entry => entry.path === dir);
+ assert.equal(registered?.head, seed);
+});
+
+test('a malformed seed commit is refused before any repository or worktree exists', async t => {
+ const f = fixture(t);
+ for (const commit of ['', 'HEAD', 'main', 'abc123', 'g'.repeat(40), 'A'.repeat(40), 'a'.repeat(39), 'a'.repeat(41)])
+  await assert.rejects(createWorktree(f.reposRoot, f.projectId, 'session-x', commit), /not a full sha1 commit id/, JSON.stringify(commit));
+ assert.equal(existsSync(f.repoDir), false, 'validation ran before ensureRepo — nothing was initialized');
+});
+
+test('resolveHeadCommit names HEAD as a validated sha1 and refuses a repo without one', async t => {
+ const f = fixture(t);
+ await ensureRepo(f.reposRoot, f.projectId);
+ const head = await resolveHeadCommit(f.repoDir);
+ assert.match(head, /^[0-9a-f]{40}$/);
+ assert.equal(head, git(['rev-parse', 'HEAD'], f.repoDir));
+ const empty = path.join(f.root, 'unborn');
+ await assert.rejects(resolveHeadCommit(empty), /rev-parse --verify HEAD failed/);
+});
+
 test('removeWorktreeRegistration drops a moved-away worktree without touching its bytes', async t => {
  const f = fixture(t);
- const dir = await createWorktree(f.reposRoot, f.projectId, 'session-beta');
+ await ensureRepo(f.reposRoot, f.projectId);
+ const dir = await createWorktree(f.reposRoot, f.projectId, 'session-beta', await resolveHeadCommit(f.repoDir));
  const moved = path.join(f.root, 'moved-session-beta');
  renameSync(dir, moved);
  assert.ok((await listWorktrees(f.repoDir)).some(entry => entry.path === dir), 'the registration is stale while it still points at the old path');
@@ -61,7 +94,7 @@ test('removeWorktreeRegistration drops a moved-away worktree without touching it
 test('unsafe worktree names are refused before git ever runs', async t => {
  const f = fixture(t);
  for (const name of ['', '.', '..', '../escape', 'nested/name', 'back\\slash', 'trail ', 'con', 'mid:dle'])
-  await assert.rejects(createWorktree(f.reposRoot, f.projectId, name), /not a safe directory name/, JSON.stringify(name));
+  await assert.rejects(createWorktree(f.reposRoot, f.projectId, name, 'a'.repeat(40)), /not a safe directory name/, JSON.stringify(name));
  assert.equal(existsSync(f.repoDir), false, 'no repository was initialized and no worktree directory exists');
  // The project id becomes a path segment too, so it is held to the same rule.
  await assert.rejects(ensureRepo(f.reposRoot, '../escape'), /not a safe repository directory name/);

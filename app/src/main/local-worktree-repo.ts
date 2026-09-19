@@ -85,6 +85,21 @@ async function gitOrThrow(args: string[], cwd: string): Promise<string> {
  return result.out;
 }
 
+/** The office's project repos are sha1 — a seed is always a full 40-hex commit id. */
+const COMMIT_SHA = /^[0-9a-f]{40}$/;
+
+/**
+ * The repository's current HEAD as a validated commit id, for callers that must name a seed
+ * (the legacy unbound path, future binding creation). A repo with no HEAD fails the same way any
+ * git invocation here does; a HEAD that is not a 40-hex sha1 is reported rather than trusted —
+ * a sha256 repo or a corrupt answer is a defect, never a seed.
+ */
+export async function resolveHeadCommit(repoDir: string): Promise<string> {
+ const head = await gitOrThrow(['rev-parse', '--verify', 'HEAD'], repoDir);
+ if (!COMMIT_SHA.test(head)) throw new Error(`git rev-parse --verify HEAD answered ${JSON.stringify(head)} — not a full sha1 commit id.`);
+ return head;
+}
+
 /**
  * The project repo exists and carries at least one commit after this call. Idempotent: an
  * existing repo is left exactly as found, and a repo whose initial commit is somehow absent
@@ -104,15 +119,21 @@ export async function ensureRepo(reposRoot: string, projectId: string): Promise<
 /**
  * Adds one detached worktree of the project repo at `<reposRoot>/<projectId>/worktrees/<name>`
  * and returns its path. Detached HEAD on purpose: session worktrees are packet directories,
- * not lines of development, so no branch is ever created for them.
+ * not lines of development, so no branch is ever created for them. The seed commit is always
+ * named explicitly — a worktree that followed bare HEAD would silently drift (defect F08).
  */
-export async function createWorktree(reposRoot: string, projectId: string, name: string): Promise<string> {
+export async function createWorktree(reposRoot: string, projectId: string, name: string, commit: string): Promise<string> {
  // A name is refused before git ever runs: an unsafe segment could land outside the worktrees root.
  if (!safeSegment(name))
   throw new Error(`The session worktree name ${JSON.stringify(name)} is not a safe directory name.`);
+ // The seed commit is explicit and required (defect F08): a worktree created from bare HEAD
+ // silently follows whatever HEAD happens to be, so the caller names the recorded seed and this
+ // validates its shape before git ever runs. Refs, abbreviations and non-sha1 strings are refused.
+ if (!COMMIT_SHA.test(commit))
+  throw new Error(`The session worktree seed ${JSON.stringify(commit)} is not a full sha1 commit id — worktrees are pinned to explicit commits, never resolved here.`);
  const dir = await ensureRepo(reposRoot, projectId);
  const worktree = path.join(dir, WORKTREES_DIR, name);
- await gitOrThrow(['worktree', 'add', '--detach', worktree], dir);
+ await gitOrThrow(['worktree', 'add', '--detach', worktree, commit], dir);
  return worktree;
 }
 
