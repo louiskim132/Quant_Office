@@ -858,8 +858,11 @@ export class AssignmentController {
       this.noteLocalEvidence(job, adapter.cancelEvidence?.(job) ?? []);
       return this.store.snapshot({history:false});
     }
+    // The acknowledgement's provenance follows who actually answered: a hosted provider's reply is
+    // PROVIDER_REPORTED, but a local route's acknowledgement is the office's own sentinel write —
+    // recording that as provider testimony manufactures evidence (defect F02, legacy path).
     const acknowledged = this.store.recordJobTransition({ jobId: job.id, expectedRevision: job.revision, to: 'CANCEL_ACKNOWLEDGED',
-      evidence: 'PROVIDER_REPORTED', detail: result.detail, at: this.now() });
+      evidence: job.route.startsWith('LOCAL_') ? 'OFFICE_LOCAL' : 'PROVIDER_REPORTED', detail: result.detail, at: this.now() });
     this.noteLocalEvidence(job, adapter.cancelEvidence?.(job) ?? []);
     return acknowledged;
   }
