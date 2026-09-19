@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -11,11 +11,9 @@ import {
   discoverClaudeProject,
   discoverCodexRollouts,
   discoverDevinSessions,
-  retire,
-  retireClaudeProject,
-  retireCodexRollouts,
-  retireDevinSessions,
-  retireProviderRecords,
+  findClaudeProject,
+  findCodexRollout,
+  findDevinSessionRows,
 } from '../src/main/local-provider-records';
 
 function fixture(t: test.TestContext) {
@@ -76,23 +74,21 @@ test('claude discovery on an absent projects store reports empty, never throws',
   assert.equal(notes.length, 1);
 });
 
-test('claude retire removes only the derived project dir and reports per-record outcomes', t => {
+test('claude exact-key lookup matches the project dir by name only', t => {
   const f = fixture(t);
   const projectsRoot = path.join(f.root, '.claude', 'projects');
   const key = claudeProjectKey(f.packetDir);
   mkdirSync(path.join(projectsRoot, key, 'nested'), { recursive: true });
-  const decoy = path.join(projectsRoot, 'C--somewhere-else');
-  mkdirSync(decoy, { recursive: true });
-  writeFileSync(path.join(decoy, 'keep.jsonl'), '{}\n');
-  const outcome = retireClaudeProject(projectsRoot, f.packetDir);
-  assert.equal(outcome.found, 1);
-  assert.equal(outcome.removed, 1);
-  assert.match(outcome.detail.join('\n'), new RegExp(`removed Claude project ${key.replace(/-/g, '-')}`));
-  assert.equal(existsSync(path.join(projectsRoot, key)), false, 'the derived dir is gone');
-  assert.deepEqual(readdirSync(projectsRoot), ['C--somewhere-else'], 'nothing outside the derived key was touched');
-  const again = retireClaudeProject(projectsRoot, f.packetDir);
-  assert.equal(again.found, 0);
-  assert.equal(again.removed, 0);
+  mkdirSync(path.join(projectsRoot, 'C--somewhere-else'), { recursive: true });
+  const { records, notes } = findClaudeProject(projectsRoot, key);
+  assert.equal(records.length, 1);
+  assert.equal(records[0].id, key);
+  assert.equal(records[0].location, path.join(projectsRoot, key));
+  assert.deepEqual(notes, []);
+  // The project dir is still there: lookup is read-only.
+  assert.ok(existsSync(path.join(projectsRoot, key)));
+  assert.equal(findClaudeProject(projectsRoot, 'no-such-key').records.length, 0);
+  assert.equal(findClaudeProject(projectsRoot, '../escape').records.length, 0);
 });
 
 test('devin discovery reads sessions.db read-only and matches both separator forms', t => {
@@ -120,24 +116,20 @@ test('devin discovery on an absent or unopenable store reports honestly', t => {
   assert.equal(broken.notes.length, 1);
 });
 
-test('devin retire runs rm per matched id and a busy session is an honest refusal', async t => {
+test('devin exact-id lookup returns rows for that id only, read-only', t => {
   const f = fixture(t);
   const dbFile = sessionsDb(path.join(f.root, 'devin', 'cli'), [
     { id: 'mulberry-ferry', working_directory: f.packetDir, title: 'Mulberry Ferry' },
-    { id: 'busy-one', working_directory: f.packetDir, title: 'Busy' },
+    { id: 'other', working_directory: path.join(f.root, 'elsewhere'), title: 'Elsewhere' },
   ]);
-  const calls: string[] = [];
-  const outcome = await retireDevinSessions(dbFile, f.packetDir, async (id) => {
-    calls.push(id);
-    return id === 'busy-one'
-      ? { removed: false, detail: 'the session is open in another process' }
-      : { removed: true, detail: 'removed' };
-  });
-  assert.deepEqual(calls.sort(), ['busy-one', 'mulberry-ferry'], 'rm ran once per matched session id');
-  assert.equal(outcome.found, 2);
-  assert.equal(outcome.removed, 1);
-  assert.match(outcome.detail.join('\n'), /removed devin session mulberry-ferry/);
-  assert.match(outcome.detail.join('\n'), /kept devin session busy-one: the session is open in another process/);
+  const before = readFileSync(dbFile);
+  const { records, notes } = findDevinSessionRows(dbFile, 'mulberry-ferry');
+  assert.equal(records.length, 1);
+  assert.equal(records[0].id, 'mulberry-ferry');
+  assert.equal(records[0].detail, 'Mulberry Ferry');
+  assert.deepEqual(notes, []);
+  assert.deepEqual(readFileSync(dbFile), before, 'lookup never writes to sessions.db');
+  assert.equal(findDevinSessionRows(dbFile, 'mulb').records.length, 0, 'no prefix matching');
 });
 
 test('codex discovery matches rollouts by recorded cwd across sessions and archived_sessions', t => {
@@ -167,23 +159,19 @@ test('codex discovery reports unparseable rollouts and never guesses at them', t
   assert.match(notes.join('\n'), /rollout-bad\.jsonl carries no readable session cwd/);
 });
 
-test('codex retire removes exactly the matched rollout files', t => {
+test('codex exact-name lookup matches rollout file names only, across both record dirs', t => {
   const f = fixture(t);
   const codexRoot = path.join(f.root, '.codex');
-  const mine = path.join(codexRoot, 'sessions', '2026', '09', '18', 'rollout-mine.jsonl');
-  const other = path.join(codexRoot, 'sessions', '2026', '09', '18', 'rollout-other.jsonl');
-  const bad = path.join(codexRoot, 'sessions', '2026', '09', '18', 'rollout-bad.jsonl');
-  rollout(mine, f.packetDir);
+  const live = path.join(codexRoot, 'sessions', '2026', '09', '18', 'rollout-2026-09-18T10-00-00-aaaa.jsonl');
+  const other = path.join(codexRoot, 'sessions', '2026', '09', '18', 'rollout-2026-09-18T10-00-00-bbbb.jsonl');
+  rollout(live, f.packetDir);
   rollout(other, path.join(f.root, 'different', 'dir'));
-  mkdirSync(path.dirname(bad), { recursive: true });
-  writeFileSync(bad, 'unparseable\n');
-  const outcome = retireCodexRollouts(codexRoot, f.packetDir);
-  assert.equal(outcome.found, 1);
-  assert.equal(outcome.removed, 1);
-  assert.equal(existsSync(mine), false);
-  assert.ok(existsSync(other), 'an unmatched rollout is never touched');
-  assert.ok(existsSync(bad), 'an unparseable rollout is never touched');
-  assert.match(outcome.detail.join('\n'), /removed Codex rollout rollout-mine\.jsonl/);
+  const { records } = findCodexRollout(codexRoot, 'rollout-2026-09-18T10-00-00-aaaa.jsonl');
+  assert.equal(records.length, 1);
+  assert.equal(records[0].location, live);
+  assert.ok(existsSync(live), 'lookup is read-only');
+  assert.equal(findCodexRollout(codexRoot, 'rollout-2026-09-18T10-00-00-aaaa').records.length, 0, 'no partial-name matching');
+  assert.equal(findCodexRollout(codexRoot, '..\\rollout-x.jsonl').records.length, 0, 'a non-basename is refused');
 });
 
 test('the codex scan honors the file-count bound and says so', t => {
@@ -196,7 +184,7 @@ test('the codex scan honors the file-count bound and says so', t => {
   assert.match(notes.join('\n'), /stopped at the 1-file bound/);
 });
 
-test('the top level resolves roots from env and retires each provider through its own path', async t => {
+test('the top level resolves roots from env and discovers each provider through its own path', t => {
   const f = fixture(t);
   const home = path.join(f.root, 'home');
   const appdata = path.join(f.root, 'appdata');
@@ -204,36 +192,15 @@ test('the top level resolves roots from env and retires each provider through it
   // claude: fake projects store under the fake profile.
   const key = claudeProjectKey(f.packetDir);
   mkdirSync(path.join(home, '.claude', 'projects', key), { recursive: true });
-  // devin: fake sessions.db under the fake APPDATA, with an injected rm so no CLI runs.
+  // devin: fake sessions.db under the fake APPDATA.
   sessionsDb(path.join(appdata, 'devin', 'cli'), [{ id: 'mulberry-ferry', working_directory: f.packetDir }]);
   // codex: fake rollout under the fake CODEX_HOME.
-  const mine = path.join(codexHome, 'sessions', '2026', '09', '18', 'rollout-mine.jsonl');
-  rollout(mine, f.packetDir);
+  rollout(path.join(codexHome, 'sessions', '2026', '09', '18', 'rollout-mine.jsonl'), f.packetDir);
   const env = { USERPROFILE: home, APPDATA: appdata, CODEX_HOME: codexHome };
   assert.equal(discover(f.packetDir, 'claude', env).records.length, 1);
   assert.equal(discover(f.packetDir, 'devin', env).records.length, 1);
   assert.equal(discover(f.packetDir, 'openai', env).records.length, 1);
-  const claude = await retireProviderRecords({ provider: 'claude', packetDir: f.packetDir, env });
-  assert.equal(claude.removed, 1);
-  assert.equal(existsSync(path.join(home, '.claude', 'projects', key)), false);
-  const removed: string[] = [];
-  const devin = await retireProviderRecords({
-    provider: 'devin', packetDir: f.packetDir, env,
-    devinRm: async (id) => { removed.push(id); return { removed: true, detail: 'removed' }; },
-  });
-  assert.deepEqual(removed, ['mulberry-ferry']);
-  assert.equal(devin.removed, 1);
-  const codex = await retireProviderRecords({ provider: 'openai', packetDir: f.packetDir, env });
-  assert.equal(codex.removed, 1);
-  assert.equal(existsSync(mine), false);
-});
-
-test('a devin retire with no executable reports kept sessions instead of failing', async t => {
-  const f = fixture(t);
-  const appdata = path.join(f.root, 'appdata');
-  sessionsDb(path.join(appdata, 'devin', 'cli'), [{ id: 'mulberry-ferry', working_directory: f.packetDir }]);
-  const outcome = await retire(f.packetDir, 'devin', { env: { APPDATA: appdata, USERPROFILE: f.root, PATH: '' } });
-  assert.equal(outcome.found, 1);
-  assert.equal(outcome.removed, 0);
-  assert.match(outcome.detail.join('\n'), /kept devin session mulberry-ferry: devin\.exe could not be located/);
+  // Everything is still in place: discovery is a diagnostic read, never a removal.
+  assert.ok(existsSync(path.join(home, '.claude', 'projects', key)));
+  assert.ok(existsSync(path.join(codexHome, 'sessions', '2026', '09', '18', 'rollout-mine.jsonl')));
 });
