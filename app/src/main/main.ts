@@ -22,6 +22,8 @@ import { HoldoutCustody } from './holdout.js';
 import { OutputService } from './outputs.js';
 import { TerminalHandoffAdapter } from './handoff.js';
 import { LocalMailboxAdapter } from './local-session.js';
+import { LocalWorktreeMailboxAdapter } from './local-worktree-session.js';
+import { LocalSessionRouter } from './local-session-router.js';
 import { PtyCloudAdapter, transportModuleStatus } from './pty.js';
 import { probeCloudTransport } from './probe.js';
 import { currentConnection } from '../shared/readiness.js';
@@ -401,7 +403,12 @@ function buildController():AssignmentController{
  const workspace=()=>workspaceDirectory(app.getPath('userData'));
  const outputs=new OutputService(store,workspace());
  const handoff=new TerminalHandoffAdapter({executable:()=>subscriptions.toolPath('claude')});
- const mailbox=new LocalMailboxAdapter(()=>path.join(workspace(),'local-sessions'));
+ const flat=new LocalMailboxAdapter(()=>path.join(workspace(),'local-sessions'));
+ const tree=new LocalWorktreeMailboxAdapter(()=>path.join(workspace(),'local-repos'));
+ // LOCAL_MAILBOX resolves through the persisted binding router: the layout each job's record
+ // declares decides which adapter owns it, and pre-binding jobs take the named legacy rule —
+ // never registration-order luck (QO-LOCAL-REV §5.3).
+ const mailbox=new LocalSessionRouter(jobId=>store.localSessionForJob(jobId),{FLAT_PACKET:flat,PROJECT_WORKTREE:tree});
  return new AssignmentController(store,handoff,undefined,
   // Verification is scoped to the staging root this office owns, so a snapshot pointing anywhere
   // else is refused rather than verified in place.
