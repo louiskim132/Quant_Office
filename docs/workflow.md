@@ -147,9 +147,20 @@ Each step records only what the office itself did, as office-observed evidence:
 
 - Writing the packet records LOCAL_SUBMIT, TOOL_CONFINEMENT (the scoped workspace delivery) and DELEGATION_CONTROL (the packet carries the frozen single-agent payload; the mailbox has no delegation channel), and the job is left UNKNOWN awaiting a session — a written packet is not an acceptance, and the office does not record one it did not observe.
 - Reading a fully verified `result.json` records LOCAL_OBSERVE plus LOCAL_OUTPUT_FETCH for the verified output inventory, and records MODEL_APPLICATION, EFFORT_APPLICATION or DELEGATION_CONTROL only for the self-report fields the receipt actually declared — an absent field stays absent.
-- Cancellation writes a `cancel.requested` sentinel in the packet directory and records LOCAL_CANCEL once that sentinel is on disk: ending the session is a real cancellation of that local session, honestly labeled — it is not a provider cancellation acknowledgement, and no provider-side job exists to acknowledge.
+- Cancellation writes a `cancel.requested` sentinel in the packet directory and records LOCAL_CANCEL once that sentinel is on disk: the office's cancel request, honestly labeled — it is not a provider cancellation acknowledgement, no provider-side job exists to acknowledge, and the sentinel is a cooperative request the session may never see, not a termination guarantee.
 
 The recorded route and packet identity are the durable facts, so a restart cannot duplicate a dispatch.
+
+### Local session lifecycle — current state
+
+The mailbox is a manual handoff, and every lifecycle step below is office-local:
+
+- **Delivery waits for the user.** Writing the packet is the whole dispatch — the office does not spawn, poll or signal a session. The job sits UNKNOWN until the user launches the official tool against the packet directory and a verified receipt says otherwise.
+- **Cancellation is a request, not a termination guarantee.** `cancel.requested` is a sentinel file in the session's own directory — a cooperative signal the session may never see. LOCAL_CANCEL records that the office wrote the request; it does not attest that the session ended, and nothing forcibly stops the session process.
+- **Retire archives office bytes only.** The adapter's retire moves the packet directory under `archive/` by rename — every byte survives, and an absent or already-retired directory is reported rather than thrown. Nothing calls it automatically.
+- **Provider-side records are a separate store.** A packet's session can leave provider-side traces — Devin `sessions.db` rows, Claude project directories, Codex rollout files — that office archival does not touch. Office code can discover those records and retire them explicitly, but retirement is never automatic, and ordering it against evidence collection stays the caller's responsibility.
+
+Planned, not yet implemented: versioned packet/result contracts, lifecycle journalling, the office-side retire/archive IPC and worktree-lane adapter selection are in flight; nothing above should be read as describing them.
 
 ### What the request view shows
 
@@ -165,7 +176,7 @@ Local evidence is office-observed: the office itself wrote, spawned, read or ter
 
 - Scoped workspace delivery, recorded under TOOL_CONFINEMENT, is not enforced isolation, sandboxing or blinding.
 - A model, effort or delegation setting reported by a local session is self-report unless the tool's own output verifies it.
-- A local cancel ends that local session; it is not a provider acknowledgement.
+- A local cancel writes a request sentinel in the packet directory; it is not a provider acknowledgement and not a termination guarantee.
 - No usage or allowance accounting exists for local sessions; the Devin CLI reports no usage windows to this application.
 
 Because scoped delivery is not isolation, local agents are ineligible for blinded-review, holdout-custody and independently-verified-gate roles unless enforced isolation is separately verified. Label definitions: [evidence.md](evidence.md).
