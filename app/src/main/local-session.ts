@@ -2,42 +2,22 @@ import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import type { CapabilityEvidence, Effort, Provider, ProviderJob } from '../shared/types.js';
-import { parseStrictJson } from '../core/strict-json.js';
 import { efforts } from '../shared/effort.js';
+import type { LocalSessionRecord } from '../shared/local-session.js';
 import { MAX_FILE, safeEntry } from './artifacts.js';
+import { GuardedLocalFileIO, type LocalFileIO } from './local-session-files.js';
+import { AGENTS_FILE, CANCEL_FILE, CONTRACT_FILE, INPUTS_DIR, MAX_OUTPUTS, MAX_RESULT_BYTES, PACKET_FILE, RESULT_FILE, RESULT_OPTIONAL_KEYS, RESULT_REQUIRED_KEYS, RESULT_STATES, prepareLocalPacket, readLocalResult, readLocalResultV1 } from './local-packet.js';
 import type { ObserveResult, ProviderAdapter, SubmitContext, SubmitResult } from './controller.js';
 
-export const PACKET_FILE = 'packet.json';
-export const RESULT_FILE = 'result.json';
-export const CANCEL_FILE = 'cancel.requested';
-export const CONTRACT_FILE = 'CONTRACT.md';
-export const AGENTS_FILE = 'AGENTS.md';
-export const INPUTS_DIR = 'inputs';
+// The packet/receipt contract constants live in local-packet.ts with both readers; they are
+// re-exported here so existing consumers keep one import site.
+export { AGENTS_FILE, CANCEL_FILE, CONTRACT_FILE, INPUTS_DIR, PACKET_FILE, RESULT_FILE, RESULT_OPTIONAL_KEYS, RESULT_REQUIRED_KEYS, RESULT_STATES } from './local-packet.js';
+export type { LocalResult } from './local-packet.js';
 
-/** A receipt is a small record; a multi-megabyte one is a defect, not a result. */
-const MAX_RESULT_BYTES = 4 * 1024 * 1024;
-/** Mirrors the inventory cap the controller enforces on reported outputs. */
-const MAX_OUTPUTS = 256;
-/** The states a session may claim. UNKNOWN is the office's own reading of silence, never a claim. */
-export const RESULT_STATES = ['ACCEPTED', 'RUNNING', 'COMPLETED', 'FAILED'] as const;
-type ResultState = (typeof RESULT_STATES)[number];
 /** Session directories are single safe names under the sessions root — never paths, never traversal. */
 const SESSION_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,160}$/;
-/** The receipt keys every result must carry. */
-export const RESULT_REQUIRED_KEYS = ['state', 'detail', 'outputs'] as const;
-/** The only additions a result may carry: the session's own self-report, never inferred when absent. */
-export const RESULT_OPTIONAL_KEYS = ['appliedModel', 'appliedEffort', 'delegation'] as const;
 /** The recorded source of every observation this adapter produces. */
 const EVIDENCE_SOURCE = 'office-local-mailbox@1';
-
-/**
- * A verified session receipt. The optional fields are the session's own self-report: they are
- * present only when the receipt declared them, and the office never fills a silence with a guess.
- */
-export interface LocalResult {
-  state: ResultState; detail: string; outputs: { path: string; sha256: string; bytes: number }[];
-  appliedModel?: string; appliedEffort?: Effort; delegation?: boolean;
-}
 
 /** What a verified receipt's declared self-report becomes on the office's observation record. */
 interface AppliedReport { model?: string; effort?: Effort; delegation?: boolean }
@@ -123,7 +103,14 @@ export class LocalMailboxAdapter implements ProviderAdapter {
   // hash-verified result.json carry no provider semantics; the user runs whichever local CLI
   // on the directory. Evidence stays office-observed regardless of which provider the session used.
   readonly providers: readonly Provider[] = ['devin','claude','openai'];
-  constructor(private readonly sessionsRoot: () => string, private readonly now: () => string = () => new Date().toISOString()) {}
+  // What this adapter writes when a persisted binding is present: v2 packets with attempt binding.
+  // An unbound submit still writes the legacy v1 packet and can never produce a v2 binding.
+  readonly packetVersion = 2;
+  constructor(
+    private readonly sessionsRoot: () => string,
+    private readonly now: () => string = () => new Date().toISOString(),
+    private readonly io: LocalFileIO = new GuardedLocalFileIO(),
+  ) {}
 
   /** The recorded identity is a directory name only, so a stored job can never point outside the root. */
   private sessionDir(externalId: string): string | null {
@@ -133,6 +120,20 @@ export class LocalMailboxAdapter implements ProviderAdapter {
 
   async submit(context: SubmitContext): Promise<SubmitResult> {
     if (!context.snapshot.stagingPath) throw new Error('Prepare the request inputs before dispatching.');
+    if (context.localSession) {
+      // Bound path (QO-LOCAL-REV §6.2): the binding's storage path is the packet directory, and the
+      // whole write goes through the guarded I/O boundary. The caller persists the packet hash on
+      // the binding; this adapter only reports what it verified it wrote.
+      const binding = context.localSession;
+      const dir = path.resolve(this.sessionsRoot(), binding.storageRelativePath);
+      const prepared = prepareLocalPacket({ dir, context, binding, io: this.io, now: this.now() });
+      return {
+        externalId: path.basename(binding.storageRelativePath),
+        externalUrl: '',
+        detail: `Packet written to ${prepared.dir}. It awaits a local session you launch against that folder; the office reads ${RESULT_FILE} back when the session reports. Nothing has run yet.`,
+        localPacket: { packetHash: prepared.packetHash },
+      };
+    }
     const name = `session-${this.now().replace(/[^0-9A-Za-z]/g, '')}-${randomUUID()}`;
     const dir = path.join(this.sessionsRoot(), name);
     // Create the session directory before any input copy: a zero-input snapshot still gets
@@ -175,17 +176,41 @@ export class LocalMailboxAdapter implements ProviderAdapter {
     };
   }
 
-  async observe(job: ProviderJob): Promise<ObserveResult> {
+  async observe(job: ProviderJob, local?: LocalSessionRecord | null): Promise<ObserveResult> {
     const unknown = (detail: string): ObserveResult => ({ state: 'UNKNOWN', detail, provenance: 'OFFICE_LOCAL' });
-    const dir = job.externalId ? this.sessionDir(job.externalId) : null;
+    // A persisted binding names the packet directory by its storage path; a legacy job only has
+    // the recorded directory name. Neither is trusted as anything but a location.
+    const dir = local
+      ? path.resolve(this.sessionsRoot(), local.storageRelativePath)
+      : job.externalId ? this.sessionDir(job.externalId) : null;
     if (!dir) return unknown(job.externalId
       ? 'The recorded session identity is not a session directory name under the workspace sessions root; nothing has been heard from a local session.'
       : 'No session directory is recorded for this job.');
     if (!existsSync(dir)) return unknown('The session directory for this job is not present under the workspace sessions root — it may have been retired or removed externally; nothing has been heard from a local session.');
+    if (local?.packetVersion === 2) {
+      // The v2 reader proves the ready marker, the attempt binding, the sequence and every
+      // declared output byte before anything is reported. A v1-shaped receipt here is a defect.
+      const read = readLocalResult(dir, local, this.io);
+      if ('defect' in read) return unknown(read.defect);
+      const result = read.value.result;
+      const observed: ObserveResult & { applied?: AppliedReport } = {
+        state: result.state, detail: result.detail,
+        outputs: result.outputs.map(output => ({ path: output.path, sha256: output.sha256, bytes: output.bytes })),
+        provenance: 'PROVIDER_REPORTED',
+      };
+      if (result.applied) {
+        const applied: AppliedReport = {};
+        if (result.applied.model !== undefined) applied.model = result.applied.model;
+        if (result.applied.effort !== undefined) applied.effort = result.applied.effort;
+        if (result.applied.delegation !== undefined) applied.delegation = result.applied.delegation;
+        if (applied.model !== undefined || applied.effort !== undefined || applied.delegation !== undefined) observed.applied = applied;
+      }
+      return observed;
+    }
     const resultPath = path.join(dir, RESULT_FILE);
     if (!existsSync(resultPath))
       return unknown(`No ${RESULT_FILE} yet. The packet is still waiting for the user-launched local session to report.`);
-    const result = this.readResult(resultPath);
+    const result = readLocalResultV1(resultPath);
     if ('defect' in result) return unknown(result.defect);
     for (const output of result.value.outputs) {
       const target = path.join(dir, output.path);
@@ -210,59 +235,6 @@ export class LocalMailboxAdapter implements ProviderAdapter {
     if (result.value.delegation !== undefined) applied.delegation = result.value.delegation;
     if (applied.model !== undefined || applied.effort !== undefined || applied.delegation !== undefined) observed.applied = applied;
     return observed;
-  }
-
-  /** Strict shape validation: a malformed or over-sized result never becomes a reported outcome. */
-  private readResult(resultPath: string): { value: LocalResult } | { defect: string } {
-    const defect = (detail: string): { defect: string } => ({ defect: `${RESULT_FILE} cannot be trusted: ${detail}` });
-    let raw: unknown;
-    try {
-      const bytes = statSync(resultPath).size;
-      if (bytes > MAX_RESULT_BYTES) return defect(`it is ${bytes} bytes, over the ${MAX_RESULT_BYTES}-byte receipt limit.`);
-      raw = parseStrictJson(readFileSync(resultPath, 'utf8'));
-    } catch (error) {
-      return defect(`it is not valid JSON (${error instanceof Error ? error.message : 'unknown parse failure'}).`);
-    }
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return defect('it is not a JSON object.');
-    const record = raw as Record<string, unknown>;
-    const keys = Object.keys(record);
-    const allowed = [...RESULT_REQUIRED_KEYS, ...RESULT_OPTIONAL_KEYS] as readonly string[];
-    const extras = keys.filter(key => !allowed.includes(key));
-    if (extras.length || !RESULT_REQUIRED_KEYS.every(key => key in record))
-      return defect(`it must carry exactly state, detail and outputs (appliedModel, appliedEffort and delegation are the only permitted additions); found ${keys.sort().join(',') || 'no keys'}.`);
-    if (typeof record.state !== 'string' || !(RESULT_STATES as readonly string[]).includes(record.state))
-      return defect(`state ${JSON.stringify(record.state)} is not one of ${RESULT_STATES.join(', ')}.`);
-    if (typeof record.detail !== 'string' || record.detail.length > 4000) return defect('detail must be a string of at most 4000 characters.');
-    if (!Array.isArray(record.outputs) || record.outputs.length > MAX_OUTPUTS)
-      return defect(`outputs must be an array of at most ${MAX_OUTPUTS} declared files.`);
-    const outputs: LocalResult['outputs'] = [];
-    const seen = new Set<string>();
-    for (const item of record.outputs) {
-      if (!item || typeof item !== 'object' || Array.isArray(item)) return defect('an output entry is not an object.');
-      const output = item as Record<string, unknown>;
-      if (Object.keys(output).sort().join(',') !== 'bytes,path,sha256') return defect('an output entry must carry exactly path, sha256 and bytes.');
-      if (typeof output.path !== 'string' || !safeEntry(output.path)) return defect(`an output path is missing or unsafe: ${JSON.stringify(output.path)}.`);
-      if (typeof output.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(output.sha256)) return defect(`an output sha256 is not a lowercase hex digest: ${JSON.stringify(output.sha256)}.`);
-      if (typeof output.bytes !== 'number' || !Number.isSafeInteger(output.bytes) || output.bytes < 0 || output.bytes > MAX_FILE)
-        return defect(`an output byte count is out of range: ${JSON.stringify(output.bytes)}.`);
-      const key = output.path.toLowerCase();
-      if (seen.has(key)) return defect(`the output path ${output.path} is declared twice.`);
-      seen.add(key);
-      outputs.push({ path: output.path, sha256: output.sha256, bytes: output.bytes });
-    }
-    // Optional self-reports are validated like everything else: a malformed claim is a defect in
-    // the whole receipt, never a value to be silently dropped or carried anyway.
-    if ('appliedModel' in record && (typeof record.appliedModel !== 'string' || record.appliedModel.length > 160))
-      return defect('appliedModel must be a string of at most 160 characters.');
-    if ('appliedEffort' in record && (typeof record.appliedEffort !== 'string' || !(efforts as readonly string[]).includes(record.appliedEffort)))
-      return defect(`appliedEffort ${JSON.stringify(record.appliedEffort)} is not one of ${efforts.join(', ')}.`);
-    if ('delegation' in record && typeof record.delegation !== 'boolean')
-      return defect('delegation must be a boolean.');
-    const value: LocalResult = { state: record.state as ResultState, detail: record.detail, outputs };
-    if (typeof record.appliedModel === 'string') value.appliedModel = record.appliedModel;
-    if (typeof record.appliedEffort === 'string') value.appliedEffort = record.appliedEffort as Effort;
-    if (typeof record.delegation === 'boolean') value.delegation = record.delegation;
-    return { value };
   }
 
   async cancel(job: ProviderJob): Promise<{ acknowledged: boolean; detail: string }> {
@@ -307,9 +279,21 @@ export class LocalMailboxAdapter implements ProviderAdapter {
   }
 
   /** Reads one declared output back from the session directory; the caller re-verifies its identity. */
-  async fetch(job: ProviderJob, output: { path: string; sha256: string; bytes: number }): Promise<Uint8Array> {
-    const dir = job.externalId ? this.sessionDir(job.externalId) : null;
+  async fetch(job: ProviderJob, output: { path: string; sha256: string; bytes: number }, local?: LocalSessionRecord | null): Promise<Uint8Array> {
+    const dir = local
+      ? path.resolve(this.sessionsRoot(), local.storageRelativePath)
+      : job.externalId ? this.sessionDir(job.externalId) : null;
     if (!dir) throw new Error('No session directory is recorded for this job.');
+    if (local?.packetVersion === 2) {
+      // The guarded boundary re-proves the path is a real, contained file, and the declared
+      // sha256/bytes are re-verified against the bytes actually read before they are returned.
+      const file = this.io.read(dir, output.path, MAX_FILE);
+      if (file.byteLength !== output.bytes)
+        throw new Error(`The declared output ${output.path} is ${file.byteLength} bytes on disk, not the ${output.bytes} the receipt recorded.`);
+      if (file.sha256 !== output.sha256)
+        throw new Error(`The declared output ${output.path} hashes to ${file.sha256} on disk, not the ${output.sha256} the receipt recorded.`);
+      return file.bytes;
+    }
     return new Uint8Array(readFileSync(path.join(dir, output.path)));
   }
 
@@ -324,8 +308,10 @@ export class LocalMailboxAdapter implements ProviderAdapter {
    * describes is still on disk to point at. Model and effort are deliberately absent: the packet
    * declares what was requested, and nothing about what a session applied is known at submit time.
    */
-  submitEvidence(_context: SubmitContext, result: SubmitResult): CapabilityEvidence[] {
-    const dir = this.sessionDir(result.externalId);
+  submitEvidence(context: SubmitContext, result: SubmitResult): CapabilityEvidence[] {
+    const dir = context.localSession
+      ? path.resolve(this.sessionsRoot(), context.localSession.storageRelativePath)
+      : this.sessionDir(result.externalId);
     if (!dir || !existsSync(path.join(dir, PACKET_FILE))) return [];
     const scope = this.evidenceScope(this.now());
     return [

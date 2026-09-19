@@ -7,6 +7,8 @@ import path from 'node:path';
 import { removeTreeSync } from '../src/main/fsx';
 import { buildProviderPayload, type SubmitContext } from '../src/main/controller';
 import { AGENTS_FILE, CANCEL_FILE, CONTRACT_FILE, INPUTS_DIR, LocalMailboxAdapter, PACKET_FILE, RESULT_FILE, RESULT_OPTIONAL_KEYS, RESULT_REQUIRED_KEYS, RESULT_STATES } from '../src/main/local-session';
+import { CLAUDE_FILE, PACKET_HASH_FILE, PACKET_READY_FILE } from '../src/main/local-packet';
+import { localPacketV2Schema, type LocalSessionRecord } from '../src/shared/local-session';
 import type { Assignment, InputSnapshot, ProviderJob } from '../src/shared/types';
 
 const at = (minutes: number) => new Date(Date.UTC(2026, 8, 8, 10, 0, 0) + minutes * 60000).toISOString();
@@ -546,4 +548,135 @@ test('the confinement record names delivery scope honestly and still describes e
   // what was and wasn't restricted, which the honest record still satisfies.
   assert.ok([policy.tools, policy.filesystem, policy.network, policy.environment].every(field => field.trim()),
     'every confinement axis is described');
+});
+
+function boundFixture(t: test.TestContext, storageRelativePath = 'bound-session') {
+  const f = fixture(t);
+  mkdirSync(f.sessions, { recursive: true });
+  const binding: LocalSessionRecord = {
+    schemaVersion: 1, id: randomUUID(), jobId: f.context.jobId, assignmentId: f.assignment.id,
+    projectId: f.assignment.projectId, attemptId: randomUUID(), revision: 0,
+    provider: 'devin', surface: 'DEVIN_CLI', layout: 'FLAT_PACKET', packetVersion: 2,
+    packetHash: null, storageRelativePath, originalCwd: null,
+    repoRelativePath: null, seedCommit: null, worktreeOwner: 'NONE',
+    providerSessionId: null, providerProjectId: null, bindingEvidence: 'UNBOUND',
+    groupingStatus: 'UNKNOWN', requirement: 'SCOPED_DELIVERY', confinementStatus: 'UNVERIFIED',
+    confinementEvidenceId: null, lifecycle: 'READY', archiveRelativePath: null,
+    lastReceipt: null, cancelRequestId: null, stopStatus: 'NOT_REQUESTED',
+    createdAt: at(0), updatedAt: at(0),
+  };
+  const context: SubmitContext = { ...f.context, localSession: binding };
+  const dir = path.resolve(f.sessions, storageRelativePath);
+  return { ...f, binding, context, dir };
+}
+
+/** A well-formed v2 receipt for a bound fixture — callers override what they attack. */
+function v2Receipt(binding: LocalSessionRecord, overrides: Record<string, unknown> = {}) {
+  return {
+    schema: 'office-local-result@2', jobId: binding.jobId, assignmentId: binding.assignmentId,
+    attemptId: binding.attemptId, packetHash: binding.packetHash, sequence: 1,
+    state: 'COMPLETED', detail: 'Done.', outputs: [], ...overrides,
+  };
+}
+
+test('the adapter declares packet contract version 2 for bound submissions', async t => {
+  const f = fixture(t);
+  assert.equal(f.adapter.packetVersion, 2);
+});
+
+test('a bound submit writes a v2 packet under the binding storage path and reports its hash', async t => {
+  const f = boundFixture(t);
+  const result = await f.adapter.submit(f.context);
+  assert.equal(result.externalId, 'bound-session');
+  assert.ok(result.localPacket, 'a bound submit reports the verified packet hash');
+  const packet = localPacketV2Schema.parse(JSON.parse(readFileSync(path.join(f.dir, PACKET_FILE), 'utf8')));
+  assert.equal(packet.schema, 'office-local-session@2');
+  assert.equal(packet.jobId, f.binding.jobId);
+  assert.equal(packet.assignmentId, f.binding.assignmentId);
+  assert.equal(packet.attemptId, f.binding.attemptId);
+  assert.equal(packet.requestName, 'Tiny local task');
+  assert.deepEqual(packet.requested, { model: 'devin-local', effort: 'default', delegation: false });
+  assert.equal(packet.snapshotManifestHash, f.snapshot.manifestHash);
+  assert.ok(packet.files.every(file => file.path.startsWith(`${INPUTS_DIR}/`)));
+  // The reported hash is exactly the written packet.sha256, and the ready marker binds the attempt.
+  assert.equal(readFileSync(path.join(f.dir, PACKET_HASH_FILE), 'utf8').trim(), result.localPacket.packetHash);
+  const ready = JSON.parse(readFileSync(path.join(f.dir, PACKET_READY_FILE), 'utf8'));
+  assert.deepEqual(ready, { attemptId: f.binding.attemptId, packetHash: result.localPacket.packetHash });
+  assert.ok(existsSync(path.join(f.dir, CLAUDE_FILE)));
+  assert.match(result.detail, /awaits a local session/);
+});
+
+test('a nested binding storage path lands exactly where the record names it', async t => {
+  const f = boundFixture(t, 'nested/bound-session');
+  const result = await f.adapter.submit(f.context);
+  assert.equal(result.externalId, 'bound-session', 'the recorded identity is the directory basename');
+  assert.ok(existsSync(path.join(f.dir, PACKET_FILE)), 'the packet lives under sessions/nested/bound-session');
+  assert.equal(existsSync(path.join(f.sessions, 'bound-session')), false, 'no flat directory was created beside it');
+});
+
+test('observe on a v2 binding validates the receipt through the v2 reader', async t => {
+  const f = boundFixture(t);
+  const result = await f.adapter.submit(f.context);
+  const bound = { ...f.binding, packetHash: result.localPacket!.packetHash };
+  const output = { path: 'outputs/summary.txt', sha256: sha('done bytes'), bytes: Buffer.byteLength('done bytes') };
+  mkdirSync(path.join(f.dir, 'outputs'), { recursive: true });
+  writeFileSync(path.join(f.dir, 'outputs', 'summary.txt'), 'done bytes');
+  writeFileSync(path.join(f.dir, RESULT_FILE), JSON.stringify(v2Receipt(bound, {
+    outputs: [output], applied: { model: 'devin-local-9', effort: 'high', delegation: false },
+  })));
+  const observed = await f.adapter.observe(f.job(result.externalId), bound);
+  assert.equal(observed.state, 'COMPLETED');
+  assert.equal(observed.provenance, 'PROVIDER_REPORTED');
+  assert.deepEqual(observed.outputs, [output]);
+  assert.deepEqual((observed as { applied?: unknown }).applied, { model: 'devin-local-9', effort: 'high', delegation: false });
+});
+
+test('a v1-shaped receipt on a v2 binding is UNKNOWN, never a fallback', async t => {
+  const f = boundFixture(t);
+  const result = await f.adapter.submit(f.context);
+  const bound = { ...f.binding, packetHash: result.localPacket!.packetHash };
+  writeFileSync(path.join(f.dir, RESULT_FILE), JSON.stringify({ state: 'COMPLETED', detail: 'v1 shape', outputs: [] }));
+  const observed = await f.adapter.observe(f.job(result.externalId), bound);
+  assert.equal(observed.state, 'UNKNOWN');
+  assert.equal(observed.provenance, 'OFFICE_LOCAL');
+  assert.match(observed.detail, /office-local-result@2/);
+});
+
+test('a receipt bound to another attempt is refused even with matching output hashes', async t => {
+  const f = boundFixture(t);
+  const result = await f.adapter.submit(f.context);
+  const bound = { ...f.binding, packetHash: result.localPacket!.packetHash };
+  const output = { path: 'outputs/summary.txt', sha256: sha('done bytes'), bytes: Buffer.byteLength('done bytes') };
+  mkdirSync(path.join(f.dir, 'outputs'), { recursive: true });
+  writeFileSync(path.join(f.dir, 'outputs', 'summary.txt'), 'done bytes');
+  writeFileSync(path.join(f.dir, RESULT_FILE), JSON.stringify(v2Receipt(bound, { attemptId: randomUUID(), outputs: [output] })));
+  const observed = await f.adapter.observe(f.job(result.externalId), bound);
+  assert.equal(observed.state, 'UNKNOWN');
+  assert.match(observed.detail, /attemptId/);
+});
+
+test('a receipt that does not advance past the recorded last receipt is refused', async t => {
+  const f = boundFixture(t);
+  const result = await f.adapter.submit(f.context);
+  const bound = { ...f.binding, packetHash: result.localPacket!.packetHash, lastReceipt: { sequence: 1, hash: sha('first'), observedAt: at(0) } };
+  writeFileSync(path.join(f.dir, RESULT_FILE), JSON.stringify(v2Receipt(bound, { sequence: 1 })));
+  const observed = await f.adapter.observe(f.job(result.externalId), bound);
+  assert.equal(observed.state, 'UNKNOWN');
+  assert.match(observed.detail, /sequence/);
+  writeFileSync(path.join(f.dir, RESULT_FILE), JSON.stringify(v2Receipt(bound, { sequence: 2 })));
+  const advanced = await f.adapter.observe(f.job(result.externalId), bound);
+  assert.equal(advanced.state, 'COMPLETED');
+});
+
+test('fetch on a v2 binding returns the verified bytes and refuses drift', async t => {
+  const f = boundFixture(t);
+  const result = await f.adapter.submit(f.context);
+  const bound = { ...f.binding, packetHash: result.localPacket!.packetHash };
+  mkdirSync(path.join(f.dir, 'outputs'), { recursive: true });
+  writeFileSync(path.join(f.dir, 'outputs', 'summary.txt'), 'done bytes');
+  const job = f.job(result.externalId);
+  const output = { path: 'outputs/summary.txt', sha256: sha('done bytes'), bytes: Buffer.byteLength('done bytes') };
+  assert.equal(Buffer.from(await f.adapter.fetch!(job, output, bound)).toString(), 'done bytes');
+  await assert.rejects(f.adapter.fetch!(job, { ...output, bytes: 999 }, bound), /bytes/);
+  await assert.rejects(f.adapter.fetch!(job, { ...output, sha256: sha('forged') }, bound), /hashes to/);
 });
