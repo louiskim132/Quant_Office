@@ -103,8 +103,12 @@ export interface ProviderAdapter {
   /** The packet contract version a local adapter writes; the binding records it at preparation. */
   readonly packetVersion?: 1 | 2;
   submit(context: SubmitContext): Promise<SubmitResult>;
-  observe(job: ProviderJob): Promise<ObserveResult>;
-  cancel(job: ProviderJob): Promise<{ acknowledged: boolean; detail: string }>;
+  /**
+   * `local` carries the resolved delivery binding on local routes so the adapter can enforce the
+   * bound packet version, attempt identity and storage path. Hosted adapters ignore it.
+   */
+  observe(job: ProviderJob, local?: LocalSessionRecord | null): Promise<ObserveResult>;
+  cancel(job: ProviderJob, local?: LocalSessionRecord | null): Promise<{ acknowledged: boolean; detail: string }>;
   /**
    * Office-observed evidence from a completed local operation. Only local-route adapters implement
    * these; what they return is the office's own testimony about work it performed — the caller
@@ -115,7 +119,7 @@ export interface ProviderAdapter {
   observeEvidence?(job: ProviderJob, result: ObserveResult): CapabilityEvidence[];
   cancelEvidence?(job: ProviderJob): CapabilityEvidence[];
   /** Reads bytes for an output this route verifies itself, when the office has no fetcher for it. */
-  fetch?(job: ProviderJob, output: { path: string; sha256: string; bytes: number }): Promise<Uint8Array>;
+  fetch?(job: ProviderJob, output: { path: string; sha256: string; bytes: number }, local?: LocalSessionRecord | null): Promise<Uint8Array>;
 }
 
 /** Everything one external action needs, gathered and validated together by `launchGuard`. */
