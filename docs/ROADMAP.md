@@ -3311,3 +3311,35 @@ P1's guarded I/O), then P3 cancellation, P4 worktree
 hardening, P6 lifecycle orchestration; P7/P8 organizer-owned
 routing + UI wiring; F06 applied-dedup ordering rides the P8
 structured query.
+
+2026-09-19 (round local-rev-2) — worker-1 (fda1865) delivered
+P2 packet/result v2. New local-packet.ts exports
+prepareLocalPacket (v2 directory written entirely through the
+LocalFileIO boundary: root inspection, ancestor-verified
+allocation, residue refusal for result.json/cancel.*/ready
+markers, manifest re-verified inputs/ copies, instruction
+files, packet.json validated against localPacketV2Schema,
+packet.sha256 = canonicalHash(packet), packet.ready.json
+written last), readLocalResult (ready-marker identity,
+strict office-local-result@2, four-field binding equality —
+cross-attempt refused even with matching output hashes,
+advancing sequence with the prior receipt named, per-output
+guarded reads with per-file and aggregate caps returning
+verified bytes) and readLocalResultV1 (the legacy reader
+moved verbatim). CLAUDE.md is now a regular file whose first
+line is the @AGENTS.md include (F13); CONTRACT.md documents
+the v2 receipt and the cancel-ack@1 wire for P3.
+LocalMailboxAdapter: packetVersion=2, bound submit consumes
+context.localSession and returns SubmitResult.localPacket
+.packetHash, unbound submits keep the byte-identical v1
+path, observe/fetch branch on the bound packetVersion.
+Organizer integration: the router now forwards the resolved
+binding through observe/cancel/fetch (58a5c57) so the bound
+packet version actually reaches the readers. Remaining
+organizer wiring before v2 goes live: controller creates the
+LocalSessionRecord in the dispatch intent transaction and
+persists packetHash + READY on submit success (P6). Combined
+verification at 58a5c57: typecheck clean, 623/624 unit (1
+skipped: privileged symlink fixture), build clean. Round 3
+per spec section 14: P3 cancel request/ack + P4 pinned-seed
+worktree hardening, both now unblocked.
