@@ -86,6 +86,12 @@ export interface ObserveResult {
    * — a local record the caller persists as stop status, never a provider acknowledgement.
    */
   cancelAck?: { requestId: string; outcome: 'STOPPED'; detail: string };
+  /**
+   * The identity of a receipt the local adapter verified this observation — its declared sequence
+   * and the sha256 of the bytes as read. The caller persists it as the binding's lastReceipt so a
+   * replayed or rewound receipt is refused next time. Hosted adapters never set it.
+   */
+  receipt?: { sequence: number; hash: string };
 }
 
 /** Fetches the bytes an output claims to be, so a deliverable is never certified by a hash alone. */
