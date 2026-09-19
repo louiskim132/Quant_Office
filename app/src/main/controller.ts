@@ -80,6 +80,12 @@ export interface ObserveResult {
    * what the office asked for. Absent keys mean the tool said nothing; they are never inferred.
    */
   applied?: { model?: string; effort?: Effort; delegation?: boolean };
+  /**
+   * A validated cooperative-stop acknowledgement the session wrote for the recorded cancel
+   * request. Present only when the bytes satisfied the ack contract and bound the exact request
+   * — a local record the caller persists as stop status, never a provider acknowledgement.
+   */
+  cancelAck?: { requestId: string; outcome: 'STOPPED'; detail: string };
 }
 
 /** Fetches the bytes an output claims to be, so a deliverable is never certified by a hash alone. */
@@ -108,7 +114,12 @@ export interface ProviderAdapter {
    * bound packet version, attempt identity and storage path. Hosted adapters ignore it.
    */
   observe(job: ProviderJob, local?: LocalSessionRecord | null): Promise<ObserveResult>;
-  cancel(job: ProviderJob, local?: LocalSessionRecord | null): Promise<{ acknowledged: boolean; detail: string }>;
+  /**
+   * Requests cooperative cancellation. `acknowledged` means the office delivered the request —
+   * never that anything stopped. `requestId` names the request the office wrote so the caller can
+   * persist it on the binding; an absent or mismatched acknowledgement later is its own state.
+   */
+  cancel(job: ProviderJob, local?: LocalSessionRecord | null): Promise<{ acknowledged: boolean; detail: string; requestId?: string }>;
   /**
    * Office-observed evidence from a completed local operation. Only local-route adapters implement
    * these; what they return is the office's own testimony about work it performed — the caller
