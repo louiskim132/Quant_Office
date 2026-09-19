@@ -9,6 +9,7 @@ import type { LocalSessionRecord } from '../shared/local-session.js';
 import { agentDispatchReadiness, currentConnection, effectiveEvidence, latestCapability, scopeMismatches, supplyingSnapshotIds, type RequestedScope } from '../shared/readiness.js';
 import { dependencyStatus } from '../shared/cooperation.js';
 import { verifySnapshotForTransfer, type OutputDestination } from './locations.js';
+import { localRequirementFor } from './local-lane.js';
 import { safeEntry, MAX_FILE } from './artifacts.js';
 import { pipelineStageBlocker, type FrozenResearchSpec } from '../shared/research.js';
 import { stageContextHash } from '../shared/pipeline.js';
@@ -501,13 +502,19 @@ export class AssignmentController {
     this.prepareOutputs?.(assignment, staged);
     ({ state, frozen, connection, now } = context);
     let job = this.job(assignmentId);
+    const adapter = this.adapterFor({ route: assignment.route });
+    // A local route submits only through a persisted delivery binding: the record is the durable
+    // intent the router requires, written before the job says SUBMITTING so a refused
+    // classification or an un-retryable binding leaves the job honestly undispatched.
+    const attempt = localRoute ? this.prepareLocalSession({ assignment, agent, adapter, job }) : null;
     this.store.recordJobTransition({ jobId: job.id, expectedRevision: job.revision, to: 'SUBMITTING', evidence: 'OFFICE_LOCAL', detail: `Submitting through ${assignment.route}.`, at: this.now() });
     job = this.job(assignmentId);
-    const adapter = this.adapterFor({ route: assignment.route });
     const submitContext: SubmitContext = { assignment, snapshot: staged, objective: frozen.objective, requestName: frozen.requestName, payload: this.providerPayload(assignment), jobId: job.id };
+    if (attempt) submitContext.localSession = attempt.binding;
     try {
       const result = await adapter.submit(submitContext);
       if (!result.externalId) throw new UnknownDispatchError('The provider returned no identifier for this submission.');
+      if (attempt) this.settleLocalPreparation(attempt, 'READY', result.localPacket?.packetHash ?? null, null);
       // A local transport delivers into a mailbox the office owns; nothing has run or been accepted
       // yet, so the honest record is the office's submission awaiting a session — never ACCEPTED.
       const submitted = localRoute
@@ -524,6 +531,7 @@ export class AssignmentController {
       return submitted;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'The dispatch failed for an unknown reason.';
+      if (attempt) this.settleLocalPreparation(attempt, 'PREPARATION_FAILED', null, `Dispatch outcome unknown: ${message}`);
       // Any failure after the call started leaves the provider's view unknown, never "not submitted".
       return this.store.recordJobTransition({ jobId: job.id, expectedRevision: job.revision, to: 'UNKNOWN', evidence: 'OFFICE_LOCAL',
         detail: `Dispatch outcome unknown: ${message} The office will not resubmit automatically.`, at: this.now() });
@@ -584,13 +592,17 @@ export class AssignmentController {
     this.prepareOutputs?.(assignment, staged);
     const frozen = context.frozen;
     let job = this.job(assignmentId);
-    this.store.recordJobTransition({ jobId: job.id, expectedRevision: job.revision, to: 'SUBMITTING', evidence: 'OFFICE_LOCAL', detail: 'Opening the official terminal for a manual submission.', at: this.now() });
-    job = this.job(assignmentId);
     const adapter = this.adapterFor({ route: assignment.route });
     const localRoute = assignment.route.startsWith('LOCAL_');
+    // Same durable-intent rule as dispatch: the persisted binding goes with the submission.
+    const attempt = localRoute ? this.prepareLocalSession({ assignment, agent: context.agent, adapter, job }) : null;
+    this.store.recordJobTransition({ jobId: job.id, expectedRevision: job.revision, to: 'SUBMITTING', evidence: 'OFFICE_LOCAL', detail: 'Opening the official terminal for a manual submission.', at: this.now() });
+    job = this.job(assignmentId);
     const submitContext: SubmitContext = { assignment, snapshot: staged, objective: frozen.objective, requestName: frozen.requestName, payload: this.providerPayload(assignment), jobId: job.id };
+    if (attempt) submitContext.localSession = attempt.binding;
     try {
       const result = await adapter.submit(submitContext);
+      if (attempt) this.settleLocalPreparation(attempt, 'READY', result.localPacket?.packetHash ?? null, null);
       // For a local transport the office knows the session identity it created; recording it keeps
       // observation and cancellation pointed at the packet directory that actually exists.
       const opened = this.store.recordJobTransition({ jobId: job.id, expectedRevision: job.revision, to: 'UNKNOWN', evidence: 'OFFICE_LOCAL',
@@ -599,6 +611,7 @@ export class AssignmentController {
       return opened;
     } catch (error) {
       const failure = error instanceof Error ? error.message : 'unknown launcher failure';
+      if (attempt) this.settleLocalPreparation(attempt, 'PREPARATION_FAILED', null, failure);
       // The failure class follows where the launcher ran. A local route fails writing the session
       // packet on this machine — the provider never saw the attempt, so naming it would send the
       // user to the wrong place. Only a hosted-route failure points at the provider.
@@ -616,6 +629,105 @@ export class AssignmentController {
     return this.store.recordUserReportedLink({ jobId: job.id, expectedRevision: job.revision, externalId, externalUrl, at: this.now() });
   }
 
+  /**
+   * Prepares the durable local-session binding a local route submits against (QO-LOCAL-REV §10).
+   *
+   * The assignment's confinement requirement is classified before anything is persisted: a
+   * requirement with no permitted layout refuses loudly, and scoped delivery selects the flat
+   * packet lane — the worktree lane is never silently selected; it becomes reachable only when a
+   * user-level layout choice exists. The record lands PREPARING as durable intent before the job
+   * claims SUBMITTING, so a refused classification or an un-retryable existing binding leaves the
+   * job honestly undispatched. Hosted routes never reach this helper.
+   */
+  private prepareLocalSession(input: { assignment: Assignment; agent: Agent; adapter: ProviderAdapter; job: ProviderJob }): { binding: LocalSessionRecord; operationId: string } {
+    const { assignment, agent, adapter, job } = input;
+    const decision = localRequirementFor(assignment);
+    if (!decision.allowed)
+      throw new Error(`This assignment cannot be delivered to a local session: ${decision.reason}`);
+    if (decision.requirement === 'READ_CONFINEMENT_REQUIRED')
+      throw new Error(decision.detail);
+    const operationId = randomUUID();
+    const mint = () => `session-${this.now().replace(/[^0-9A-Za-z]/g, '')}-${randomUUID()}`;
+    const existing = this.store.localSessionForJob(job.id);
+    if (!existing) {
+      const binding = this.store.createLocalSession({
+        schemaVersion: 1, jobId: job.id, assignmentId: assignment.id, projectId: assignment.projectId,
+        attemptId: randomUUID(), provider: agent.provider, surface: 'UNKNOWN', layout: 'FLAT_PACKET',
+        packetVersion: adapter.packetVersion ?? 1, packetHash: null, storageRelativePath: mint(),
+        originalCwd: null, repoRelativePath: null, seedCommit: null, providerSessionId: null,
+        providerProjectId: null, confinementEvidenceId: null, archiveRelativePath: null,
+        worktreeOwner: 'NONE', bindingEvidence: 'UNBOUND', groupingStatus: 'UNKNOWN',
+        requirement: decision.requirement, confinementStatus: 'UNVERIFIED', lastReceipt: null,
+        cancelRequestId: null, stopStatus: 'NOT_REQUESTED', lifecycle: 'PREPARING',
+      });
+      this.store.appendLocalJournal({ operationId, localSessionId: binding.id, jobId: job.id, kind: 'PREPARE', phase: 'INTENT',
+        expectedRevision: binding.revision, source: null, destination: binding.storageRelativePath, outcome: 'NONE', failureDetail: null });
+      return { binding, operationId };
+    }
+    if (existing.lifecycle === 'PREPARATION_FAILED') {
+      // The declared re-attempt edge: a fresh attempt in a fresh directory. The failed attempt's
+      // residue is never touched — its receipts and cancel records die on attemptId mismatch, so
+      // attempt-scoped state resets and the new attempt's first receipt starts at sequence 1.
+      const { revision: _revision, updatedAt: _updatedAt, ...rest } = existing;
+      const binding = this.store.updateLocalSession({
+        localSessionId: existing.id, expectedRevision: existing.revision,
+        next: { ...rest, lifecycle: 'PREPARING', attemptId: randomUUID(), storageRelativePath: mint(),
+          packetHash: null, lastReceipt: null, cancelRequestId: null, stopStatus: 'NOT_REQUESTED' },
+      });
+      this.store.appendLocalJournal({ operationId, localSessionId: binding.id, jobId: job.id, kind: 'PREPARE', phase: 'INTENT',
+        expectedRevision: binding.revision, source: null, destination: binding.storageRelativePath, outcome: 'NONE', failureDetail: null });
+      return { binding, operationId };
+    }
+    throw new Error(`This job already has a local-session binding in ${existing.lifecycle}; reconcile it before dispatching again — the office never silently rebinds.`);
+  }
+
+  /**
+   * Records what submit actually did to a bound delivery. A returned packet hash is the adapter's
+   * proof it wrote a versioned (v2) packet — the record then carries the proven contract, not only
+   * the adapter's declaration — and a thrown submit fails the preparation. The CAS only ever acts
+   * on the PREPARING record this attempt observed; a binding that already moved belongs to
+   * reconciliation and is never overwritten by a dispatch finishing late.
+   */
+  private settleLocalPreparation(attempt: { binding: LocalSessionRecord; operationId: string }, outcome: 'READY' | 'PREPARATION_FAILED', packetHash: string | null, failureDetail: string | null): void {
+    const current = this.store.localSessionForJob(attempt.binding.jobId);
+    if (!current || current.id !== attempt.binding.id || current.lifecycle !== 'PREPARING') return;
+    try {
+      const { revision: _revision, updatedAt: _updatedAt, ...rest } = current;
+      const next = this.store.updateLocalSession({
+        localSessionId: current.id, expectedRevision: current.revision,
+        next: outcome === 'READY'
+          ? { ...rest, lifecycle: 'READY', packetHash, packetVersion: packetHash ? 2 : current.packetVersion }
+          : { ...rest, lifecycle: 'PREPARATION_FAILED' },
+      });
+      this.store.appendLocalJournal({
+        operationId: attempt.operationId, localSessionId: next.id, jobId: next.jobId, kind: 'PREPARE',
+        phase: outcome === 'READY' ? 'VERIFIED' : 'FAILED', expectedRevision: next.revision,
+        source: null, destination: current.storageRelativePath, outcome: outcome === 'READY' ? 'SUCCESS' : 'UNKNOWN',
+        failureDetail: failureDetail === null ? null : failureDetail.slice(0, 2000),
+      });
+    } catch {
+      // A record that already moved belongs to reconciliation, not to this dispatch.
+    }
+  }
+
+  /**
+   * Persists what a bound local observation verified: a receipt's sequence and read-hash become
+   * the binding's lastReceipt — the next receipt must advance past it — and a validated cancel
+   * acknowledgement marks the stop status SESSION_REPORTED_STOPPED, the session's own word that it
+   * stopped. These are same-lifecycle metadata updates through the store's CAS; the job's own
+   * observation handling is unchanged.
+   */
+  private recordLocalObservation(job: ProviderJob, result: ObserveResult): void {
+    if (!result.receipt && !result.cancelAck) return;
+    const binding = this.store.localSessionForJob(job.id);
+    if (!binding) return;
+    const { revision: _revision, updatedAt: _updatedAt, ...rest } = binding;
+    const next = { ...rest };
+    if (result.receipt) next.lastReceipt = { sequence: result.receipt.sequence, hash: result.receipt.hash, observedAt: this.now() };
+    if (result.cancelAck) next.stopStatus = 'SESSION_REPORTED_STOPPED';
+    this.store.updateLocalSession({ localSessionId: binding.id, expectedRevision: binding.revision, next });
+  }
+
   /** Records what the provider currently reports, including its visible events. */
   async observe(assignmentId: string): Promise<AppState> {
     let job = this.job(assignmentId);
@@ -623,6 +735,7 @@ export class AssignmentController {
     const adapter = this.adapterFor({ route: job.route });
     const result = await adapter.observe(job);
     if (result.events?.length) this.store.recordJobEvents(job.id, result.events);
+    this.recordLocalObservation(job, result);
     job = this.job(assignmentId);
     if (isTerminalJob(job.state)) return this.store.snapshot({history:false});
     // An adapter that cannot observe anything is describing its own limits, not reporting what the
@@ -717,9 +830,32 @@ export class AssignmentController {
     }
     const adapter = this.adapterFor({ route: job.route });
     const result = await adapter.cancel(job);
+    const binding = this.store.localSessionForJob(job.id);
     if (!result.acknowledged) {
+      if (binding) this.store.appendLocalJournal({
+        operationId: randomUUID(), localSessionId: binding.id, jobId: job.id, kind: 'CANCEL_REQUEST',
+        phase: 'EXECUTED', expectedRevision: binding.revision, source: null, destination: null,
+        outcome: 'REFUSED', failureDetail: result.detail.slice(0, 2000),
+      });
       this.store.recordJobEvents(job.id, [{ externalId: `cancel-attempt:${job.revision}`, cursor: '', kind: 'STATUS',
         text: `Cancellation not acknowledged: ${result.detail}`, occurredAt: this.now(), receivedAt: this.now(), evidence: 'OFFICE_LOCAL' }]);
+      return this.store.snapshot({history:false});
+    }
+    if (binding && result.requestId) {
+      // A cooperative cancel request was delivered into the packet — persist which request and
+      // that a request is now outstanding. The job stays CANCEL_REQUESTED: delivering a request
+      // is not a stopped session, and the session's own acknowledgement arrives through observe().
+      const { revision: _r, updatedAt: _u, ...rest } = binding;
+      const requested = this.store.updateLocalSession({
+        localSessionId: binding.id, expectedRevision: binding.revision,
+        next: { ...rest, cancelRequestId: result.requestId, stopStatus: 'REQUESTED' },
+      });
+      this.store.appendLocalJournal({
+        operationId: randomUUID(), localSessionId: requested.id, jobId: job.id, kind: 'CANCEL_REQUEST',
+        phase: 'EXECUTED', expectedRevision: requested.revision, source: null, destination: null,
+        outcome: 'SUCCESS', failureDetail: null,
+      });
+      this.noteLocalEvidence(job, adapter.cancelEvidence?.(job) ?? []);
       return this.store.snapshot({history:false});
     }
     const acknowledged = this.store.recordJobTransition({ jobId: job.id, expectedRevision: job.revision, to: 'CANCEL_ACKNOWLEDGED',

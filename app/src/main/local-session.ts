@@ -214,6 +214,9 @@ export class LocalMailboxAdapter implements ProviderAdapter {
         if (applied.model !== undefined || applied.effort !== undefined || applied.delegation !== undefined) observed.applied = applied;
       }
       if (ack.ack) observed.cancelAck = ack.ack;
+      // The verified receipt's identity rides to the caller — the binding persists it as
+      // lastReceipt so a replayed or rewound receipt is refused on the next observation.
+      observed.receipt = { sequence: result.sequence, hash: read.value.receiptHash };
       return observed;
     }
     const resultPath = path.join(dir, RESULT_FILE);
