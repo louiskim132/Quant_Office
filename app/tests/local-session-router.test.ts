@@ -32,20 +32,29 @@ const binding = (jobId: string, layout: LocalSessionRecord['layout']): LocalSess
 class Stub implements ProviderAdapter {
   readonly route = 'LOCAL_MAILBOX' as const;
   observed: ProviderJob[] = [];
+  observedLocal: (LocalSessionRecord | null | undefined)[] = [];
+  cancelledLocal: (LocalSessionRecord | null | undefined)[] = [];
+  fetchedLocal: (LocalSessionRecord | null | undefined)[] = [];
   constructor(private tag: string, private result: SubmitResult | null = null) {}
   async submit(_ctx: SubmitContext): Promise<SubmitResult> { return this.result ?? { externalId: this.tag, externalUrl: '', detail: `${this.tag} wrote the packet` }; }
-  async observe(j: ProviderJob) { this.observed.push(j); return { state: 'RUNNING' as const, detail: `${this.tag} observing` }; }
-  async cancel() { return { acknowledged: true, detail: `${this.tag} cancelled` }; }
+  async observe(j: ProviderJob, local?: LocalSessionRecord | null) { this.observed.push(j); this.observedLocal.push(local); return { state: 'RUNNING' as const, detail: `${this.tag} observing` }; }
+  async cancel(_j: ProviderJob, local?: LocalSessionRecord | null) { this.cancelledLocal.push(local); return { acknowledged: true, detail: `${this.tag} cancelled` }; }
+  async fetch(_j: ProviderJob, _o: { path: string; sha256: string; bytes: number }, local?: LocalSessionRecord | null) { this.fetchedLocal.push(local); return new Uint8Array(0); }
 }
 
 test('a bound job routes every operation to its recorded layout, never the other one', async () => {
   const flat = new Stub('flat'), tree = new Stub('worktree');
   const j = job();
-  const router = new LocalSessionRouter(id => id === j.id ? binding(id, 'PROJECT_WORKTREE') : null, { FLAT_PACKET: flat, PROJECT_WORKTREE: tree });
+  const bound = binding(j.id, 'PROJECT_WORKTREE');
+  const router = new LocalSessionRouter(id => id === j.id ? bound : null, { FLAT_PACKET: flat, PROJECT_WORKTREE: tree });
   const observed = await router.observe(j);
   assert.equal(observed.detail, 'worktree observing');
   assert.deepEqual(flat.observed, [], 'the flat adapter must not touch a worktree-bound job');
+  assert.deepEqual(tree.observedLocal, [bound], 'the resolved binding must ride with the job');
   await router.cancel(j);
+  assert.deepEqual(tree.cancelledLocal, [bound]);
+  await router.fetch(j, { path: 'outputs/a.txt', sha256: 'a'.repeat(64), bytes: 1 });
+  assert.deepEqual(tree.fetchedLocal, [bound], 'fetch validates bytes against the bound storage path');
 });
 
 test('an unbound legacy job resolves to the flat adapter with the rule named in the observation', async () => {
@@ -54,6 +63,7 @@ test('an unbound legacy job resolves to the flat adapter with the rule named in 
   const observed = await router.observe(job());
   assert.match(observed.detail, /legacy binding.*flat packet/i);
   assert.equal(tree.observed.length, 0);
+  assert.deepEqual(flat.observedLocal, [null], 'a legacy job arrives explicitly unbound');
 });
 
 test('submit without a binding refuses rather than guessing a layout', async () => {

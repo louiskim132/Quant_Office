@@ -49,12 +49,17 @@ export class LocalSessionRouter implements ProviderAdapter {
 
   async observe(job: ProviderJob): Promise<ObserveResult> {
     const { adapter, binding } = this.resolve(job);
-    const result = await adapter.observe(job);
+    // The resolved binding goes with the job: the bound packet version, attempt identity and
+    // storage path are what the receipt is validated against — never the receipt's own claims.
+    const result = await adapter.observe(job, binding);
     if (!binding) return { ...result, detail: `[legacy binding: no local-session record — resolved as flat packet by rule, reconcile to bind] ${result.detail}` };
     return result;
   }
 
-  async cancel(job: ProviderJob) { return this.resolve(job).adapter.cancel(job); }
+  async cancel(job: ProviderJob) {
+    const { adapter, binding } = this.resolve(job);
+    return adapter.cancel(job, binding);
+  }
 
   submitEvidence(context: SubmitContext, result: SubmitResult) {
     return (context.localSession ? this.adapters[context.localSession.layout] : this.adapters.FLAT_PACKET).submitEvidence?.(context, result) ?? [];
@@ -63,9 +68,9 @@ export class LocalSessionRouter implements ProviderAdapter {
   cancelEvidence(job: ProviderJob) { return this.resolve(job).adapter.cancelEvidence?.(job) ?? []; }
 
   async fetch(job: ProviderJob, output: { path: string; sha256: string; bytes: number }) {
-    const { adapter } = this.resolve(job);
+    const { adapter, binding } = this.resolve(job);
     if (!adapter.fetch) throw new Error('This layout carries no fetch operation.');
-    return adapter.fetch(job, output);
+    return adapter.fetch(job, output, binding);
   }
 
   /**
