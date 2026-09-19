@@ -1,22 +1,24 @@
-import { execFile } from 'node:child_process';
-import { closeSync, existsSync, openSync, readSync, readdirSync, rmSync, type Dirent } from 'node:fs';
+import { closeSync, existsSync, openSync, readSync, readdirSync, type Dirent } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import path from 'node:path';
 import type { Provider } from '../shared/types.js';
 
 /**
- * Provider-side session records for local mailbox packets.
+ * Provider-side session records for local mailbox packets — READ-ONLY diagnostics.
  *
  * Three stores track the same work and never propagate deletes: the office database, the packet
- * directory under the workspace sessions root, and the provider's own session records. Removing a
- * packet leaves the provider record behind; this module maps a packet directory to those records
- * (discover) and removes exactly them (retire).
+ * directory under the workspace sessions root, and the provider's own session records. Retiring a
+ * packet leaves the provider record behind; this module maps a packet directory or an exact
+ * provider identity to those records. Nothing here removes provider bytes — supported lifecycle
+ * operations (devin's `devin rm <id> --force`, the only per-session archive verb the installed
+ * CLIs carry) live in local-provider-lifecycle.ts. Claude project dirs and Codex rollout files are
+ * never deleted by this codebase: no supported per-session removal exists for them, and raw file
+ * deletion is exactly defects F01/F10.
  *
  * Verified record locations on this machine:
  * - Devin CLI/Desktop sessions: %APPDATA%\devin\cli\sessions.db, table `sessions` with
  *   id, working_directory, backend_type, model, agent_mode, created_at, last_activity_at, title.
- *   `devin rm <id> --force` removes a row but refuses while the session is open in another process;
- *   that refusal is reported, never retried around. The DB is opened read-only — never written.
+ *   The DB is opened read-only — never written.
  * - Claude Code projects: %USERPROFILE%\.claude\projects\<key>\ where <key> is derived from the
  *   recorded working directory — see claudeProjectKey. The transform is inferred from observed key
  *   names and is documented as such.
@@ -24,9 +26,7 @@ import type { Provider } from '../shared/types.js';
  *   (and already-archived ones under %USERPROFILE%\.codex\archived_sessions\). A rollout's opening
  *   lines carry session metadata including cwd; matching means scanning each file's first chunk.
  *
- * Removal is explicit-only: nothing here is invoked automatically, and evidence ordering is the
- * caller's job (organizer wires retire after evidence is recorded). Absent stores and missing
- * tools report empty or honest failures — they never throw.
+ * Absent stores and missing tools report empty or honest failures — they never throw.
  */
 
 export interface ProviderRecord {
@@ -42,12 +42,6 @@ export interface ProviderRecord {
 
 /** What a discovery pass found, plus anything it could see but not honestly classify. */
 export interface Discovery { records: ProviderRecord[]; notes: string[] }
-
-/** The retire contract: how many bound records existed, how many were removed, and per-record outcomes. */
-export interface RetireOutcome { found: number; removed: number; detail: string[] }
-
-/** How `devin rm <id> --force` is reached; injectable so tests never spawn a real CLI. */
-export type DevinRm = (id: string) => Promise<{ removed: boolean; detail: string }>;
 
 const msg = (error: unknown): string => error instanceof Error ? error.message : 'unknown error';
 /** Absolute, separator-stable, case-insensitive comparison key for recorded working directories. */
@@ -180,16 +174,64 @@ export function discoverCodexRollouts(codexRoot: string, packetDir: string, boun
   return { records, notes };
 }
 
-/** `devin rm <id> --force` against the resolved official executable; the refusal text rides home. */
-export function createDevinRm(executable: string): DevinRm {
-  return (id) => new Promise((resolve) => {
-    execFile(executable, ['rm', id, '--force'], { timeout: 30000, windowsHide: true, maxBuffer: 256 * 1024 },
-      (error, stdout, stderr) => {
-        if (!error) { resolve({ removed: true, detail: String(stdout).trim().slice(0, 400) || 'devin rm reported success' }); return; }
-        const report = [stderr, stdout, error.message].map(text => String(text ?? '').trim()).find(text => text) ?? 'unknown failure';
-        resolve({ removed: false, detail: report.slice(0, 400) });
-      });
-  });
+/**
+ * sessions.db rows whose id equals the session id exactly — never prefix- or substring-matched.
+ * More than one row means a corrupt or unexpected store; the caller must report ambiguity rather
+ * than pick one. Read-only — this file is never written.
+ */
+export function findDevinSessionRows(sessionsDbPath: string, sessionId: string): Discovery {
+  if (!existsSync(sessionsDbPath)) return { records: [], notes: [`No Devin sessions store at ${sessionsDbPath}.`] };
+  let db: DatabaseSync;
+  try { db = new DatabaseSync(sessionsDbPath, { readOnly: true }); }
+  catch (error) { return { records: [], notes: [`The Devin sessions store could not be opened read-only: ${msg(error)}`] }; }
+  try {
+    const rows = db.prepare('SELECT id, title, working_directory FROM sessions WHERE id = ?')
+      .all(sessionId) as { id: string; title: string; working_directory: string }[];
+    return {
+      records: rows.map(row => ({ provider: 'devin', kind: 'devin-session', id: row.id, detail: row.title ?? '', location: sessionsDbPath })),
+      notes: [],
+    };
+  } catch (error) {
+    return { records: [], notes: [`The Devin sessions store could not be read: ${msg(error)}`] };
+  } finally { db.close(); }
+}
+
+/** The .claude/projects directory whose name equals the given key exactly — no derivation here. */
+export function findClaudeProject(projectsRoot: string, projectKey: string): Discovery {
+  if (!existsSync(projectsRoot)) return { records: [], notes: [`No Claude Code projects store at ${projectsRoot}.`] };
+  if (!projectKey || projectKey === '.' || projectKey === '..' || projectKey.includes('/') || projectKey.includes('\\'))
+    return { records: [], notes: [`The project key ${JSON.stringify(projectKey)} is not a safe directory name; nothing was matched.`] };
+  let entries: string[];
+  try { entries = readdirSync(projectsRoot); }
+  catch (error) { return { records: [], notes: [`The Claude Code projects store could not be listed: ${msg(error)}`] }; }
+  const matched = entries.filter(entry => entry.toLowerCase() === projectKey.toLowerCase());
+  return {
+    records: matched.map(entry => ({ provider: 'claude', kind: 'claude-project', id: entry, detail: entry, location: path.join(projectsRoot, entry) })),
+    notes: [],
+  };
+}
+
+/** Rollout files under sessions/ and archived_sessions/ whose file name equals the given name exactly. */
+export function findCodexRollout(codexRoot: string, fileName: string, bounds: { maxFiles?: number } = {}): Discovery {
+  const maxFiles = bounds.maxFiles ?? MAX_ROLLOUT_FILES;
+  const notes: string[] = [];
+  if (!fileName || fileName !== path.basename(fileName) || !ROLLOUT_FILE.test(fileName))
+    return { records: [], notes: [`${JSON.stringify(fileName)} is not a rollout file name; nothing was matched.`] };
+  const files: string[] = [];
+  for (const sub of CODEX_RECORD_DIRS) {
+    if (files.length >= maxFiles) break;
+    const base = path.join(codexRoot, sub);
+    if (existsSync(base)) collectRollouts(base, 0, files, maxFiles);
+  }
+  if (!existsSync(codexRoot)) notes.push(`No Codex sessions store at ${codexRoot}.`);
+  else if (files.length >= maxFiles) notes.push(`The rollout scan stopped at the ${maxFiles}-file bound; files beyond it were not inspected.`);
+  const wanted = fileName.toLowerCase();
+  return {
+    records: files
+      .filter(file => path.basename(file).toLowerCase() === wanted)
+      .map(file => ({ provider: 'openai', kind: 'codex-rollout', id: path.basename(file), detail: file, location: file })),
+    notes,
+  };
 }
 
 /**
@@ -202,46 +244,6 @@ export function resolveDevinExecutable(env: NodeJS.ProcessEnv = process.env): st
   if (env.USERPROFILE) candidates.push(path.join(env.USERPROFILE, '.local', 'bin', name));
   if (env.LOCALAPPDATA) candidates.push(path.join(env.LOCALAPPDATA, 'Programs', 'Devin', name));
   return candidates.find(candidate => existsSync(candidate)) ?? null;
-}
-
-export async function retireDevinSessions(sessionsDbPath: string, packetDir: string, rm: DevinRm): Promise<RetireOutcome> {
-  const { records, notes } = discoverDevinSessions(sessionsDbPath, packetDir);
-  const detail = [...notes];
-  let removed = 0;
-  for (const record of records) {
-    const outcome = await rm(record.id);
-    if (outcome.removed) { removed++; detail.push(`removed devin session ${record.id}${record.detail ? ` (${record.detail})` : ''}`); }
-    else detail.push(`kept devin session ${record.id}: ${outcome.detail}`);
-  }
-  return { found: records.length, removed, detail };
-}
-
-export function retireClaudeProject(projectsRoot: string, packetDir: string): RetireOutcome {
-  const { records, notes } = discoverClaudeProject(projectsRoot, packetDir);
-  const detail = [...notes];
-  let removed = 0;
-  for (const record of records) {
-    try {
-      rmSync(record.location, { recursive: true, force: true });
-      removed++;
-      detail.push(`removed Claude project ${record.id}`);
-    } catch (error) { detail.push(`kept Claude project ${record.id}: ${msg(error)}`); }
-  }
-  return { found: records.length, removed, detail };
-}
-
-export function retireCodexRollouts(codexRoot: string, packetDir: string, bounds: { maxFiles?: number; headBytes?: number } = {}): RetireOutcome {
-  const { records, notes } = discoverCodexRollouts(codexRoot, packetDir, bounds);
-  const detail = [...notes];
-  let removed = 0;
-  for (const record of records) {
-    try {
-      rmSync(record.location);
-      removed++;
-      detail.push(`removed Codex rollout ${record.id}`);
-    } catch (error) { detail.push(`kept Codex rollout ${record.id}: ${msg(error)}`); }
-  }
-  return { found: records.length, removed, detail };
 }
 
 /** The real per-provider record roots, resolved from the user's environment. */
@@ -262,40 +264,4 @@ export function discover(packetDir: string, provider: Provider, env: NodeJS.Proc
     case 'claude': return roots.claudeProjects ? discoverClaudeProject(roots.claudeProjects, packetDir) : { records: [], notes: ['No user profile directory is set; the Claude Code projects store cannot be located.'] };
     case 'openai': return roots.codexHome ? discoverCodexRollouts(roots.codexHome, packetDir) : { records: [], notes: ['No user profile directory is set; the Codex sessions store cannot be located.'] };
   }
-}
-
-/**
- * Removes the provider-side records bound to a packet dir and reports per-record outcomes.
- * Explicit-only: the caller decides when removal is justified and records evidence first.
- */
-export async function retire(packetDir: string, provider: Provider, options: { env?: NodeJS.ProcessEnv; devinRm?: DevinRm } = {}): Promise<RetireOutcome> {
-  const env = options.env ?? process.env;
-  const roots = providerRecordRoots(env);
-  switch (provider) {
-    case 'devin': {
-      if (!roots.sessionsDb) return { found: 0, removed: 0, detail: ['No APPDATA is set; the Devin sessions store cannot be located.'] };
-      const rm = options.devinRm ?? (() => {
-        const executable = resolveDevinExecutable(env);
-        return executable ? createDevinRm(executable) : undefined;
-      })();
-      if (!rm) {
-        const { records, notes } = discoverDevinSessions(roots.sessionsDb, packetDir);
-        return { found: records.length, removed: 0, detail: [...notes, ...records.map(record => `kept devin session ${record.id}: devin.exe could not be located`)] };
-      }
-      return retireDevinSessions(roots.sessionsDb, packetDir, rm);
-    }
-    case 'claude': {
-      if (!roots.claudeProjects) return { found: 0, removed: 0, detail: ['No user profile directory is set; the Claude Code projects store cannot be located.'] };
-      return retireClaudeProject(roots.claudeProjects, packetDir);
-    }
-    case 'openai': {
-      if (!roots.codexHome) return { found: 0, removed: 0, detail: ['No user profile directory is set; the Codex sessions store cannot be located.'] };
-      return retireCodexRollouts(roots.codexHome, packetDir);
-    }
-  }
-}
-
-/** The call the organizer wires: resolve real roots from env and remove exactly the bound records. */
-export async function retireProviderRecords(input: { provider: Provider; packetDir: string; env?: NodeJS.ProcessEnv; devinRm?: DevinRm }): Promise<RetireOutcome> {
-  return retire(input.packetDir, input.provider, { env: input.env, devinRm: input.devinRm });
 }
