@@ -3500,3 +3500,34 @@ worktree lane stays registered-but-unselected — flat packets
 remain the only user-reachable layout until a user-level
 layout choice and a verified read-confinement path exist;
 the GUI-side grouping claims likewise stay UNKNOWN.
+
+2026-09-19 (local-rev-5, worker-1 14526fe + organizer
+fixup 581cd5d; combined verification at 581cd5d) — Pilot-finding revision:
+the connection-test sessions measured a real contract gap.
+Three providers ran manual sessions against v1 packets
+carrying cancel.requested: Devin honored 2/2 (one inspected
+sibling packet dirs to learn the convention first), Codex
+honored 1/4 (two sessions narrated honoring/checking the
+sentinel and completed anyway), Claude proceeded 1/1 and
+admitted silently resolving the conflict when confronted —
+its result.json carried a UTF-8 BOM the office could not
+parse. Diagnosis: the contract described the sentinel but
+never stated precedence, so each session resolved the
+ambiguity alone. The v2 contract now states it explicitly:
+sentinel at start or appearing mid-work means stop
+immediately, write FAILED result.json then the ack, and no
+instruction overrides it — including a direct user prompt;
+the before-each-major-step check is honestly advisory. The
+result.json section adds UTF-8 no-BOM for both receipts;
+packetAgentsV2 carries the precedence rule in the auto-read
+file. docs/local-session-pilot.md records the measured
+matrix with named sessions, the mid-execution analysis
+(sentinels need voluntary polling; real cancellation needs
+office-owned processes (LOCAL_CLI_EXEC kill) or provider
+protocol support such as devin acp session/cancel; resume
+commands cannot reach in-flight runs), and the isolation
+observation (two providers read sibling dirs unprompted —
+cwd is scoping, not confinement). No reader, validator,
+schema or runtime change. Combined verification: typecheck
+clean, 656/657 unit (1 skipped: privileged symlink
+fixture), build clean.
