@@ -52,13 +52,28 @@ Tool versions observed: claude `2.1.273`, codex `0.154.0`, devin `3000.10.21 (61
 
 ## Devin (`devin.exe 3000.10.21`)
 
-- `devin -p` was proven in the earlier session probes (`--respect-workspace-trust false`
-  required — help confirms print mode cannot show the trust prompt and fails untrusted
-  dirs without it); sessions register in `sessions.db`; `devin list --format json` and
-  `-r` resumption verified.
+- `devin -p` runs unattended once the environment is scrubbed (see the ACP-masking
+  note below): `--respect-workspace-trust false` is required (help confirms print mode
+  cannot show the trust prompt and fails untrusted dirs without it). Sessions register
+  in `sessions.db`; `devin list --format json` and `-r` resumption verified.
 - `--model <MODEL>` exists on the top-level command. `--permission-mode` accepts
-  `auto | accept-edits | smart | dangerous`; `auto` only auto-approves read-only tools,
-  so contract writes need `accept-edits` or stronger.
+  `auto | accept-edits | smart | dangerous`. **Observed ladder**: default `auto` and
+  `accept-edits` both got the write tool call rejected ("requires confirmation… use
+  --permission-mode dangerous to auto-approve all tools"); only `dangerous` let the
+  session write `outputs/probe.txt` + `result.json`. The contract leg therefore needs
+  `--permission-mode dangerous` — record it verbatim in launch evidence.
+- With `dangerous`: the real-packet run **passed `readLocalResult` end-to-end** —
+  COMPLETED, sequence 1, bound IDs, output hash/bytes verified, UTF-8 no BOM, and an
+  `applied` self-report of `{model:"swe-2-max", delegation:false}` matching the
+  `--model swe-2-max` launch flag (partial launch-arg verification observed working).
+- **ACP-masking trap (measured live, 2026-09-20)**: any shell spawned under an ACP host
+  carries `ACP_BACKEND` (e.g. `windsurf`), and the devin CLI then ignores
+  `credentials.toml` entirely — `auth status` and `-p` both report "Not logged in."
+  `env -u ACP_BACKEND devin auth status` → "Logged in (via Devin)" with the same file,
+  same instant. The credential was never expired; an earlier probe misread this as an
+  auth failure. `subscriptionEnvironment()` already scrubs `ACP_*` for office-spawned
+  children — the office is unaffected; **probe shells must scrub `ACP_*` the same way**,
+  and every future probe claim about devin auth must name its env.
 - **`devin acp` is a real ACP stdio server.** `initialize` returns capabilities:
   `sessionCapabilities: {list, delete, additionalDirectories}`, `loadSession: true`,
   `promptCapabilities: {image, embeddedContext}`, `mcpCapabilities: {http: false,
@@ -79,18 +94,9 @@ Tool versions observed: claude `2.1.273`, codex `0.154.0`, devin `3000.10.21 (61
   untagged enum; the probe's shape was rejected at deserialization for missing the
   variant fields, e.g. `env`). Whether per-session MCP config actually applies is
   unverifiable until past the auth gate.
-- **Blocker found during this probe**: the stored credential at
-  `%APPDATA%\devin\credentials.toml` (Sep 12, `windsurf_api_key`) is rejected —
-  `devin auth status` reports "Not logged in." `devin -p` therefore fails today with
-  "Not logged in." The Devin contract-adherence leg is **unproven** until the user
-  re-authenticates (`devin auth login`) and the run is repeated.
-- **Auth split-brain observed**: `devin auth login` reports "already logged in" (the
-  browser/IDE session is live) while `auth status` and `-p` read the on-disk credential
-  and still report "Not logged in" — the file's mtime never advanced past Sep 12, so the
-  login path did not persist a CLI-readable credential. The deterministic unblock is
-  `devin auth login --force-manual-token-flow` (paste a token), or complete the browser
-  PKCE redirect so the credential file is actually rewritten; `auth status` flipping to
-  logged-in is the verification.
+- Superseded diagnosis, kept for the record: an earlier read blamed an expired
+  `credentials.toml`. Disproven — the Sep 12 file is valid; `ACP_BACKEND` in the probe
+  shell masked it (see the ACP-masking note above). No re-auth was ever needed.
 
 ## Authoritative verdict
 
@@ -98,8 +104,9 @@ Tool versions observed: claude `2.1.273`, codex `0.154.0`, devin `3000.10.21 (61
 |---|---|---|---|---|---|---|
 | claude | yes (`-p`, needs `--dangerously-skip-permissions`) | yes | VALIDATED (COMPLETED) | `~/.claude/projects/<cwd-key>/` | `--resume <id>` | kill PID + sentinel |
 | codex | yes (`exec -s workspace-write`, spawn-cwd) | yes | VALIDATED (COMPLETED) | `~/.codex/sessions/…/rollout-*.jsonl` | `exec resume [--last]` | kill PID + sentinel |
-| devin | proven earlier; currently blocked — credential expired | unproven | unproven | `sessions.db` + `list --format json` | `-r <id>` | kill PID + sentinel; ACP `session/cancel` notification exists |
+| devin | yes (`-p`, needs `--respect-workspace-trust false` + `--permission-mode dangerous`; env must be `ACP_*`-scrubbed) | yes | VALIDATED (COMPLETED, applied.model=swe-2-max) | `sessions.db` + `list --format json` | `-r <id>` | kill PID + sentinel; ACP `session/cancel` notification exists |
 
 Unproven and not claimed: codex read confinement outside the workspace on Windows;
-devin contract adherence and model-flag effect; mid-run session-id extraction for
-claude (end-of-run JSON and registration-dir discovery are the working surfaces).
+mid-run session-id extraction for claude (end-of-run JSON and registration-dir
+discovery are the working surfaces); devin `smart` permission mode (skipped — `dangerous`
+was reached first and is the documented full-auto level).
