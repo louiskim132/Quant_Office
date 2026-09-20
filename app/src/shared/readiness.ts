@@ -329,13 +329,17 @@ export function agentBinding(state: Records, agent: Pick<Agent, 'provider' | 'ac
  * The full gate one profile must pass before any external dispatch: an available binding, a fresh
  * account check, and verified transport evidence for the exact model this profile would use.
  */
-export function agentDispatchReadiness(state: Records, agent: Pick<Agent, 'provider' | 'model' | 'effort' | 'account' | 'setupAccount' | 'connectionId' | 'bindingVerifiedAt' | 'removedAt' | 'execution'>, options: Options = {}) {
+export function agentDispatchReadiness(state: Records, agent: Pick<Agent, 'provider' | 'model' | 'effort' | 'account' | 'setupAccount' | 'connectionId' | 'bindingVerifiedAt' | 'removedAt' | 'execution' | 'localRoute'>, options: Options = {}) {
   const binding = agentBinding(state, agent);
   // The profile's own effort is part of what would actually be requested, so readiness answers for
   // it rather than for an unspecified one. Route and delegation come from the caller when known.
   // The execution environment picks the dispatch family: LOCAL agents are gated on office-observed
-  // local transport evidence, never silently on the hosted family.
-  const readiness = providerReadiness(state, agent.provider, { ...options, execution: agent.execution ?? 'HOSTED_SETUP_REQUIRED', model: agent.model, effort: options.effort ?? agent.effort ?? 'default' });
+  // local transport evidence, never silently on the hosted family. A local profile's declared
+  // localRoute scopes that evidence to the exact transport — mailbox runs do not verify exec and
+  // exec runs do not verify mailbox.
+  const readiness = providerReadiness(state, agent.provider, { ...options,
+    route: agent.execution === 'LOCAL' ? (agent.localRoute ?? 'LOCAL_MAILBOX') : options.route,
+    execution: agent.execution ?? 'HOSTED_SETUP_REQUIRED', model: agent.model, effort: options.effort ?? agent.effort ?? 'default' });
   return {
     binding, readiness,
     canPrepare: !agent.removedAt,

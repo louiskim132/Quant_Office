@@ -19,7 +19,7 @@ export type ExecutionEnvironment = 'HOSTED_SETUP_REQUIRED' | 'LOCAL';
 /** What a session may access; navigation profiles (e.g. a Serena-backed index) ride this field later. */
 export type ToolProfile = 'STANDARD' | 'CODE_NAV';
 export type Effort = 'default' | 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
-export interface AgentDraft { name: string; provider: Provider; model: string; team: string; role: Role; instructions: string; effort?: Effort; execution?: ExecutionEnvironment; toolProfile?: ToolProfile; }
+export interface AgentDraft { name: string; provider: Provider; model: string; team: string; role: Role; instructions: string; effort?: Effort; execution?: ExecutionEnvironment; toolProfile?: ToolProfile; /** Which local adapter serves a LOCAL profile: the manual mailbox packet or the office-spawned CLI run. Absent means mailbox. */ localRoute?: 'LOCAL_MAILBOX' | 'LOCAL_CLI_EXEC'; }
 /** `account` is the identity this profile was created for. `connectionId` is set only by an explicit, verified binding. */
 /**
  * `account` is the identity this profile is bound to now; `setupAccount` is the identity it was
