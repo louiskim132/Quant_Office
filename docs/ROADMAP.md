@@ -3531,3 +3531,42 @@ cwd is scoping, not confinement). No reader, validator,
 schema or runtime change. Combined verification: typecheck
 clean, 656/657 unit (1 skipped: privileged symlink
 fixture), build clean.
+
+2026-09-20 (pilot-rev-1, organizer 4db8c81 + worker-1
+95216ef + organizer fixup abb01a6; combined verification at
+abb01a6) — Multi-provider pilot UX revision: the relay
+pilot proved evidence the UI could not show. requestQueue
+now derives `settled` from recorded provider jobs — every
+job at a terminal outcome (COMPLETED, FAILED,
+CANCEL_ACKNOWLEDGED) counts as finished work, not a success
+claim — so the Completed tab and counts are live instead of
+dead by construction; an unresolved attempt keeps the row
+active and a canceled request with an unresolved job stays
+in view for reconciliation. dispatch.tsx pins the selection
+to the just-actioned job, so Observe results, applied
+reports, the requested-vs-applied mismatch banner, the
+local-session summary and launch/retire controls stay
+reachable after a job settles. projects.tsx replaces the
+row's settings gear with a FolderOpen action calling the
+existing office:project-open-folder IPC (honest errors for
+missing/unconfigured folders); the inline location panel is
+removed from the list and configuration stays on the detail
+page. queue.tsx badges settled request rows Completed.
+main.tsx opens the request dialog whenever a non-archived,
+non-removed project exists — the dialog's own project
+select defaults to a valid project — and reserves
+project-creation for the zero-projects state; the fixup
+applies the same gate to the WorkQueue onNew prop, the
+call site the packet had mislabeled. desktop.e2e.ts covers
+the folder control, the no-selection New request path and
+the dialog default, and repairs a stale bridge-keys
+allowlist for the P8–P10 IPC additions. Deferred, not
+silently folded in: LOCAL_CLI_EXEC probes (claude/codex
+headless, sandbox read-confinement, devin acp
+session/cancel and per-session mcpServers) need their own
+authorized round; the dependsOn artifact-relay design
+touches snapshot provenance and needs its own packet; the
+worktree lane stays registered-but-unselected pending a
+user layout choice. Combined verification: typecheck clean,
+657/658 unit (1 skipped: privileged symlink fixture),
+build clean, desktop e2e passed in the worker checkout.
