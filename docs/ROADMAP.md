@@ -3570,3 +3570,62 @@ worktree lane stays registered-but-unselected pending a
 user layout choice. Combined verification: typecheck clean,
 657/658 unit (1 skipped: privileged symlink fixture),
 build clean, desktop e2e passed in the worker checkout.
+
+2026-09-20 (cli-exec-1, worker-1 666f1fc + organizer
+prereq b980199 + wiring fixup a6f5305; combined
+verification at a6f5305) — LOCAL_CLI_EXEC: the
+office-spawned local route is now real. Probes first
+(docs/cli-exec-probes.md): all three providers ran
+contract-bound headless runs against real
+prepareLocalPacket packets and all three receipts
+validated through the office's own readLocalResult —
+claude -p (writes need --dangerously-skip-permissions;
+registers ~/.claude/projects/<cwd-key>/), codex exec -s
+workspace-write (spawn cwd is authoritative; -C does not
+place the model's shell), devin -p --model --respect-
+workspace-trust false --permission-mode dangerous (auto
+and accept-edits both get the write tool rejected
+non-interactively). Two probe traps are documented:
+agent shells carrying ACP_* mask Devin's file credential
+(the earlier 'expired credential' diagnosis was wrong —
+same file, env -u ACP_BACKEND flips it), and
+subscriptionEnvironment() already scrubs them for
+spawned children. The LocalCliExecAdapter spawns the
+installed CLI inside the packet it wrote (cwd=packetDir,
+scrubbed env, stdin ignored, 30-minute office kill
+limit), buffers bounded stdout/stderr into deduped
+PROVIDER_REPORTED job events, and reads receipts through
+the identical readLocalResult/readLocalCancelAck —
+extracted into local-packet.ts as shared helpers the
+mailbox now delegates to, its suite unmodified.
+Cancellation writes the same cooperative sentinel then
+kills only a registry-owned live child; an office kill
+reports FAILED/OFFICE_LOCAL ('a killed run cannot be
+trusted to write a receipt'), a self-exit stays UNKNOWN,
+and post-restart pid liveness is informational — the
+office never claims ownership of a process it did not
+spawn. Launch evidence embeds the verbatim record (pid,
+executable, argv with <prompt:sha256> marker, exact
+bypass flags, cwd, timeout, requested model/effort plus
+effortFlag or unmappedEffort) stamped LOCAL_CLI_EXEC
+TOOL_SUPPORTED/OBSERVED 'office-spawned unattended run';
+applied facts come only from receipt-declared fields.
+Organizer seam: LocalSessionRouter gained a route
+parameter (exec fills both layout slots so a misbound
+record fails closed) and plan() forwarding; main.ts
+selects exec vs mailbox by agent.localRoute (absent =
+mailbox, existing agents unaffected); agentDispatch
+Readiness already scopes evidence by route — mailbox
+evidence does not satisfy an exec scope. agents.tsx adds
+the Local transport select; dispatch.tsx labels exec
+launches honestly; workflow.md documents the route, the
+cancellation truth table, the restart-ownership limit
+and the non-claims. Deferred by design: the dependsOn
+artifact-relay runner is Phase 3's own packet; LOCAL_ACP
+stays unwired (devin acp mapped for the record:
+session/list works unauthenticated, session/cancel is a
+notification, session/new requires host-authenticated
+meta.api_key). Combined verification: typecheck clean,
+675 tests 674 pass 1 skipped (pre-existing privileged
+symlink fixture), build clean — run on the integrated
+head after the wiring fixup.
