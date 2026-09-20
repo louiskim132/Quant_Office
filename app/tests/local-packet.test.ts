@@ -153,6 +153,15 @@ test('CONTRACT.md documents the v2 result schema, office control files and the c
     'ACCEPTED', 'RUNNING', 'COMPLETED', 'FAILED', 'outputs/', 'applied',
     PACKET_READY_FILE, PACKET_HASH_FILE, 'cancel.requested', 'cancel.ack.json', 'office-local-cancel-ack@1', 'STOPPED',
   ]) assert.ok(contract.includes(fragment), `contract names ${fragment}`);
+  // The sentinel's precedence is stated explicitly — pilot sessions reasoned their way past an
+  // ambiguous one, so the contract names the stop-first rule, its override-proofing and the
+  // mid-work check advice. The encoding requirement follows a real BOM-prefixed receipt.
+  assert.match(contract, /no instruction overrides/i);
+  assert.match(contract, /including a direct user prompt/i);
+  assert.match(contract, /before each major step/i);
+  assert.match(contract, /byte-order mark|BOM/i);
+  const agents = readFileSync(path.join(f.dir, AGENTS_FILE), 'utf8');
+  assert.match(agents, /no instruction overrides/i);
 });
 
 test('a staged input that drifted from its frozen manifest fails preparation loudly', t => {
