@@ -1,11 +1,14 @@
 # Local-session pilot — provider adherence to the cancel sentinel — 2026-09-19
 
-Scope: measured behavior of real local sessions run against v2 packets that
-carried `cancel.requested`, the cooperative-stop sentinel. Each session was
+Scope: measured behavior of real local sessions run against v1 packets
+(`office-local-session@1`) that carried `cancel.requested`, the cooperative-stop
+sentinel — the v1 contract described the sentinel as the office's end signal
+without stating precedence or an acknowledgement format. Each session was
 launched by the user against a packet directory; the office's contract asked
 the session to stop and acknowledge. These are observations of what the
 sessions actually did — local evidence only, no provider attestation, and no
-scientific, brokerage or live-research claim.
+scientific, brokerage or live-research claim. The precedence fix this document
+motivates landed in the v2 contract.
 
 ## Adherence matrix
 
