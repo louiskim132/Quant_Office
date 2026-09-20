@@ -84,6 +84,13 @@ Tool versions observed: claude `2.1.273`, codex `0.154.0`, devin `3000.10.21 (61
   `devin auth status` reports "Not logged in." `devin -p` therefore fails today with
   "Not logged in." The Devin contract-adherence leg is **unproven** until the user
   re-authenticates (`devin auth login`) and the run is repeated.
+- **Auth split-brain observed**: `devin auth login` reports "already logged in" (the
+  browser/IDE session is live) while `auth status` and `-p` read the on-disk credential
+  and still report "Not logged in" — the file's mtime never advanced past Sep 12, so the
+  login path did not persist a CLI-readable credential. The deterministic unblock is
+  `devin auth login --force-manual-token-flow` (paste a token), or complete the browser
+  PKCE redirect so the credential file is actually rewritten; `auth status` flipping to
+  logged-in is the verification.
 
 ## Authoritative verdict
 

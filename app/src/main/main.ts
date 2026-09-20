@@ -110,6 +110,12 @@ async function start(){
  win.on('close',event=>{if(transferBusy){event.preventDefault();void dialog.showMessageBox(win!,{type:'info',message:'A file transfer is still being finalized.',detail:'Please wait for the transfer to finish before closing the office.'});}});
  win.on('closed',()=>{win=null;});
  register();await win.loadFile(html);win.show();
+ // The office opens on re-observed accounts, not on however stale the recorded check is.
+ // Each provider is re-observed once, off the load path; a failed observation leaves the
+ // last recorded state standing with its real timestamp — never a refreshed-looking lie.
+ for(const provider of ['openai','claude','devin'] as const)void subscriptions.observe(provider)
+  .then(({observation})=>{try{store.recordAccountObservation(observation);win?.webContents.send('office:changed');}catch{}})
+  .catch(()=>{});
 }
 function register(){
  const handle=(channel:string,fn:(value:unknown)=>unknown|Promise<unknown>)=>ipcMain.handle(channel,async(event,value)=>{
