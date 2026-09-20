@@ -63,6 +63,7 @@ export function RequestDispatch({request,state,onState}:{request:Request;state:A
  // effort, and the collaboration policy this request authorized. Local profiles have no hosted
  // route, so their gate is scoped to the local transport family instead of a nonexistent handoff.
  const local=agent?.execution==='LOCAL';
+ const exec=local&&agent?.localRoute==='LOCAL_CLI_EXEC';
  const gate=agent?agentDispatchReadiness(state,agent,{now,...(local?{}:{route:'OFFICIAL_TERMINAL_HANDOFF' as const}),delegation:request.delegation}):undefined;
  const settled=job?['COMPLETED','FAILED','CANCEL_ACKNOWLEDGED'].includes(job.state):false;
  const canceledRequest=request.status==='CANCELED';
@@ -91,10 +92,10 @@ export function RequestDispatch({request,state,onState}:{request:Request;state:A
   {!agent&&!closed&&<p className="muted">Choose the agent for this request before preparing work.</p>}
   {gate&&!closed&&<ul className="readiness-list">
    <li data-state={gate.canPrepare?'yes':'no'}>Prepare: {gate.canPrepare?'Available':'Blocked'}</li>
-   <li data-state={gate.canHandoff?'yes':'no'}>{local?'Local session handoff':'Official terminal handoff'}: {gate.canHandoff?'Available':'Blocked'}</li>
+   <li data-state={gate.canHandoff?'yes':'no'}>{local?(exec?'Office-spawned session launch':'Local session handoff'):'Official terminal handoff'}: {gate.canHandoff?'Available':'Blocked'}</li>
    <li data-state={gate.canStart?'yes':'no'}>Automatic start: {gate.canStart?'Available':'Blocked'}</li>
   </ul>}
-  {local&&!closed&&<p className="muted">Write local session packet → run the session → observe. This profile runs sessions on this machine through the official CLI. Writing the session packet records office-observed evidence for this exact scope; automatic start stays blocked until that local evidence exists. The office never runs the session itself.</p>}
+  {local&&!closed&&<p className="muted">{exec?'Launch office-spawned session → observe. The office spawns the provider CLI on this machine and owns the process (cancel kills it). Launch records office-observed evidence for this exact scope; automatic start stays blocked until that local evidence exists. Not provider-hosted, isolated or independently attested.':'Write local session packet → run the session → observe. This profile runs sessions on this machine through the official CLI. Writing the session packet records office-observed evidence for this exact scope; automatic start stays blocked until that local evidence exists. The office never runs the session itself.'}</p>}
   {agent&&gate&&!closed&&gate.readiness.connectionId&&!gate.readiness.accountFresh&&<p><button className="secondary" disabled={!!busy} onClick={()=>void run('recheck',async()=>{await window.office.connectionStatus(agent.provider);return window.office.getState();})}>{busy==='recheck'?'Checking…':'Re-check account'}</button> <span className="muted">The account check is stale; a live re-check refreshes it in place.</span></p>}
   {job&&<p><strong>{jobLabels[job.state]}</strong>{job.externalId?` · ${job.externalId}${job.evidence==='USER_REPORTED'?' (reported by you, unverified)':''}`:''}</p>}
   {job&&<p className="muted">{job.detail}</p>}
@@ -120,7 +121,7 @@ export function RequestDispatch({request,state,onState}:{request:Request;state:A
     setSelectedJob(result.state.jobs?.find(item=>item.assignmentId===result.assignmentId)?.id??'');return result.state;})}>{busy==='prepare'?'Preparing…':local?'Prepare local session':'Prepare Claude handoff'}</button>}
    {assignment&&!settled&&<>
     {!closed&&!local&&<button className="secondary" disabled={!!busy} onClick={()=>void run('plan',async()=>{setPlan(await window.office.handoffPlan({assignmentId:assignment.id}));})}>Show exact command</button>}
-    {!closed&&<button className="primary" disabled={!!busy||job?.state!=='INTENT'||!gate?.canHandoff} onClick={()=>void run('handoff',()=>window.office.openHandoffTerminal({assignmentId:assignment.id}))}>{busy==='handoff'?'Opening…':local?'Write local session packet':'Open official Claude terminal'}</button>}
+    {!closed&&<button className="primary" disabled={!!busy||job?.state!=='INTENT'||!gate?.canHandoff} onClick={()=>void run('handoff',()=>window.office.openHandoffTerminal({assignmentId:assignment.id}))}>{busy==='handoff'?(exec?'Launching…':'Opening…'):local?(exec?'Launch office-spawned session':'Write local session packet'):'Open official Claude terminal'}</button>}
     <button className="secondary" disabled={!!busy||job?.state==='INTENT'} onClick={()=>void reportJob('observe',()=>window.office.observeJob({assignmentId:assignment.id}))}>{busy==='observe'?'Observing…':'Observe'}</button>
     {!closed&&job?.state==='INTENT'&&<button className="secondary" disabled={!!busy} onClick={()=>void run('discard',()=>window.office.discardPreparation({assignmentId:assignment.id}))}>Discard preparation to prepare again</button>}
     <button className="cancel-request" disabled={!!busy} onClick={()=>void reportJob('cancel',()=>window.office.cancelJob({assignmentId:assignment.id}))}>{busy==='cancel'?'Requesting…':job?.state==='CANCEL_REQUESTED'?'Cancellation requested — re-check acknowledgment':'Request cancellation'}</button>

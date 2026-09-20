@@ -2,12 +2,11 @@ import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import type { CapabilityEvidence, Effort, Provider, ProviderJob } from '../shared/types.js';
-import { parseStrictJson } from '../core/strict-json.js';
 import { efforts } from '../shared/effort.js';
-import { cancelAckV1Schema, cancelRequestV1Schema, type LocalSessionRecord } from '../shared/local-session.js';
+import { type LocalSessionRecord } from '../shared/local-session.js';
 import { MAX_FILE, safeEntry } from './artifacts.js';
 import { GuardedLocalFileIO, type LocalFileIO } from './local-session-files.js';
-import { AGENTS_FILE, CANCEL_ACK_FILE, CANCEL_FILE, CONTRACT_FILE, INPUTS_DIR, MAX_OUTPUTS, MAX_RESULT_BYTES, PACKET_FILE, RESULT_FILE, RESULT_OPTIONAL_KEYS, RESULT_REQUIRED_KEYS, RESULT_STATES, prepareLocalPacket, readLocalResult, readLocalResultV1 } from './local-packet.js';
+import { AGENTS_FILE, CANCEL_FILE, CONTRACT_FILE, INPUTS_DIR, MAX_OUTPUTS, MAX_RESULT_BYTES, PACKET_FILE, RESULT_FILE, RESULT_OPTIONAL_KEYS, RESULT_REQUIRED_KEYS, RESULT_STATES, prepareLocalPacket, readLocalCancelAck, readLocalResult, readLocalResultV1, writeLocalCancelRequest } from './local-packet.js';
 import { discover, type Discovery } from './local-provider-records.js';
 import type { ObserveResult, ProviderAdapter, SubmitContext, SubmitResult } from './controller.js';
 
@@ -20,8 +19,6 @@ export type { LocalResult } from './local-packet.js';
 const SESSION_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,160}$/;
 /** The recorded source of every observation this adapter produces. */
 const EVIDENCE_SOURCE = 'office-local-mailbox@1';
-/** The cancel request/ack pair are tiny office control files. */
-const MAX_CONTROL_BYTES = 64 * 1024;
 
 /** What a verified receipt's declared self-report becomes on the office's observation record. */
 interface AppliedReport { model?: string; effort?: Effort; delegation?: boolean }
@@ -201,7 +198,7 @@ export class LocalMailboxAdapter implements ProviderAdapter {
       // A cancel acknowledgement is a control file: it is validated before the receipt is read,
       // and a malformed or misbound one makes the whole observation UNKNOWN — a bad control file
       // is never ignored to reach a good receipt.
-      const ack = this.readCancelAck(dir, local);
+      const ack = readLocalCancelAck(dir, local, this.io);
       if ('defect' in ack) return attach(unknown(ack.defect));
       // The v2 reader proves the ready marker, the attempt binding, the sequence and every
       // declared output byte before anything is reported. A v1-shaped receipt here is a defect.
@@ -268,84 +265,13 @@ export class LocalMailboxAdapter implements ProviderAdapter {
     } catch { return undefined; }
   }
 
-  /**
-   * Reads and validates the cooperative-stop acknowledgement on a bound packet. An absent file is
-   * not an observation at all; a present one must satisfy office-local-cancel-ack@1 and name the
-   * exact request this binding recorded — anything less is a defect, never an ignored file.
-   */
-  private readCancelAck(dir: string, binding: LocalSessionRecord): { ack?: { requestId: string; outcome: 'STOPPED'; detail: string } } | { defect: string } {
-    const defect = (detail: string): { defect: string } => ({ defect: detail });
-    let file;
-    try {
-      file = this.io.read(dir, CANCEL_ACK_FILE, MAX_CONTROL_BYTES);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (/not present/.test(message)) return {};
-      return defect(`${CANCEL_ACK_FILE} could not be read (${message}) — a control file that cannot be verified makes the receipt beside it untrusted.`);
-    }
-    if (!binding.cancelRequestId)
-      return defect(`${CANCEL_ACK_FILE} is present, but this binding records no cancel request — an acknowledgement claiming a request the office never recorded is a tamper signal; the receipt beside it is not trusted.`);
-    let raw: unknown;
-    try {
-      raw = parseStrictJson(Buffer.from(file.bytes).toString('utf8'));
-    } catch (error) {
-      return defect(`${CANCEL_ACK_FILE} is not valid JSON (${error instanceof Error ? error.message : 'unknown parse failure'}) — a malformed control file is a defect, not an acknowledgement.`);
-    }
-    const parsed = cancelAckV1Schema.safeParse(raw);
-    if (!parsed.success)
-      return defect(`${CANCEL_ACK_FILE} does not satisfy office-local-cancel-ack@1 (${parsed.error.issues.map(issue => `${issue.path.join('.') || 'ack'}: ${issue.message}`).join('; ')}) — a malformed control file is a defect, not an acknowledgement.`);
-    const ack = parsed.data;
-    const mismatches = (['requestId', 'jobId', 'assignmentId', 'attemptId', 'packetHash'] as const)
-      .filter(key => ack[key] !== (key === 'requestId' ? binding.cancelRequestId : binding[key]));
-    if (mismatches.length)
-      return defect(`${CANCEL_ACK_FILE} acknowledges ${mismatches.map(key => `${key} ${JSON.stringify(ack[key])}`).join(', ')} — this binding expects ${mismatches.map(key => `${key} ${JSON.stringify(key === 'requestId' ? binding.cancelRequestId : binding[key])}`).join(', ')}; a misbound acknowledgement is a defect, not a stop record.`);
-    return { ack: { requestId: ack.requestId, outcome: ack.outcome, detail: ack.detail } };
-  }
-
   async cancel(job: ProviderJob, local?: LocalSessionRecord | null): Promise<{ acknowledged: boolean; detail: string; requestId?: string }> {
     if (local?.packetVersion === 2) {
       // Cooperative stop on a bound packet (QO-LOCAL-REV §8): the office writes cancel.requested
       // bound to this attempt's identity. acknowledged means the office DELIVERED a request —
       // never that anything stopped; the session acknowledges by writing cancel.ack.json.
-      if (local.packetHash === null)
-        return { acknowledged: false, detail: 'This binding records no verified packet hash, so a cancel request cannot be bound to an attempt. Nothing was written; nothing has stopped.' };
       const dir = path.resolve(this.sessionsRoot(), local.storageRelativePath);
-      if (!existsSync(dir))
-        return { acknowledged: false, detail: 'The recorded session directory is gone, so no session can be signalled. The cancellation stays requested; nothing has stopped.' };
-      // Read-first for idempotency: a request file that already exists is either this exact
-      // request or a defect — the office never overwrites one (writeNew would refuse anyway).
-      try {
-        const existing = this.io.read(dir, CANCEL_FILE, MAX_CONTROL_BYTES);
-        let raw: unknown;
-        try {
-          raw = parseStrictJson(Buffer.from(existing.bytes).toString('utf8'));
-        } catch (error) {
-          return { acknowledged: false, detail: `The existing ${CANCEL_FILE} is malformed — not valid JSON (${error instanceof Error ? error.message : 'unknown parse failure'}). The office never overwrites a request file; reconcile the directory first. Nothing has stopped.` };
-        }
-        const parsed = cancelRequestV1Schema.safeParse(raw);
-        if (!parsed.success)
-          return { acknowledged: false, detail: `The existing ${CANCEL_FILE} is malformed — it does not satisfy office-local-cancel-request@1 (${parsed.error.issues.map(issue => `${issue.path.join('.') || 'request'}: ${issue.message}`).join('; ')}). The office never overwrites a request file; reconcile the directory first. Nothing has stopped.` };
-        const request = parsed.data;
-        const mismatches = (['jobId', 'assignmentId', 'attemptId', 'packetHash'] as const).filter(key => request[key] !== local[key]);
-        if (mismatches.length)
-          return { acknowledged: false, detail: `The existing ${CANCEL_FILE} is bound to ${mismatches.map(key => `${key} ${JSON.stringify(request[key])}`).join(', ')} — this attempt expects ${mismatches.map(key => `${key} ${JSON.stringify(local[key])}`).join(', ')}; a request for a different attempt is a defect, never overwritten. Nothing has stopped.` };
-        return { acknowledged: true, requestId: request.requestId, detail: `A cooperative cancel request was already delivered to ${dir} (requestId ${request.requestId}). The office delivered a request only — nothing has stopped; the session acknowledges by writing ${CANCEL_ACK_FILE} (office-local-cancel-ack@1).` };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        if (!/not present/.test(message))
-          return { acknowledged: false, detail: `The existing ${CANCEL_FILE} could not be read (${message}). The office never overwrites a request file. Nothing has stopped.` };
-      }
-      const request = cancelRequestV1Schema.parse({
-        schema: 'office-local-cancel-request@1', requestId: randomUUID(),
-        jobId: local.jobId, assignmentId: local.assignmentId, attemptId: local.attemptId,
-        packetHash: local.packetHash, requestedAt: this.now(),
-      });
-      try {
-        this.io.writeNew(dir, CANCEL_FILE, Buffer.from(`${JSON.stringify(request, null, 2)}\n`, 'utf8'));
-      } catch (error) {
-        return { acknowledged: false, detail: `The cancel request could not be written: ${error instanceof Error ? error.message : 'unknown error'}. Nothing has stopped.` };
-      }
-      return { acknowledged: true, requestId: request.requestId, detail: `Cooperative cancel request ${request.requestId} delivered to ${dir}. The office delivered a request only — nothing has stopped; the session acknowledges by writing ${CANCEL_ACK_FILE} (office-local-cancel-ack@1). It is a local record, not a provider acknowledgement.` };
+      return writeLocalCancelRequest({ dir, binding: local, io: this.io, now: this.now() });
     }
     const dir = job.externalId ? this.sessionDir(job.externalId) : null;
     if (!dir)
