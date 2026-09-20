@@ -21,6 +21,7 @@ import { PipelineService } from './pipeline.js';
 import { HoldoutCustody } from './holdout.js';
 import { OutputService } from './outputs.js';
 import { TerminalHandoffAdapter } from './handoff.js';
+import { LocalCliExecAdapter } from './local-cli-exec.js';
 import { LocalMailboxAdapter } from './local-session.js';
 import { LocalWorktreeMailboxAdapter } from './local-worktree-session.js';
 import { WORKTREES_DIR } from './local-worktree-repo.js';
@@ -435,6 +436,14 @@ function buildController():AssignmentController{
  // declares decides which adapter owns it, and pre-binding jobs take the named legacy rule —
  // never registration-order luck (QO-LOCAL-REV §5.3).
  const mailbox=new LocalSessionRouter(jobId=>store.localSessionForJob(jobId),{FLAT_PACKET:flat,PROJECT_WORKTREE:tree});
+ // LOCAL_CLI_EXEC resolves through the same persisted binding, to the office-spawned adapter.
+ // Both layout slots hold the exec adapter: a record misbound to the worktree layout lands on it
+ // anyway and fails closed on its own flat-packet check instead of silently changing transport.
+ // The child's environment is the adapter's own subscriptionEnvironment() default — the scrub
+ // that removes ACP_* and billing overrides before the CLI sees them.
+ const exec=new LocalCliExecAdapter(()=>path.join(workspace(),'local-sessions'),provider=>subscriptions.toolPath(provider),undefined,undefined,undefined,undefined,undefined,undefined,
+  agentId=>store.snapshot().agents.find(a=>a.id===agentId)?.provider);
+ const execRoute=new LocalSessionRouter(jobId=>store.localSessionForJob(jobId),{FLAT_PACKET:exec,PROJECT_WORKTREE:exec},'LOCAL_CLI_EXEC');
  return new AssignmentController(store,handoff,undefined,
   // Verification is scoped to the staging root this office owns, so a snapshot pointing anywhere
   // else is refused rather than verified in place.
@@ -453,8 +462,8 @@ function buildController():AssignmentController{
   // and agents resolve only to the adapter that actually owns them — a miss fails closed, never a
   // silent fallback across environments.
   ref=>{
-   if(ref.route)return ref.route===handoff.route?handoff:ref.route===mailbox.route?mailbox:undefined;
-   if(ref.agent)return ref.agent.execution==='HOSTED_SETUP_REQUIRED'?handoff:ref.agent.execution==='LOCAL'?mailbox:undefined;
+   if(ref.route)return ref.route===handoff.route?handoff:ref.route===mailbox.route?mailbox:ref.route===execRoute.route?execRoute:undefined;
+   if(ref.agent)return ref.agent.execution==='HOSTED_SETUP_REQUIRED'?handoff:ref.agent.execution==='LOCAL'?(ref.agent.localRoute==='LOCAL_CLI_EXEC'?execRoute:mailbox):undefined;
    return undefined;
   },
   // Provider-side archive for retired packets — exact record identity, bounded output, and an

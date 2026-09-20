@@ -1,6 +1,7 @@
-import type { CapabilityEvidence, ProviderJob, Provider } from '../shared/types.js';
+import type { AdapterRoute, CapabilityEvidence, ProviderJob, Provider } from '../shared/types.js';
 import type { LocalSessionRecord, WorkspaceLayout } from '../shared/local-session.js';
 import type { ProviderAdapter, SubmitContext, SubmitResult, ObserveResult } from './controller.js';
+import type { LaunchRequest } from './handoff.js';
 
 /**
  * LOCAL_MAILBOX layout router (QO-LOCAL-REV-20260919 §5.3, defect F07).
@@ -20,12 +21,18 @@ export type LocalSessionLookup = (jobId: string) => LocalSessionRecord | null;
 export type LayoutAdapters = Record<WorkspaceLayout, ProviderAdapter>;
 
 export class LocalSessionRouter implements ProviderAdapter {
-  readonly route = 'LOCAL_MAILBOX' as const;
   readonly providers: readonly Provider[] = ['devin', 'claude', 'openai'];
 
   constructor(
     private readonly lookup: LocalSessionLookup,
     private readonly adapters: LayoutAdapters,
+    /**
+     * The route this router serves. LOCAL_MAILBOX resolves two real layout adapters; a
+     * single-layout route (LOCAL_CLI_EXEC) fills both slots with its own adapter, so a record
+     * misbound to the other layout still lands on that adapter and fails closed on its own
+     * layout check instead of silently changing transport.
+     */
+    readonly route: AdapterRoute = 'LOCAL_MAILBOX',
   ) {}
 
   /** Which layout implementation owns this job, and how the decision was reached. */
@@ -59,6 +66,12 @@ export class LocalSessionRouter implements ProviderAdapter {
   async cancel(job: ProviderJob) {
     const { adapter, binding } = this.resolve(job);
     return adapter.cancel(job, binding);
+  }
+
+  /** Launch previews resolve through the bound layout when one exists; absent a binding the flat slot answers, and an adapter without plan simply offers none. */
+  plan(context: SubmitContext): LaunchRequest | undefined {
+    const adapter = context.localSession ? this.adapters[context.localSession.layout] : this.adapters.FLAT_PACKET;
+    return (adapter as ProviderAdapter & { plan?: (context: SubmitContext) => LaunchRequest }).plan?.(context);
   }
 
   submitEvidence(context: SubmitContext, result: SubmitResult) {
