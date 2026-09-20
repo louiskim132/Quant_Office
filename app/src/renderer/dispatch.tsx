@@ -77,7 +77,11 @@ export function RequestDispatch({request,state,onState}:{request:Request;state:A
  // Reconciliation actions must always say what they found: a spinner that resolves to nothing looks
  // like it worked. The returned state carries the job's post-action record even when nothing moved.
  async function reportJob(label:string,action:()=>Promise<AppState>){
-  await run(label,async()=>{const next=await action();const updated=job?next.jobs?.find(item=>item.id===job.id):undefined;setNote(updated?`${jobLabels[updated.state]}${updated.detail?` — ${updated.detail}`:''}`:'The action returned without a record for this job.');return next;});
+  await run(label,async()=>{const next=await action();const updated=job?next.jobs?.find(item=>item.id===job.id):undefined;setNote(updated?`${jobLabels[updated.state]}${updated.detail?` — ${updated.detail}`:''}`:'The action returned without a record for this job.');
+   // Pin the selection to the job this action just ran against: a settled job must stay
+   // selected so its observation, applied reports and launch/retire controls remain visible
+   // instead of the card reverting to the newest unresolved item.
+   if(job)setSelectedJob(job.id);return next;});
  }
  return <section className="dispatch-card">
   <h3>{local?'Local session work':'Provider work'}</h3>

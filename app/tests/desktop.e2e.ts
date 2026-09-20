@@ -136,12 +136,24 @@ try{
  assert.deepEqual(after.connections??[],before.connections??[],'no account observation was recorded');
  assert.equal(after.events.length,before.events.length,'no lineage event was appended');
  await page.getByRole('button',{name:'Office',exact:true}).click();
- const keys=await page.evaluate(()=>Object.keys(window.office));assert.deepEqual(keys.sort(),['chooseProjectFolder','chooseInputFiles','openProjectFolder','scanClaudeUsage','changeAgentEffort','changeAgentModel','getWorkLogs','importWorkLogs','bindAgentConnection','connectAgent','confirmAgent','cancelAgent','connectionStatus','selectProviderTool','openProviderUsage','backupWorkspace','restoreWorkspace','command','exportProject','getInfo','getState','migrateLegacyRecords','historyPage','logPage','jobEventPage','verifyCloudTransport','prepareRequest','discardPreparation','handoffPlan','openHandoffTerminal','observeJob','cancelJob','linkJobSession','loginProvider','importFiles','onChanged','previewArtifact','describeObject','readObject','queryEvidence','stagePacket','researchStatus','assignResearchFunction','migrateResearchFunctions','pipelineAction','messagePage','researchPage','researchInsights','exportResearch'].sort());
+ const keys=await page.evaluate(()=>Object.keys(window.office));assert.deepEqual(keys.sort(),['chooseProjectFolder','chooseInputFiles','openProjectFolder','scanClaudeUsage','changeAgentEffort','changeAgentModel','getWorkLogs','importWorkLogs','bindAgentConnection','connectAgent','confirmAgent','cancelAgent','connectionStatus','selectProviderTool','openProviderUsage','backupWorkspace','restoreWorkspace','command','exportProject','getInfo','getState','migrateLegacyRecords','historyPage','logPage','jobEventPage','verifyCloudTransport','prepareRequest','discardPreparation','handoffPlan','openHandoffTerminal','observeJob','cancelJob','linkJobSession','loginProvider','importFiles','onChanged','previewArtifact','describeObject','readObject','queryEvidence','stagePacket','researchStatus','assignResearchFunction','migrateResearchFunctions','pipelineAction','messagePage','researchPage','researchInsights','exportResearch','appliedReports','localSessionSummary','localLaunchPlan','localSessionArchive'].sort());
  const globals=await page.evaluate(()=>({nodeRequire:'require' in window,nodeProcess:'process' in window,bridge:typeof window.office.command}));assert.equal(globals.nodeRequire,false);assert.equal(globals.nodeProcess,false);assert.equal(globals.bridge,'function');
  state=await page.evaluate(()=>window.office.getState());const eventCount=state.events.length;
  await application!.close();application=undefined;
  page=await launch();state=await page.evaluate(()=>window.office.getState());assert.equal(state.projects.length,1);assert.equal(state.artifacts.length,1);assert.equal(state.events.length,eventCount);assert.equal(state.settings.globalBudgetCents,0);
  assert.equal(state.agents.length,0);assert.equal(state.reviews.length,0);assert.equal(state.tasks.every(t=>t.status==='BLOCKED'),true);
+ // A project exists but none is selected after relaunch: the Projects heading still offers
+ // New request (not New project), the row carries a folder-opening control rather than an
+ // inline settings affordance, and the dialog's project select defaults to a valid project.
+ await page.getByRole('button',{name:'Projects',exact:true}).click();
+ assert.equal(await page.getByRole('button',{name:'Open folder for Volatility research',exact:true}).count(),1);
+ assert.equal(await page.getByRole('button',{name:/Location settings/}).count(),0);
+ await page.getByRole('button',{name:'New request',exact:true}).click();
+ const requestDialog=page.getByRole('dialog',{name:'New request'});
+ await requestDialog.getByLabel('Request name').waitFor();
+ assert.equal(await requestDialog.getByLabel('Project').inputValue(),state.projects[0].id);
+ await requestDialog.getByRole('button',{name:'Close dialog'}).click();
+ await page.getByRole('button',{name:'Office',exact:true}).click();
  // The queue lives on Office after relaunch; the canceled request still opens its research details.
  await page.getByRole('button',{name:'Cancel request',exact:true}).click();
  await page.getByLabel('Show requests').selectOption('canceled');
@@ -192,7 +204,7 @@ try{
  assert.equal((await restoring).canceled,true);
  assert.equal((await page.evaluate(()=>window.office.getState())).agents.length,1);
  assert.deepEqual(logs,[]);
- await writeFile(path.join(output,process.env.QRO_EXECUTABLE?'packaged-desktop-report.json':'desktop-report.json'),JSON.stringify({status:'PASS',timestamp:new Date().toISOString(),packaged:Boolean(process.env.QRO_EXECUTABLE),checks:['empty office','agent setup form','project creation','blocked request','experiment and versioned contract','review cannot self-pass','reference import','safe preview','project export','subscription usage view','theme switch','narrow IPC','renderer sandbox','restart persistence','contained cloud transport verification','concurrent request admission','discard preparation guard','restore admission lock (V1)','projects nav lands on list','detail requests section','mandate folder-scope disclosure','profile dialog model/effort order and uniform tabs'],pageErrors:logs,testWorkspace:data},null,2));
+ await writeFile(path.join(output,process.env.QRO_EXECUTABLE?'packaged-desktop-report.json':'desktop-report.json'),JSON.stringify({status:'PASS',timestamp:new Date().toISOString(),packaged:Boolean(process.env.QRO_EXECUTABLE),checks:['empty office','agent setup form','project creation','blocked request','experiment and versioned contract','review cannot self-pass','reference import','safe preview','project export','subscription usage view','theme switch','narrow IPC','renderer sandbox','restart persistence','contained cloud transport verification','concurrent request admission','discard preparation guard','restore admission lock (V1)','projects nav lands on list','detail requests section','mandate folder-scope disclosure','project row folder-opening control','new request offered with no project selected','request dialog defaults a project','profile dialog model/effort order and uniform tabs'],pageErrors:logs,testWorkspace:data},null,2));
  console.log('Desktop end-to-end checks passed. Screenshots and report saved in test-output.');
 }catch(error){if(application){try{const page=await application.firstWindow();await page.screenshot({path:path.join(output,'desktop-failure.png'),fullPage:true});console.error('Visible text:',(await page.locator('body').innerText()).slice(0,6000));}catch{}}throw error;}
 finally{if(application)await application.close();}
