@@ -183,3 +183,24 @@ test('team filters follow membership, and lifecycle filtering keeps scope counts
  assert.equal(activeOnly.counts.all,2,'counts describe the filtered scope, not the visible page');
  assert.equal(queueScope(state,{lifecycle:'CANCELED'}).entries[0].request!.name,'Beta question');
 });
+
+test('a request whose jobs all settled reads completed, not active',async t=>{
+ const f=await fixture(t);
+ const {assignment}=f.controller.prepare({requestId:f.alphaRequest.id,agentId:f.worker.id,snapshotId:f.snapshot.id});
+ await f.controller.dispatch(assignment.id);
+ let state=f.store.snapshot({history:false});
+ const openEntry=queueScope(state).entries.find(e=>e.id===f.alphaRequest.id)!;
+ assert.equal(openEntry.active,true,'an open request with an unresolved job stays active');
+ assert.equal(openEntry.settled,false);
+ assert.equal(queueScope(state,{lifecycle:'COMPLETED'}).counts.completed,0,'no request is completed before its jobs settle');
+ const job=state.jobs![0];
+ f.store.recordJobTransition({jobId:job.id,expectedRevision:job.revision,to:'FAILED',evidence:'OFFICE_LOCAL',detail:'Receipt rejected.',at:at(3)});
+ state=f.store.snapshot({history:false});
+ const settledEntry=queueScope(state).entries.find(e=>e.id===f.alphaRequest.id)!;
+ assert.equal(settledEntry.settled,true);
+ assert.equal(settledEntry.active,false,'a settled request leaves the active tab');
+ const completedScope=queueScope(state,{lifecycle:'COMPLETED'});
+ assert.equal(completedScope.counts.completed,1);
+ assert.equal(completedScope.entries[0].id,f.alphaRequest.id,'a failed job still counts: settled means finished work, not a success claim');
+ assert.equal(queueScope(state).counts.active,1,'the still-open request without jobs stays active');
+});
