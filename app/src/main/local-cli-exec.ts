@@ -1,13 +1,13 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, watch, type FSWatcher } from 'node:fs';
 import path from 'node:path';
 import type { CapabilityEvidence, Effort, JobEvent, Provider, ProviderJob } from '../shared/types.js';
 import type { LocalSessionRecord } from '../shared/local-session.js';
 import { MAX_FILE } from './artifacts.js';
 import type { LaunchRequest } from './handoff.js';
 import { GuardedLocalFileIO, type LocalFileIO } from './local-session-files.js';
-import { PACKET_FILE, RESULT_FILE, RESULT_STATES, prepareLocalPacket, readLocalCancelAck, readLocalResult, writeLocalCancelRequest } from './local-packet.js';
+import { CANCEL_ACK_FILE, PACKET_FILE, RESULT_FILE, RESULT_STATES, prepareLocalPacket, readLocalCancelAck, readLocalResult, writeLocalCancelRequest } from './local-packet.js';
 import { discover, type Discovery } from './local-provider-records.js';
 import { subscriptionEnvironment } from './subscriptions.js';
 import type { ObserveResult, ProviderAdapter, SubmitContext, SubmitResult } from './controller.js';
@@ -73,6 +73,8 @@ interface SpawnRecord {
   jobId: string;
   child: CliChild;
   launch: LaunchRecord;
+  /** The packet directory this record runs in — the watcher reads receipts only from here. */
+  dir: string;
   lines: BufferedLine[];
   bufferedBytes: number;
   /** Lines dropped to bound memory — never emitted as events. */
@@ -88,6 +90,10 @@ interface SpawnRecord {
   /** Highest line sequence already emitted as a job event. */
   drainCursor: number;
   timer: ReturnType<typeof setTimeout> | undefined;
+  /** Watches the packet directory for the receipt or a cancel ack — auto-observe without polling. */
+  watcher: FSWatcher | null;
+  /** Trailing debounce so an exit plus a receipt write collapse into one observation. */
+  notifyTimer: ReturnType<typeof setTimeout> | undefined;
 }
 
 const sha256Text = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex');
@@ -137,6 +143,12 @@ export class LocalCliExecAdapter implements ProviderAdapter {
     private readonly discoverRecords: (dir: string, provider: Provider) => Discovery = discover,
     /** Resolves an agent record's provider for plan previews, which run before a binding exists. */
     private readonly providerFor?: (agentId: string) => Provider | undefined,
+    /**
+     * Fired after a child exit or a receipt/ack write settles — the office observes the job and
+     * advances the chain. In-memory only: a run from a previous office process is covered by
+     * startup reconciliation, never by a listener on a process this office did not spawn.
+     */
+    private readonly onLocalEvent?: (jobId: string) => void,
   ) {}
 
   /**
@@ -204,11 +216,21 @@ export class LocalCliExecAdapter implements ProviderAdapter {
       effortFlag: command.effortFlag, unmappedEffort: command.unmappedEffort,
     };
     const record: SpawnRecord = {
-      jobId: binding.jobId, child, launch,
+      jobId: binding.jobId, child, launch, dir,
       lines: [], bufferedBytes: 0, dropped: 0, seq: 0, pendingOut: '', pendingErr: '',
       exit: null, spawnError: null, officeKill: null, drainCursor: 0, timer: undefined,
+      watcher: null, notifyTimer: undefined,
     };
     this.registry.set(binding.jobId, record);
+    // A receipt or cancel ack landing in the packet directory is itself the observation trigger —
+    // the office never polls. A failed watch degrades to the exit trigger and manual observe,
+    // which read the same files.
+    try {
+      record.watcher = watch(dir, (_event, name) => {
+        if (name === RESULT_FILE || name === CANCEL_ACK_FILE) this.notify(record.jobId);
+      });
+      record.watcher.unref?.();
+    } catch { /* the exit trigger still fires; nothing is claimed from silence */ }
     child.stdout?.on('data', chunk => this.pushChunk(record, 'stdout', String(chunk)));
     child.stderr?.on('data', chunk => this.pushChunk(record, 'stderr', String(chunk)));
     child.on('exit', (code, signal) => {
@@ -216,6 +238,7 @@ export class LocalCliExecAdapter implements ProviderAdapter {
       if (record.pendingOut) { this.pushLine(record, 'stdout', record.pendingOut); record.pendingOut = ''; }
       if (record.pendingErr) { this.pushLine(record, 'stderr', record.pendingErr); record.pendingErr = ''; }
       if (record.timer) clearTimeout(record.timer);
+      this.notify(record.jobId);
     });
     child.on('error', error => { record.spawnError = error.message; });
     record.timer = setTimeout(() => {
@@ -231,6 +254,45 @@ export class LocalCliExecAdapter implements ProviderAdapter {
       detail: `Packet written to ${dir} and ${binding.provider} CLI spawned unattended (pid ${child.pid ?? 'unreported'}). The office owns the process; the receipt arrives through ${RESULT_FILE}.`,
       localPacket: { packetHash: prepared.packetHash },
     };
+  }
+
+  /**
+   * Debounced delivery of a local run event to the office. A process exit and the receipt it may
+   * leave behind often land together; the trailing delay collapses them into one observation and
+   * gives a just-written receipt a moment to flush before the read.
+   */
+  private notify(jobId: string): void {
+    const record = this.registry.get(jobId);
+    if (!record) return;
+    if (record.notifyTimer) clearTimeout(record.notifyTimer);
+    record.notifyTimer = setTimeout(() => {
+      record.notifyTimer = undefined;
+      try { this.onLocalEvent?.(jobId); } catch { /* a listener failure never reaches process bookkeeping */ }
+    }, 750);
+    record.notifyTimer.unref?.();
+  }
+
+  /**
+   * Releases every OS resource one spawn record holds — the directory watcher and both timers —
+   * and drops the record. An unref'd handle is the right lifetime hint but is not disposal:
+   * watchers must be closed or they accumulate for the life of the office process. Called the
+   * moment a job's outcome is verified terminal; a still-open job keeps its triggers.
+   */
+  private dispose(jobId: string): void {
+    const record = this.registry.get(jobId);
+    if (!record) return;
+    try { record.watcher?.close(); } catch { /* a dead watcher reports nothing */ }
+    record.watcher = null;
+    if (record.timer) clearTimeout(record.timer);
+    record.timer = undefined;
+    if (record.notifyTimer) clearTimeout(record.notifyTimer);
+    record.notifyTimer = undefined;
+    this.registry.delete(jobId);
+  }
+
+  /** Releases all spawn bookkeeping — the office calls this when it goes away. */
+  disposeAll(): void {
+    for (const jobId of [...this.registry.keys()]) this.dispose(jobId);
   }
 
   /** Buffers one output chunk into lines; retained volume is capped, drops are counted honestly. */
@@ -325,8 +387,11 @@ export class LocalCliExecAdapter implements ProviderAdapter {
       return attach(unknown('The session directory for this job is not present under the workspace sessions root — it may have been retired or removed externally; nothing has been heard from a local session.'));
     // An office-killed run is failed work: the office ended the process, so a receipt it may never
     // write is not awaited. This is the office's own kill — OFFICE_LOCAL, not a provider report.
-    if (record?.officeKill)
+    // The outcome is terminal here, so the spawn's watcher and timers are released with it.
+    if (record?.officeKill) {
+      this.dispose(job.id);
       return attach({ state: 'FAILED', detail: `office terminated the spawned process (${record.officeKill}); a killed run cannot be trusted to write a receipt`, provenance: 'OFFICE_LOCAL' });
+    }
     // A cancel acknowledgement is a control file: it is validated before the receipt is read, and
     // a malformed or misbound one makes the whole observation UNKNOWN — a bad control file is
     // never ignored to reach a good receipt.
@@ -358,6 +423,9 @@ export class LocalCliExecAdapter implements ProviderAdapter {
     // The verified receipt's identity rides to the caller — the binding persists it as lastReceipt
     // so a replayed or rewound receipt is refused on the next observation.
     observed.receipt = { sequence: result.sequence, hash: read.value.receiptHash };
+    // A verified terminal receipt or a cooperative cancel acknowledgement ends the spawn's watch:
+    // nothing this watcher could still report would change the recorded outcome.
+    if (result.state === 'COMPLETED' || result.state === 'FAILED' || ack.ack) this.dispose(job.id);
     return attach(observed);
   }
 

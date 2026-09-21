@@ -41,4 +41,18 @@ export class OutputService {
       } else writeFileSync(target, bytes, { flag: 'wx' });
     }
   };
+
+  /**
+   * Reads a content-addressed stored object back, re-verifying the bytes against the hash that
+   * names them. Dependent packets inherit only bytes that survive this check — a missing or
+   * corrupted object is a loud failure, never a partially delivered input.
+   */
+  readBytes = async (hash: string): Promise<Uint8Array> => {
+    const target = snapshotObjectPath(this.workspace, hash);
+    assertNoLinkedAncestor(target, p => `Output storage is reached through a link: ${p}`);
+    const bytes = readFileSync(target);
+    if (createHash('sha256').update(bytes).digest('hex') !== hash)
+      throw new Error('Stored output bytes failed integrity verification on read-back.');
+    return bytes;
+  };
 }

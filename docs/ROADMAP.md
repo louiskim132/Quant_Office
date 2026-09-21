@@ -3629,3 +3629,48 @@ meta.api_key). Combined verification: typecheck clean,
 675 tests 674 pass 1 skipped (pre-existing privileged
 symlink fixture), build clean — run on the integrated
 head after the wiring fixup.
+
+2026-09-20 (auto-chain-1, organizer; direct request —
+'build phase 3/ full automatic pipeline') — the
+deferred dependsOn runner is real: the office now
+advances a dependent automatically once every recorded
+predecessor job reaches COMPLETED with durably stored,
+hash-verified output. Prepare accepts dependsOn (IPC,
+preload and a renderer dependency picker with honest
+waiting status); the launch guard already refused
+incomplete predecessors. prepareLocalPacket gains an
+inherited/ tree: each predecessor's stored output bytes
+are read back through OutputService.readBytes,
+re-hashed byte-for-byte at write time and manifested
+with the source job id and object hash — a missing or
+mutated object fails the write loudly, and a packet
+with no predecessors declares no inherited manifest.
+Controller.advanceLocalChain / reconcileLocalChain run
+every launch through the identical guard-binding-packet
+path a manual launch takes, serialized behind a single
+tail promise and idempotent — an already-dispatched job
+is never resubmitted, launches are recorded as
+chain-launch:/chain-blocked: office-local testimony,
+and hosted-route dependents are never auto-launched.
+Observation is event-driven, never polled: the exec
+adapter watches its packet directory and emits one
+debounced local event on child exit or result.json /
+cancel.ack.json arrival; the office observes through
+the same validated reader, and a verified completion
+advances the chain — a self-exit without a receipt
+stays UNKNOWN. One real defect surfaced in verification:
+unref'd fs.watch handles alone kept the process alive
+on Windows, so spawn bookkeeping (watcher + timers +
+registry) is now explicitly disposed the moment a job's
+outcome is verified terminal and at office shutdown.
+Router gained packetVersion forwarding — exec bindings
+were minted version 1 and would have failed their own
+flat-packet check. tests/local-chain.test.ts (12 tests)
+proves gating, verified inheritance, defect-locking,
+missing-object blockers, idempotent and restart
+reconciliation, hosted exclusion, debounced triggers
+and watcher release; workflow.md documents the chain.
+Verification: typecheck clean, 688 tests 687 pass
+1 skipped (pre-existing privileged symlink fixture),
+build clean — and the suite exits promptly, which it
+did not before disposal.

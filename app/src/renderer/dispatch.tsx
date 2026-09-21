@@ -3,6 +3,7 @@ import type {Agent,AppState,InputSnapshot,ProviderJob,Request,JobEvent} from '..
 import type {LocalSessionSummary,LocalLaunchPlan} from '../shared/local-session';
 import {agentDispatchReadiness} from '../shared/readiness';
 import {requestJobs} from '../shared/queue';
+import {dependencyStatus} from '../shared/cooperation';
 
 const jobLabels:Record<ProviderJob['state'],string>={
  INTENT:'Prepared · nothing submitted',SUBMITTING:'Submitting',ACCEPTED:'Accepted by the provider',RUNNING:'Running',
@@ -25,6 +26,8 @@ export function RequestDispatch({request,state,onState}:{request:Request;state:A
  useEffect(()=>{const timer=setInterval(()=>setNow(Date.now()),30000);return()=>clearInterval(timer);},[]);
  const [sessionId,setSessionId]=useState('');
  const [sessionUrl,setSessionUrl]=useState('');
+ // Assignments this request's next preparation waits on — recorded as dependsOn at prepare time.
+ const [deps,setDeps]=useState<string[]>([]);
  const summaries=requestJobs(state,request.id);
  const chosen=summaries.find(item=>item.jobId===selectedJob)??summaries.find(item=>item.unresolved)??summaries.find(item=>!item.settled)??summaries.at(-1);
  const job=(state.jobs??[]).find(item=>item.id===chosen?.jobId);
@@ -39,7 +42,7 @@ export function RequestDispatch({request,state,onState}:{request:Request;state:A
  const reportedModel=appliedReport?.applied?.model;
  const reportedEffort=appliedReport?.applied?.effort;
  const appliedMismatch=Boolean(assignment&&appliedReport?.applied&&((reportedModel!==undefined&&reportedModel!==assignment.requestedModel)||(reportedEffort!==undefined&&reportedEffort!==assignment.requestedEffort)));
- useEffect(()=>{setPlan(null);setSessionId('');setSessionUrl('');setNote('');},[job?.id,request.id]);
+ useEffect(()=>{setPlan(null);setSessionId('');setSessionUrl('');setNote('');setDeps([]);},[job?.id,request.id]);
  const snapshot:InputSnapshot|undefined=assignment?(state.snapshots??[]).find(item=>item.id===assignment.snapshotId):undefined;
  const [events,setEvents]=useState<JobEvent[]>([]);
  const [eventCursor,setEventCursor]=useState<string|null>(null);
@@ -59,6 +62,11 @@ export function RequestDispatch({request,state,onState}:{request:Request;state:A
  },[job?.id,job?.revision,state]);
  useEffect(()=>{setReports([]);setLocalSummary(null);setLocalPlan(null);},[job?.id]);
  const agent:Agent|undefined=state.agents.find(item=>item.id===(assignment?.agentId??request.leadAgentId));
+ // Predecessor candidates: other recorded work in this project, each labeled by its request and
+ // its job's current state. dependsOn edges can only point at already-existing assignments, so
+ // the chain is a DAG by construction — no cycle check is needed or performed.
+ const depCandidates=(state.assignments??[]).filter(item=>item.projectId===request.projectId&&item.id!==assignment?.id&&(state.jobs??[]).some(item2=>item2.assignmentId===item.id));
+ const depsStatus=assignment?.dependsOn?.length?dependencyStatus(state,assignment):undefined;
  // The same scope the main process gates on: the route this office would really use, the profile's
  // effort, and the collaboration policy this request authorized. Local profiles have no hosted
  // route, so their gate is scoped to the local transport family instead of a nonexistent handoff.
@@ -99,6 +107,9 @@ export function RequestDispatch({request,state,onState}:{request:Request;state:A
   {agent&&gate&&!closed&&gate.readiness.connectionId&&!gate.readiness.accountFresh&&<p><button className="secondary" disabled={!!busy} onClick={()=>void run('recheck',async()=>{await window.office.connectionStatus(agent.provider);return window.office.getState();})}>{busy==='recheck'?'Checking…':'Re-check account'}</button> <span className="muted">The account check is stale; a live re-check refreshes it in place.</span></p>}
   {job&&<p><strong>{jobLabels[job.state]}</strong>{job.externalId?` · ${job.externalId}${job.evidence==='USER_REPORTED'?' (reported by you, unverified)':''}`:''}</p>}
   {job&&<p className="muted">{job.detail}</p>}
+  {depsStatus&&(depsStatus.ready
+   ?<p className="muted">Recorded predecessor work completed — this work can run, and its packet inherits their verified outputs.</p>
+   :<ul className="evidence-list">{depsStatus.blockers.map(blocker=><li key={blocker}>{blocker}</li>)}</ul>)}
   {localSummary&&<p className="muted">Local session {localSummary.lifecycle.toLowerCase().replaceAll('_',' ')} · {localSummary.layout==='FLAT_PACKET'?'packet folder':'project worktree'} · {localSummary.cwdDisplay}{localSummary.stopStatus!=='NOT_REQUESTED'?` · stop ${localSummary.stopStatus.toLowerCase().replaceAll('_',' ')}`:''}{localSummary.archive.packet!=='LIVE'?` · packet ${localSummary.archive.packet.toLowerCase()}`:''}{localSummary.archive.provider!=='NOT_REQUESTED'?` · provider ${localSummary.archive.provider.toLowerCase().replaceAll('_',' ')}`:''}</p>}
   {localSummary?.blockers.map(blocker=><p className="blocker" key={blocker}>{blocker}</p>)}
   {localPlan&&!closed&&<details><summary>How to run this packet ({localPlan.availability==='MANUAL_HANDOFF'?'manual handoff':'unavailable'})</summary>
@@ -114,10 +125,18 @@ export function RequestDispatch({request,state,onState}:{request:Request;state:A
   {plan&&<pre className="command-preview">{plan.executable} {plan.args.join(' ')}{'\n'}in {plan.cwd}</pre>}
   {plan?.outputDestination&&<div className="command-preview"><p>Reserved results folder: {plan.outputDestination.path}</p><p>Exact staged inventory: {plan.outputDestination.totalBytes} bytes</p><ul>{plan.outputDestination.files.map(file=><li key={file.path}>{file.path} · {file.bytes} bytes · {file.sha256}</li>)}</ul></div>}
   {error&&<p className="notice error" role="alert">{error}</p>}
+  {!closed&&(!assignment||settled)&&!summaries.some(item=>!item.settled)&&depCandidates.length>0&&<details className="dep-picker"><summary>Runs after other work{deps.length?` — ${deps.length} selected`:''} (optional)</summary>
+   <ul className="evidence-list">{depCandidates.map(item=>{
+    const other=(state.requests??[]).find(r=>r.id===item.requestId);
+    const otherJob=(state.jobs??[]).find(x=>x.assignmentId===item.id);
+    return <li key={item.id}><label><input type="checkbox" checked={deps.includes(item.id)} onChange={e=>setDeps(current=>e.target.checked?[...current,item.id]:current.filter(id=>id!==item.id))}/> {other?.name??'Request'} · {state.agents.find(a=>a.id===item.agentId)?.name??'Agent'} · {otherJob?jobLabels[otherJob.state]:'no job'} · {item.id.slice(0,8)}</label></li>;
+   })}</ul>
+   <p className="muted">The new work waits until every selected job completes, then runs automatically and inherits their verified outputs.</p>
+  </details>}
   <div className="button-row">
    {!closed&&(!assignment||settled)&&!summaries.some(item=>!item.settled)&&<button className="primary" disabled={!!busy||!agent||!gate?.canPrepare} onClick={()=>void run('prepare',async()=>{
     if(!agent)return;
-    const result=await window.office.prepareRequest({requestId:request.id,expectedRequestRevision:request.revision,agentId:agent.id,expectedAgentRevision:agent.revision??0});
+    const result=await window.office.prepareRequest({requestId:request.id,expectedRequestRevision:request.revision,agentId:agent.id,expectedAgentRevision:agent.revision??0,...(deps.length?{dependsOn:deps}:{})});
     setSelectedJob(result.state.jobs?.find(item=>item.assignmentId===result.assignmentId)?.id??'');return result.state;})}>{busy==='prepare'?'Preparing…':local?'Prepare local session':'Prepare Claude handoff'}</button>}
    {assignment&&!settled&&<>
     {!closed&&!local&&<button className="secondary" disabled={!!busy} onClick={()=>void run('plan',async()=>{setPlan(await window.office.handoffPlan({assignmentId:assignment.id}));})}>Show exact command</button>}

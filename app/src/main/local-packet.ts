@@ -117,7 +117,10 @@ export const resultContractV2 = (): string => [
   `This directory is a Quant Research Office session packet (office-local-session@2):`,
   `\`${PACKET_FILE}\` is the frozen assignment, \`${PACKET_HASH_FILE}\` the office's hash of`,
   `it, \`${PACKET_READY_FILE}\` the office's ready marker, and \`${INPUTS_DIR}/\` the declared`,
-  `input files. Do the bounded work, then write \`${RESULT_FILE}\` in this directory to report.`,
+  `input files. When \`${PACKET_FILE}\` declares an \`inherited\` manifest, those verified`,
+  `outputs from earlier work in this request's dependency chain are under`,
+  `\`${INPUTS_DIR}/inherited/<job-id>/\`. Do the bounded work, then write \`${RESULT_FILE}\``,
+  'in this directory to report.',
   '',
   `## ${RESULT_FILE}`,
   '',
@@ -234,6 +237,23 @@ export function prepareLocalPacket(input: PrepareLocalPacketInput): PreparedLoca
     io.writeNew(managed, relativePath, staged.bytes);
     files.push({ path: relativePath, sha256: staged.sha256, bytes: staged.byteLength });
   }
+  // Verified predecessor outputs ride as ordinary inputs, under a path that names the producing
+  // job. The bytes are re-hashed against the recorded object identity before anything is written —
+  // a dependent never inherits an output it cannot prove byte-for-byte.
+  const inherited: NonNullable<LocalPacketV2['inherited']> = [];
+  for (const item of context.inherited ?? []) {
+    const rel = item.name.startsWith(`${OUTPUTS_DIR}/`) ? item.name.slice(OUTPUTS_DIR.length + 1) : item.name;
+    const relativePath = `${INPUTS_DIR}/inherited/${item.sourceJobId}/${rel}`;
+    if (!safeEntry(rel) || !safeEntry(relativePath))
+      throw new Error(`A predecessor output path is unsafe for inheritance: ${item.name}.`);
+    const digest = createHash('sha256').update(item.bytes).digest('hex');
+    if (digest !== item.objectHash || item.bytes.byteLength > MAX_FILE)
+      throw new Error(`The predecessor output ${item.name} failed byte verification before it could be inherited.`);
+    const target = path.join(managed, relativePath);
+    mkdirSync(path.dirname(target), { recursive: true });
+    io.writeNew(managed, relativePath, item.bytes);
+    inherited.push({ path: relativePath, sha256: digest, bytes: item.bytes.byteLength, sourceJobId: item.sourceJobId, objectHash: item.objectHash });
+  }
   // Instruction files are ordinary packet members: written once, declared in the manifest.
   const instructions: LocalPacketV2['instructions'] = [];
   for (const [name, text] of [[AGENTS_FILE, packetAgentsV2()], [CLAUDE_FILE, packetClaude()], [CONTRACT_FILE, resultContractV2()]] as const) {
@@ -254,6 +274,7 @@ export function prepareLocalPacket(input: PrepareLocalPacketInput): PreparedLoca
     payload: context.payload.text,
     snapshotManifestHash: context.snapshot.manifestHash,
     files,
+    ...(inherited.length ? { inherited } : {}),
     instructions,
     contract: CONTRACT_FILE,
   });

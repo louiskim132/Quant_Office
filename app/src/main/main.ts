@@ -56,6 +56,7 @@ let activeWorkspaceCalls=0;
 /** Set for the whole restore lifecycle, from candidate preparation to commit. */
 let workspaceLocked=false;
 let controller:AssignmentController;
+let exec:LocalCliExecAdapter|undefined;
 let pipeline:PipelineService;
 let custody:HoldoutCustody;
 let dispatchBusy=false;
@@ -81,7 +82,7 @@ else {
    :`${error instanceof Error?error.message:'Unknown startup error'}\n\nYour files have not been reset. Keep the data folder and use a compatible build or a verified backup.`;
   dialog.showErrorBox('Workspace could not be opened',detail);app.quit();});
  app.on('window-all-closed',()=>app.quit());
- app.on('before-quit',()=>{subscriptions?.close();if(store)store.close();});
+ app.on('before-quit',()=>{exec?.disposeAll();subscriptions?.close();if(store)store.close();});
 }
 async function start(){
  const root=app.getPath('userData');await mkdir(root,{recursive:true});await recoverInterruptedRestore(root);const workspace=workspaceDirectory(root);await mkdir(workspace,{recursive:true});store=new OfficeStore(path.join(workspace,'workspace.sqlite'),{includeHistoryInResults:false});artifacts=new ArtifactService(store,workspace);evidence=new EvidenceService(store,workspace);
@@ -97,6 +98,9 @@ async function start(){
  pipeline=buildPipeline();
  // Interrupted work is reconciled before the window opens; a crash never resubmits or invents an outcome.
  try{await controller.reconcile();}catch{}
+ // Work that finished while the office was closed may now unlock dependents — the same guarded
+ // chain-advance runs once here, so a completed predecessor never leaves its chain parked.
+ try{await controller.reconcileLocalChain();}catch{}
  session.defaultSession.setPermissionRequestHandler((_webContents,_permission,callback)=>callback(false));
  session.defaultSession.setPermissionCheckHandler(()=>false);
  session.defaultSession.webRequest.onBeforeRequest((details,callback)=>{
@@ -210,7 +214,7 @@ const changed=()=>win?.webContents.send('office:changed');
   }finally{dispatchBusy=false;openRequestActions--;}
  };
  handle('office:request-prepare',async value=>{
-  const input=z.object({requestId:id,expectedRequestRevision:z.number().int().nonnegative(),agentId:id,expectedAgentRevision:z.number().int().nonnegative()}).strict().parse(value);
+  const input=z.object({requestId:id,expectedRequestRevision:z.number().int().nonnegative(),agentId:id,expectedAgentRevision:z.number().int().nonnegative(),dependsOn:z.array(id).max(64).optional()}).strict().parse(value);
   return dispatch(async()=>{
    const state=store.snapshot({history:false});
    const request=state.requests?.find(item=>item.id===input.requestId);
@@ -221,14 +225,17 @@ const changed=()=>win?.webContents.send('office:changed');
     objectRoot:workspaceDirectory(app.getPath('userData')),
     projectId:request.projectId,requestId:request.id,requestRevision:request.revision,objective:request.objective});
    const result=controller.prepare({requestId:input.requestId,agentId:input.agentId,snapshotId:snapshot.id,
-    expectedRequestRevision:input.expectedRequestRevision,expectedAgentRevision:input.expectedAgentRevision});
+    expectedRequestRevision:input.expectedRequestRevision,expectedAgentRevision:input.expectedAgentRevision,dependsOn:input.dependsOn});
    changed();return {state:result.state,assignmentId:result.assignment.id,snapshot};
   });
  });
  handle('office:request-plan',value=>{const input=assignmentInput.parse(value);return controller.handoffPlan(input.assignmentId);});
  handle('office:request-handoff',async value=>{const input=assignmentInput.parse(value);return dispatch(async()=>{
   const state=await controller.handoff(input.assignmentId);changed();return state;});});
- handle('office:request-observe',async value=>{const input=assignmentInput.parse(value);return dispatch(async()=>{const state=await controller.observe(input.assignmentId);changed();return state;});});
+ handle('office:request-observe',async value=>{const input=assignmentInput.parse(value);return dispatch(async()=>{
+ // A completed observation may unlock dependent work — the same guarded chain-advance the
+ // automatic path uses runs here, so manual and automatic observation settle identically.
+ await controller.observe(input.assignmentId);const state=await controller.advanceLocalChain(input.assignmentId);changed();return state;});});
  handle('office:request-cancel-job',async value=>{const input=assignmentInput.parse(value);return dispatch(async()=>{const state=await controller.cancel(input.assignmentId);changed();return state;});});
  handle('office:request-discard-preparation',async value=>{const input=assignmentInput.parse(value);return dispatch(async()=>{const state=controller.discardPreparation(input.assignmentId);changed();return state;});});
  handle('office:request-link',value=>{
@@ -444,8 +451,22 @@ function buildController():AssignmentController{
  // anyway and fails closed on its own flat-packet check instead of silently changing transport.
  // The child's environment is the adapter's own subscriptionEnvironment() default — the scrub
  // that removes ACP_* and billing overrides before the CLI sees them.
- const exec=new LocalCliExecAdapter(()=>path.join(workspace(),'local-sessions'),provider=>subscriptions.toolPath(provider),undefined,undefined,undefined,undefined,undefined,undefined,
-  agentId=>store.snapshot().agents.find(a=>a.id===agentId)?.provider);
+ exec=new LocalCliExecAdapter(()=>path.join(workspace(),'local-sessions'),provider=>subscriptions.toolPath(provider),undefined,undefined,undefined,undefined,undefined,undefined,
+  agentId=>store.snapshot().agents.find(a=>a.id===agentId)?.provider,
+  // A spawned child's exit or a receipt write fires this — the office observes the job through the
+  // same validated reader a manual Observe uses, then advances any dependent the completion
+  // unlocked. It runs outside the request-action mutex; a refused or racing pass leaves the job
+  // for the next trigger or startup reconciliation, never a silently claimed outcome.
+  jobId=>{void (async()=>{
+   if(workspaceLocked)return;
+   try{
+    const job=store.snapshot({history:false}).jobs?.find(item=>item.id===jobId);
+    if(!job)return;
+    await controller.observe(job.assignmentId);
+    await controller.advanceLocalChain(job.assignmentId);
+    win?.webContents.send('office:changed');
+   }catch(error){console.warn('automatic local observation failed:',error);}
+  })();});
  const execRoute=new LocalSessionRouter(jobId=>store.localSessionForJob(jobId),{FLAT_PACKET:exec,PROJECT_WORKTREE:exec},'LOCAL_CLI_EXEC');
  return new AssignmentController(store,handoff,undefined,
   // Verification is scoped to the staging root this office owns, so a snapshot pointing anywhere
@@ -471,7 +492,10 @@ function buildController():AssignmentController{
   },
   // Provider-side archive for retired packets — exact record identity, bounded output, and an
   // honest UNSUPPORTED where the provider ships no archive verb (claude/codex keep their history).
-  createLocalProviderLifecycle());
+  createLocalProviderLifecycle(),
+  // Dependent packets inherit predecessor outputs only as hash-verified bytes read back from the
+  // content-addressed store — never a filename or a claim.
+  outputs.readBytes);
 }
 async function transfer<T>(fn:()=>Promise<T>):Promise<T>{if(transferBusy)throw new Error('Another file dialog or transfer is already active.');transferBusy=true;try{return await fn();}finally{transferBusy=false;}}
 /**

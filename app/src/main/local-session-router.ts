@@ -35,6 +35,14 @@ export class LocalSessionRouter implements ProviderAdapter {
     readonly route: AdapterRoute = 'LOCAL_MAILBOX',
   ) {}
 
+  /**
+   * The packet contract new bindings are minted at — the flat slot's own declaration, because
+   * binding creation always selects the flat lane. Without this the minted record would read
+   * version 1 while every registered adapter only writes v2, and a route that hard-requires the
+   * v2 contract (LOCAL_CLI_EXEC) would refuse its own freshly minted binding.
+   */
+  get packetVersion(): 1 | 2 | undefined { return this.adapters.FLAT_PACKET.packetVersion; }
+
   /** Which layout implementation owns this job, and how the decision was reached. */
   private resolve(job: ProviderJob): { adapter: ProviderAdapter; binding: LocalSessionRecord | null } {
     const binding = this.lookup(job.id);

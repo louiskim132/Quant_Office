@@ -54,6 +54,12 @@ export interface SubmitContext {
   jobId: string;
   /** The persisted local delivery binding when one exists; hosted adapters ignore it. */
   localSession?: LocalSessionRecord;
+  /**
+   * Verified bytes of completed predecessor outputs, resolved from content-addressed storage by
+   * the controller. A local packet writes them under `inputs/inherited/<sourceJobId>/` and binds
+   * the exact {sourceJobId, objectHash} provenance in its manifest; hosted adapters ignore this.
+   */
+  inherited?: { name: string; bytes: Uint8Array; sourceJobId: string; objectHash: string }[];
 }
 export interface SubmitResult {
   externalId: string; externalUrl: string; detail: string; resolvedModel?: string; appliedEffort?: Effort | 'UNVERIFIED';
@@ -200,6 +206,11 @@ export class AssignmentController {
      * own record identity. Absent means provider archive is never attempted and honestly says so.
      */
     private readonly providerLifecycle?: import('./local-provider-lifecycle.js').ProviderLifecycle,
+    /**
+     * Reads a content-addressed stored output back, hash-verified. Dependent packets inherit
+     * predecessor bytes only through this path — absent means a dependent can never be prepared.
+     */
+    private readonly readObject?: (sha256: string) => Promise<Uint8Array>,
   ) {}
 
   /** One clock for gates and records, so evidence freshness never depends on the wall calendar. */
@@ -516,6 +527,10 @@ export class AssignmentController {
     ({ state, frozen, connection, now } = context);
     let job = this.job(assignmentId);
     const adapter = this.adapterFor({ route: assignment.route });
+    // Dependent work inherits only verified predecessor bytes — resolved before the durable intent
+    // binding so an unreadable or corrupted object fails the launch as a preflight, never a
+    // stranded submission.
+    const inherited = localRoute && assignment.dependsOn?.length ? await this.inheritedInputs(assignment) : undefined;
     // A local route submits only through a persisted delivery binding: the record is the durable
     // intent the router requires, written before the job says SUBMITTING so a refused
     // classification or an un-retryable binding leaves the job honestly undispatched.
@@ -524,6 +539,7 @@ export class AssignmentController {
     job = this.job(assignmentId);
     const submitContext: SubmitContext = { assignment, snapshot: staged, objective: frozen.objective, requestName: frozen.requestName, payload: this.providerPayload(assignment), jobId: job.id };
     if (attempt) submitContext.localSession = attempt.binding;
+    if (inherited?.length) submitContext.inherited = inherited;
     try {
       const result = await adapter.submit(submitContext);
       if (!result.externalId) throw new UnknownDispatchError('The provider returned no identifier for this submission.');
@@ -607,12 +623,16 @@ export class AssignmentController {
     let job = this.job(assignmentId);
     const adapter = this.adapterFor({ route: assignment.route });
     const localRoute = assignment.route.startsWith('LOCAL_');
+    // Same preflight rule as dispatch: verified predecessor bytes resolve before the durable
+    // intent binding, so a dependent with unreadable inputs stays honestly prepared.
+    const inherited = localRoute && assignment.dependsOn?.length ? await this.inheritedInputs(assignment) : undefined;
     // Same durable-intent rule as dispatch: the persisted binding goes with the submission.
     const attempt = localRoute ? this.prepareLocalSession({ assignment, agent: context.agent, adapter, job }) : null;
     this.store.recordJobTransition({ jobId: job.id, expectedRevision: job.revision, to: 'SUBMITTING', evidence: 'OFFICE_LOCAL', detail: 'Opening the official terminal for a manual submission.', at: this.now() });
     job = this.job(assignmentId);
     const submitContext: SubmitContext = { assignment, snapshot: staged, objective: frozen.objective, requestName: frozen.requestName, payload: this.providerPayload(assignment), jobId: job.id };
     if (attempt) submitContext.localSession = attempt.binding;
+    if (inherited?.length) submitContext.inherited = inherited;
     try {
       const result = await adapter.submit(submitContext);
       if (attempt) this.settleLocalPreparation(attempt, 'READY', result.localPacket?.packetHash ?? null, null);
@@ -640,6 +660,87 @@ export class AssignmentController {
   link(assignmentId: string, externalId: string, externalUrl: string): AppState {
     const job = this.job(assignmentId);
     return this.store.recordUserReportedLink({ jobId: job.id, expectedRevision: job.revision, externalId, externalUrl, at: this.now() });
+  }
+
+  /**
+   * The verified predecessor bytes a dependent packet inherits.
+   *
+   * Only outputs the office fetched, hash-checked and durably stored qualify — `stored: true` is
+   * set only after that retrieval path completes, so an output claimed but never verified never
+   * reaches a dependent. The bytes are then read back from content-addressed storage and the hash
+   * is re-verified before they are handed to the packet writer; a missing or corrupted object is
+   * a launch refusal, never a partially delivered input.
+   */
+  private async inheritedInputs(assignment: Assignment): Promise<NonNullable<SubmitContext['inherited']>> {
+    const state = this.store.snapshot({history:false});
+    const inherited: NonNullable<SubmitContext['inherited']> = [];
+    for (const dependency of assignment.dependsOn ?? []) {
+      const job = (state.jobs ?? []).find(item => item.assignmentId === dependency);
+      for (const output of job?.outputs ?? []) {
+        if (!output.stored) continue;
+        if (!this.readObject) throw new Error('This workspace cannot read stored predecessor output for a dependent packet.');
+        const bytes = await this.readObject(output.sha256);
+        if (createHash('sha256').update(bytes).digest('hex') !== output.sha256)
+          throw new Error(`The recorded output ${output.path} could not be read back intact for the dependent packet.`);
+        inherited.push({ name: output.path, bytes, sourceJobId: job!.id, objectHash: output.sha256 });
+      }
+    }
+    return inherited;
+  }
+
+  /**
+   * Advances the local dependency chain after one assignment's job was observed COMPLETED.
+   *
+   * A dependent launches only while it is still INTENT — an already-dispatched or discarded job
+   * is never resubmitted by this path, which makes repeated calls idempotent. Every launch runs
+   * the same guard, binding and packet path a manual launch would, so a chain step records exactly
+   * the evidence a user-initiated launch does. Hosted-route dependents are never auto-launched;
+   * a refused launch is recorded on the job as office-local testimony, not swallowed.
+   */
+  async advanceLocalChain(assignmentId: string): Promise<AppState> {
+    const state = this.store.snapshot({history:false});
+    const settled = (state.jobs ?? []).find(item => item.assignmentId === assignmentId);
+    if (!settled || settled.state !== 'COMPLETED') return state;
+    for (const dependent of (state.assignments ?? []).filter(item => (item.dependsOn ?? []).includes(assignmentId)))
+      await this.launchChainDependent(state, dependent);
+    return this.store.snapshot({history:false});
+  }
+
+  /**
+   * Startup and reconciliation pass for the chain: every INTENT dependent whose recorded
+   * predecessors all completed is launched through the same guarded path. Durable and
+   * idempotent — a job already launched is never touched, and nothing outside the recorded
+   * `dependsOn` set is considered.
+   */
+  async reconcileLocalChain(): Promise<AppState> {
+    const state = this.store.snapshot({history:false});
+    for (const dependent of (state.assignments ?? []).filter(item => item.dependsOn?.length))
+      await this.launchChainDependent(state, dependent);
+    return this.store.snapshot({history:false});
+  }
+
+  /** Serializes chain launches — two predecessors settling together must not race one dependent. */
+  private chainTail: Promise<unknown> = Promise.resolve();
+
+  private async launchChainDependent(state: AppState, dependent: Assignment): Promise<void> {
+    const job = (state.jobs ?? []).find(item => item.assignmentId === dependent.id);
+    if (!job || job.state !== 'INTENT' || !dependent.route.startsWith('LOCAL_')) return;
+    if (!dependencyStatus(state, dependent).ready) return;
+    const run = this.chainTail.then(async () => {
+      try {
+        await this.handoff(dependent.id);
+        this.store.recordJobEvents(job.id, [{ externalId: `chain-launch:${job.id}`, cursor: '', kind: 'STATUS',
+          text: 'The office launched this work automatically — its recorded predecessor work completed with verified output.',
+          occurredAt: this.now(), receivedAt: this.now(), evidence: 'OFFICE_LOCAL' }]);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : 'unknown error';
+        this.store.recordJobEvents(job.id, [{ externalId: `chain-blocked:${canonicalHash({ job: job.id, revision: job.revision, detail })}`, cursor: '', kind: 'STATUS',
+          text: `The automatic chain launch could not run: ${detail} The work stays prepared; launch it manually when the blocker clears.`,
+          occurredAt: this.now(), receivedAt: this.now(), evidence: 'OFFICE_LOCAL' }]);
+      }
+    });
+    this.chainTail = run;
+    await run;
   }
 
   /**

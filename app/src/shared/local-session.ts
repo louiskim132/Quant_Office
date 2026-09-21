@@ -170,6 +170,12 @@ export const localPacketV2Schema = z.object({
   payload: z.string().max(262144),
   snapshotManifestHash: hash,
   files: z.array(packetFileSchema).max(256),
+  /**
+   * Verified predecessor outputs a dependent packet carries, staged under
+   * `inputs/inherited/<sourceJobId>/`. Each entry pins the producing job and the content-addressed
+   * object identity the office re-verified at injection — an output is never inherited by name alone.
+   */
+  inherited: z.array(packetFileSchema.extend({ sourceJobId: id, objectHash: hash })).max(256).optional(),
   instructions: z.array(packetFileSchema).max(16),
   contract: z.literal('CONTRACT.md'),
 }).strict();

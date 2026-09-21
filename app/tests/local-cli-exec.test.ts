@@ -43,7 +43,7 @@ interface SpawnCall { executable: string; args: string[]; options: CliSpawnOptio
 
 function fixture(t: test.TestContext, options: { provider?: Provider; effort?: Effort; timeoutMs?: number; pid?: number | undefined } = {}) {
   const root = mkdtempSync(path.join(tmpdir(), 'qro-cli-exec-'));
-  t.after(() => removeTreeSync(root));
+  t.after(() => { adapter.disposeAll(); removeTreeSync(root); });
   const staging = path.join(root, 'staging');
   mkdirSync(path.join(staging, 'data'), { recursive: true });
   writeFileSync(path.join(staging, 'data', 'input.csv'), 'a,b\n1,2\n');
