@@ -132,6 +132,27 @@ test('a signed-in but unidentified session cannot mint a binding ticket',async()
  await assert.rejects(f.service.connect({...draft,provider:'devin',model:'swe-2-max'}),/unidentified session/);
  f.service.close();
 });
+test('an unidentified live check falls back to a still-fresh recorded identity, never a stale one',async()=>{
+ // The bind-time flake: devin auth status verifies sign-in while its GetUserStatus email fetch
+ // hiccups. A recorded SIGNED_IN identity inside the local staleness window still binds.
+ let recorded:{identity:string;lastCheckedAt:string}|undefined={identity:'louisnn80@gmail.com',lastCheckedAt:new Date().toISOString()};
+ const root=mkdtempSync(path.join(tmpdir(),'qro-subscriptions-'));
+ const service=new Subscriptions(root,async()=>{throw new Error('No browser in this metadata fixture');},()=>recorded);
+ service.status=async()=>({provider:'devin',connected:true,account:'',models:[{id:'swe-2-max',name:'SWE-2 Max'}],windows:[],checkedAt:new Date().toISOString(),note:''});
+ try{
+  const ticket=await service.connect({name:'Worker',provider:'devin',model:'swe-2-max',team:'Signals',role:'WORKER',instructions:'Do work.',execution:'LOCAL'});
+  assert.equal(ticket.connection.account,'louisnn80@gmail.com','the recorded identity binds when the live check cannot name one');
+  // Confirm re-observes through the same flake and resolves the same recorded identity.
+  let saved='';await service.confirm(ticket.id,agent=>{saved=agent.account;});
+  assert.equal(saved,'louisnn80@gmail.com','confirm compares the resolved identity, not the empty live read');
+  // A stale recorded identity is never trusted.
+  recorded={identity:'louisnn80@gmail.com',lastCheckedAt:new Date(Date.now()-31*60*1000).toISOString()};
+  await assert.rejects(service.connect({name:'Worker',provider:'devin',model:'swe-2-max',team:'Signals',role:'WORKER',instructions:'Do work.',execution:'LOCAL'}),/unidentified session/);
+  // And none at all keeps the original refusal.
+  recorded=undefined;
+  await assert.rejects(service.connect({name:'Worker',provider:'devin',model:'swe-2-max',team:'Signals',role:'WORKER',instructions:'Do work.',execution:'LOCAL'}),/unidentified session/);
+ }finally{service.close();}
+});
 test('a negative account read re-checks on a fresh process when auth.json moved, but never while a login listener lives',async()=>{
  const root=mkdtempSync(path.join(tmpdir(),'qro-subscriptions-'));
  const codexHome=mkdtempSync(path.join(tmpdir(),'qro-codex-home-'));

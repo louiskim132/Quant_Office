@@ -7,6 +7,7 @@ import { homedir } from 'node:os';
 import { z } from 'zod';
 import { agentDraftSchema, observationSchema } from '../core/store.js';
 import { efforts, PROVIDER_MODEL_SUGGESTIONS, CLAUDE_EFFORT_LEVELS } from '../shared/effort.js';
+import { ACCOUNT_STALE_MS, LOCAL_ACCOUNT_STALE_MS } from '../shared/readiness.js';
 import type { Effort, Agent, AgentTicket, Connection, Provider, UsageWindow } from '../shared/types.js';
 export type AccountObservation=z.infer<typeof observationSchema>;
 
@@ -127,7 +128,15 @@ export class Subscriptions {
  private loginProcess?:ReturnType<typeof spawn>;
  private loginId?:string;
  private connecting=false;
- constructor(private root:string,private openBrowser:(url:string)=>Promise<void>){
+ constructor(private root:string,private openBrowser:(url:string)=>Promise<void>,
+  /**
+   * The most recent recorded SIGNED_IN observation that named an account for this provider,
+   * supplied by the durable store. A live check that verifies sign-in but cannot name the account
+   * (a transient identity-fetch failure) falls back to this record — inside the scope's staleness
+   * window only, so a hiccup never zeroes a still-fresh recorded identity and a stale one is never
+   * silently trusted.
+   */
+  private recordedAccount?:(provider:Provider)=>{identity:string;lastCheckedAt:string}|undefined){
   mkdirSync(root,{recursive:true});
   try{this.paths=z.object({openai:z.string().optional(),claude:z.string().optional(),devin:z.string().optional()}).strict().parse(JSON.parse(readFileSync(path.join(root,'provider-tools.json'),'utf8')));}catch{}
  }
@@ -194,7 +203,13 @@ export class Subscriptions {
    }catch(error){this.codex?.stop();this.codex=undefined;throw error;}
   }else if(provider==='devin'){
    const run=(args:string[])=>new Promise<{stdout:string;failed:boolean}>((resolve,reject)=>execFile(this.executable('devin'),args,{cwd:this.root,env:subscriptionEnvironment(),windowsHide:true,timeout:30000,maxBuffer:1024*1024},(error,stdout)=>{if(error&&!stdout){reject(new Error('Devin CLI unavailable. Update the official tool and retry.'));return;}resolve({stdout,failed:Boolean(error)});}));
-   const status=await run(['auth','status']),raw=status.stdout;
+   let status=await run(['auth','status']),raw=status.stdout;
+   // The Email: line rides on a GetUserStatus fetch that can fail while sign-in itself is fine —
+   // a signed-in report with no identity gets one retry before the office settles for unidentified.
+   if(!/not logged in/i.test(raw)&&!devinStatusIdentity(raw)){
+    await new Promise(resolve=>setTimeout(resolve,750));
+    status=await run(['auth','status']);raw=status.stdout;
+   }
    if(/not logged in/i.test(raw)){connection.note='Sign in through the Devin CLI (devin auth login). The Devin Desktop session is a separate credential.';return connection;}
    const identity=devinStatusIdentity(raw);
    if(identity)connection.account=z.string().min(1).max(160).parse(identity);
@@ -275,11 +290,26 @@ export class Subscriptions {
   const supported=connection?.provider===provider?(connection.models.find(m=>m.id===model)?.efforts??(provider==='claude'?['default',...CLAUDE_EFFORT_LEVELS]:['default'])):['default'];
   if(!supported.includes(effort))throw new Error('This effort level is not supported by the selected model. Refresh model options or choose Default.');
  }
+ /**
+  * The account the office may honestly name when a live check verified sign-in but could not
+  * identify it: the still-fresh recorded identity for this provider, inside the staleness window
+  * this scope already uses (LOCAL reads stay fresh longer than hosted ones). Returns '' when no
+  * such record exists — the caller keeps its refusal.
+  */
+ private recordedIdentity(provider:Provider,localScope:boolean):string {
+  const recorded=this.recordedAccount?.(provider);
+  if(!recorded?.identity)return '';
+  return Date.now()-Date.parse(recorded.lastCheckedAt)<=(localScope?LOCAL_ACCOUNT_STALE_MS:ACCOUNT_STALE_MS)?recorded.identity:'';
+ }
  async connect(input:unknown):Promise<AgentTicket>{
   if(this.connecting)throw new Error('Another sign-in is already in progress. Cancel it first.');
   const draft=agentDraftSchema.parse(input);this.connecting=true;this.ticket=undefined;const generation=++this.generation;
   try{
    const connection=await this.runLogin(draft.provider,generation);
+   if(!connection.account&&connection.connected){
+    const recorded=this.recordedIdentity(draft.provider,(draft.execution??'HOSTED_SETUP_REQUIRED')==='LOCAL');
+    if(recorded){connection.account=recorded;connection.note=`${connection.note} This check verified sign-in but could not name the account, so the bound identity is the still-fresh recorded one.`.trim();}
+   }
    if(!connection.account)throw new Error(`The official ${PROVIDER_TOOL_NAME[draft.provider]} reported a signed-in session but did not identify the account. A profile cannot be bound to an unidentified session — sign in so the tool reports the account.`);
    if((draft.provider==='openai'||draft.provider==='devin')&&!connection.models.some(m=>m.id===draft.model))throw new Error(`The selected model is not in your available ${PROVIDER_TOOL_NAME[draft.provider]} catalog. Refresh models and select again.`);
    this.validateEffort(draft.provider,draft.model,draft.effort??'default',connection);
@@ -350,11 +380,15 @@ export class Subscriptions {
   const ticket=this.ticket;if(!ticket||ticket.id!==id||ticket.expiresAt<Date.now())throw new Error('Connection confirmation expired. Click Add to verify again.');
   const generation=this.generation;const {connection:current,observation}=await this.observe(ticket.draft.provider);
   if(generation!==this.generation||this.ticket!==ticket)throw new Error('Confirmation canceled.');
-  if(!current.connected||current.account!==ticket.connection.account)throw new Error('The signed-in account changed. Connect again before confirming.');
+  // A re-check that verifies sign-in but cannot name the account resolves through the same
+  // still-fresh recorded identity the ticket may itself carry — the comparison is against the
+  // account the office can name, not the empty string a transient fetch failure returned.
+  const currentAccount=current.account||this.recordedIdentity(ticket.draft.provider,(ticket.draft.execution??'HOSTED_SETUP_REQUIRED')==='LOCAL');
+  if(!current.connected||currentAccount!==ticket.connection.account)throw new Error('The signed-in account changed. Connect again before confirming.');
   if((ticket.draft.provider==='openai'||ticket.draft.provider==='devin')&&!current.models.some(m=>m.id===ticket.draft.model))throw new Error('Model access changed. Choose an available model.');
   this.validateEffort(ticket.draft.provider,ticket.draft.model,ticket.draft.effort??'default',current);
   // The caller commits the agent and this observation atomically; a failed durable write must create no agent.
-  save({...ticket.draft,id:ticket.id,account:current.account,createdAt:new Date().toISOString(),connectionVerifiedAt:current.checkedAt,execution:ticket.draft.execution??'HOSTED_SETUP_REQUIRED'},observation);this.ticket=undefined;
+  save({...ticket.draft,id:ticket.id,account:currentAccount,createdAt:new Date().toISOString(),connectionVerifiedAt:current.checkedAt,execution:ticket.draft.execution??'HOSTED_SETUP_REQUIRED'},observation);this.ticket=undefined;
  }
  /** One official check for an existing profile's provider, used by explicit Verify/Change connection. */
  async observeFor(provider:Provider):Promise<AccountObservation>{return (await this.observe(provider)).observation;}

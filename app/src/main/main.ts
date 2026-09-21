@@ -85,7 +85,10 @@ else {
 }
 async function start(){
  const root=app.getPath('userData');await mkdir(root,{recursive:true});await recoverInterruptedRestore(root);const workspace=workspaceDirectory(root);await mkdir(workspace,{recursive:true});store=new OfficeStore(path.join(workspace,'workspace.sqlite'),{includeHistoryInResults:false});artifacts=new ArtifactService(store,workspace);evidence=new EvidenceService(store,workspace);
- subscriptions=new Subscriptions(path.join(root,'connections'),url=>shell.openExternal(url));
+ subscriptions=new Subscriptions(path.join(root,'connections'),url=>shell.openExternal(url),
+  // The most recent recorded observation that named an account for this provider — the
+  // still-fresh fallback a connected-but-unidentified live check resolves through.
+  provider=>[...(store.snapshot().connections??[])].reverse().find(c=>c.provider===provider&&c.state==='SIGNED_IN'&&c.identity));
  // The interim transport is the labeled handoff. Automatic dispatch stays gated on verified evidence.
  controller=buildController();
  // Custody lives outside the workspace tree so no backup or restore can reach it. This build has no
