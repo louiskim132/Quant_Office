@@ -3732,3 +3732,34 @@ removed from lists, and the three 'UI Chain *' agent
 profiles archived and removed; INTENT assignments/
 jobs remain as retained inert records. No provider
 calls ran for any of this.
+
+2026-09-21 (office-chat revision; organizer, review
+9.2) — a view-only Office chat panel lands beside the
+agent scene: shared/office-chat.ts projects recorded
+inter-agent messages, provider job events and office
+status into a scope-bound, newest-first paged feed
+(store.officeChatPage over office:chat-page IPC;
+publicState still strips messages/jobEvents).
+office-chat.tsx renders text only — no HTML — with
+project/participant filters, Load-earlier paging,
+unread handling and per-entry evidence labels.
+chatEventText surfaces only speech and tool names
+from known CLI envelopes; thinking, credentials
+metadata and raw JSON never render. local-cli-exec
+stdout now triggers the existing 750 ms debounced
+office update (bounded once per interval on busy
+streams), and the observe drain covers the whole
+bounded buffer; speech still cannot settle a job.
+Independent review found the implementation correct
+and one test line wrong: the suite named zod's raw
+'max 100' detail where the IPC boundary deliberately
+maps ZodError to the generic message — corrected to
+/Invalid desktop request/. Verification at 10171dc:
+695 tests, 694 pass, 1 pre-existing skip; typecheck
+and build clean; all four desktop suites pass
+(office-chat, desktop.e2e, pipeline, revision).
+Scope note: the panel shows recorded activity — for
+claude -p in json mode stdout lands in one envelope
+at completion, so a claude hop's text appears near
+end-of-run; true mid-run dialog needs stream-json or
+transcript tailing, a clean follow-up.
