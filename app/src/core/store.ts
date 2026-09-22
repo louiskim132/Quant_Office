@@ -65,9 +65,10 @@ const gateEnum=z.enum(['G-SPEC','G-CORRECT','G-TIME','G-SPLIT','G-FIT','G-TARGET
 const outcomeEnum=z.enum(['IN_PROGRESS','VALID_NEGATIVE','INCONCLUSIVE','RETIRED','SHADOW_QUALIFIED','SUSPENDED']);
 const common = { idempotencyKey: z.string().min(8).max(128).regex(/^[a-zA-Z0-9_-]+$/) };
 export const commandSchema = z.discriminatedUnion('type', [
-  z.object({...common,type:z.literal('request.create'),projectId:id,name:title,hypothesis:z.string().trim().min(1).max(12000),workType:z.enum(['QUESTION','ANALYSIS','IMPLEMENTATION','CODE_REVIEW','EXPERIMENT']).optional(),mode:z.enum(['SINGLE','GROUP','TEAM']).optional(),leadAgentId:id.nullable().optional(),participantIds:z.array(id).optional(),acceptanceCriteria:text(12000).optional()}).strict(),
+  z.object({...common,type:z.literal('request.create'),projectId:id,name:title,hypothesis:z.string().trim().min(1).max(12000),workType:z.enum(['QUESTION','ANALYSIS','IMPLEMENTATION','CODE_REVIEW','EXPERIMENT','PLANNING','RESULT_ANALYSIS','OTHER']).optional(),mode:z.enum(['SINGLE','GROUP','TEAM']).optional(),leadAgentId:id.nullable().optional(),participantIds:z.array(id).optional(),acceptanceCriteria:text(12000).optional()}).strict(),
   z.object({...common,type:z.literal('request.update'),requestId:id,expectedRevision:z.number().int().nonnegative(),objective:z.string().trim().min(1).max(12000),leadAgentId:id.nullable(),participantIds:z.array(id),acceptanceCriteria:text(12000)}).strict(),
-  ...(['request.start','request.cancel','request.duplicate'] as const).map(type=>z.object({...common,type:z.literal(type),requestId:id,expectedRevision:z.number().int().nonnegative()}).strict()),
+  ...(['request.start','request.cancel','request.duplicate','request.pipeline.confirm'] as const).map(type=>z.object({...common,type:z.literal(type),requestId:id,expectedRevision:z.number().int().nonnegative()}).strict()),
+  z.object({...common,type:z.literal('request.pipeline.note'),requestId:id,expectedRevision:z.number().int().nonnegative(),text:z.string().trim().min(1).max(4000)}).strict(),
   z.object({...common,type:z.literal('agent.remove'),agentId:id,removed:z.boolean()}).strict(),
   z.object({...common,type:z.literal('agent.delete'),agentId:id}).strict(),
   z.object({...common,type:z.literal('agent.update'),agentId:id,expectedRevision:z.number().int().nonnegative().optional(),name:title,team:title,role,instructions:text(12000)}).strict(),
@@ -116,7 +117,9 @@ export const agentDraftSchema = z.object({ name: title, provider: z.enum(['opena
 // `account` stays the historical setup identity. `connectionId` is a durable binding fact and is never writable through a profile edit.
 const agentSchema = agentDraftSchema.extend({revision:z.number().int().nonnegative().optional(),removedAt:timestamp.optional(),deletedAt:timestamp.optional(),id, account: title, setupAccount: title.optional(), createdAt: timestamp, connectionVerifiedAt: timestamp, connectionId:id.optional(), bindingVerifiedAt:timestamp.optional(), execution: z.enum(['HOSTED_SETUP_REQUIRED','LOCAL']).default('HOSTED_SETUP_REQUIRED')}).strict();
 const logSchema=z.object({id,conversationId:z.string().min(1).max(200),from:z.string().min(1).max(100),to:z.string().min(1).max(100),kind:z.enum(['MESSAGE','TOOL','STATUS']),text:text(64000),timestamp,sourceHash:hash,externalId:z.string().min(1).max(200),provenance:z.literal('USER_IMPORTED')}).strict();
-const requestSchema=z.object({migratedFromTaskId:id.optional(),teamId:id.optional(),roleSlots:z.array(z.object({role,count:z.number().int().min(1).max(64)}).strict()).max(16).optional(),id,projectId:id,experimentId:id.nullable(),name:title,objective:text(12000),workType:z.enum(['QUESTION','ANALYSIS','IMPLEMENTATION','CODE_REVIEW','EXPERIMENT']),mode:z.enum(['SINGLE','GROUP','TEAM']),leadAgentId:id.nullable(),participantIds:z.array(id),acceptanceCriteria:text(12000),revision:z.number().int().nonnegative(),status:z.enum(['DRAFT','READY','CANCELED']),removedAt:timestamp.optional(),blockers:z.array(z.object({code:text(100),message:text(1000),action:text(200)}).strict()),delegation:z.boolean(),createdAt:timestamp,updatedAt:timestamp,sourceRequestId:id.optional()}).strict();
+const requestSchema=z.object({migratedFromTaskId:id.optional(),teamId:id.optional(),roleSlots:z.array(z.object({role,count:z.number().int().min(1).max(64)}).strict()).max(16).optional(),id,projectId:id,experimentId:id.nullable(),name:title,objective:text(12000),workType:z.enum(['QUESTION','ANALYSIS','IMPLEMENTATION','CODE_REVIEW','EXPERIMENT','PLANNING','RESULT_ANALYSIS','OTHER']),mode:z.enum(['SINGLE','GROUP','TEAM']),leadAgentId:id.nullable(),participantIds:z.array(id),acceptanceCriteria:text(12000),revision:z.number().int().nonnegative(),status:z.enum(['DRAFT','READY','CANCELED']),removedAt:timestamp.optional(),blockers:z.array(z.object({code:text(100),message:text(1000),action:text(200)}).strict()),delegation:z.boolean(),createdAt:timestamp,updatedAt:timestamp,sourceRequestId:id.optional(),
+  pipeline:z.object({kind:z.enum(['PLANNING','RESULT_ANALYSIS']),specHash:hash.nullable(),phase:z.enum(['BRIEFING','LAUNCHED']),briefAssignmentId:id.nullable()}).strict().optional(),
+  pipelineNotes:z.array(z.object({id,text:text(4000),createdAt:timestamp}).strict()).max(64).optional()}).strict();
 const providerEnum=z.enum(['openai','claude','devin']);
 /** Defence in depth: durable records must never carry provider secrets, even in free-text fields. */
 const secretFree=(maximum:number)=>text(maximum).refine(value=>!/\b(sk-[A-Za-z0-9_-]{8,}|Bearer\s+[A-Za-z0-9._-]{12,}|eyJ[A-Za-z0-9._-]{16,})/.test(value),'Durable records must not contain credentials');
@@ -155,7 +158,7 @@ const snapshotSchema=z.object({objectsStored:z.literal(true).optional(),id,proje
   warnings:z.array(text(1000)).max(64),provenance:z.literal('OFFICE_STAGED'),createdAt:timestamp}).strict();
 const jobStateEnum=z.enum(['INTENT','SUBMITTING','ACCEPTED','RUNNING','COMPLETED','FAILED','UNKNOWN','CANCEL_REQUESTED','CANCEL_ACKNOWLEDGED']);
 const evidenceKindEnum=z.enum(['OFFICE_LOCAL','PROVIDER_REPORTED','USER_REPORTED']);
-const assignmentSchema=z.object({research:stageContextSchema.optional(),dependsOn:z.array(id).max(64).optional(),toolProfile:toolProfileSchema.optional(),id,projectId:id,requestId:id,requestRevision:z.number().int().nonnegative(),agentId:id,agentRevision:z.number().int().nonnegative(),
+const assignmentSchema=z.object({research:stageContextSchema.optional(),dependsOn:z.array(id).max(64).optional(),toolProfile:toolProfileSchema.optional(),pipelineKey:z.string().trim().min(1).max(80).optional(),id,projectId:id,requestId:id,requestRevision:z.number().int().nonnegative(),agentId:id,agentRevision:z.number().int().nonnegative(),
   connectionId:id,capabilitySnapshotId:id,capabilitySnapshotIds:z.array(id).max(64).optional(),snapshotId:id,route:routeEnum,requestedModel:secretFree(160),resolvedModel:secretFree(160),
   requestedEffort:effortSchema,appliedEffort:z.union([effortSchema,z.literal('UNVERIFIED')]),delegation:z.boolean(),objectiveHash:hash,
   frozen:z.object({requestName:title,objective:text(12000),acceptanceCriteria:text(12000),instructions:text(12000),
@@ -1516,6 +1519,25 @@ export class OfficeStore {
           }
           break;
         }
+        case 'request.pipeline.note':
+        case 'request.pipeline.confirm': {
+          const request=state.requests?.find(r=>r.id===command.requestId);if(!request)throw new Error('Request not found');
+          this.activeProject(state,request.projectId);projectId=request.projectId;experimentId=request.experimentId;
+          if(request.revision!==command.expectedRevision)throw new Error('Stale request revision; reload before continuing');
+          if(request.status==='CANCELED')throw new Error('Canceled requests are read-only.');
+          if(!request.pipeline)throw new Error('Only planning or result-analysis requests carry a pipeline.');
+          if(command.type==='request.pipeline.note'){
+            if(request.status!=='READY'||request.pipeline.phase!=='BRIEFING')throw new Error('Director notes land only while the request is briefing.');
+            changes.push({collection:'requests',value:{...request,pipelineNotes:[...(request.pipelineNotes??[]),{id:randomUUID(),text:command.text,createdAt:now}],revision:request.revision+1,updatedAt:now}});
+            reason='Director note recorded; the office queues a brief refinement hop';break;
+          }
+          if(request.status!=='READY'||request.pipeline.phase!=='BRIEFING')throw new Error('This pipeline is already launched or still drafting.');
+          if(!request.pipeline.briefAssignmentId)throw new Error('No director brief hop exists yet — start the request first.');
+          const briefJob=state.jobs?.find(item=>item.assignmentId===request.pipeline!.briefAssignmentId);
+          if(!briefJob||briefJob.state!=='COMPLETED')throw new Error('The director brief has not completed — the shaped brief must exist before the pipeline launches.');
+          changes.push({collection:'requests',value:{...request,pipeline:{...request.pipeline,phase:'LAUNCHED'},revision:request.revision+1,updatedAt:now}});
+          reason='Pipeline confirmed; the office mints the remaining hops';break;
+        }
         case 'request.update':
         case 'request.start':
         case 'request.cancel':
@@ -1537,7 +1559,14 @@ export class OfficeStore {
             reason='Saved a request revision; pending reviews superseded';break;
           }
           const blockers:Request['blockers']=[];
-          if(command.type==='request.start'){
+          if(command.type==='request.start'&&request.pipeline){
+            // Pipeline arms resolve by role across the roster; the picked lead is the director
+            // seat, and coverage of the arm roles — not a participant list — is the gate.
+            if(!request.leadAgentId)blockers.push({code:'LEAD_REQUIRED',message:'Choose the director agent when creating the request.',action:'Edit the request'});
+            else{const a=state.agents?.find(item=>item.id===request.leadAgentId);if(!a||a.removedAt)blockers.push({code:'AGENT_UNAVAILABLE',message:'The chosen director agent is archived or unavailable.',action:'Restore the agent or pick another director'});}
+            for(const role of (request.pipeline.kind==='PLANNING'?['PM_A','PM_B','WORKER']:['PM_C','PM_D','WORKER']))
+              if(!state.agents?.some(item=>!item.removedAt&&item.role===role))blockers.push({code:'PIPELINE_ROLE_MISSING',message:`The ${request.pipeline.kind==='PLANNING'?'planning':'result analysis'} pipeline needs a live ${role} agent on the roster.`,action:'Add or restore an agent with that role'});
+          }else if(command.type==='request.start'){
             const selected=[...new Set([request.leadAgentId,...request.participantIds].filter((id):id is string=>!!id))];
             if(!request.leadAgentId)blockers.push({code:'LEAD_REQUIRED',message:'Choose a responsible agent when creating the request.',action:'Edit request participants'});
             for(const id of selected){const a=state.agents?.find(a=>a.id===id);if(!a||a.removedAt)blockers.push({code:'AGENT_UNAVAILABLE',message:'A selected agent is archived or unavailable.',action:'Restore the agent or edit participants'});}
@@ -1780,7 +1809,9 @@ export class OfficeStore {
             if(mode==='SINGLE'&&participantIds.some(id=>id!==leadAgentId))throw new Error('Single-agent requests cannot include collaborators');
             for(const id of [leadAgentId,...participantIds].filter(Boolean))if(!state.agents?.some(a=>a.id===id&&!a.removedAt))throw new Error('Choose an active agent');
             experimentId=command.workType==='EXPERIMENT'?randomUUID():null;
-            const request:Request={id:randomUUID(),projectId,experimentId,name:command.name,objective:command.hypothesis,workType:command.workType,mode,leadAgentId,participantIds,acceptanceCriteria:command.acceptanceCriteria??'',revision:0,status:'DRAFT',blockers:[],delegation:mode!=='SINGLE',createdAt:now,updatedAt:now};
+            const pipelineKind=command.workType==='PLANNING'||command.workType==='RESULT_ANALYSIS'?command.workType:null;
+            const request:Request={id:randomUUID(),projectId,experimentId,name:command.name,objective:command.hypothesis,workType:command.workType,mode,leadAgentId,participantIds,acceptanceCriteria:command.acceptanceCriteria??'',revision:0,status:'DRAFT',blockers:[],delegation:mode!=='SINGLE',createdAt:now,updatedAt:now,
+              ...(pipelineKind?{pipeline:{kind:pipelineKind,specHash:null,phase:'BRIEFING' as const,briefAssignmentId:null}}:{})};
             changes.push({collection:'requests',value:request});
             if(experimentId)changes.push({collection:'experiments',value:{id:experimentId,projectId,name:command.name,hypothesis:command.hypothesis,stage:'DRAFT',revision:0,contract:{...emptyContract(),objective:command.hypothesis},createdAt:now,updatedAt:now}});
             reason='Saved draft request; no work queued';break;

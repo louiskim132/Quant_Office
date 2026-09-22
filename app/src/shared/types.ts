@@ -1,9 +1,26 @@
 export type Role = 'DIRECTOR' | 'PM_A' | 'PM_B' | 'PM_C' | 'PM_D' | 'WORKER';
 export type Stage = 'CANCELED' | 'DRAFT' | 'CONTRACT_REVIEW' | 'CONTRACT_FROZEN' | 'IMPLEMENTING' | 'REMOTE_VERIFIED' | 'PREFLIGHT_READY' | 'WAITING_FOR_USER_PREFLIGHT' | 'PREFLIGHT_REVIEW' | 'RUN_APPROVED' | 'WAITING_FOR_USER_RUN' | 'RESULT_VALIDATION' | 'INDEPENDENT_ANALYSIS' | 'DIRECTOR_DECISION';
 export type TaskStatus = 'BLOCKED' | 'QUEUED' | 'RUNNING' | 'ACCEPTED' | 'CANCELED' | 'SUPERSEDED';
-export type WorkType = 'QUESTION' | 'ANALYSIS' | 'IMPLEMENTATION' | 'CODE_REVIEW' | 'EXPERIMENT';
+export type WorkType = 'QUESTION' | 'ANALYSIS' | 'IMPLEMENTATION' | 'CODE_REVIEW' | 'EXPERIMENT'
+ | 'PLANNING' | 'RESULT_ANALYSIS' | 'OTHER';
+/**
+ * A pipeline request's durable orchestration state (inter-agent pipeline). `briefAssignmentId`
+ * names the assignment that carries the current director brief — the first hop, and the target
+ * each user note refines. `phase` flips to LAUNCHED only through an explicit confirm command.
+ */
+export interface RequestPipeline {
+  kind: 'PLANNING' | 'RESULT_ANALYSIS';
+  specHash: string | null;
+  phase: 'BRIEFING' | 'LAUNCHED';
+  briefAssignmentId: string | null;
+}
+/** A bounded user note to the director while a pipeline request is still briefing. */
+export interface PipelineNote { id: string; text: string; createdAt: string }
 export type WorkMode = 'SINGLE' | 'GROUP' | 'TEAM';
-export interface Request { migratedFromTaskId?:string; teamId?:string; roleSlots?:RoleSlot[]; id:string; projectId:string; experimentId:string|null; name:string; objective:string; workType:WorkType; mode:WorkMode; leadAgentId:string|null; participantIds:string[]; acceptanceCriteria:string; revision:number; status:'DRAFT'|'READY'|'CANCELED'; removedAt?:string; blockers:{code:string;message:string;action:string}[]; delegation:boolean; createdAt:string; updatedAt:string; sourceRequestId?:string; }
+export interface Request { migratedFromTaskId?:string; teamId?:string; roleSlots?:RoleSlot[]; id:string; projectId:string; experimentId:string|null; name:string; objective:string; workType:WorkType; mode:WorkMode; leadAgentId:string|null; participantIds:string[]; acceptanceCriteria:string; revision:number; status:'DRAFT'|'READY'|'CANCELED'; removedAt?:string; blockers:{code:string;message:string;action:string}[]; delegation:boolean; createdAt:string; updatedAt:string; sourceRequestId?:string;
+ /** Present on PLANNING/RESULT_ANALYSIS requests — the comm-round orchestration record. */
+ pipeline?:RequestPipeline; /** Bounded user→director notes recorded while briefing. */
+ pipelineNotes?:PipelineNote[]; }
 export interface Project { localFolder?:string; cloudWorkspace?:string; id: string; name: string; mandate: string; createdAt: string; updatedAt: string; archived: boolean; removedAt?: string; budgetCents: number; }
 export interface Experiment { id: string; projectId: string; name: string; hypothesis: string; stage: Stage; revision: number; createdAt: string; updatedAt: string; contract: ResearchContract; }
 export interface ResearchContract { objective: string; dataPolicy: string; modelFamilies: string; evaluation: string; economics: string; protectedRegions: string; requiredChecks: string; limitations: string; }
@@ -170,6 +187,8 @@ export interface Assignment {
   dependsOn?: string[];
   /** Declared tool scope for this assignment; absent on records frozen before the field existed. */
   toolProfile?: import('./tool-profile').ToolProfile;
+  /** The comm-round spec entry this assignment was minted for — idempotent mints key on it. */
+  pipelineKey?: string;
   id: string; projectId: string; requestId: string; requestRevision: number; agentId: string; agentRevision: number;
   connectionId: string; capabilitySnapshotId: string; snapshotId: string; route: DispatchRoute;
   requestedModel: string; resolvedModel: string; requestedEffort: Effort; appliedEffort: Effort | 'UNVERIFIED';
@@ -207,7 +226,8 @@ export interface AppState { pipeline?: import("./pipeline").PipelineRecord[]; sc
 export type Command =
  | { type: 'request.create'; idempotencyKey: string; projectId: string; name: string; hypothesis: string; workType?:WorkType; mode?:WorkMode; leadAgentId?:string|null; participantIds?:string[]; acceptanceCriteria?:string }
  | { type:'request.update';idempotencyKey:string;requestId:string;expectedRevision:number;objective:string;leadAgentId:string|null;participantIds:string[];acceptanceCriteria:string }
- | { type: 'request.start' | 'request.cancel' | 'request.duplicate'; idempotencyKey:string; requestId:string; expectedRevision:number }
+ | { type: 'request.start' | 'request.cancel' | 'request.duplicate' | 'request.pipeline.confirm'; idempotencyKey:string; requestId:string; expectedRevision:number }
+ | { type: 'request.pipeline.note'; idempotencyKey:string; requestId:string; expectedRevision:number; text:string }
  | { type: 'agent.remove'; idempotencyKey: string; agentId: string; removed: boolean }
  | { type: 'agent.delete'; idempotencyKey: string; agentId: string }
  | { type: 'agent.update'; idempotencyKey: string; agentId: string; expectedRevision?: number; name: string; team: string; role: Role; instructions: string }
