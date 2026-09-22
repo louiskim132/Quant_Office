@@ -4,11 +4,13 @@ import { existsSync, watch, type FSWatcher } from 'node:fs';
 import path from 'node:path';
 import type { CapabilityEvidence, Effort, JobEvent, Provider, ProviderJob } from '../shared/types.js';
 import type { LocalSessionRecord } from '../shared/local-session.js';
+import type { ToolProfile } from '../shared/tool-profile.js';
 import { MAX_FILE } from './artifacts.js';
 import type { LaunchRequest } from './handoff.js';
 import { GuardedLocalFileIO, type LocalFileIO } from './local-session-files.js';
 import { CANCEL_ACK_FILE, PACKET_FILE, RESULT_FILE, RESULT_STATES, prepareLocalPacket, readLocalCancelAck, readLocalResult, writeLocalCancelRequest } from './local-packet.js';
 import { discover, type Discovery } from './local-provider-records.js';
+import { mapToolFlags, type ToolFlagResult } from './tool-flags.js';
 import { subscriptionEnvironment } from './subscriptions.js';
 import type { ObserveResult, ProviderAdapter, SubmitContext, SubmitResult } from './controller.js';
 
@@ -26,12 +28,6 @@ const MAX_BUFFERED_LINES = 500;
 const MAX_BUFFERED_BYTES = 256 * 1024;
 /** Drain the entire bounded buffer so an idle burst or terminal cleanup cannot strand its tail. */
 const MAX_EVENTS_PER_OBSERVE = MAX_BUFFERED_LINES;
-/**
- * Claude Code's documented --effort levels on the installed build. Other effort names have no
- * documented mapping and are recorded as unmapped rather than silently dropped or guessed.
- */
-const CLAUDE_EFFORTS = new Set<Effort>(['low', 'medium', 'high', 'xhigh', 'max']);
-
 /**
  * The spawn surface the adapter needs — a subset of node's spawn result, so tests can drive a
  * scripted child without a real process.
@@ -66,6 +62,14 @@ export interface LaunchRecord {
   effortFlag: string | null;
   /** A requested effort the CLI has no documented flag for — recorded, never silently dropped. */
   unmappedEffort: Effort | null;
+  /** Declared tool-profile restrictions a verified CLI flag actually carries at this launch. */
+  appliedRestrictions: string[];
+  /**
+   * Declared tool-profile restrictions the installed CLI cannot express. Each entry names the
+   * restriction and spells out 'declared, not enforced by <provider>' — recorded verbatim so
+   * the launch never implies a boundary that does not exist.
+   */
+  unmappedRestrictions: string[];
 }
 
 interface BufferedLine { seq: number; stream: 'stdout' | 'stderr'; text: string; bytes: number; at: string }
@@ -152,8 +156,9 @@ export class LocalCliExecAdapter implements ProviderAdapter {
   ) {}
 
   /**
-   * The documented argv for each installed CLI (docs/cli-exec-probes.md). Every flag below was
-   * verified against the installed tool's --help at development time:
+   * The documented argv for each installed CLI (docs/cli-exec-probes.md), built by
+   * mapToolFlags in tool-flags.ts — every flag was verified against the installed tool's
+   * --help at development time:
    *   claude 2.1.x: -p, --output-format json, --dangerously-skip-permissions, --model, --effort.
    *   codex:        exec, -s workspace-write, --skip-git-repo-check, -m (exec documents no effort flag).
    *   devin 3000.x: -p, --model, --respect-workspace-trust, --permission-mode (no effort flag).
@@ -161,36 +166,11 @@ export class LocalCliExecAdapter implements ProviderAdapter {
    * the write tool rejected in non-interactive use, so dangerous is the least mode that actually
    * covers the contract's workspace writes. It is recorded verbatim in the launch record — a real
    * widening of the tool's own gate, never silently widened further.
+   * A binding's declared toolProfile adds only flags verified in the installed --help; every
+   * restriction no flag expresses lands in unmappedRestrictions instead of being dropped.
    */
-  private providerCommand(provider: Provider, prompt: string, model: string, effort: Effort): { args: string[]; bypassFlags: string[]; effortFlag: string | null; unmappedEffort: Effort | null } {
-    switch (provider) {
-      case 'claude': {
-        const args = ['-p', prompt, '--output-format', 'json', '--dangerously-skip-permissions', '--model', model];
-        let effortFlag: string | null = null;
-        let unmappedEffort: Effort | null = null;
-        if (effort !== 'default') {
-          if (CLAUDE_EFFORTS.has(effort)) {
-            args.push('--effort', effort);
-            effortFlag = `--effort ${effort}`;
-          } else unmappedEffort = effort;
-        }
-        return { args, bypassFlags: ['--dangerously-skip-permissions'], effortFlag, unmappedEffort };
-      }
-      case 'openai':
-        return {
-          args: ['exec', '-s', 'workspace-write', '--skip-git-repo-check', '-m', model, prompt],
-          bypassFlags: ['-s', 'workspace-write', '--skip-git-repo-check'],
-          effortFlag: null,
-          unmappedEffort: effort === 'default' ? null : effort,
-        };
-      case 'devin':
-        return {
-          args: ['-p', prompt, '--model', model, '--respect-workspace-trust', 'false', '--permission-mode', 'dangerous'],
-          bypassFlags: ['--respect-workspace-trust', 'false', '--permission-mode', 'dangerous'],
-          effortFlag: null,
-          unmappedEffort: effort === 'default' ? null : effort,
-        };
-    }
+  private providerCommand(provider: Provider, prompt: string, model: string, effort: Effort, profile?: ToolProfile): ToolFlagResult {
+    return mapToolFlags({ provider, model, effort, prompt, profile });
   }
 
   async submit(context: SubmitContext): Promise<SubmitResult> {
@@ -202,7 +182,7 @@ export class LocalCliExecAdapter implements ProviderAdapter {
     const dir = path.resolve(this.sessionsRoot(), binding.storageRelativePath);
     const prepared = prepareLocalPacket({ dir, context, binding, io: this.io, now: this.now() });
     const prompt = `${context.payload.text}\n\n${PROMPT_SUFFIX}`;
-    const command = this.providerCommand(binding.provider, prompt, context.payload.model, context.payload.effort);
+    const command = this.providerCommand(binding.provider, prompt, context.payload.model, context.payload.effort, binding.toolProfile);
     const executable = this.executable(binding.provider);
     const child = this.spawnChild(executable, command.args, {
       // The spawn cwd is authoritative — codex -C does not place the model's shell (probe doc).
@@ -214,6 +194,7 @@ export class LocalCliExecAdapter implements ProviderAdapter {
       bypassFlags: command.bypassFlags, spawnedAt: this.now(), cwd: dir, timeoutMs: this.timeoutMs,
       requestedModel: context.payload.model, requestedEffort: context.payload.effort,
       effortFlag: command.effortFlag, unmappedEffort: command.unmappedEffort,
+      appliedRestrictions: command.applied, unmappedRestrictions: command.unmapped,
     };
     const record: SpawnRecord = {
       jobId: binding.jobId, child, launch, dir,
@@ -488,7 +469,7 @@ export class LocalCliExecAdapter implements ProviderAdapter {
     const provider = context.localSession?.provider ?? this.providerFor?.(context.assignment.agentId);
     if (!provider) throw new Error('The provider for this launch cannot be resolved, so the exec command cannot be named.');
     const prompt = `${context.payload.text}\n\n${PROMPT_SUFFIX}`;
-    const { args } = this.providerCommand(provider, prompt, context.payload.model, context.payload.effort);
+    const { args } = this.providerCommand(provider, prompt, context.payload.model, context.payload.effort, context.localSession?.toolProfile);
     return {
       executable: this.executable(provider), args,
       cwd: context.localSession ? path.resolve(this.sessionsRoot(), context.localSession.storageRelativePath) : this.sessionsRoot(),
@@ -524,7 +505,7 @@ export class LocalCliExecAdapter implements ProviderAdapter {
         ...scope, operation: 'TOOL_CONFINEMENT',
         detail: `Delivery scope, not an enforced boundary: the office spawned the CLI into one dedicated session directory under the user's own permissions. ${this.confinementNote(launch?.provider ?? context.localSession?.provider)}`,
         confinement: {
-          tools: 'packet contents delivered: packet.json, the result contract and declared snapshot inputs',
+          tools: this.confinementTools(launch, context.localSession),
           filesystem: 'the packet was written to one dedicated session directory; the office confines nothing — the spawned CLI runs under the user\'s filesystem permissions and can read sibling directories',
           network: 'not restricted by the office; the packet declares what the session may read',
           environment: 'office-spawned provider CLI child process on this machine',
@@ -535,6 +516,28 @@ export class LocalCliExecAdapter implements ProviderAdapter {
         detail: 'The packet carries only the frozen single-agent payload; the spawned run has no office delegation channel beyond the CLI\'s own flags.',
       },
     ];
+  }
+
+  /**
+   * The tools line of the launch's confinement record. It names the packet contents, every
+   * profile restriction a verified CLI flag carries, and every restriction left as a declared-
+   * only residue — each unmapped entry already spells out 'declared, not enforced by
+   * <provider>'. When this office process no longer holds the launch record, the residue is
+   * recomputed from the binding's declared profile (applied/unmapped are profile-derived only)
+   * and qualified as such.
+   */
+  private confinementTools(launch: LaunchRecord | undefined, binding: LocalSessionRecord | null | undefined): string {
+    const parts = ['packet contents delivered: packet.json, the result contract and declared snapshot inputs'];
+    let applied = launch?.appliedRestrictions ?? [];
+    let unmapped = launch?.unmappedRestrictions ?? [];
+    if (!launch && binding?.toolProfile) {
+      const residue = mapToolFlags({ provider: binding.provider, model: '', effort: 'default', prompt: '', profile: binding.toolProfile });
+      applied = residue.applied.map(entry => `${entry} (reconstructed from the declared profile — the launch record is unavailable to this office process)`);
+      unmapped = residue.unmapped;
+    }
+    if (applied.length) parts.push(`profile restrictions carried by verified CLI flags: ${applied.join(' | ')}`);
+    parts.push(...unmapped);
+    return parts.join('; ');
   }
 
   /** The probed confinement claim for each provider's sandbox flags — exactly what was observed, nothing more. */
