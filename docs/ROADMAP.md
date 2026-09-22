@@ -1,5 +1,7 @@
 # Quant Research Office — single implementation roadmap
 
+Current acceptance update, 2026-09-21: the live three-agent Director → PM → Worker local CLI chain passed after correcting the generated packet-hash instructions and a concurrent-trigger false-blocker race. Final regression: 690 tests, 689 passed, one existing privileged-symlink skip; typecheck, build and three development desktop suites passed. See the C9 automated-chain row and dated acceptance entry below. This establishes bounded local synthetic office orchestration, not hosted execution or the user-run Colab milestone.
+
 Current planning update, 2026-09-16: section 3.2 adds the four-plugin office evaluation (Serena, Ponytail, Graphify, LightRAG) and a runnable synthetic example. Based on fetched `origin/main` commit `6d27652846d18f8c8b7c5d588bc3a2923b154f4b` (C9 PR #5), C9 is PARTIALLY_VERIFIED_LOCAL, not a new unimplemented hybrid proposal. C10 below plans tool lifecycle and comparative trials; it installs nothing and claims no token savings. Earlier baseline paragraphs remain historical; use section 11 for current per-item status.
 
 Updated 2026-09-13 after the fixed eight-session desktop coordination layer was implemented and exercised. The complete locally actionable C4–C7 revision, static review, consolidated verification with targeted repairs, and fresh packaged/native acceptance remain the application baseline. This is the sole active roadmap. Sections 11 and 12 distinguish VERIFIED_LOCAL implementation from BLOCKED_EXTERNAL live capability evidence. Earlier slice reports are historical. Section 3.1 remains a proposal, not an enabled provider route.
@@ -1109,6 +1111,12 @@ Ordered implementation packets (organizer owns shared contracts, IPC, dependenci
 Exact next local work: implement C10-A attempt preparation/ledger and C10-B contracts on organizer-published packets; retain C9's separate local-session probe and pilot as outstanding. Local fixture work can proceed without changing R5 or waiting for real data. Do not start paid/live provider runs merely because a packet is written.
 
 ## 11. Execution checklist and progress record
+
+Latest C9 qualification (2026-09-21) supersedes the historical C9 row's statement that CLI-exec is unimplemented: LOCAL_CLI_EXEC and automatic dependency relay are implemented and have passed the real three-agent acceptance below. The historical row retains its original evidence; it is not the current next-action list.
+
+| Current acceptance item | Status | Evidence / next item |
+| --- | --- | --- |
+| C9 automated Director → PM → Worker | VERIFIED_LOCAL for bounded live Claude CLI relay | Three distinct role profiles and real processes; one Director start, two event-driven dependent starts; exact inherited manifests, agent-consumed predecessor hashes, verified durable outputs and replay non-duplication. Two product defects repaired; 689/690 unit tests pass (one existing skip), typecheck/build and three development desktop suites pass. [Acceptance record](../records/reviews/three-agent-acceptance-2026-09-21.md). Next: reproduce output-storage failure recovery and retain process/watch bookkeeping until durable terminal admission. Mixed-provider chains, packaged acceptance and the C8 user-run Colab pilot are not established by this test. |
 
 Status vocabulary: NOT_STARTED, IMPLEMENTED_FOUNDATION, IN_PROGRESS, PARTIALLY_VERIFIED_LOCAL, BLOCKED_EXTERNAL, VERIFIED_LOCAL, VERIFIED_HOSTED. PARTIALLY_VERIFIED_LOCAL means some tested code exists but parent acceptance is not met; list exact open subitems. PARTIALLY_IMPLEMENTED means the larger program still has unimplemented contracts/UI/tests. The latter requires actual provider evidence for the exact scope. A local test cannot advance a hosted gate. Keep this table in the same file.
 
@@ -3674,3 +3682,53 @@ Verification: typecheck clean, 688 tests 687 pass
 1 skipped (pre-existing privileged symlink fixture),
 build clean — and the suite exits promptly, which it
 did not before disposal.
+
+2026-09-21 (three-agent live acceptance; organizer) —
+the Director → PM → Worker LOCAL_CLI_EXEC chain passed
+end to end against three real claude.exe processes:
+one manual handoff, two event-driven dependent
+launches, exact inherited manifests, agent-measured
+predecessor hashes matching stored output bytes, and
+verified durable results with no replay duplication.
+Artifact root
+app/test-output/three-agent-live-2026-09-22T00-03-19-074Z/
+(acceptance.json = PASS); the full record is
+records/reviews/three-agent-acceptance-2026-09-21.md.
+Two live defects were found and repaired in 5febc7f:
+CONTRACT.md pointed packetHash at packet.json instead
+of the packet.sha256 sidecar (first run's receipt
+bound snapshotManifestHash and was correctly refused),
+and concurrent completion triggers could record a
+false chain-blocked event for an already-launched
+dependent — the serialized section now re-verifies
+durable INTENT/route/readiness before any handoff.
+Final regression at the fixed source: 690 tests, 689
+passed, one existing privileged-symlink skip;
+typecheck, build and the three development desktop
+suites pass. Bounded local synthetic orchestration
+only — no hosted execution, mixed-provider chain,
+packaged acceptance or user-run Colab claim. Next:
+reproduce output-storage failure recovery and retain
+process/watch bookkeeping until durable terminal
+admission.
+
+2026-09-21 (pre-restart defect fixes; organizer) —
+two app defects surfaced while driving the UI chain:
+post-creation effort edits on Claude agents rejected
+every non-default level because office:agent-effort
+fetches a connection only for openai and
+validateEffort then collapsed to Provider default;
+the tool-published session enum now applies to claude
+with or without a connection, while signed-in catalog
+narrowing and OpenAI/Devin account-bound strictness
+are unchanged (ea1f354, activity.test.ts). The
+Projects page had no New project entry once any
+active project existed; the heading now always offers
+it (de8bc34). Workspace debris from the interrupted
+UI run was retired through domain ops only — three
+'UI chain *' draft requests canceled, the 'UI
+three-agent chain acceptance' project archived and
+removed from lists, and the three 'UI Chain *' agent
+profiles archived and removed; INTENT assignments/
+jobs remain as retained inert records. No provider
+calls ran for any of this.
