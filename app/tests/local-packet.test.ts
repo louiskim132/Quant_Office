@@ -144,6 +144,20 @@ test('CLAUDE.md is a regular file starting with the @AGENTS.md include line', t 
   assert.match(agents, /packet\.json/);
 });
 
+test('result contract identifies the packet hash sidecar and rejects the snapshot hash', t => {
+  const f = fixture(t);
+  const prepared = prepare(f);
+  const contract = readFileSync(path.join(f.dir, CONTRACT_FILE), 'utf8');
+  assert.match(contract, /`packetHash` — copy the trimmed contents of `packet\.sha256`/);
+  assert.match(contract, /Do not use\n  `snapshotManifestHash`/);
+  const packetHash = readFileSync(path.join(f.dir, PACKET_HASH_FILE), 'utf8').trim();
+  const bound = { ...f.binding, packetHash: prepared.packetHash };
+  writeFileSync(path.join(f.dir, RESULT_FILE), JSON.stringify(receipt(bound, f.snapshot.manifestHash)));
+  assert.ok('defect' in readLocalResult(f.dir, bound, f.io));
+  writeFileSync(path.join(f.dir, RESULT_FILE), JSON.stringify(receipt(bound, packetHash)));
+  assert.ok('value' in readLocalResult(f.dir, bound, f.io));
+});
+
 test('CONTRACT.md documents the v2 result schema, office control files and the cancel ack', t => {
   const f = fixture(t);
   prepare(f);

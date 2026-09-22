@@ -327,6 +327,23 @@ test('reconcileLocalChain launches a dependent left parked by a completed predec
   assert.equal(f.calls.length, 2);
 });
 
+test('concurrent chain triggers launch once without recording a false blocker', async t => {
+  const f = await fixture(t);
+  const a = await prepared(f);
+  const b = await prepared(f, { dependsOn: [a.assignment.id] });
+  await complete(f, a);
+  await Promise.all([
+    f.controller.advanceLocalChain(a.assignment.id),
+    f.controller.advanceLocalChain(a.assignment.id),
+    f.controller.reconcileLocalChain(),
+  ]);
+  assert.equal(f.calls.length, 2);
+  assert.equal(jobState(f, b.job.id), 'UNKNOWN');
+  const events = f.store.snapshot({ history: true }).jobEvents?.filter(e => e.jobId === b.job.id) ?? [];
+  assert.equal(events.filter(e => e.externalId.startsWith('chain-launch:')).length, 1);
+  assert.equal(events.filter(e => e.externalId.startsWith('chain-blocked:')).length, 0);
+});
+
 test('a hosted-route dependent is never auto-launched by the local chain', async t => {
   const f = await fixture(t);
   const a = await prepared(f);

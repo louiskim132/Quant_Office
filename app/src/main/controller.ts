@@ -727,6 +727,13 @@ export class AssignmentController {
     if (!job || job.state !== 'INTENT' || !dependent.route.startsWith('LOCAL_')) return;
     if (!dependencyStatus(state, dependent).ready) return;
     const run = this.chainTail.then(async () => {
+      // Another completion signal may already have launched this job while this callback waited.
+      // Recheck durable eligibility inside the serialized section, before account checks or handoff.
+      const current = this.store.snapshot({ history: false });
+      const currentAssignment = current.assignments?.find(item => item.id === dependent.id);
+      const currentJob = current.jobs?.find(item => item.id === job.id);
+      if (!currentAssignment || currentJob?.state !== 'INTENT'
+        || !currentAssignment.route.startsWith('LOCAL_') || !dependencyStatus(current, currentAssignment).ready) return;
       try {
         await this.handoff(dependent.id);
         this.store.recordJobEvents(job.id, [{ externalId: `chain-launch:${job.id}`, cursor: '', kind: 'STATUS',
