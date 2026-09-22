@@ -8,6 +8,7 @@ import { OfficeStore, effortSchema } from '../core/store.js';
 import { ArtifactService, MAX_TOTAL } from './artifacts.js';
 import { createRunPackageCodec } from './run-package.js';
 import { EvidenceService } from './evidence.js';
+import { handleEvidenceFrame } from './evidence-tool.js';
 import { promotable, scheduleStage, STAGE_FUNCTIONS_REQUIRED } from './research-controller.js';
 import { STAGE_DELIVERY } from '../shared/run-package.js';
 import { migrateRolesToFunctions, resolveFunctions } from './context-policy.js';
@@ -469,7 +470,11 @@ function buildController():AssignmentController{
     await controller.advanceLocalChain(job.assignmentId);
     win?.webContents.send('office:changed');
    }catch(error){console.warn('automatic local observation failed:',error);}
-  })();});
+  })();},
+  undefined,undefined,
+  // The evidence drop-box edge: caller identity is bound from the assignment record inside the
+  // adapter — an agent's query file can never choose whose grants are checked.
+  (caller,line)=>handleEvidenceFrame(evidence,caller,line));
  const execRoute=new LocalSessionRouter(jobId=>store.localSessionForJob(jobId),{FLAT_PACKET:exec,PROJECT_WORKTREE:exec},'LOCAL_CLI_EXEC');
  return new AssignmentController(store,handoff,undefined,
   // Verification is scoped to the staging root this office owns, so a snapshot pointing anywhere

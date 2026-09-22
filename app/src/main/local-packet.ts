@@ -5,6 +5,7 @@ import { canonicalHash } from '../core/canonical.js';
 import { parseStrictJson } from '../core/strict-json.js';
 import { efforts } from '../shared/effort.js';
 import { cancelAckV1Schema, cancelRequestV1Schema, localPacketV2Schema, localResultV2Schema, type LocalPacketV2, type LocalResultV2, type LocalSessionRecord } from '../shared/local-session.js';
+import { mountsEvidenceSurface } from '../shared/tool-profile.js';
 import type { Effort } from '../shared/types.js';
 import { MAX_FILE, MAX_TOTAL, safeEntry } from './artifacts.js';
 import type { SubmitContext } from './controller.js';
@@ -111,7 +112,7 @@ export const packetClaude = (): string => [
  * control files, and documents the cooperative cancel request/acknowledgement pair (spec §8 —
  * the schema exists in shared/local-session.ts; P3 implements the runtime).
  */
-export const resultContractV2 = (): string => [
+export const resultContractV2 = (options?: { evidenceSurface?: boolean }): string => [
   '# Local session result contract',
   '',
   `This directory is a Quant Research Office session packet (office-local-session@2):`,
@@ -126,6 +127,13 @@ export const resultContractV2 = (): string => [
   'contract — the allowlisted tools and office-spawned servers in scope. It is a declared',
   'boundary the office and provider flags enforce where they can, not a sandbox; honor it',
   'regardless, and never reach for a tool the profile does not name.',
+  ...(options?.evidenceSurface ? [
+    '',
+    'This packet mounts the office evidence surface: write `queries/<name>.jsonl` — one',
+    '`{"id":"<label>","op":"queryEvidence|readEvidence|stagePacket","args":{...}}` frame per',
+    'line — then read `answers/<name>.jsonl` for `{id,result}` or `{id,refused}` lines. Every',
+    'frame is grant-checked against this session\'s identity before any evidence bytes move.',
+  ] : []),
   '',
   `## ${RESULT_FILE}`,
   '',
@@ -263,7 +271,7 @@ export function prepareLocalPacket(input: PrepareLocalPacketInput): PreparedLoca
   }
   // Instruction files are ordinary packet members: written once, declared in the manifest.
   const instructions: LocalPacketV2['instructions'] = [];
-  for (const [name, text] of [[AGENTS_FILE, packetAgentsV2()], [CLAUDE_FILE, packetClaude()], [CONTRACT_FILE, resultContractV2()]] as const) {
+  for (const [name, text] of [[AGENTS_FILE, packetAgentsV2()], [CLAUDE_FILE, packetClaude()], [CONTRACT_FILE, resultContractV2({ evidenceSurface: mountsEvidenceSurface(binding.toolProfile) })]] as const) {
     const content = Buffer.from(text, 'utf8');
     io.writeNew(managed, name, content);
     instructions.push({ path: name, sha256: createHash('sha256').update(content).digest('hex'), bytes: content.byteLength });

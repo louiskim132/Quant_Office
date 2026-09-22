@@ -1,5 +1,5 @@
 import type { Effort, Provider } from '../shared/types.js';
-import type { ToolProfile } from '../shared/tool-profile.js';
+import { EVIDENCE_SURFACE_ID, type ToolProfile } from '../shared/tool-profile.js';
 
 /**
  * Profile-driven launch flags (inter-agent pipeline W1).
@@ -57,6 +57,29 @@ export interface ToolFlagResult {
 
 const CLAUDE_EFFORTS = new Set<Effort>(['low', 'medium', 'high', 'xhigh', 'max']);
 
+/**
+ * Splits declared mcpServers into the office-mounted evidence surface (packet drop-box — real
+ * for every provider because it is plain files, and never a CLI-spawned command) and the
+ * stdio servers a provider flag might attach. The surface must never reach --mcp-config:
+ * its 'command' is a declaration label, not an executable.
+ */
+function partitionServers(profile: ToolProfile | undefined) {
+  const servers = profile?.mcpServers ?? [];
+  return {
+    surface: servers.filter(server => server.id === EVIDENCE_SURFACE_ID),
+    cli: servers.filter(server => server.id !== EVIDENCE_SURFACE_ID),
+  };
+}
+const surfaceMounted = 'evidence-surface mounted via the packet queries/answers drop-box — the office serves it, no provider flag involved';
+
+/**
+ * Whether the provider has a verified flag that attaches declared MCP servers to the spawned
+ * run. Only claude documents one (--mcp-config); codex and devin leave mcpServers unmapped, so
+ * an office-side spawn of a declared server would gate on a binary the session could never
+ * reach — the unmapped record is the honest state there, not a readiness probe.
+ */
+export const providerAttachesMcp = (provider: Provider): boolean => provider === 'claude';
+
 export function mapToolFlags(input: ToolFlagInput, platform: NodeJS.Platform = process.platform): ToolFlagResult {
   switch (input.provider) {
     case 'claude': return claudeFlags(input);
@@ -85,11 +108,13 @@ function claudeFlags(input: ToolFlagInput): ToolFlagResult {
     args.push('--tools', profile.allowedTools.join(','));
     applied.push(`allowedTools [${profile.allowedTools.join(', ')}] restricted via --tools (verified in claude --help: the available built-in tool set, enforced even under --dangerously-skip-permissions)`);
   }
-  if (profile?.mcpServers?.length) {
-    const servers = Object.fromEntries(profile.mcpServers.map(server =>
+  const servers = partitionServers(profile);
+  if (servers.surface.length) applied.push(surfaceMounted);
+  if (servers.cli.length) {
+    const config = Object.fromEntries(servers.cli.map(server =>
       [server.id, server.args?.length ? { command: server.command, args: server.args } : { command: server.command }]));
-    args.push('--mcp-config', JSON.stringify({ mcpServers: servers }));
-    applied.push(`mcpServers [${profile.mcpServers.map(server => server.id).join(', ')}] attached via --mcp-config (verified in claude --help; each server's readOnly intent is packet-declared metadata, not a CLI flag)`);
+    args.push('--mcp-config', JSON.stringify({ mcpServers: config }));
+    applied.push(`mcpServers [${servers.cli.map(server => server.id).join(', ')}] attached via --mcp-config (verified in claude --help; each server's readOnly intent is packet-declared metadata, not a CLI flag)`);
   }
   if (profile?.filesystem)
     unmapped.push(`filesystem=${profile.filesystem}: declared, not enforced by claude — the installed CLI has no flag that confines filesystem reads (--add-dir only widens access)`);
@@ -118,8 +143,10 @@ function codexFlags(input: ToolFlagInput): ToolFlagResult {
     applied.push(`filesystem=READ_PROJECT satisfied by -s ${args[2]} — reads are already unrestricted (the project included); command writes stay confined to the packet directory`);
   if (profile?.allowedTools?.length)
     unmapped.push(`allowedTools [${profile.allowedTools.join(', ')}]: declared, not enforced by codex — codex exec --help documents no per-tool allowlist; the tool surface follows the sandbox mode`);
-  if (profile?.mcpServers?.length)
-    unmapped.push(`mcpServers [${profile.mcpServers.map(server => server.id).join(', ')}]: declared, not enforced by codex — exec --help documents -c config overrides but not the mcp_servers keys a per-invocation attach would need`);
+  const servers = partitionServers(profile);
+  if (servers.surface.length) applied.push(surfaceMounted);
+  if (servers.cli.length)
+    unmapped.push(`mcpServers [${servers.cli.map(server => server.id).join(', ')}]: declared, not enforced by codex — exec --help documents -c config overrides but not the mcp_servers keys a per-invocation attach would need`);
   return {
     args,
     bypassFlags: ['-s', args[2], '--skip-git-repo-check'],
@@ -146,8 +173,10 @@ function devinFlags(input: ToolFlagInput, platform: NodeJS.Platform): ToolFlagRe
   }
   if (profile?.allowedTools?.length)
     unmapped.push(`allowedTools [${profile.allowedTools.join(', ')}]: declared, not enforced by devin — devin --help documents no per-tool allowlist flag`);
-  if (profile?.mcpServers?.length)
-    unmapped.push(`mcpServers [${profile.mcpServers.map(server => server.id).join(', ')}]: declared, not enforced by devin — 'devin mcp' manages server configuration, but no per-invocation flag attaches servers to a -p run`);
+  const servers = partitionServers(profile);
+  if (servers.surface.length) applied.push(surfaceMounted);
+  if (servers.cli.length)
+    unmapped.push(`mcpServers [${servers.cli.map(server => server.id).join(', ')}]: declared, not enforced by devin — 'devin mcp' manages server configuration, but no per-invocation flag attaches servers to a -p run`);
   if (profile?.canWrite === false)
     unmapped.push('canWrite=false: declared, not enforced by devin — --permission-mode auto auto-approves only read-only tools, but the help does not document that writes are denied non-interactively; the launch still records --permission-mode dangerous verbatim');
   if (profile?.canWrite === true)

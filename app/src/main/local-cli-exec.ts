@@ -1,16 +1,19 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, watch, type FSWatcher } from 'node:fs';
+import { existsSync, mkdirSync, watch, type FSWatcher } from 'node:fs';
 import path from 'node:path';
 import type { CapabilityEvidence, Effort, JobEvent, Provider, ProviderJob } from '../shared/types.js';
 import type { LocalSessionRecord } from '../shared/local-session.js';
-import type { ToolProfile } from '../shared/tool-profile.js';
+import { mountsEvidenceSurface, type ToolProfile } from '../shared/tool-profile.js';
+import type { EvidenceCaller } from './evidence-tool.js';
+import { QUERIES_DIR, QUERY_SETTLE_MS, isQueryFile, prepareEvidenceDropbox, serveEvidenceQuery, type EvidenceFrameHandler } from './evidence-dropbox.js';
+import { spawnSerenaSession, type SerenaSpawn } from './serena-session.js';
 import { MAX_FILE } from './artifacts.js';
 import type { LaunchRequest } from './handoff.js';
 import { GuardedLocalFileIO, type LocalFileIO } from './local-session-files.js';
 import { CANCEL_ACK_FILE, PACKET_FILE, RESULT_FILE, RESULT_STATES, prepareLocalPacket, readLocalCancelAck, readLocalResult, writeLocalCancelRequest } from './local-packet.js';
 import { discover, type Discovery } from './local-provider-records.js';
-import { mapToolFlags, type ToolFlagResult } from './tool-flags.js';
+import { mapToolFlags, providerAttachesMcp, type ToolFlagResult } from './tool-flags.js';
 import { subscriptionEnvironment } from './subscriptions.js';
 import type { ObserveResult, ProviderAdapter, SubmitContext, SubmitResult } from './controller.js';
 
@@ -96,6 +99,8 @@ interface SpawnRecord {
   timer: ReturnType<typeof setTimeout> | undefined;
   /** Watches the packet directory for the receipt or a cancel ack — auto-observe without polling. */
   watcher: FSWatcher | null;
+  /** Watches the evidence drop-box for query files — present only when the profile mounts the surface. */
+  queryWatcher: FSWatcher | null;
   /** Trailing debounce so an exit plus a receipt write collapse into one observation. */
   notifyTimer: ReturnType<typeof setTimeout> | undefined;
 }
@@ -153,6 +158,18 @@ export class LocalCliExecAdapter implements ProviderAdapter {
      * startup reconciliation, never by a listener on a process this office did not spawn.
      */
     private readonly onLocalEvent?: (jobId: string) => void,
+    /**
+     * Spawns the office-side serena readiness probe — stdin must be a pipe so the initialize
+     * handshake can be written; the exec spawn's pinned 'ignore' stdin cannot serve.
+     */
+    private readonly serenaSpawn: SerenaSpawn = (command, args, options) => spawn(command, args, { cwd: options.cwd, env: options.env, windowsHide: options.windowsHide, stdio: options.stdio }),
+    /** Probe deadline override for tests; serena-session supplies the 30s default. */
+    private readonly serenaReadyTimeoutMs?: number,
+    /**
+     * The office-bound edge of the evidence drop-box, bound to EvidenceService at construction.
+     * The caller identity comes from the assignment record at submit — never from file bytes.
+     */
+    private readonly evidenceFrames?: EvidenceFrameHandler,
   ) {}
 
   /**
@@ -173,6 +190,52 @@ export class LocalCliExecAdapter implements ProviderAdapter {
     return mapToolFlags({ provider, model, effort, prompt, profile });
   }
 
+  /**
+   * Mounts the office-owned half of a declared tool surface before the provider CLI spawns.
+   * A serena entry gets a readiness probe: the office spawns the declared server itself and
+   * requires an observed initialize handshake — a declared-but-dead server refuses the launch
+   * rather than letting the arm run underprovisioned (the provider attaches its own instance
+   * through the emitted MCP config where the provider maps one). A readOnly entry also writes
+   * `.serena/project.yml` — the documented mechanism on the pinned build. An evidence-surface
+   * entry mounts the queries/answers drop-box in the packet. Returns the honest detail text
+   * for the launch record; every failure path throws before the provider spawn.
+   */
+  private async prepareToolSurface(binding: LocalSessionRecord, dir: string): Promise<string> {
+    const profile = binding.toolProfile;
+    const notes: string[] = [];
+    // The office probes a declared serena only when the provider can actually attach it —
+    // a provider whose CLI cannot reach MCP servers already records the entry as unmapped;
+    // blocking its launch over a server that could never serve the run would be the dishonest
+    // gate.
+    const serenaEntry = profile?.mcpServers?.find(server => server.id === 'serena');
+    if (serenaEntry && providerAttachesMcp(binding.provider)) {
+      if (serenaEntry.readOnly) {
+        try {
+          const serenaDir = path.join(dir, '.serena');
+          mkdirSync(serenaDir, { recursive: true });
+          this.io.inspectRoot(serenaDir);
+          this.io.writeNew(dir, '.serena/project.yml', Buffer.from('read_only: true\n', 'utf8'));
+          notes.push('serena read_only written to .serena/project.yml');
+        } catch {
+          notes.push('a .serena/project.yml was already present — read_only relies on the probe\'s fail-closed flag alone');
+        }
+      }
+      const probe = spawnSerenaSession({ binding, profile: profile!, packetDir: dir }, { spawn: this.serenaSpawn, readyTimeoutMs: this.serenaReadyTimeoutMs });
+      const ready = await probe.ready;
+      probe.dispose();
+      if (!ready.ok)
+        throw new Error(`The declared serena MCP server failed its office readiness probe — ${ready.reason}. The session was not launched.`);
+      notes.push('serena readiness probe passed (initialize handshake observed)');
+    }
+    if (mountsEvidenceSurface(profile)) {
+      if (!this.evidenceFrames)
+        throw new Error('The tool profile declares the office evidence surface but this adapter was built without an evidence frame handler; the session was not launched.');
+      prepareEvidenceDropbox(dir, this.io);
+      notes.push('office evidence surface mounted at queries/ + answers/');
+    }
+    return notes.length ? ` ${notes.join('; ')}.` : '';
+  }
+
   async submit(context: SubmitContext): Promise<SubmitResult> {
     const binding = context.localSession;
     if (!binding)
@@ -181,13 +244,40 @@ export class LocalCliExecAdapter implements ProviderAdapter {
       throw new Error(`A LOCAL_CLI_EXEC submission requires a flat office-local-session@2 binding; this record describes ${binding.layout} packetVersion ${binding.packetVersion}.`);
     const dir = path.resolve(this.sessionsRoot(), binding.storageRelativePath);
     const prepared = prepareLocalPacket({ dir, context, binding, io: this.io, now: this.now() });
+    const surfaceNote = await this.prepareToolSurface(binding, dir);
+    // The evidence drop-box watcher attaches before the provider spawn so a watch that cannot
+    // start refuses the launch cleanly instead of leaving a declared surface silently deaf.
+    let queryWatcher: FSWatcher | null = null;
+    if (mountsEvidenceSurface(binding.toolProfile) && this.evidenceFrames) {
+      const caller: EvidenceCaller = { agentId: context.assignment.agentId, projectId: context.assignment.projectId, requestId: context.assignment.requestId };
+      const frames = this.evidenceFrames;
+      try {
+        queryWatcher = watch(path.join(dir, QUERIES_DIR), (_event, name) => {
+          if (!isQueryFile(name)) return;
+          // A just-created query file gets a beat to flush before the office reads it.
+          const settle = setTimeout(() => {
+            void serveEvidenceQuery({ dir, io: this.io, name, caller, frames }).catch(() => { /* failures are reported inside the answers stream */ });
+          }, QUERY_SETTLE_MS);
+          settle.unref?.();
+        });
+        queryWatcher.unref?.();
+      } catch (error) {
+        throw new Error(`The declared evidence surface drop-box could not be watched: ${error instanceof Error ? error.message : String(error)}. The session was not launched.`);
+      }
+    }
     const prompt = `${context.payload.text}\n\n${PROMPT_SUFFIX}`;
     const command = this.providerCommand(binding.provider, prompt, context.payload.model, context.payload.effort, binding.toolProfile);
     const executable = this.executable(binding.provider);
-    const child = this.spawnChild(executable, command.args, {
-      // The spawn cwd is authoritative — codex -C does not place the model's shell (probe doc).
-      cwd: dir, env: this.environment(), windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    let child: CliChild;
+    try {
+      child = this.spawnChild(executable, command.args, {
+        // The spawn cwd is authoritative — codex -C does not place the model's shell (probe doc).
+        cwd: dir, env: this.environment(), windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    } catch (error) {
+      try { queryWatcher?.close(); } catch { /* the launch refusal is the record that matters */ }
+      throw error;
+    }
     const launch: LaunchRecord = {
       route: this.route, provider: binding.provider, pid: child.pid, executable,
       args: command.args.map(arg => (arg === prompt ? `<prompt:${sha256Text(prompt)}>` : arg)),
@@ -200,7 +290,7 @@ export class LocalCliExecAdapter implements ProviderAdapter {
       jobId: binding.jobId, child, launch, dir,
       lines: [], bufferedBytes: 0, dropped: 0, seq: 0, pendingOut: '', pendingErr: '',
       exit: null, spawnError: null, officeKill: null, drainCursor: 0, timer: undefined,
-      watcher: null, notifyTimer: undefined,
+      watcher: null, queryWatcher, notifyTimer: undefined,
     };
     this.registry.set(binding.jobId, record);
     // A receipt or cancel ack landing in the packet directory is itself the observation trigger —
@@ -232,7 +322,7 @@ export class LocalCliExecAdapter implements ProviderAdapter {
     return {
       externalId: path.basename(binding.storageRelativePath),
       externalUrl: '',
-      detail: `Packet written to ${dir} and ${binding.provider} CLI spawned unattended (pid ${child.pid ?? 'unreported'}). The office owns the process; the receipt arrives through ${RESULT_FILE}.`,
+      detail: `Packet written to ${dir} and ${binding.provider} CLI spawned unattended (pid ${child.pid ?? 'unreported'}). The office owns the process; the receipt arrives through ${RESULT_FILE}.${surfaceNote}`,
       localPacket: { packetHash: prepared.packetHash },
     };
   }
@@ -264,6 +354,8 @@ export class LocalCliExecAdapter implements ProviderAdapter {
     if (!record) return;
     try { record.watcher?.close(); } catch { /* a dead watcher reports nothing */ }
     record.watcher = null;
+    try { record.queryWatcher?.close(); } catch { /* a dead watcher reports nothing */ }
+    record.queryWatcher = null;
     if (record.timer) clearTimeout(record.timer);
     record.timer = undefined;
     if (record.notifyTimer) clearTimeout(record.notifyTimer);

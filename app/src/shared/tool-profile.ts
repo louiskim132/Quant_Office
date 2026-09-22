@@ -33,3 +33,14 @@ export const toolProfileSchema = z.object({
 }).strict();
 
 export type ToolProfile = z.infer<typeof toolProfileSchema>;
+
+/**
+ * The reserved mcpServers id for the office's own grant-checked evidence surface. It is not a
+ * stdio server a provider CLI can spawn — the office mounts it inside the packet itself as the
+ * queries/ and answers/ drop-box — so provider flag mapping must never pass it to --mcp-config.
+ */
+export const EVIDENCE_SURFACE_ID = 'evidence-surface';
+
+/** Whether a declared tool profile mounts the office evidence surface in its packet. */
+export const mountsEvidenceSurface = (profile?: ToolProfile): boolean =>
+  !!profile?.mcpServers?.some(server => server.id === EVIDENCE_SURFACE_ID);

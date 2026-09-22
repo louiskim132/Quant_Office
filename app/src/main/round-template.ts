@@ -1,4 +1,4 @@
-import type { ToolProfile } from '../shared/tool-profile.js';
+import { EVIDENCE_SURFACE_ID, type ToolProfile } from '../shared/tool-profile.js';
 
 /**
  * The diverge→converge round planner (inter-agent pipeline W5).
@@ -63,7 +63,7 @@ export const PLANNER_TOOL_PROFILE: ToolProfile = {
  canWrite: false,
 };
 export const ANALYST_TOOL_PROFILE: ToolProfile = {
- mcpServers: [{ id: 'evidence-surface', command: 'office evidence-surface', readOnly: true }],
+ mcpServers: [{ id: EVIDENCE_SURFACE_ID, command: 'office evidence-surface', readOnly: true }],
  filesystem: 'PACKET_ONLY',
  canWrite: false,
 };
