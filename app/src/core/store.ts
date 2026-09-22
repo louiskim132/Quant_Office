@@ -42,6 +42,7 @@ import {shadowBatchSchema} from '../shared/shadow';
 import {replayShadow} from './shadow-ledger';
 import { nextJob } from './jobs.js';
 import { appliedReportPayloadSchema, localLaunchPlanSchema, localSessionJournalSchema, localSessionRecordSchema, localSessionSummarySchema, transitionLocalLifecycle, type LocalLaunchPlan, type LocalSessionJournal, type LocalSessionRecord, type LocalSessionSummary } from '../shared/local-session.js';
+import { toolProfileSchema } from '../shared/tool-profile.js';
 import { MAX_BUDGET_CENTS } from './guards.js';
 import {pipelineRecordSchema,stageContextHash,stageContextSchema,stageReportSchema,type PipelineRecord} from '../shared/pipeline';
 import {evidenceRecordSchema,type EvidenceRecord} from '../shared/evidence';
@@ -154,7 +155,7 @@ const snapshotSchema=z.object({objectsStored:z.literal(true).optional(),id,proje
   warnings:z.array(text(1000)).max(64),provenance:z.literal('OFFICE_STAGED'),createdAt:timestamp}).strict();
 const jobStateEnum=z.enum(['INTENT','SUBMITTING','ACCEPTED','RUNNING','COMPLETED','FAILED','UNKNOWN','CANCEL_REQUESTED','CANCEL_ACKNOWLEDGED']);
 const evidenceKindEnum=z.enum(['OFFICE_LOCAL','PROVIDER_REPORTED','USER_REPORTED']);
-const assignmentSchema=z.object({research:stageContextSchema.optional(),dependsOn:z.array(id).max(64).optional(),id,projectId:id,requestId:id,requestRevision:z.number().int().nonnegative(),agentId:id,agentRevision:z.number().int().nonnegative(),
+const assignmentSchema=z.object({research:stageContextSchema.optional(),dependsOn:z.array(id).max(64).optional(),toolProfile:toolProfileSchema.optional(),id,projectId:id,requestId:id,requestRevision:z.number().int().nonnegative(),agentId:id,agentRevision:z.number().int().nonnegative(),
   connectionId:id,capabilitySnapshotId:id,capabilitySnapshotIds:z.array(id).max(64).optional(),snapshotId:id,route:routeEnum,requestedModel:secretFree(160),resolvedModel:secretFree(160),
   requestedEffort:effortSchema,appliedEffort:z.union([effortSchema,z.literal('UNVERIFIED')]),delegation:z.boolean(),objectiveHash:hash,
   frozen:z.object({requestName:title,objective:text(12000),acceptanceCriteria:text(12000),instructions:text(12000),

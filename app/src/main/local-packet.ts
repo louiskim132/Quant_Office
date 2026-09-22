@@ -122,6 +122,11 @@ export const resultContractV2 = (): string => [
   `\`${INPUTS_DIR}/inherited/<job-id>/\`. Do the bounded work, then write \`${RESULT_FILE}\``,
   'in this directory to report.',
   '',
+  `When \`${PACKET_FILE}\` declares a \`toolProfile\`, it names this session's tool`,
+  'contract — the allowlisted tools and office-spawned servers in scope. It is a declared',
+  'boundary the office and provider flags enforce where they can, not a sandbox; honor it',
+  'regardless, and never reach for a tool the profile does not name.',
+  '',
   `## ${RESULT_FILE}`,
   '',
   `A single JSON object of at most ${MAX_RESULT_BYTES} bytes satisfying office-local-result@2:`,
@@ -278,6 +283,7 @@ export function prepareLocalPacket(input: PrepareLocalPacketInput): PreparedLoca
     files,
     ...(inherited.length ? { inherited } : {}),
     instructions,
+    ...(binding.toolProfile ? { toolProfile: binding.toolProfile } : {}),
     contract: CONTRACT_FILE,
   });
   io.writeNew(managed, PACKET_FILE, Buffer.from(`${JSON.stringify(packet, null, 2)}\n`, 'utf8'));

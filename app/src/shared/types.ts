@@ -168,6 +168,8 @@ export type DispatchRoute = 'FAKE_ADAPTER' | 'OFFICIAL_TERMINAL_HANDOFF' | 'OFFI
 export interface Assignment {
   research?: import('./pipeline').StageContext;
   dependsOn?: string[];
+  /** Declared tool scope for this assignment; absent on records frozen before the field existed. */
+  toolProfile?: import('./tool-profile').ToolProfile;
   id: string; projectId: string; requestId: string; requestRevision: number; agentId: string; agentRevision: number;
   connectionId: string; capabilitySnapshotId: string; snapshotId: string; route: DispatchRoute;
   requestedModel: string; resolvedModel: string; requestedEffort: Effort; appliedEffort: Effort | 'UNVERIFIED';

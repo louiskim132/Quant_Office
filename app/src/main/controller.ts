@@ -13,6 +13,7 @@ import { localRequirementFor } from './local-lane.js';
 import { safeEntry, MAX_FILE } from './artifacts.js';
 import { pipelineStageBlocker, type FrozenResearchSpec } from '../shared/research.js';
 import { stageContextHash } from '../shared/pipeline.js';
+import type { ToolProfile } from '../shared/tool-profile.js';
 
 /**
  * The complete text one external action would deliver, assembled once and reviewable before launch.
@@ -251,7 +252,7 @@ export class AssignmentController {
   }
 
   /** Freezes the exact inputs for one request and records the intent to submit. */
-  prepare(input: { requestId: string; agentId: string; snapshotId: string; expectedRequestRevision?: number; expectedAgentRevision?: number; dependsOn?: string[]; research?: Assignment['research'] }): { state: AppState; assignment: Assignment } {
+  prepare(input: { requestId: string; agentId: string; snapshotId: string; expectedRequestRevision?: number; expectedAgentRevision?: number; dependsOn?: string[]; research?: Assignment['research']; toolProfile?: ToolProfile }): { state: AppState; assignment: Assignment } {
     const state = this.store.snapshot({history:false});
     const request = state.requests?.find(item => item.id === input.requestId);
     if (!request) throw new Error('Request not found.');
@@ -294,6 +295,7 @@ export class AssignmentController {
       },
       createdAt: this.now(),
       ...(input.dependsOn?.length ? { dependsOn: input.dependsOn } : {}),
+      ...(input.toolProfile ? { toolProfile: input.toolProfile } : {}),
       // The staged-scientific context is part of what is frozen; the store re-validates it against
       // the recorded link, so a caller cannot name a stage or subject the branch is not on.
       ...(input.research ? { research: input.research } : {}),
@@ -780,6 +782,8 @@ export class AssignmentController {
         worktreeOwner: 'NONE', bindingEvidence: 'UNBOUND', groupingStatus: 'UNKNOWN',
         requirement: decision.requirement, confinementStatus: 'UNVERIFIED', lastReceipt: null,
         cancelRequestId: null, stopStatus: 'NOT_REQUESTED', lifecycle: 'PREPARING',
+        // An explicit undefined would break canonical hashing — the field rides along only when set.
+        ...(assignment.toolProfile ? { toolProfile: assignment.toolProfile } : {}),
       });
       this.store.appendLocalJournal({ operationId, localSessionId: binding.id, jobId: job.id, kind: 'PREPARE', phase: 'INTENT',
         expectedRevision: binding.revision, source: null, destination: binding.storageRelativePath, outcome: 'NONE', failureDetail: null });

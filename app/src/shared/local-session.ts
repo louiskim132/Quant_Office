@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { toolProfileSchema } from './tool-profile.js';
 
 /**
  * Contracts for the local-session lifecycle revision (QO-LOCAL-REV-20260919).
@@ -88,6 +89,11 @@ export const localSessionRecordSchema = z.object({
   lastReceipt: lastReceiptSchema.nullable(),
   cancelRequestId: id.nullable(),
   stopStatus: z.enum(STOP_STATUSES),
+  /**
+   * Declared tool scope copied from the assignment at bind time. Absent on bindings created
+   * before the field existed; an absent profile means the session's default tool posture.
+   */
+  toolProfile: toolProfileSchema.optional(),
   createdAt: timestamp,
   updatedAt: timestamp,
 }).strict().superRefine((record, ctx) => {
@@ -177,6 +183,11 @@ export const localPacketV2Schema = z.object({
    */
   inherited: z.array(packetFileSchema.extend({ sourceJobId: id, objectHash: hash })).max(256).optional(),
   instructions: z.array(packetFileSchema).max(16),
+  /**
+   * The assignment's declared tool scope, copied from the binding so the agent reads the same
+   * contract the launch flags enforce. Declared scope is not a sandbox — see CONTRACT.md.
+   */
+  toolProfile: toolProfileSchema.optional(),
   contract: z.literal('CONTRACT.md'),
 }).strict();
 export type LocalPacketV2 = z.infer<typeof localPacketV2Schema>;
