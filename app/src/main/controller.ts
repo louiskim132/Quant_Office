@@ -8,6 +8,7 @@ import type { OfficeStore } from '../core/store.js';
 import { appliedReportPayloadSchema, type LocalSessionRecord } from '../shared/local-session.js';
 import { agentDispatchReadiness, currentConnection, effectiveEvidence, latestCapability, scopeMismatches, supplyingSnapshotIds, type RequestedScope } from '../shared/readiness.js';
 import { dependencyStatus } from '../shared/cooperation.js';
+import { recordChainHandoff } from './chain-messages.js';
 import { verifySnapshotForTransfer, type OutputDestination } from './locations.js';
 import { localRequirementFor } from './local-lane.js';
 import { safeEntry, MAX_FILE } from './artifacts.js';
@@ -704,7 +705,7 @@ export class AssignmentController {
     const settled = (state.jobs ?? []).find(item => item.assignmentId === assignmentId);
     if (!settled || settled.state !== 'COMPLETED') return state;
     for (const dependent of (state.assignments ?? []).filter(item => (item.dependsOn ?? []).includes(assignmentId)))
-      await this.launchChainDependent(state, dependent);
+      await this.launchChainDependent(state, dependent, assignmentId);
     return this.store.snapshot({history:false});
   }
 
@@ -724,7 +725,7 @@ export class AssignmentController {
   /** Serializes chain launches — two predecessors settling together must not race one dependent. */
   private chainTail: Promise<unknown> = Promise.resolve();
 
-  private async launchChainDependent(state: AppState, dependent: Assignment): Promise<void> {
+  private async launchChainDependent(state: AppState, dependent: Assignment, settledAssignmentId?: string): Promise<void> {
     const job = (state.jobs ?? []).find(item => item.assignmentId === dependent.id);
     if (!job || job.state !== 'INTENT' || !dependent.route.startsWith('LOCAL_')) return;
     if (!dependencyStatus(state, dependent).ready) return;
@@ -736,8 +737,10 @@ export class AssignmentController {
       const currentJob = current.jobs?.find(item => item.id === job.id);
       if (!currentAssignment || currentJob?.state !== 'INTENT'
         || !currentAssignment.route.startsWith('LOCAL_') || !dependencyStatus(current, currentAssignment).ready) return;
+      let launched = false;
       try {
         await this.handoff(dependent.id);
+        launched = true;
         this.store.recordJobEvents(job.id, [{ externalId: `chain-launch:${job.id}`, cursor: '', kind: 'STATUS',
           text: 'The office launched this work automatically — its recorded predecessor work completed with verified output.',
           occurredAt: this.now(), receivedAt: this.now(), evidence: 'OFFICE_LOCAL' }]);
@@ -747,9 +750,36 @@ export class AssignmentController {
           text: `The automatic chain launch could not run: ${detail} The work stays prepared; launch it manually when the blocker clears.`,
           occurredAt: this.now(), receivedAt: this.now(), evidence: 'OFFICE_LOCAL' }]);
       }
+      // The handoff message rides only on a launch that actually ran: the helper itself confirms
+      // the packet settled READY before naming it, and every other path stays silent by contract.
+      if (launched) this.chainHandoff(dependent.id, settledAssignmentId);
     });
     this.chainTail = run;
     await run;
+  }
+
+  /**
+   * Writes the chain hop's durable record — one HANDOFF message plus the office's delivery
+   * receipt — after a chain launch that actually ran. A refusal is recorded on the job with its
+   * true reason; it is never folded into the launch failure event, because the launch succeeded.
+   */
+  private chainHandoff(dependentId: string, settledAssignmentId?: string): void {
+    const state = this.store.snapshot({ history: false });
+    const dependent = state.assignments?.find(item => item.id === dependentId);
+    const job = dependent ? state.jobs?.find(item => item.assignmentId === dependentId) : undefined;
+    if (!dependent || !job) return;
+    try {
+      const outcome = recordChainHandoff({ store: this.store, state, dependent, settledAssignmentId, now: this.now });
+      if (!outcome.recorded)
+        this.store.recordJobEvents(job.id, [{ externalId: `chain-handoff-note:${job.id}`, cursor: '', kind: 'STATUS',
+          text: `The chain launch stands, but no handoff message was recorded: ${outcome.reason}`,
+          occurredAt: this.now(), receivedAt: this.now(), evidence: 'OFFICE_LOCAL' }]);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : 'unknown error';
+      this.store.recordJobEvents(job.id, [{ externalId: `chain-handoff-blocked:${canonicalHash({ job: job.id, detail })}`, cursor: '', kind: 'STATUS',
+        text: `The chain launch ran, but its handoff record could not be written: ${detail}`,
+        occurredAt: this.now(), receivedAt: this.now(), evidence: 'OFFICE_LOCAL' }]);
+    }
   }
 
   /**
