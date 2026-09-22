@@ -286,8 +286,11 @@ export class Subscriptions {
  validateEffort(provider:Provider,model:string,effort:Effort,connection?:Connection):void {
   if(effort==='default')return;
   // Claude's model input is free-text: an unlisted id still gets the session-level effort enum
-  // the CLI publishes. OpenAI/Devin stay strict — an unlisted model offers only Provider default.
-  const supported=connection?.provider===provider?(connection.models.find(m=>m.id===model)?.efforts??(provider==='claude'?['default',...CLAUDE_EFFORT_LEVELS]:['default'])):['default'];
+  // the CLI publishes. That enum is tool-published, not account-bound, so a post-creation edit
+  // without a live connection offers it too. OpenAI/Devin stay strict — without this account's
+  // catalog an unlisted model offers only Provider default.
+  const catalogEfforts=connection?.provider===provider?connection.models.find(m=>m.id===model)?.efforts:undefined;
+  const supported=catalogEfforts??(provider==='claude'?['default',...CLAUDE_EFFORT_LEVELS]:['default']);
   if(!supported.includes(effort))throw new Error('This effort level is not supported by the selected model. Refresh model options or choose Default.');
  }
  /**
