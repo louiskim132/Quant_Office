@@ -3789,3 +3789,80 @@ organizer owned main.ts wiring. Verification: worker
 checks independently rerun (5/5, tsc clean);
 combined unit suite, typecheck, build and the
 desktop e2e (real boot path) pass at this head.
+2026-09-22 (round comm-pipe-1 integrated at 68a6e8b;
+workers 1-5 + organizer wiring) — inter-agent
+communication pipeline. Frozen contract first
+(organizer f9f27a3): toolProfile rides assignment →
+local-session binding → packet.json, backward-
+compatible, schema-tested. Worker-1 (d4607ea, merge
+0932cc1): recordChainHandoff emits exactly one
+HANDOFF per successful dependent launch — sender
+predecessor, receiver dependent, scoped to the
+dependent's requestId/projectId/assignmentId, with
+scopeOutputHashes carrying verified inherited object
+hashes or the packet identity — plus a separate
+delivery receipt naming what the office re-verified;
+refusals, preflight failures and parked dependencies
+emit nothing, ISOLATION sealing intact,
+reconciliation idempotent. Worker-2 (2c1b74a, merge
+5df2cfa): tool-flags maps declared profiles to
+verified provider flags only — claude --tools (real
+tool-set restriction under bypass, unlike the
+advisory --allowedTools) and --mcp-config, codex
+-s read-only for canWrite=false, devin
+--permission-mode/--respect-workspace-trust with
+--sandbox correctly refused on win32; every
+unexpressible restriction lands verbatim in
+unmappedRestrictions on the launch record.
+Worker-3 (bbc30ea, merge d0f3043): serena-session
+spawns the profile's pinned serena server per
+session (stdio, --project <packet dir>), readiness
+is an observed MCP initialize handshake — never
+spawn alone — with fail-closed handling of missing
+entries, spawn errors, dead stdin, early exit,
+timeout and repeated dispose. Worker-4 (a90d06f,
+merge 66ecb42): evidence-tool wraps
+EvidenceService with zod-strict callers, grants
+checked inside the service before any bytes move,
+structured MALFORMED/OUT_OF_SCOPE/CURSOR_MISMATCH/
+FAILED refusals receipted via the new recordDenial
+op, opaque cursors bound to agent+project+request+
+op+args, declared totals or UNKNOWN_TOTAL, and a
+JSONL frame edge for packet transport. Worker-5
+(3d16132, merge badf3bd): round-template builds the
+office-comm-round@1 diverge→converge spec — two
+isolated draft arms on byte-identical manifests, one
+bounded cross-critique each naming the opposite
+artifact only, director synthesis, optional phase-2
+interpret∥falsify mirror, implement/verify/gate —
+pure, deterministic, DAG-validated, artifact refs
+only (transcripts are structurally absent).
+Organizer wiring landed the modules on the live
+path: local-cli-exec prepares the tool surface
+before spawn — a declared serena entry gets an
+office-side readiness probe (blocking the launch
+when the handshake fails, only for providers with a
+verified MCP attach so an unmapped server cannot
+block a run that could never reach it) and writes
+.serena/project.yml read_only when declared; a
+declared evidence-surface mounts the queries/
+answers drop-box with a watcher serving JSONL frames
+under the assignment-bound caller (deduped by
+in-flight join + durable answer-file + writeNew
+backstop), and CONTRACT.md documents the channel;
+tool-flags partitions the office-mounted id out of
+--mcp-config for every provider; main.ts binds
+handleEvidenceFrame to the EvidenceService. Ten new
+tool-surface tests cover the mount, the probe gate,
+the drop-box serve and the byte-identical
+unprofiled path. Deferred honestly: the round
+executor that mints requests from a comm-round spec
+(the DAG remains hand-runnable through the UI), a
+live serena/arm pilot (acceptance needs a real
+installed server), and worker-5's verify hop is
+assigned to the director where the reviewer text
+suggested PM spot-checks — a one-line change when
+the executor lands. Verification: combined unit
+suite 758/759 pass, 1 pre-existing skip, typecheck and build clean at this
+head; workers' packet checks independently rerun
+(18/18, 27/27, 13/13, 8/8, 7/7).
