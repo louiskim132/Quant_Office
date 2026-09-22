@@ -254,6 +254,27 @@ export class EvidenceService {
     return { ...computed.value, receiptId: receipt.id };
   }
 
+  /**
+   * A refused call is recorded as its own receipt: the attempt is evidence even when no bytes moved.
+   *
+   * The record names the caller, the operation and the refusal — never an object, because a denied
+   * caller must not learn what it could not reach. Returns null when the caller's identity cannot
+   * even form a valid record, so the refusing surface can still answer honestly.
+   */
+  async recordDenial(input: { kind: QueryReceipt['kind']; agentId: string; projectId: string; parameters: unknown }): Promise<QueryReceipt | null> {
+    try {
+      let contextHash: string | null = null;
+      try { contextHash = this.researchScope(input.agentId)?.research?.contextHash ?? null; } catch { contextHash = null; }
+      const receipt: QueryReceipt = { id: randomUUID(), kind: input.kind, agentId: input.agentId, projectId: input.projectId,
+        objectHashes: [], parameters: JSON.stringify(input.parameters),
+        dependencyKey: 'denied:' + canonicalHash({ kind: input.kind, agentId: input.agentId, projectId: input.projectId, parameters: input.parameters }),
+        returned: 0, omitted: 0, coverage: 'UNKNOWN', reusedFromReceiptId: null, createdAt: this.now(), contextHash };
+      this.persist({ id: randomUUID(), projectId: receipt.projectId, agentId: receipt.agentId, kind: 'RECEIPT', value: receipt });
+      this.receipts.push(receipt);
+      return receipt;
+    } catch { return null; } // Recording is best-effort; a denial it cannot record must still refuse cleanly.
+  }
+
   // ---- describe / read / query ----------------------------------------------------------------
 
   async describe(input: unknown): Promise<ObjectDescription> {
