@@ -13,6 +13,7 @@ import { STAGE_DELIVERY } from '../shared/run-package.js';
 import { migrateRolesToFunctions, resolveFunctions } from './context-policy.js';
 import { stat, readFile } from 'node:fs/promises';
 import { reconstructUsage } from './local-usage.js';
+import { loadWindowWithRetry } from './boot-load.js';
 import { parseWorkLogs } from './work-logs.js';
 import { workspaceDirectory, recoverInterruptedRestore, prepareRestore, discardCandidate, commitRestore } from './recovery.js';
 import { resolveSelection, prepareInputSnapshot, reconstructSnapshot, verifySnapshotForTransfer } from './locations.js';
@@ -96,11 +97,6 @@ async function start(){
  // isolated evaluator, which the capability states honestly and which keeps S8 reservations refused.
  custody=buildCustody(root,workspace);
  pipeline=buildPipeline();
- // Interrupted work is reconciled before the window opens; a crash never resubmits or invents an outcome.
- try{await controller.reconcile();}catch{}
- // Work that finished while the office was closed may now unlock dependents — the same guarded
- // chain-advance runs once here, so a completed predecessor never leaves its chain parked.
- try{await controller.reconcileLocalChain();}catch{}
  session.defaultSession.setPermissionRequestHandler((_webContents,_permission,callback)=>callback(false));
  session.defaultSession.setPermissionCheckHandler(()=>false);
  session.defaultSession.webRequest.onBeforeRequest((details,callback)=>{
@@ -110,14 +106,20 @@ async function start(){
   // The .ico keeps window and taskbar pinned to the same artwork the packager embeds in the exe;
  // the .png remains for platforms without multi-size ico support.
  const appIcon=path.join(__dirname,process.platform==='win32'?'../assets/icon.ico':'../assets/icon.png');
- win=new BrowserWindow({width:1440,height:1000,minWidth:1050,minHeight:720,title:'Quant Research Office',backgroundColor:'#101414',show:false,autoHideMenuBar:true,icon:appIcon,webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,webSecurity:true,allowRunningInsecureContent:false,devTools:!app.isPackaged}});
+ win=new BrowserWindow({width:1440,height:1000,minWidth:1050,minHeight:720,title:'Quant Research Office',backgroundColor:'#101414',show:true,autoHideMenuBar:true,icon:appIcon,webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,webSecurity:true,allowRunningInsecureContent:false,devTools:!app.isPackaged}});
  Menu.setApplicationMenu(Menu.buildFromTemplate([{label:'Office',submenu:[{label:'Quit',role:'quit'}]},{label:'Edit',submenu:[{role:'undo'},{role:'redo'},{type:'separator'},{role:'cut'},{role:'copy'},{role:'paste'},{role:'selectAll'}]},{label:'View',submenu:[{role:'resetZoom'},{role:'zoomIn'},{role:'zoomOut'},{role:'togglefullscreen'}]}]));
  win.webContents.setWindowOpenHandler(()=>({action:'deny'}));
  win.webContents.on('will-navigate',event=>event.preventDefault());
  win.webContents.on('will-attach-webview',event=>event.preventDefault());
  win.on('close',event=>{if(transferBusy){event.preventDefault();void dialog.showMessageBox(win!,{type:'info',message:'A file transfer is still being finalized.',detail:'Please wait for the transfer to finish before closing the office.'});}});
  win.on('closed',()=>{win=null;});
- register();await win.loadFile(html);win.show();
+ // Interrupted work is reconciled while the window is already visible but before the renderer
+ // loads; a crash never resubmits or invents an outcome, and no page exists to serve IPC yet.
+ try{await controller.reconcile();}catch{}
+ // Work that finished while the office was closed may now unlock dependents — the same guarded
+ // chain-advance runs once here, so a completed predecessor never leaves its chain parked.
+ try{await controller.reconcileLocalChain();}catch{}
+ register();await loadWindowWithRetry(win,html);
  // The office opens on re-observed accounts, not on however stale the recorded check is.
  // Each provider is re-observed once, off the load path; a failed observation leaves the
  // last recorded state standing with its real timestamp — never a refreshed-looking lie.
