@@ -3763,3 +3763,29 @@ claude -p in json mode stdout lands in one envelope
 at completion, so a claude hop's text appears near
 end-of-run; true mid-run dialog needs stream-json or
 transcript tailing, a clean follow-up.
+
+2026-09-22 (round boot-rev-1 integrated at 2dbe569;
+worker-1 a0e5f6c + organizer wiring) — reviewer
+follow-up on startup UX: the window is now created
+show:true with the existing backgroundColor, so cold
+start paints immediately instead of sitting invisible
+through store open and reconcile; a taskbar click
+during boot now focuses a real window rather than
+restoring a hidden one. Reconcile and
+reconcileLocalChain still complete before register()
+and before the renderer loads, so no page can issue
+IPC early — the invariant moved behind the visible
+window, not away. win.loadFile now runs through
+boot-load.ts loadWindowWithRetry: one bounded retry
+after 400 ms (loadFile's did-fail-load rejection
+makes the promise cover both failure surfaces), then
+the first error propagates to the existing fatal
+dialog. The packaged binary was rebuilt the same
+evening and verified to contain the office-chat,
+packet-hash contract and race-recheck fixes — the
+stale-release finding is closed. Worker-1 owned the
+Electron-free module and its five unit tests; the
+organizer owned main.ts wiring. Verification: worker
+checks independently rerun (5/5, tsc clean);
+combined unit suite, typecheck, build and the
+desktop e2e (real boot path) pass at this head.
