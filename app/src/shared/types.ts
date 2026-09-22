@@ -268,6 +268,7 @@ export interface OfficeAPI {
  historyPage(input: { projectId?: string | null; limit?: number; cursor?: number }): Promise<{ entries: LineageEvent[]; nextCursor: number | null; total: number }>;
  logPage(input: { agentId?: string; conversationId?: string; limit?: number; cursor?: string }): Promise<{ entries: WorkLog[]; nextCursor: string | null; total: number }>;
  jobEventPage(input: { jobId: string; limit?: number; cursor?: string }): Promise<{ entries: JobEvent[]; nextCursor: string | null; total: number }>;
+ officeChatPage(input: import('./office-chat').OfficeChatQuery): Promise<import('./office-chat').OfficeChatPage>;
  /** Chronological applied self-report events for one job — the structured query the applied-report
   *  UI reads. publicState strips jobEvents, so the pushed snapshot never carries them. */
  appliedReports(input: { jobId: string; limit?: number }): Promise<{ entries: JobEvent[] }>;

@@ -414,3 +414,17 @@ test('watcher and timers are released once a job reaches a verified terminal sta
   assert.equal(jobState(f, a.job.id), 'COMPLETED');
   assert.equal(registry.has(a.job.id), false, 'a verified completion releases the spawn record, watcher and timers');
 });
+
+test('visible stdout triggers an office update before any receipt or child exit', async t => {
+  const events: string[] = [];
+  const f = await fixture(t, { events });
+  const a = await prepared(f);
+  await launched(f, a.assignment.id, a.job.id);
+  f.calls[0].child.stdout.write('Reviewing the director handoff.\n' + Array.from({ length: 204 }, (_, i) => `Visible step ${i}\n`).join(''));
+  await sleep(1200);
+  assert.deepEqual(events, [a.job.id]);
+  await f.controller.observe(a.assignment.id);
+  assert.equal(jobState(f, a.job.id), 'UNKNOWN', 'visible speech cannot establish completion');
+  assert.ok(f.store.snapshot({ history: true }).jobEvents?.some(e => e.jobId === a.job.id && e.text === 'Reviewing the director handoff.'));
+  assert.equal(f.store.snapshot({ history: true }).jobEvents?.filter(e => e.jobId === a.job.id && e.externalId.startsWith('spawn:')).length, 205, 'the whole bounded burst reaches the record even if output stops');
+});

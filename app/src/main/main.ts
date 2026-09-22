@@ -261,6 +261,7 @@ const changed=()=>win?.webContents.send('office:changed');
   });
  });
  const pageLimit=z.number().int().min(1).max(500).optional();
+ handle('office:chat-page',value=>store.officeChatPage(z.object({projectId:id.optional(),requestId:id.optional(),agentId:id.optional(),limit:z.number().int().min(1).max(100).optional(),cursor:z.string().max(1000).optional()}).strict().parse(value)));
  handle('office:history-page',value=>store.historyPage(z.object({projectId:id.nullable().optional(),limit:pageLimit,cursor:z.number().int().positive().optional()}).strict().parse(value)));
  handle('office:log-page',value=>store.logPage(z.object({agentId:id.optional(),conversationId:z.string().max(200).optional(),limit:pageLimit,cursor:z.string().max(300).optional()}).strict().parse(value)));
  handle('office:job-events',value=>{const input=z.object({jobId:id,limit:pageLimit,cursor:z.string().max(300).optional()}).strict().parse(value);return store.jobEventPage(input.jobId,input);});

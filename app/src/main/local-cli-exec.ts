@@ -24,8 +24,8 @@ const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
 /** Buffered child output is evidence, not a transcript — bounded so a chatty process cannot grow memory. */
 const MAX_BUFFERED_LINES = 500;
 const MAX_BUFFERED_BYTES = 256 * 1024;
-/** At most this many buffered lines drain into job events per observation. */
-const MAX_EVENTS_PER_OBSERVE = 200;
+/** Drain the entire bounded buffer so an idle burst or terminal cleanup cannot strand its tail. */
+const MAX_EVENTS_PER_OBSERVE = MAX_BUFFERED_LINES;
 /**
  * Claude Code's documented --effort levels on the installed build. Other effort names have no
  * documented mapping and are recorded as unmapped rather than silently dropped or guessed.
@@ -297,6 +297,7 @@ export class LocalCliExecAdapter implements ProviderAdapter {
 
   /** Buffers one output chunk into lines; retained volume is capped, drops are counted honestly. */
   private pushChunk(record: SpawnRecord, stream: 'stdout' | 'stderr', chunk: string): void {
+    const previousSequence = record.seq;
     const key = stream === 'stdout' ? 'pendingOut' : 'pendingErr';
     record[key] += chunk;
     let index;
@@ -305,6 +306,9 @@ export class LocalCliExecAdapter implements ProviderAdapter {
       record[key] = record[key].slice(index).replace(/^\r?\n/, '');
       this.pushLine(record, stream, line);
     }
+    // Surface available tool output without waiting for a receipt or process exit. Do not keep
+    // resetting the timer on a busy stream: the office gets a bounded update every 750 ms.
+    if (record.seq !== previousSequence && !record.notifyTimer) this.notify(record.jobId);
   }
 
   private pushLine(record: SpawnRecord, stream: 'stdout' | 'stderr', text: string): void {

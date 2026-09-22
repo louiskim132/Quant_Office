@@ -32,6 +32,7 @@ import { independenceClaimBlocker } from '../shared/cooperation.js';
 import { requestJobs, UNRESOLVED } from '../shared/queue.js';
 import type { AccountConnection, ProviderCapabilitySnapshot, ProjectLocation, InputSnapshot, Assignment, ProviderJob, JobEvent, JobEvidence, JobState, Team, TeamMembership, Message, ReviewDecision, RequestGrant, ProbeAttempt, ResearchBranch, FrozenResearchSpec, PredictionRecord, TrialLedgerEntry, StageAttempt, GateReceipt, FunctionAssignment, SealedReviewReport, Agent, AgentLog, WorkLog, Effort, AppState, Artifact, Command, Experiment, LineageEvent, Project, ResearchContract, ResearchTask, Request, Settings } from '../shared/types.js';
 import { canonical, canonicalHash, sha256 } from './canonical.js';
+import { officeChatPage, type OfficeChatQuery } from '../shared/office-chat.js';
 import { parseStrictJson } from './strict-json.js';
 import {ResearchAdmission} from './research-admission';
 import {adjudicate,recheckMandatoryGates} from './adjudication';
@@ -475,6 +476,9 @@ export class OfficeStore {
     const row=this.db.prepare('SELECT record FROM events ORDER BY sequence DESC LIMIT 1').get() as {record:string}|undefined;
     const count=Number((this.db.prepare('SELECT COUNT(*) AS count FROM event_index').get() as {count:number}).count);
     return {hash:row?eventSchema.parse(JSON.parse(row.record)).hash:null,count};
+  }
+  officeChatPage(query: OfficeChatQuery = {}) {
+    return officeChatPage(this.snapshot({ history: false }), query);
   }
   static publicState(state:AppState):AppState {
     return {...state,events:[],messages:[],jobEvents:[],localSessions:[],localOps:[],trials:[],pipeline:[],
