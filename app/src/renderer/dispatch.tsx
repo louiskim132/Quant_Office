@@ -92,6 +92,17 @@ export function RequestDispatch({request,state,onState}:{request:Request;state:A
    // instead of the card reverting to the newest unresolved item.
    if(job)setSelectedJob(job.id);return next;});
  }
+ // Pipeline requests mint their own hops through the confirm path — manual preparation and
+ // handoff are never offered, and this card only reports recorded pipeline state.
+ if(request.pipeline){
+  const hops=(state.assignments??[]).filter(item=>item.requestId===request.id&&item.pipelineKey);
+  const briefJob=request.pipeline.briefAssignmentId?(state.jobs??[]).find(item=>item.assignmentId===request.pipeline!.briefAssignmentId):undefined;
+  return <section className="dispatch-card"><h3>Pipeline work</h3>
+   <p className="muted">{request.pipeline.kind==='PLANNING'?'Planning':'Result analysis'} pipeline — {request.pipeline.phase==='BRIEFING'?`the director brief hop is briefing${briefJob?` (${briefJob.state.toLowerCase().replaceAll('_',' ')})`:''}; confirm the shaped brief on the request card to launch the remaining arms.`:'launched.'}</p>
+   {request.pipeline.phase==='LAUNCHED'&&<p className="muted">{hops.length?`${hops.length} minted hop${hops.length===1?'':'s'}: ${hops.map(item=>item.pipelineKey).join(', ')}`:'No minted hops on record yet.'}</p>}
+   <p className="muted">Manual preparation is not offered on pipeline requests — the office mints the hops.</p>
+  </section>;
+ }
  return <section className="dispatch-card">
   <h3>{local?'Local session work':'Provider work'}</h3>
   {summaries.length>0&&<label className="field">Job history<select value={job?.id??''} onChange={e=>setSelectedJob(e.target.value)}>{summaries.map(item=><option key={item.jobId} value={item.jobId}>{state.agents.find(agent=>agent.id===item.agentId)?.name??'Agent'} · {jobLabels[item.state]} · {item.jobId.slice(0,8)}</option>)}</select></label>}
