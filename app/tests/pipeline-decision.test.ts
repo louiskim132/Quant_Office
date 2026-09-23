@@ -209,6 +209,21 @@ test('decide refuses stale hashes, records APPROVE bound to the viewed report, a
   assert.throws(() => f.store.execute({ type: 'request.pipeline.decide', idempotencyKey: key(), requestId: request.id, expectedRevision: current.revision, decision: 'REJECT', expectedSpecHash: specHash, expectedReceiptHash: receiptHash }), /already recorded/);
 });
 
+test('completing the terminal hop through the chain-observe path seals the round automatically', async t => {
+  const f = await fixture(t);
+  const { request } = await launchedRound(f);
+  const gate = f.store.snapshot({ history: false }).assignments!.find(item => item.requestId === request.id && item.pipelineKey === 'verify')!;
+  await completeRound(f, request.id);
+  // The observe alone records the receipt; the chain advance is what seals the round.
+  const receiptHash = f.store.localSessionForJob(jobFor(f, gate.id).id)!.lastReceipt!.hash;
+  assert.equal(requestOf(f, request.id).pipeline?.phase, 'LAUNCHED');
+  await f.controller.advanceLocalChain(gate.id);
+  const after = requestOf(f, request.id);
+  assert.equal(after.pipeline?.phase, 'AWAITING_DECISION');
+  assert.equal(after.pipeline?.pendingDecision?.headAssignmentId, gate.id);
+  assert.equal(after.pipeline?.pendingDecision?.headReceiptHash, receiptHash);
+});
+
 test('decide and the decision wait refuse outside their honest phases', async t => {
   const f = await fixture(t);
   const nonPipeline = f.store.execute({ type: 'request.create', idempotencyKey: key(), projectId: f.project.id, name: 'Plain', hypothesis: 'Do a thing.', workType: 'OTHER', mode: 'SINGLE', leadAgentId: f.agents.DIRECTOR.id, participantIds: [] }).requests![0];
