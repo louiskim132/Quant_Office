@@ -3939,3 +3939,24 @@ pipeline run still needs the full role roster bound
 are minted through the same path but only local
 CLI routes were exercised; the user-gate hop is a
 director-run step, not a UI control.
+
+2026-09-23 — batch integration PR #6 merged to main
+(merge commit 63556fd) through the authenticated
+protected route after every gate held: the round
+was closed, origin/main was merged into the branch
+first so the exact PR head contained it, the
+required verify check reported SUCCESS on that
+head (02c1cdc, two runs), and no review
+conversations existed. Two CI-only Windows
+failures surfaced on the first PR run — the
+runner's TMP resolves to an 8.3 alias (RUNNER~1):
+fs.watch on a short-name target trips libuv's
+fs-event prefix assertion and aborts the test
+subprocess, and git worktree porcelain reports the
+long path the suite compared literally. Fixed on
+the branch by realpathSync.native at both watch
+targets and the fixture root (bd65053, 02c1cdc) —
+verified empirically that plain realpathSync
+preserves 8.3 aliases while the native variant
+expands them, and reproduced under a short-name
+TMP locally before re-push.
