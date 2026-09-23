@@ -3866,3 +3866,76 @@ the executor lands. Verification: combined unit
 suite 758/759 pass, 1 pre-existing skip, typecheck and build clean at this
 head; workers' packet checks independently rerun
 (18/18, 27/27, 13/13, 8/8, 7/7).
+
+2026-09-22 (round comm-pipe-2 integrated at 6dc5603;
+workers 1-3 + organizer wiring) — pipeline request
+types. Contract frozen first (organizer ffe9649):
+WorkType gains PLANNING / RESULT_ANALYSIS / OTHER
+(old stored values stay valid), Request gains
+pipeline {kind, specHash, BRIEFING/LAUNCHED,
+briefAssignmentId} plus bounded pipelineNotes,
+Assignment gains pipelineKey, request.start gates
+pipeline types on the director seat plus roster
+role coverage (PM_A/PM_B/WORKER or PM_C/PM_D/
+WORKER) instead of participant lists, and
+request.pipeline.note / .confirm land as commands.
+Worker-1 (b571808, merge 6d72517): round-template —
+plan-brief leads buildCommRound with both draft
+arms depending on it alone on identical manifests;
+new buildAnalysisRound emits the standalone
+RESULT_ANALYSIS spec brief → digest → interpret ∥
+falsify → bounded responses → finalize → report →
+user-gate; every CommRoundEntry carries armRole
+naming its roster seat. Worker-2 (c782527, merge
+43ecf26): round-executor — the pure mint layer:
+planCommRoundMint resolves the director from
+leadAgentId and arms by roster role with every
+missing seat refused by name, planRefineHop mints
+bounded (≤4000) brief-refine-N hops carrying only
+the note, mintEntriesFor re-keys the spec DAG onto
+minted assignment ids; reconciled to the landed
+singular workerAgentId declaration. Worker-3
+(1682b16, merge 7ac5643): renderer — Work type is
+exactly Planning / Result analysis / Other; the
+pipeline options render a Director picker plus the
+honest briefing hint and no mode/responsible/
+collaborators controls; Other keeps the unchanged
+controls; queue cards show 'planning/result
+analysis pipeline' meta plus the briefing surface
+(brief job state, recorded notes, bounded note
+input, Launch gated on the brief job COMPLETED);
+RequestDispatch renders status text only so manual
+preparation never mints extra assignments on a
+pipeline request. Organizer wiring: pipeline-runner
+mints through the real prepare path — request.start
+mints only the director brief hop then handoffs it
+through the guarded launch, each note mints a
+chained refine hop and re-binds the gate,
+request.pipeline.confirm mints every remaining
+spec entry in topological order with dependsOn
+resolved to minted assignment ids, and the chain
+machinery carries the DAG on durable receipts;
+pipelineConfirmGate resolves the whole spec before
+the phase flips so a missing role leaves the
+request honestly briefing; bindPipelineBrief is an
+office-only store method that never bumps the
+frozen request revision; createAssignment exempts
+pipelineKey hops from the one-open-job rule because
+the DAG, not job state, serializes their launches;
+confirm re-runs on LAUNCHED as a mint retry;
+prepare() takes pipelineKey plus the bounded
+objective override that becomes the hop's frozen
+payload; assertLifecycle exempts pipelined seats —
+the office mint is the recorded authorization.
+desktop.e2e.ts retargeted: the scientific flow now
+drives request.create workType=EXPERIMENT through
+the command surface directly (the form no longer
+offers it). Verified at this head: 779 tests / 778
+pass / 1 pre-existing skip, tsc and build clean;
+workers' packet checks independently rerun (10/10,
+11/11, desktop pass). Deferred honestly: a live
+pipeline run still needs the full role roster bound
+(pm/director/worker agents); hosted-provider arms
+are minted through the same path but only local
+CLI routes were exercised; the user-gate hop is a
+director-run step, not a UI control.
