@@ -163,8 +163,9 @@ test('identical inputs mint identical specs, hashes and entries', () => {
 
 test('an already-minted pipeline key attaches its assignment id to the mint entry', () => {
   const r = roster();
-  const existing = assignment(randomUUID(), 'plan-draft-a');
-  const mint = planCommRoundMint({ request: request('PLANNING', r.director.id), agents: r.agents, existingAssignments: [existing] });
+  const req = request('PLANNING', r.director.id);
+  const existing = { ...assignment(randomUUID(), 'plan-draft-a'), requestId: req.id };
+  const mint = planCommRoundMint({ request: req, agents: r.agents, existingAssignments: [existing] });
   assert.equal(mint.ok, true);
   if (!mint.ok) return;
   assert.equal(mint.entries.find(entry => entry.key === 'plan-draft-a')!.assignmentId, existing.id);
@@ -199,11 +200,12 @@ test('refine hops refuse an oversized or empty note and a leaderless request', (
 
 test('mintEntriesFor re-keys the spec DAG onto assignment ids', () => {
   const r = roster();
-  const mint = planCommRoundMint({ request: request('PLANNING', r.director.id), agents: r.agents, existingAssignments: [] });
+  const req = request('PLANNING', r.director.id);
+  const mint = planCommRoundMint({ request: req, agents: r.agents, existingAssignments: [] });
   assert.equal(mint.ok, true);
   if (!mint.ok) return;
-  const minted = mint.spec.entries.map(entry => assignment(randomUUID(), entry.key));
-  const resolved = mintEntriesFor(mint.spec, minted);
+  const minted = mint.spec.entries.map(entry => ({ ...assignment(randomUUID(), entry.key), requestId: req.id }));
+  const resolved = mintEntriesFor(mint.spec, req, minted);
   assert.equal(resolved.ok, true);
   if (!resolved.ok) return;
   const byKey = new Map(resolved.entries.map(entry => [entry.key, entry] as const));
@@ -211,23 +213,54 @@ test('mintEntriesFor re-keys the spec DAG onto assignment ids', () => {
   assert.deepEqual(synthesis.dependsOn, ['plan-draft-a', 'plan-draft-b', 'plan-critique-a-on-b', 'plan-critique-b-on-a'].map(key => byKey.get(key)!.assignmentId));
   assert.equal(byKey.get('user-gate')!.dependsOn[0], byKey.get('verify')!.assignmentId);
   // Assignments without a pipeline key are unrelated work, not an error.
-  const withForeign = mintEntriesFor(mint.spec, [...minted, assignment(randomUUID())]);
+  const withForeign = mintEntriesFor(mint.spec, req, [...minted, assignment(randomUUID())]);
   assert.equal(withForeign.ok, true);
 });
 
 test('mintEntriesFor refuses unminted spec keys, unknown assignment keys and duplicate claims', () => {
   const r = roster();
-  const mint = planCommRoundMint({ request: request('PLANNING', r.director.id), agents: r.agents, existingAssignments: [] });
+  const req = request('PLANNING', r.director.id);
+  const mint = planCommRoundMint({ request: req, agents: r.agents, existingAssignments: [] });
   assert.equal(mint.ok, true);
   if (!mint.ok) return;
-  const minted = mint.spec.entries.map(entry => assignment(randomUUID(), entry.key));
-  const missing = mintEntriesFor(mint.spec, minted.filter(a => a.pipelineKey !== 'verify'));
+  const minted = mint.spec.entries.map(entry => ({ ...assignment(randomUUID(), entry.key), requestId: req.id }));
+  const missing = mintEntriesFor(mint.spec, req, minted.filter(a => a.pipelineKey !== 'verify'));
   assert.equal(missing.ok, false);
   if (!missing.ok) assert.match(missing.detail, /verify/);
-  const unknown = mintEntriesFor(mint.spec, [...minted, assignment(randomUUID(), 'not-in-the-spec')]);
+  const unknown = mintEntriesFor(mint.spec, req, [...minted, { ...assignment(randomUUID(), 'not-in-the-spec'), requestId: req.id }]);
   assert.equal(unknown.ok, false);
   if (!unknown.ok) assert.match(unknown.detail, /'not-in-the-spec'/);
-  const dup = mintEntriesFor(mint.spec, [...minted, assignment(randomUUID(), 'verify')]);
+  const dup = mintEntriesFor(mint.spec, req, [...minted, { ...assignment(randomUUID(), 'verify'), requestId: req.id }]);
   assert.equal(dup.ok, false);
   if (!dup.ok) assert.match(dup.detail, /pipeline key 'verify'/);
+});
+
+test('pipelineKey lookups are request-scoped — another request\'s hops are invisible', () => {
+  const r = roster();
+  const reqA = request('PLANNING', r.director.id);
+  const reqB = request('PLANNING', r.director.id);
+  // Request A's already-minted hop must never satisfy request B's mint.
+  const foreign = { ...assignment(randomUUID(), 'plan-draft-a'), requestId: reqA.id };
+  const mintB = planCommRoundMint({ request: reqB, agents: r.agents, existingAssignments: [foreign] });
+  assert.equal(mintB.ok, true);
+  if (!mintB.ok) return;
+  assert.equal(mintB.entries.find(entry => entry.key === 'plan-draft-a')!.assignmentId, undefined,
+    'a foreign-request pipeline key is not this round\'s mint');
+  const own = { ...assignment(randomUUID(), 'plan-draft-a'), requestId: reqB.id };
+  const remintB = planCommRoundMint({ request: reqB, agents: r.agents, existingAssignments: [foreign, own] });
+  if (!remintB.ok) return assert.fail('mint should resolve');
+  assert.equal(remintB.entries.find(entry => entry.key === 'plan-draft-a')!.assignmentId, own.id,
+    'the request\'s own assignment carries the key');
+  // mintEntriesFor sees only the request's assignments even when both requests' hops are listed.
+  const allB = mintB.spec.entries.map(entry => ({ ...assignment(randomUUID(), entry.key), requestId: reqB.id }));
+  const allA = mintB.spec.entries.map(entry => ({ ...assignment(randomUUID(), entry.key), requestId: reqA.id }));
+  const resolved = mintEntriesFor(mintB.spec, reqB, [...allA, ...allB]);
+  assert.equal(resolved.ok, true);
+  if (!resolved.ok) return;
+  const bIds = new Set(allB.map(item => item.id));
+  for (const entry of resolved.entries) {
+    assert.ok(bIds.has(entry.assignmentId), `${entry.key} resolved to request B's own assignment`);
+    for (const dep of entry.dependsOn) assert.ok(bIds.has(dep), 'edges bind request B\'s ids only');
+  }
+  // Two requests minting identical spec keys never collide on the duplicate-key guard either.
 });

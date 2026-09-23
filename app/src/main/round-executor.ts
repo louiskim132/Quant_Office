@@ -172,7 +172,9 @@ export function planCommRoundMint(input: CommRoundMintInput): CommRoundMint {
     });
   }
   const specHash = createHash('sha256').update(JSON.stringify(spec), 'utf8').digest('hex');
-  const minted = new Map(existingAssignments.filter(a => a.pipelineKey).map(a => [a.pipelineKey!, a.id] as const));
+  // Request-scoped: two requests mint the same deterministic spec keys, so a pipelineKey lookup
+  // must only ever see this request's own assignments — a foreign key is not this round's mint.
+  const minted = new Map(existingAssignments.filter(a => a.requestId === request.id && a.pipelineKey).map(a => [a.pipelineKey!, a.id] as const));
   const entries: MintEntry[] = spec.entries.map(specEntry => ({
     key: specEntry.key, phase: specEntry.phase, armRole: armRoleFor(specEntry), agentId: specEntry.agentId,
     toolProfile: specEntry.toolProfile, dependsOnKeys: [...specEntry.dependsOnKeys],
@@ -206,14 +208,16 @@ export type ResolvedMintEntries =
   | { ok: false; detail: string };
 
 /**
- * Re-keys the spec's DAG onto minted assignment ids. Every spec key must resolve to exactly
- * one assignment via pipelineKey, and every pipelined assignment must name a spec key — an
- * unknown or unminted key is refused by name rather than resolved to nothing.
+ * Re-keys the spec's DAG onto minted assignment ids. The assignment list is scoped to the
+ * request before any lookup runs — spec keys are deterministic, so another request's hops
+ * carry the same keys and an unscoped map would happily bind them. Every spec key must resolve
+ * to exactly one assignment via pipelineKey, and every pipelined assignment must name a spec
+ * key — an unknown or unminted key is refused by name rather than resolved to nothing.
  */
-export function mintEntriesFor(spec: CommRoundSpec, assignments: readonly Assignment[]): ResolvedMintEntries {
+export function mintEntriesFor(spec: CommRoundSpec, request: Request, assignments: readonly Assignment[]): ResolvedMintEntries {
   const byKey = new Map<string, string>();
   for (const assignment of assignments) {
-    if (!assignment.pipelineKey) continue;
+    if (assignment.requestId !== request.id || !assignment.pipelineKey) continue;
     const prior = byKey.get(assignment.pipelineKey);
     if (prior && prior !== assignment.id)
       return { ok: false, detail: `Two assignments (${prior}, ${assignment.id}) claim pipeline key '${assignment.pipelineKey}' — the mint cannot resolve it.` };
