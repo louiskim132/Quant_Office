@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdtempSync, renameSync } from 'node:fs';
+import { existsSync, mkdtempSync, realpathSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { removeTreeSync } from '../src/main/fsx';
@@ -11,7 +11,9 @@ import { createWorktree, ensureRepo, listWorktrees, removeWorktreeRegistration, 
 const git = (args: string[], cwd: string) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
 
 function fixture(t: test.TestContext) {
- const root = mkdtempSync(path.join(tmpdir(), 'qro-worktree-repo-'));
+ // realpathSync: TMP may resolve to an 8.3 short name (RUNNER~1) while git worktree
+ // porcelain output reports the canonical long path — compare canonical to canonical.
+ const root = realpathSync(mkdtempSync(path.join(tmpdir(), 'qro-worktree-repo-')));
  t.after(() => removeTreeSync(root));
  // These tests run real git against real repositories; the assumption is asserted, not skipped.
  assert.match(execFileSync('git', ['--version'], { encoding: 'utf8' }), /git version/, 'git must be on PATH for the worktree lane tests');

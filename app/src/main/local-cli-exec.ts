@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, watch, type FSWatcher } from 'node:fs';
+import { existsSync, mkdirSync, realpathSync, watch, type FSWatcher } from 'node:fs';
 import path from 'node:path';
 import type { CapabilityEvidence, Effort, JobEvent, Provider, ProviderJob } from '../shared/types.js';
 import type { LocalSessionRecord } from '../shared/local-session.js';
@@ -252,7 +252,9 @@ export class LocalCliExecAdapter implements ProviderAdapter {
       const caller: EvidenceCaller = { agentId: context.assignment.agentId, projectId: context.assignment.projectId, requestId: context.assignment.requestId };
       const frames = this.evidenceFrames;
       try {
-        queryWatcher = watch(path.join(dir, QUERIES_DIR), (_event, name) => {
+        // realpath first: a short-name (8.3) or aliased watch target trips libuv's fs-event
+        // prefix assertion on Windows, and the crash would take down the whole office process.
+        queryWatcher = watch(realpathSync(path.join(dir, QUERIES_DIR)), (_event, name) => {
           if (!isQueryFile(name)) return;
           // A just-created query file gets a beat to flush before the office reads it.
           const settle = setTimeout(() => {
@@ -297,7 +299,7 @@ export class LocalCliExecAdapter implements ProviderAdapter {
     // the office never polls. A failed watch degrades to the exit trigger and manual observe,
     // which read the same files.
     try {
-      record.watcher = watch(dir, (_event, name) => {
+      record.watcher = watch(realpathSync(dir), (_event, name) => {
         if (name === RESULT_FILE || name === CANCEL_ACK_FILE) this.notify(record.jobId);
       });
       record.watcher.unref?.();
