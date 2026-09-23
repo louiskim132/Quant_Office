@@ -4063,3 +4063,17 @@ only — a bounded note, no automatic
 re-mint; P3 live acceptance (a real user
 decision on a live round) is unverified;
 memory workstream unstarted.
+
+2026-09-23 — batch integration PR #7 merged to
+main (merge commit 5317f4e) through the
+authenticated protected route: the round was
+closed, origin/main was merged into the branch
+first (4272c24) so the exact PR head contained
+it, both required verify runs reported SUCCESS
+on that same head (35920345758 and
+35920353331), mergeStateStatus read CLEAN and
+no review conversations existed. The packaged
+app release and the mirrored taskbar install
+carry this revision — byte-identical app.asar
+(6a53a13e…) on both sides, decision machinery
+confirmed present in the bundle.
