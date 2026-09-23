@@ -253,13 +253,13 @@ export class AssignmentController {
   }
 
   /** Freezes the exact inputs for one request and records the intent to submit. */
-  prepare(input: { requestId: string; agentId: string; snapshotId: string; expectedRequestRevision?: number; expectedAgentRevision?: number; dependsOn?: string[]; research?: Assignment['research']; toolProfile?: ToolProfile }): { state: AppState; assignment: Assignment } {
+  prepare(input: { requestId: string; agentId: string; snapshotId: string; expectedRequestRevision?: number; expectedAgentRevision?: number; dependsOn?: string[]; research?: Assignment['research']; toolProfile?: ToolProfile; pipelineKey?: string; objective?: string }): { state: AppState; assignment: Assignment } {
     const state = this.store.snapshot({history:false});
     const request = state.requests?.find(item => item.id === input.requestId);
     if (!request) throw new Error('Request not found.');
     const agent = state.agents.find(item => item.id === input.agentId);
     if (!agent) throw new Error('Agent not found.');
-    this.assertLifecycle(state, request, agent);
+    this.assertLifecycle(state, request, agent, Boolean(input.pipelineKey));
     // The caller freezes the versions it actually showed the user; a concurrent edit must not be swept in.
     if (input.expectedRequestRevision !== undefined && input.expectedRequestRevision !== request.revision) throw new Error('The request changed in another view. Reload before starting it.');
     if (input.expectedAgentRevision !== undefined && input.expectedAgentRevision !== (agent.revision ?? 0)) throw new Error('The profile changed in another view. Reload before starting it.');
@@ -285,11 +285,12 @@ export class AssignmentController {
         model: agent.model, effort: agent.effort ?? 'default', delegation: request.delegation,
       }, { now: this.nowMs() }),
       requestedEffort: agent.effort ?? 'default', appliedEffort: 'UNVERIFIED', delegation: request.delegation,
-      objectiveHash: canonicalHash({ objective: request.objective, criteria: request.acceptanceCriteria }),
+      objectiveHash: canonicalHash({ objective: input.objective ?? request.objective, criteria: request.acceptanceCriteria }),
       // The exact text the adapter will receive, captured now. Launch uses this and never re-reads
       // the request, so a later edit cannot ride along with these frozen inputs and this binding.
+      // Pipeline hops override the objective with the minted hop's bounded instruction.
       frozen: {
-        requestName: request.name, objective: request.objective, acceptanceCriteria: request.acceptanceCriteria,
+        requestName: request.name, objective: input.objective ?? request.objective, acceptanceCriteria: request.acceptanceCriteria,
         instructions: agent.instructions, model: agent.model, effort: agent.effort ?? 'default', delegation: request.delegation,
         accountIdentity: connection.identity, credentialContext: connection.credentialContext,
         outputFolder: state.locations?.find(item => item.projectId === request.projectId)?.outputFolder ?? '',
@@ -297,6 +298,7 @@ export class AssignmentController {
       createdAt: this.now(),
       ...(input.dependsOn?.length ? { dependsOn: input.dependsOn } : {}),
       ...(input.toolProfile ? { toolProfile: input.toolProfile } : {}),
+      ...(input.pipelineKey ? { pipelineKey: input.pipelineKey } : {}),
       // The staged-scientific context is part of what is frozen; the store re-validates it against
       // the recorded link, so a caller cannot name a stage or subject the branch is not on.
       ...(input.research ? { research: input.research } : {}),
@@ -315,7 +317,7 @@ export class AssignmentController {
    * A request can be canceled, or its project archived, at any point after preparation. Checking
    * only at creation means a canceled request can still be launched from a window opened earlier.
    */
-  private assertLifecycle(state: AppState, request: { id: string; projectId: string; status: string; participantIds: string[]; leadAgentId: string | null; mode: string }, agent: { id: string; removedAt?: string; name: string }): void {
+  private assertLifecycle(state: AppState, request: { id: string; projectId: string; status: string; participantIds: string[]; leadAgentId: string | null; mode: string }, agent: { id: string; removedAt?: string; name: string }, pipelineSeat = false): void {
     const project = state.projects.find(item => item.id === request.projectId);
     if (!project) throw new Error('Project not found.');
     if (project.archived) throw new Error('This project is archived. Restore it before starting work.');
@@ -324,7 +326,9 @@ export class AssignmentController {
     // A single-agent request has a closed roster by definition. Group and team work deliberately
     // draws in agents who are not listed participants - a reviewer must not be the author - but that
     // explains who may be added, it does not authorize everyone: an unlisted agent needs an explicit
-    // grant recorded against this request.
+    // grant recorded against this request. Pipeline hops are the exception: their seats resolve by
+    // roster role through the office mint, which is itself the recorded authorization.
+    if (pipelineSeat) return;
     if (request.mode === 'SINGLE') {
       if (request.leadAgentId !== agent.id)
         throw new Error(`${agent.name} is not the agent this single-agent request was assigned to.`);
@@ -359,7 +363,7 @@ export class AssignmentController {
 
     const request = state.requests?.find(item => item.id === assignment.requestId);
     if (!request) throw new Error('Request not found.');
-    this.assertLifecycle(state, request, agent);
+    this.assertLifecycle(state, request, agent, Boolean(assignment.pipelineKey));
     const frozen = this.frozenPayload(assignment);
     const snapshot = state.snapshots?.find(item => item.id === assignment.snapshotId);
     if (!snapshot) throw new Error('The prepared inputs for this work are no longer recorded.');

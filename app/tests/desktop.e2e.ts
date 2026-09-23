@@ -36,15 +36,15 @@ try{
  await modal.getByLabel('Research mandate').fill('Compare out-of-sample volatility estimates without changing the protected region.');
  await modal.getByRole('button',{name:'Create project',exact:true}).click();await modal.waitFor({state:'hidden'});
  await page.getByRole('button',{name:'Office',exact:true}).click();
- await page.getByRole('button',{name:'New request',exact:true}).click();
- const exp=page.getByRole('dialog',{name:'New request'});
- await exp.getByLabel('Request name').fill('Volatility estimate baseline');
- await exp.getByLabel('Objective').fill('A rolling baseline provides a useful comparison.');
- await exp.getByLabel('Work type').selectOption('EXPERIMENT');
- await exp.getByRole('button',{name:'Save draft'}).click();await exp.waitFor({state:'hidden'});
- let state=await page.evaluate(()=>window.office.getState());assert.equal(state.tasks.length,0);assert.equal(state.requests!.length,1);assert.equal(state.requests![0].experimentId,state.experiments[0].id);
- // Saving a draft stays on the current page; the queue card opens the project's research workspace.
- await page.getByRole('button',{name:'Open research details',exact:true}).click();
+ // The form's three-way work type no longer offers EXPERIMENT, but the command still honors it
+ // (stored compatibility) — the e2e drives request.create directly to keep the linked
+ // request+experiment coverage the canceled-flow assertions below depend on.
+ await page.evaluate(async()=>{const s=await window.office.getState();const projectId=s.projects.find(p=>!p.archived)!.id;await window.office.command({type:'request.create',idempotencyKey:crypto.randomUUID(),projectId,name:'Volatility estimate baseline',hypothesis:'A rolling baseline provides a useful comparison.',workType:'EXPERIMENT',mode:'SINGLE',leadAgentId:null,participantIds:[]} as never);});
+ let state=await page.evaluate(()=>window.office.getState());assert.equal(state.requests!.length,1);assert.equal(state.requests![0].experimentId,state.experiments[0].id);
+ // The queue card route is gone with the form option — the experiment workspace is reached by
+ // selecting the project then the experiment in the topbar.
+ await page.getByLabel('Current project').selectOption({label:'Volatility research'});
+ await page.getByLabel('Current experiment').selectOption({label:'Volatility estimate baseline'});
  // Contract sections 02-08 stay collapsed until the editor asks for them.
  await page.getByRole('button',{name:/Define the remaining/}).click();
  // Use the field's explicit contract position to avoid tying scientific copy to test behavior.

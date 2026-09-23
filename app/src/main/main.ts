@@ -19,6 +19,7 @@ import { parseWorkLogs } from './work-logs.js';
 import { workspaceDirectory, recoverInterruptedRestore, prepareRestore, discardCandidate, commitRestore } from './recovery.js';
 import { resolveSelection, prepareInputSnapshot, reconstructSnapshot, verifySnapshotForTransfer } from './locations.js';
 import { AssignmentController } from './controller.js';
+import { mintPipelineBrief, mintPipelineRefine, mintPipelineRound, pipelineConfirmGate, type PipelineMintContext } from './pipeline-runner.js';
 import { PipelineService } from './pipeline.js';
 import { HoldoutCustody } from './holdout.js';
 import { OutputService } from './outputs.js';
@@ -310,7 +311,53 @@ const changed=()=>win?.webContents.send('office:changed');
    });
  });
  handle('office:info',value=>{noInput(value);const transport=transportModuleStatus();return {version:app.getVersion(),dataDirectory:workspaceDirectory(app.getPath('userData')),platform:process.platform,packaged:app.isPackaged,transportModule:transport.available,transportDetail:transport.detail};});
- handle('office:command',value=>{if(transferBusy)throw new Error('Wait for the file operation to finish.');const state=store.execute(value);changed();return state;});
+ handle('office:command',async value=>{
+  if(transferBusy)throw new Error('Wait for the file operation to finish.');
+  // Pipeline commands carry office-side minting after the durable command lands: the brief hop on
+  // start, a refine hop per note, the remaining spec on confirm. They run inside the dispatch
+  // serializer like every other request action; every other command keeps the plain sync path.
+  const type=(value as {type?:string}|null|undefined)?.type;
+  const requestId=(value as {requestId?:string}|null|undefined)?.requestId;
+  const isPipeline=type==='request.pipeline.note'||type==='request.pipeline.confirm'
+    ||(type==='request.start'&&!!requestId&&!!store.snapshot({history:false}).requests?.find(r=>r.id===requestId)?.pipeline);
+  if(!isPipeline){const state=store.execute(value);changed();return state;}
+  return dispatch(async()=>{
+   if(type==='request.pipeline.confirm'){
+    // The whole spec must resolve before the phase flips — a refusal leaves the request briefing.
+    const gate=pipelineConfirmGate(store,requestId!);
+    if(!gate.ok)throw new Error(gate.detail);
+   }
+   let state=store.execute(value);
+   const request=state.requests?.find(r=>r.id===requestId);
+   if(request?.pipeline){
+    const workspace=workspaceDirectory(app.getPath('userData'));
+    const ctx:PipelineMintContext={store,
+     snapshotFor:req=>prepareInputSnapshot({store,stagingRoot:path.join(workspace,'snapshots'),objectRoot:workspace,
+      projectId:req.projectId,requestId:req.id,requestRevision:req.revision,objective:req.objective}),
+     prepare:input=>controller.prepare(input)};
+    if(type==='request.start'&&request.status==='READY'&&!request.blockers.length){
+     const minted=await mintPipelineBrief(ctx,request);
+     if(!minted.minted)throw new Error(`The request is ready but its director brief could not be minted: ${minted.detail}`);
+     const briefJob=(store.snapshot({history:false}).jobs??[]).find(j=>j.assignmentId===minted.assignment!.id);
+     // A re-start with the hop already launched is a no-op — only an INTENT job can hand off.
+     if(briefJob?.state==='INTENT')
+     try{await controller.handoff(minted.assignment.id);}
+     catch(error){if(briefJob)store.recordJobEvents(briefJob.id,[{externalId:`pipeline-brief-launch:${randomUUID()}`,cursor:'',kind:'STATUS',
+      text:`The director brief hop was minted but its automatic launch could not run: ${error instanceof Error?error.message:'unknown error'} The work stays prepared; launch it manually when the blocker clears.`,
+      occurredAt:new Date().toISOString(),receivedAt:new Date().toISOString(),evidence:'OFFICE_LOCAL'}]);}
+    }else if(type==='request.pipeline.note'){
+     const minted=await mintPipelineRefine(ctx,request,String((value as {text?:string}).text??''));
+     if(!minted.minted)throw new Error(`The note is recorded but its refine hop could not be minted: ${minted.detail}`);
+     await controller.reconcileLocalChain();
+    }else if(type==='request.pipeline.confirm'){
+     await mintPipelineRound(ctx,request);
+     await controller.reconcileLocalChain();
+    }
+    state=store.snapshot({history:false});
+   }
+   changed();return state;
+  });
+ });
  // Evidence access is deliberately read-only and grant-checked inside the service, which is the only
  // place that resolves an object hash to bytes. The renderer never receives an object path.
  // Read-only research status, and the one write that gives a stage its people. Assignment is

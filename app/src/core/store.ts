@@ -1531,12 +1531,18 @@ export class OfficeStore {
             changes.push({collection:'requests',value:{...request,pipelineNotes:[...(request.pipelineNotes??[]),{id:randomUUID(),text:command.text,createdAt:now}],revision:request.revision+1,updatedAt:now}});
             reason='Director note recorded; the office queues a brief refinement hop';break;
           }
-          if(request.status!=='READY'||request.pipeline.phase!=='BRIEFING')throw new Error('This pipeline is already launched or still drafting.');
-          if(!request.pipeline.briefAssignmentId)throw new Error('No director brief hop exists yet — start the request first.');
-          const briefJob=state.jobs?.find(item=>item.assignmentId===request.pipeline!.briefAssignmentId);
-          if(!briefJob||briefJob.state!=='COMPLETED')throw new Error('The director brief has not completed — the shaped brief must exist before the pipeline launches.');
+          if(request.status!=='READY')throw new Error('This pipeline is not running.');
+          if(request.pipeline.phase==='BRIEFING'){
+            if(!request.pipeline.briefAssignmentId)throw new Error('No director brief hop exists yet — start the request first.');
+            const briefJob=state.jobs?.find(item=>item.assignmentId===request.pipeline!.briefAssignmentId);
+            if(!briefJob||briefJob.state!=='COMPLETED')throw new Error('The director brief has not completed — the shaped brief must exist before the pipeline launches.');
+            reason='Pipeline confirmed; the office mints the remaining hops';
+          }else reason='Pipeline re-confirmed; the office retries any unminted hops';
+          // Re-confirm on a launched pipeline is the mint-retry path: the record is unchanged,
+          // the revision bump gives the renderer a fresh expectedRevision, and the office's
+          // post-command mint skips already-minted hops by pipelineKey.
           changes.push({collection:'requests',value:{...request,pipeline:{...request.pipeline,phase:'LAUNCHED'},revision:request.revision+1,updatedAt:now}});
-          reason='Pipeline confirmed; the office mints the remaining hops';break;
+          break;
         }
         case 'request.update':
         case 'request.start':
@@ -2294,10 +2300,15 @@ export class OfficeStore {
       }
       if(state.assignments?.some(a=>a.id===assignment.id))throw new Error('Assignment identities are immutable');
       // One open job per agent on a request: cooperation may run several agents, but never the same
-      // agent twice in parallel on the same work.
-      const open=(state.assignments??[]).filter(item=>item.requestId===assignment.requestId&&item.agentId===assignment.agentId)
-        .filter(item=>(state.jobs??[]).some(job=>job.assignmentId===item.id&&!['COMPLETED','FAILED','CANCEL_ACKNOWLEDGED'].includes(job.state)));
-      if(open.length)throw new Error('This agent already has work in flight for this request. Reconcile or cancel it first.');
+      // agent twice in parallel on the same work. Pipeline hops are exempt — the office mints the
+      // whole spec at once (the director holds several INTENT hops), and the dependsOn DAG, not job
+      // state, serializes their launches. Only the office mint can set pipelineKey, so this cannot
+      // be widened from the renderer.
+      if(!assignment.pipelineKey){
+        const open=(state.assignments??[]).filter(item=>item.requestId===assignment.requestId&&item.agentId===assignment.agentId)
+          .filter(item=>(state.jobs??[]).some(job=>job.assignmentId===item.id&&!['COMPLETED','FAILED','CANCEL_ACKNOWLEDGED'].includes(job.state)));
+        if(open.length)throw new Error('This agent already has work in flight for this request. Reconcile or cancel it first.');
+      }
       const now=new Date().toISOString();
       const job=jobSchema.parse({...input.job,state:'INTENT',evidence:'OFFICE_LOCAL',detail:'Submission intent recorded before contacting the provider.',
         externalId:'',externalUrl:'',outputs:[],revision:0,createdAt:now,updatedAt:now,dispatchedAt:'',settledAt:''});
@@ -2309,6 +2320,37 @@ export class OfficeStore {
       this.append(state,changes,
         {kind:'ASSIGNMENT_CREATED',projectId:assignment.projectId,experimentId:null,
          reason:`Froze request revision ${assignment.requestRevision}, profile revision ${assignment.agentRevision}, input snapshot and capability evidence. Nothing has been submitted yet.`},null);
+    });
+  }
+  /**
+   * Records the office-minted director brief hop on a pipeline request — the spec hash and the
+   * assignment the briefing phase gates on. Office-only: this is a store method, not a command,
+   * so the renderer can never reach it. The named assignment must be a real minted brief hop on
+   * this request held by the chosen director seat — the record cannot point at invented work.
+   */
+  bindPipelineBrief(input:{requestId:string;expectedRevision:number;briefAssignmentId:string;specHash?:string}):AppState {
+    id.parse(input.requestId);id.parse(input.briefAssignmentId);
+    if(input.specHash!==undefined)hash.parse(input.specHash);
+    return this.transaction(()=>{
+      const state=this.readProjection();
+      const request=state.requests?.find(r=>r.id===input.requestId);
+      if(!request)throw new Error('Request not found');
+      if(request.revision!==input.expectedRevision)throw new Error('Stale request revision; reload before continuing');
+      if(!request.pipeline)throw new Error('Only planning or result-analysis requests carry a pipeline.');
+      if(request.status!=='READY'||request.pipeline.phase!=='BRIEFING')
+        throw new Error('The brief hop binds only while the request is briefing.');
+      const assignment=state.assignments?.find(a=>a.id===input.briefAssignmentId);
+      if(!assignment||assignment.requestId!==request.id)throw new Error('The brief hop must be a minted assignment on this request.');
+      if(assignment.agentId!==request.leadAgentId)throw new Error('The director brief belongs to the chosen director seat.');
+      if(!assignment.pipelineKey||!/^(plan-brief|analysis-brief|brief-refine-\d+)$/.test(assignment.pipelineKey))
+        throw new Error('Only a minted director brief hop binds as the pipeline brief.');
+      const now=new Date().toISOString();
+      // No revision bump: this is office bookkeeping — a pointer to the hop the office itself
+      // minted — not a change to the request's frozen content. Bumping would stale the minted
+      // hop's requestRevision pin against the very record that binds it.
+      this.append(state,[{collection:'requests',value:{...request,pipeline:{...request.pipeline,briefAssignmentId:input.briefAssignmentId,...(input.specHash?{specHash:input.specHash}:{})},updatedAt:now}}],
+        {kind:'PIPELINE_BRIEF_BOUND',projectId:request.projectId,experimentId:null,
+         reason:`Bound the minted ${assignment.pipelineKey} hop to the briefing phase.`},null);
     });
   }
   /** Applies one job transition through the shared reducer. The renderer can never call this. */
