@@ -177,17 +177,18 @@ test('confirm refuses while the brief hop is unfinished and mints the whole spec
   request = f.store.execute({ type: 'request.pipeline.confirm', idempotencyKey: key(), requestId: request.id, expectedRevision: request.revision }).requests!.find(item => item.id === request.id)!;
   assert.equal(request.pipeline?.phase, 'LAUNCHED');
   const { minted } = await mintPipelineRound(f.ctx, request);
-  assert.equal(minted, 8); // drafts(2) + critiques(2) + synthesis + implement(1 worker) + verify + gate
+  assert.equal(minted, 7); // drafts(2) + critiques(2) + synthesis + implement(1 worker) + verify — the seal is a wait state, not a hop
   const hops = f.store.snapshot({ history: false }).assignments!.filter(item => item.requestId === request.id);
   const byKey = new Map(hops.map(item => [item.pipelineKey!, item]));
-  assert.equal(byKey.size, 9);
+  assert.equal(byKey.size, 8);
   // DAG edges resolve to assignment ids; the director holds several INTENT hops — serialized by the DAG.
   assert.deepEqual(byKey.get('plan-draft-a')!.dependsOn, [brief.id]);
   assert.deepEqual(byKey.get('plan-synthesis')!.dependsOn!.sort(), [byKey.get('plan-draft-a')!.id, byKey.get('plan-draft-b')!.id, byKey.get('plan-critique-a-on-b')!.id, byKey.get('plan-critique-b-on-a')!.id].sort());
   assert.equal(byKey.get('plan-draft-a')!.agentId, f.agents.PM_A.id);
   assert.equal(byKey.get('plan-draft-b')!.agentId, f.agents.PM_B.id);
   assert.equal(byKey.get('implement-1')!.agentId, f.agents.WORKER.id);
-  assert.equal(jobFor(f, byKey.get('user-gate')!.id).state, 'INTENT');
+  assert.equal(jobFor(f, byKey.get('verify')!.id).state, 'INTENT');
+  assert.equal(byKey.get('user-gate'), undefined, 'no user-gate hop is minted — the decision wait is a pipeline phase');
 });
 
 test('the confirm gate names every missing role and confirm never lands', async t => {

@@ -78,12 +78,12 @@ test('a PLANNING request mints the full phase-1 spec with seats resolved by role
   assert.deepEqual(implements_.map(entry => entry.agentId), [r.worker1.id, r.worker2.id]);
   for (const entry of implements_) assert.equal(entry.armRole, 'WORKER');
   assert.deepEqual(byKey.get('verify')!.dependsOnKeys, implements_.map(entry => entry.key));
-  assert.deepEqual(byKey.get('user-gate')!.dependsOnKeys, ['verify']);
+  assert.equal(mint.entries.at(-1)!.key, 'verify', 'the terminal hop is verify — the seal is a wait state, not a minted hop');
+  assert.equal(byKey.get('user-gate'), undefined, 'no user-gate hop exists in the spec');
   for (const entry of mint.entries) {
     assert.ok(entry.objectiveText.includes('Ship the bounded plan.'), `${entry.key} carries the request objective`);
     assert.ok(entry.objectiveText.length <= REFINE_NOTE_MAX, `${entry.key} instruction stays bounded`);
   }
-  assert.match(byKey.get('user-gate')!.objectiveText, /Human gate/);
   assert.match(byKey.get('plan-critique-a-on-b')!.objectiveText, /opposite artifact plan-draft-b/);
 });
 
@@ -109,7 +109,8 @@ test('a RESULT_ANALYSIS request mints the standalone analysis spec when the temp
   assert.deepEqual(byKey.get('analysis-interpret')!.toolProfile, ANALYST_TOOL_PROFILE);
   assert.equal(byKey.get('analysis-finalize')!.agentId, r.director.id);
   assert.equal(byKey.get('analysis-report')!.armRole, 'WORKER');
-  assert.deepEqual(byKey.get('user-gate')!.dependsOnKeys, ['analysis-report']);
+  assert.equal(mint.entries.at(-1)!.key, 'analysis-report', 'the terminal hop is the report — the seal is a wait state, not a minted hop');
+  assert.equal(byKey.get('user-gate'), undefined, 'no user-gate hop exists in the spec');
   assert.match(byKey.get('analysis-digest')!.objectiveText, /evidence brief.*name the gaps|name the gaps/);
 });
 
@@ -211,7 +212,7 @@ test('mintEntriesFor re-keys the spec DAG onto assignment ids', () => {
   const byKey = new Map(resolved.entries.map(entry => [entry.key, entry] as const));
   const synthesis = byKey.get('plan-synthesis')!;
   assert.deepEqual(synthesis.dependsOn, ['plan-draft-a', 'plan-draft-b', 'plan-critique-a-on-b', 'plan-critique-b-on-a'].map(key => byKey.get(key)!.assignmentId));
-  assert.equal(byKey.get('user-gate')!.dependsOn[0], byKey.get('verify')!.assignmentId);
+  assert.deepEqual(byKey.get('verify')!.dependsOn, mint.spec.entries.filter(entry => entry.phase === 'IMPLEMENT').map(entry => byKey.get(entry.key)!.assignmentId));
   // Assignments without a pipeline key are unrelated work, not an error.
   const withForeign = mintEntriesFor(mint.spec, req, [...minted, assignment(randomUUID())]);
   assert.equal(withForeign.ok, true);
