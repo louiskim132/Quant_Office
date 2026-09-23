@@ -30,17 +30,19 @@ const analysisDeclaration = (overrides: Partial<AnalysisRoundDeclaration> = {}):
 
 const byKey = (entries: CommRoundEntry[]) => new Map(entries.map(item => [item.key, item]));
 
-test('one declaration yields the full phase-1 DAG: brief → drafts ∥ → critiques ∥ → synthesis → implement/verify/gate', () => {
+test('one declaration yields the full phase-1 DAG: brief → drafts ∥ → critiques ∥ → synthesis → implement → verify', () => {
   const declared = declaration();
   const spec = buildCommRound(declared);
   assert.equal(spec.schema, 'office-comm-round@1');
   assert.equal(spec.projectId, declared.projectId);
   assert.equal(spec.packetVersion, declared.packetVersion);
   const entries = spec.entries;
-  // brief + 5 phase-1 entries + 2 implement + verify + user-gate, in topological order.
+  // brief + 5 phase-1 entries + 2 implement + verify, in topological order — the seal after
+  // verify is a wait state the office holds, not a hop any agent runs.
   assert.deepEqual(entries.map(item => item.key),
     ['plan-brief', 'plan-draft-a', 'plan-draft-b', 'plan-critique-a-on-b', 'plan-critique-b-on-a', 'plan-synthesis',
-     'implement-1', 'implement-2', 'verify', 'user-gate']);
+     'implement-1', 'implement-2', 'verify']);
+  assert.ok(!entries.some(item => item.key === 'user-gate'), 'no user-gate hop exists');
   const map = byKey(entries);
   // The director's brief hop leads the round — the user-facing "talk to the director first" step.
   assert.equal(map.get('plan-brief')!.phase, 'BRIEF');
@@ -61,8 +63,15 @@ test('one declaration yields the full phase-1 DAG: brief → drafts ∥ → crit
   assert.deepEqual(map.get('implement-1')!.dependsOnKeys, ['plan-synthesis']);
   assert.deepEqual(map.get('implement-2')!.dependsOnKeys, ['plan-synthesis']);
   assert.equal(map.get('implement-1')!.phase, 'IMPLEMENT');
+  assert.equal(map.get('verify')!.phase, 'VERIFY');
   assert.deepEqual(map.get('verify')!.dependsOnKeys, ['implement-1', 'implement-2']);
-  assert.deepEqual(map.get('user-gate')!.dependsOnKeys, ['verify']);
+  // The terminal seal reads the whole round's verified artifacts, not only its barrier.
+  assert.deepEqual(map.get('verify')!.inputKeys,
+    ['plan-brief', 'plan-draft-a', 'plan-draft-b', 'plan-critique-a-on-b', 'plan-critique-b-on-a',
+     'plan-synthesis', 'implement-1', 'implement-2']);
+  // Every ordinary hop stages exactly the predecessors it was declared against.
+  for (const item of entries.slice(0, -1))
+    assert.deepEqual(item.inputKeys, item.dependsOnKeys, `${item.key} stages only its declared predecessors`);
   // Every dependency names an earlier entry — the emitted order is a topological one.
   const seen = new Set<string>();
   for (const item of entries) {
@@ -89,9 +98,9 @@ test('critique entries name only the opposite draft artifact; the spec carries n
   assert.deepEqual(map.get('plan-critique-b-on-a')!.dependsOnKeys, ['plan-draft-a']);
   assert.deepEqual(map.get('analysis-response-interpret')!.dependsOnKeys, ['analysis-falsify']);
   assert.deepEqual(map.get('analysis-response-falsify')!.dependsOnKeys, ['analysis-interpret']);
-  // No free-text carryover: every entry carries exactly the seven declared fields.
+  // No free-text carryover: every entry carries exactly the eight declared fields.
   for (const item of entries)
-    assert.deepEqual(Object.keys(item).sort(), ['agentId', 'armRole', 'dependsOnKeys', 'inputManifestNote', 'key', 'phase', 'toolProfile']);
+    assert.deepEqual(Object.keys(item).sort(), ['agentId', 'armRole', 'dependsOnKeys', 'inputKeys', 'inputManifestNote', 'key', 'phase', 'toolProfile']);
   // And no field anywhere holds the brief prose or any transcript.
   for (const item of entries) {
     assert.ok(!JSON.stringify(item).includes('Plan the next evidence review'), `${item.key} must not carry the brief text`);
@@ -131,7 +140,7 @@ test('per-arm tool profiles match the plugin table', () => {
   for (const key of ['implement-1', 'implement-2'])
     assert.deepEqual(map.get(key)!.toolProfile, WORKER_TOOL_PROFILE);
   assert.equal(WORKER_TOOL_PROFILE.canWrite, true);
-  for (const key of ['plan-brief', 'plan-synthesis', 'analysis-finalize', 'verify', 'user-gate'])
+  for (const key of ['plan-brief', 'plan-synthesis', 'analysis-finalize', 'verify'])
     assert.deepEqual(map.get(key)!.toolProfile, DIRECTOR_TOOL_PROFILE, `${key} is a director hop`);
 });
 
@@ -146,7 +155,7 @@ test('every entry carries the armRole its roster position fills', () => {
     'analysis-falsify': 'PM_D', 'analysis-response-falsify': 'PM_D',
     'plan-synthesis': 'DIRECTOR', 'analysis-finalize': 'DIRECTOR',
     'implement-1': 'WORKER', 'implement-2': 'WORKER',
-    'verify': 'DIRECTOR', 'user-gate': 'DIRECTOR',
+    'verify': 'DIRECTOR',
   };
   for (const item of entries) assert.equal(item.armRole, expected[item.key], `${item.key} fills the wrong roster role`);
   // The armRole names the declaration's own roster slot, so it stays honest under remapping.
@@ -156,7 +165,7 @@ test('every entry carries the armRole its roster position fills', () => {
   assert.equal(remap.get('plan-draft-a')!.armRole, 'PM_A', 'the role names the roster slot, not the agent');
 });
 
-test('the analysis round emits brief → digest → interpret ∥ falsify → responses → finalize → report → gate', () => {
+test('the analysis round emits brief → digest → interpret ∥ falsify → responses → finalize → report', () => {
   const declared = analysisDeclaration();
   const spec = buildAnalysisRound(declared);
   assert.equal(spec.schema, 'office-comm-round@1');
@@ -166,7 +175,8 @@ test('the analysis round emits brief → digest → interpret ∥ falsify → re
   assert.deepEqual(entries.map(item => item.key),
     ['analysis-brief', 'analysis-digest', 'analysis-interpret', 'analysis-falsify',
      'analysis-response-interpret', 'analysis-response-falsify', 'analysis-finalize',
-     'analysis-report', 'user-gate']);
+     'analysis-report']);
+  assert.ok(!entries.some(item => item.key === 'user-gate'), 'no user-gate hop exists');
   const map = byKey(entries);
   // The director's brief leads; the worker digests it into the evidence surface before the
   // analyst pair diverges — neither arm reads the raw result directly.
@@ -197,7 +207,12 @@ test('the analysis round emits brief → digest → interpret ∥ falsify → re
   assert.equal(map.get('analysis-report')!.phase, 'REPORT');
   assert.equal(map.get('analysis-report')!.armRole, 'WORKER');
   assert.deepEqual(map.get('analysis-report')!.dependsOnKeys, ['analysis-finalize']);
-  assert.deepEqual(map.get('user-gate')!.dependsOnKeys, ['analysis-report']);
+  // The terminal seal reads the whole round — every other key in declaration order.
+  assert.deepEqual(map.get('analysis-report')!.inputKeys,
+    ['analysis-brief', 'analysis-digest', 'analysis-interpret', 'analysis-falsify',
+     'analysis-response-interpret', 'analysis-response-falsify', 'analysis-finalize']);
+  for (const item of entries.slice(0, -1))
+    assert.deepEqual(item.inputKeys, item.dependsOnKeys, `${item.key} stages only its declared predecessors`);
   // Emission order is topological — every dependency names an earlier entry.
   const seen = new Set<string>();
   for (const item of entries) {
