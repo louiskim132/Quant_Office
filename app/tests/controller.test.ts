@@ -180,6 +180,85 @@ test('completion requires provider output, and a late event cannot reopen the jo
  assert.throws(()=>f.store.recordJobTransition({jobId:job.id,expectedRevision:job.revision,to:'RUNNING',evidence:'PROVIDER_REPORTED',detail:'late'}),/cannot reopen/);
 });
 
+test("a verified receipt's applied self-report is recorded once as provider testimony",async t=>{
+ const output=declare('proof.json','{"proof":"present"}');
+ const adapter=new FakeAdapter({observe:async()=>({state:'COMPLETED' as const,detail:'Finished.',outputs:[output],
+  applied:{model:'swe-2-max',effort:'high' as const,delegation:true}})});
+ const f=await fixture(t,adapter);
+ const {assignment}=f.controller.prepare({requestId:f.request.id,agentId:f.agent.id,snapshotId:f.snapshot.id});
+ await f.controller.dispatch(assignment.id);
+ await f.controller.observe(assignment.id);
+ const applied=(f.store.snapshot().jobEvents??[]).filter(e=>e.externalId.startsWith('applied:'));
+ assert.equal(applied.length,1,'the self-report lands as exactly one job event');
+ assert.equal(applied[0].kind,'STATUS');
+ assert.equal(applied[0].evidence,'PROVIDER_REPORTED','the office verified the receipt; the content is the session\'s claim');
+ assert.match(applied[0].text,/appliedModel="swe-2-max"/);
+ assert.match(applied[0].text,/appliedEffort="high"/);
+ assert.match(applied[0].text,/delegation=true/);
+ assert.match(applied[0].text,/self-report.*not office-verified/is,'the text carries the self-reported qualifier');
+ await f.controller.observe(assignment.id);
+ assert.equal((f.store.snapshot().jobEvents??[]).filter(e=>e.externalId.startsWith('applied:')).length,1,'a repeated poll of the same receipt records nothing new');
+});
+
+test('an absent applied self-report records nothing; a changed one lands as a new event',async t=>{
+ let report:ObserveResult={state:'RUNNING',detail:'Working.'};
+ const adapter=new FakeAdapter({observe:async()=>report});
+ const f=await fixture(t,adapter);
+ const {assignment}=f.controller.prepare({requestId:f.request.id,agentId:f.agent.id,snapshotId:f.snapshot.id});
+ await f.controller.dispatch(assignment.id);
+ await f.controller.observe(assignment.id);
+ assert.equal((f.store.snapshot().jobEvents??[]).filter(e=>e.externalId.startsWith('applied:')).length,0,'an absent self-report records nothing');
+ report={state:'RUNNING',detail:'Working.',applied:{effort:'low'}};
+ await f.controller.observe(assignment.id);
+ report={state:'RUNNING',detail:'Working.',applied:{effort:'high'}};
+ await f.controller.observe(assignment.id);
+ const applied=(f.store.snapshot().jobEvents??[]).filter(e=>e.externalId.startsWith('applied:'));
+ assert.equal(applied.length,2,'a changed self-report lands as a new event even when the state did not move');
+ assert.match(applied[0].text,/appliedEffort="low"/);
+ assert.match(applied[1].text,/appliedEffort="high"/);
+});
+
+test('a self-report returning to an earlier value still lands — content-hash dedup must not lose A→B→A',async t=>{
+ let report:ObserveResult={state:'RUNNING',detail:'Working.',applied:{effort:'low'}};
+ const adapter=new FakeAdapter({observe:async()=>report});
+ const f=await fixture(t,adapter);
+ const {assignment}=f.controller.prepare({requestId:f.request.id,agentId:f.agent.id,snapshotId:f.snapshot.id});
+ await f.controller.dispatch(assignment.id);
+ await f.controller.observe(assignment.id);
+ report={state:'RUNNING',detail:'Working.',applied:{effort:'high'}};
+ await f.controller.observe(assignment.id);
+ report={state:'RUNNING',detail:'Working.',applied:{effort:'low'}};
+ await f.controller.observe(assignment.id);
+ const applied=(f.store.snapshot().jobEvents??[]).filter(e=>e.externalId.startsWith('applied:'));
+ assert.equal(applied.length,3,'a return to an earlier value is a new report, not a duplicate of the first');
+ assert.match(applied[2].text,/appliedEffort="low"/);
+ assert.equal(applied[2].applied,undefined,'an unbound receipt carries no receipt identity — no structured payload');
+ // A repeated poll of an unchanged report still records nothing.
+ await f.controller.observe(assignment.id);
+ assert.equal((f.store.snapshot().jobEvents??[]).filter(e=>e.externalId.startsWith('applied:')).length,3);
+ assert.equal(f.store.appliedReports(f.store.snapshot().jobs![0].id).length,3,'the structured query returns the same chronological reports');
+});
+
+test('an adapter method fetch still retrieves declared output bytes',async t=>{
+ // LocalMailboxAdapter.fetch is a real method that reads its own session root; the controller
+ // must invoke it bound to the adapter, or every declared output fails retrieval.
+ const text='{"proof":"present"}';
+ const output=declare('proof.json',text);
+ class MethodFetchAdapter extends FakeAdapter {
+  private readonly bytes=Buffer.from(text);
+  async fetch(){return new Uint8Array(this.bytes);}
+ }
+ const adapter=new MethodFetchAdapter();
+ adapter.behaviour={observe:async()=>({state:'COMPLETED' as const,detail:'Finished.',outputs:[output]})};
+ const f=await fixture(t,adapter);
+ const {assignment}=f.controller.prepare({requestId:f.request.id,agentId:f.agent.id,snapshotId:f.snapshot.id});
+ await f.controller.dispatch(assignment.id);
+ const state=await f.controller.observe(assignment.id);
+ const job=state.jobs![0];
+ assert.equal(job.state,'COMPLETED','a declared output must be retrieved through the bound adapter method');
+ assert.deepEqual(job.outputs,[{...output,stored:true}]);
+});
+
 test('a failed cancellation stays cancel-requested and records why',async t=>{
  const adapter=new FakeAdapter({cancel:async()=>({acknowledged:false,detail:'The provider has no supported cancellation route for this session.'})});
  const f=await fixture(t,adapter);

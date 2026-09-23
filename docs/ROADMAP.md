@@ -1,5 +1,9 @@
 # Quant Research Office — single implementation roadmap
 
+Current acceptance update, 2026-09-21: the live three-agent Director → PM → Worker local CLI chain passed after correcting the generated packet-hash instructions and a concurrent-trigger false-blocker race. Final regression: 690 tests, 689 passed, one existing privileged-symlink skip; typecheck, build and three development desktop suites passed. See the C9 automated-chain row and dated acceptance entry below. This establishes bounded local synthetic office orchestration, not hosted execution or the user-run Colab milestone.
+
+Current planning update, 2026-09-16: section 3.2 adds the four-plugin office evaluation (Serena, Ponytail, Graphify, LightRAG) and a runnable synthetic example. Based on fetched `origin/main` commit `6d27652846d18f8c8b7c5d588bc3a2923b154f4b` (C9 PR #5), C9 is PARTIALLY_VERIFIED_LOCAL, not a new unimplemented hybrid proposal. C10 below plans tool lifecycle and comparative trials; it installs nothing and claims no token savings. Earlier baseline paragraphs remain historical; use section 11 for current per-item status.
+
 Updated 2026-09-13 after the fixed eight-session desktop coordination layer was implemented and exercised. The complete locally actionable C4–C7 revision, static review, consolidated verification with targeted repairs, and fresh packaged/native acceptance remain the application baseline. This is the sole active roadmap. Sections 11 and 12 distinguish VERIFIED_LOCAL implementation from BLOCKED_EXTERNAL live capability evidence. Earlier slice reports are historical. Section 3.1 remains a proposal, not an enabled provider route.
 
 ## 1. Start here: scope, priority and execution rules
@@ -125,7 +129,7 @@ Decisions from the later Token Optimization discussion:
 
 - Keep the desktop workflow and same intended checkout. Changing to a PowerShell window does not share conversations, model understanding or provider caches; the shared material is files, versioned findings and task evidence.
 - One writer at a time in a shared checkout; implementation followed by independent review. No simultaneous edits by two clients. Separate worktrees become an option only when a real Git repository exists and parallel work is explicitly authorized; record checkout/revision in each handoff.
-- Native targeted search is the baseline. Serena is the first optional navigation trial for repeated symbol/caller reading; it is not needed for R1-A and must not delay safety repairs. Graphify remains an alternative if cross-module relationships, rather than exact symbols, are the bottleneck. Do not install both initially.
+- Native targeted search is the baseline. Serena is the first optional navigation trial for repeated symbol/caller reading; it is not needed for R1-A and must not delay safety repairs. Graphify remains an alternative if cross-module relationships, rather than exact symbols, are the bottleneck. Do not install both initially. Section 3.2/C10 separately authorizes planning office-agent trials of all four named tools, one addition at a time followed by measured combinations; D1 is not product tool provisioning.
 - When the user proceeds with tool setup, use Serena's supported MCP client interface, verify current primary setup documentation and configure each intended coding client separately against the correct checkout. Start with separate client processes, not an assumed safe shared mutable server. Installation/configuration is not performed by this roadmap update. Do not edit user-wide tool settings as an incidental R1 change.
 - No plugin automatically appears in an ordinary web chat. A supported connection and correct tool permissions must be established. Do not promise shared prompt caches, fewer tokens merely from a common directory, or automatic cross-client task dispatch.
 - No local LLM/GPU is required for the map/native retrieval baseline. Measure actual indexing CPU/RAM/disk before a navigation rollout; earlier rough resource estimates are not acceptance guarantees.
@@ -284,6 +288,61 @@ Integration sequence inside the remaining roadmap:
 4. Batch implementation and then run consolidated verification as requested. Include wrong recipient/model, unknown price, exhausted free quota, forbidden paid fallback, timeout/retry ambiguity, stale policy, invalid JSON, omitted evidence, cross-review cache leakage, restart/replay and unchanged hosted gates. A gateway outage leaves direct routes and queued work recoverable. Enable only the operation/provider scopes supported by observed evidence; do not mark R5 or holdout custody verified from an inference test.
 
 This proposal changes the design sequence, not the current completion status. C4 linkage, C5 custody integration, C6 persistence/panels, C7 scale/recovery/release validation and the R5 external evidence remain required.
+
+### 3.2 Four-plugin office evaluation and synthetic task — 2026-09-16
+
+User objective: reduce total agent tokens with minimal quality influence. Evaluate **Serena, Ponytail, Graphify and LightRAG** against the same bounded tasks. These are complementary candidates, not four mandatory layers on every call. This section is the canonical plan; fixture instructions and the evaluator below are test assets, not another roadmap. Scope of this revision: create the fixture and implementation packets. No plugin installation, agent run, provider call, paid API, real market data or research computation is performed or implicitly enabled.
+
+#### Current source and integration point
+
+Inspected at fetched main `6d27652846d18f8c8b7c5d588bc3a2923b154f4b`: `shared/types.ts` already has `ExecutionEnvironment`, `ToolProfile` (`STANDARD`, `CODE_NAV`) and Devin; `renderer/agents.tsx` already exposes execution and tool-profile preferences. These preferences express intent, not installed tools. `main/local-session.ts` implements the Devin local mailbox; automatic local CLI/ACP transports and local Claude/Codex adapters are still unimplemented per C9. `main/evidence.ts` provides grant-scoped literal search, paged exact reads, hashes, caches and omission reporting. D1 has no installed Serena integration. Preserve this work; do not rebuild C9 or mistake CODE_NAV for verified Serena readiness.
+
+#### Candidate responsibilities
+
+| Candidate | Intended office task | Integration and quality requirement |
+| --- | --- | --- |
+| Serena | Locate code symbols, callers and affected implementation/tests | Install a pinned runtime/language servers per execution environment; bind a separate process to each active session's exact workspace. Use read-only tools for review; project selection is not filesystem isolation. Verify tool calls on actual clients. |
+| Ponytail | Avoid unnecessary implementation on code-writing assignments | Pinned task-scoped rules/skill, not a second retrieval server by default. Preserve required validation, scientific checks, error handling and evidence. Do not impose coding brevity on analyst/reviewer findings. Count repeated rule injection. |
+| Graphify | Explore cross-file and cross-document relationships | Derived graph over permitted source versions; return source locators and retain EXTRACTED/INFERRED distinctions. Keep raw expansion. Charge semantic document extraction, indexing and refresh to the run. Do not require its use for every exact lookup. |
+| LightRAG | Retrieve connected evidence from document collections | Optional backend behind the office evidence interface, preferably context-only results for the existing agent. Pin extraction/embedding/reranking settings; account for all model calls. Do not silently introduce paid inference, unsupported subscription reuse or a new local model service. Unsupported routes are BLOCKED_EXTERNAL, not zero-cost runs. |
+
+Primary references checked 2026-09-16: [Serena runtime/project setup](https://oraios.github.io/serena/02-usage/020_running.html), [Ponytail and its benchmark limitations](https://github.com/DietrichGebert/ponytail), [Graphify](https://github.com/Graphify-Labs/graphify), [LightRAG](https://github.com/HKUDS/LightRAG). Reverify exact versions and interfaces at implementation; popularity and upstream benchmark percentages are not office measurements.
+
+#### Example task: synthetic feature-availability review
+
+Runnable assets: [agent task](../app/benchmarks/plugin-evaluation/task/TASK.md), [evaluator instructions](../app/benchmarks/plugin-evaluation/EVALUATOR.md), [grader](../app/benchmarks/plugin-evaluation/verify.mjs). Eight invented metadata rows, three small JavaScript modules and seven short documents; Node built-ins only. No OHLCV, full/actual chart data, download, training, financial calculation or backtest. This is a synthetic software/retrieval fixture under section 1.1.
+
+- **Track A (code + evidence):** repair a metadata-admission function under the current availability-time contract; follow source/caller relationships; report affected synthetic experiments and contradictory evidence with citations. The starter intentionally mishandles publication delay, feature/target distinction, failed inputs, malformed/missing timestamps, timezone equality and chronology. Acceptance is the full public contract, not reproducing visible ids.
+- **Track B (documents):** answer the same three evidence questions using the same documents, without code changes. Trace a feature through its upstream publication source to an affected experiment; retain an omitted failed run and reject an unsupported profitability claim. This provides an appropriate LightRAG/Graphify comparison rather than ranking a document engine on code editing.
+- **Freshness phase:** the evaluator makes the same documented Beacon-source correction in every arm and asks which conclusion changes. Require the new source, not cached old conclusions. Measure refresh and follow-up separately.
+- Ship only `task/` to participants. Keep the evaluator, expected answers, other attempts and transcripts outside all participant tools, indexes and filesystem access. A fresh chat/working directory alone is not isolation. Record violations and invalidate contaminated runs.
+
+From `app`, `node benchmarks/plugin-evaluation/verify.mjs --self-check` checks the fixture; `node benchmarks/plugin-evaluation/task/src/preview.mjs` displays the intentionally incomplete starter. The evaluator grades a completed copy using `node benchmarks/plugin-evaluation/verify.mjs <absolute-task-copy>`. Candidate JavaScript executes only in a disposable, no-secret/no-network evaluator environment. Code grading never substitutes for report review.
+
+#### Comparison protocol and bounded run budget
+
+Baseline means **existing tools and targeted retrieval without the four additions**, not an agent deprived of normal search/read/edit tools. Keep the source snapshot, allowed input bytes, exact task prompt, provider, model, effort, client/runtime version, permissions and stopping rules fixed within a comparison. Only the declared tool/rules change. Do not compare different models as plugin effects. Complete initial screening on one actually available official client; verify other clients separately before enabling them. A manual isolated fixture run can precede C9 automation but does not verify office dispatch.
+
+| Track | Initial arms | Follow-up |
+| --- | --- | --- |
+| A | A0 baseline; AS baseline + Serena; AP baseline + Ponytail; AG baseline + Graphify | Test at most two combinations selected from individually useful additions; compare against baseline and strongest single arm. No default all-tools arm. |
+| B | B0 baseline; BG baseline + Graphify; BL baseline + LightRAG where its configured route is permitted | Compare successful backends; do not stack Graphify and LightRAG without a distinct demonstrated need. |
+
+Time-efficient screening: one fresh attempt per eligible arm, at most seven initial attempts; 10-minute task timebox per attempt, no silent reset or retry. Setup/indexing is outside the task timebox but separately timed, charged and subject to a preregistered setup limit. Freeze limits before the first run, report timeouts as failures. These are evaluation budgets only, never production evidence-reading caps. Confirm only promising arms: expand each finalist and its matching baseline to three fresh attempts with rotated/randomized arm order, plus at most two A combinations (three attempts each). Report the small sample; it cannot establish statistical non-inferiority or justify broad rollout. No provider benchmark is run by this planning change.
+
+Cold and reuse costs are separate: first use includes extraction/index construction; repeat use may reuse only an index built from the same initial source snapshot, never answers, edits, session memory or evaluator material from another attempt. Record provider-cache observations rather than assuming a fresh chat has a cold cache. Refresh work belongs to the freshness phase. This tiny fixture may show no graph benefit; do not conclude graphs never help. If justified, a later preregistered medium synthetic corpus can test scale without real market data.
+
+Record per attempt: configuration/version hashes, task/corpus hashes, actual tools invoked, session/route/model/effort evidence, start/end, correctness, all six evidence findings, cited-source accuracy, omissions, retries, human interventions, tool bytes, peak resources where observable, index build/refresh time, agent input/output/reasoning/cache counters where available and every helper model's usage. Missing counters are UNKNOWN, never zero. Avoid double-counting provider totals and cached categories. Report raw categories and documented accounting conventions; tokens are not subscription allowance or money. Exclude download bytes from model-token counts but include installation/setup wall time.
+
+Quality gate: all 16 code cases on A, all six evidence findings on A/B, no critical omission/invented result/unsupported citation, and correct freshness response. A configuration that misses a gate is not promoted for smaller output. Review report quality blind to tool identity. Compare total observed usage across all attempts (including failures) per successful task, plus paired medians/ranges and cold/reuse break-even; zero successful tasks have no finite efficiency score. If savings are within observed variation or counters are missing, report INCONCLUSIVE. Keep existing retrieval available regardless of the outcome. Passing this synthetic task proves neither research correctness nor production-scale quality.
+
+#### Add Agent and session lifecycle
+
+Extend C9's existing profile preference rather than adding four unrelated global installers. Maintain an environment tool registry (reviewed version, install location, language dependencies, health, client compatibility) and a versioned tool-policy selection. At assignment preparation freeze tool versions/configuration, allowed source hashes and grants with the existing scope. At launch: resolve the chosen environment, prepare the isolated workspace, generate client-specific configuration, start only needed tools, verify a real project-scoped query, record readiness, and shut down session processes on completion/cancel. A mailbox session needs an acknowledged bootstrap/tool check; writing configuration files alone is not observation.
+
+Separate **installed**, **requested**, **ready for this assignment**, **failed/unavailable** and **disabled**. Do not install/reconfigure tools merely by adding a roster member, restoring a workspace, or changing a model. Unsupported hosts retain an actionable status. Required tool failures block that assignment; optional tools can fall back to native retrieval only when the recorded policy explicitly permits it, and benchmark fallback attempts count as degraded, not successful plugin arms. No global client configuration overwrites, arbitrary renderer-supplied commands or automatic update-to-latest behavior.
+
+Permissions precede graph/index/cache access. Isolate incompatible review scopes at ingestion as well as retrieval; do not create global summaries/embeddings that reveal forbidden evidence through permitted results. Keep indexes derived and rebuildable; source changes and permission revocation invalidate applicable entries. Shared runtime binaries are acceptable; initially use separate mutable indexes/processes for incompatible sessions. Serena project paths, worktrees and plugin settings do not prove OS isolation. Preserve section 1.1/C9 eligibility rules and the manual Colab experiment path.
 
 ## 4. Current implementation and settled baseline contracts
 
@@ -1036,7 +1095,28 @@ First-milestone acceptance: add a local Devin/SWE-2 agent through the UI → the
 
 Explicit non-requirements: no local research compute; no change to blinding, holdout custody or verified-gate requirements (local agents are ineligible for those roles); no silent local/hosted fallback; a saved profile is never proof of runtime; no Devin capability claim beyond probed surfaces; no paid-API route; no usage-quota accounting for local agents (the roster here carries unlimited/free local seats only) — local sessions record their own observed evidence, never estimated subscription allowance.
 
+### C10 — Office tool lifecycle and four-plugin evaluation — IMPLEMENTED_FOUNDATION 2026-09-16
+
+Exact packet: section 3.2. Fixture and plan exist; adapters, installations, live comparisons and savings evidence are NOT_STARTED. This is distinct from D1 developer navigation and extends the existing C9 tool-profile surface. No fifth optimizer or LightRAG/Graphify mandatory chain is in scope.
+
+Ordered implementation packets (organizer owns shared contracts, IPC, dependencies and this roadmap):
+
+1. **C10-A fixture/measurement:** use the checked-in small example; implement isolated attempt preparation, immutable manifests, usage ledger and blind report scoring. Acceptance: starter rejected, corrected implementation accepted, expected evidence/counterevidence scored, evaluator inaccessible, unknown counters preserved, setup/reuse/failure costs separated. The fixture self-check alone does not complete this packet.
+2. **C10-B tool lifecycle:** extend C9 environment/profile contracts, assignment snapshots and readiness; environment installation versus session binding; scoped configuration, health, teardown and restart non-duplication. Acceptance: add a new code agent using existing environment setup, then verify actual tools for its assignment; wrong root, absent tool, changed grant/config/version and failed cleanup are observable. Existing agents retain their prior defaults. Product dispatch acceptance depends on the corresponding C9 route being verified.
+3. **C10-C Serena + Ponytail:** integrate pinned client-supported Serena processes and task-scoped Ponytail guidance as independent options. Run A0/AS/AP, retaining exact-source fallback and every required check. Acceptance: correct symbols/callers, edit-triggered refresh, no reviewer writes, no suppressed validation, reversible configuration; model-specific measurements only.
+4. **C10-D Graphify:** grant-scoped derived graph and source expansion; run AG/BG and the freshness phase. Acceptance: inferred links labeled, source locators valid, changed/deleted sources refreshed, no out-of-scope ingestion; total indexing/extraction cost recorded.
+5. **C10-E LightRAG:** establish a permitted extraction/embedding/query route before integrating its document backend. Run B0/BL with context-only delivery where supported; preserve raw source expansion and counterevidence. Acceptance: current-source citations, no permission/cache leakage, model-call ledger including ingestion. If no route meets section 1.1, mark this packet BLOCKED_EXTERNAL and continue the other arms; do not introduce paid APIs or local model services implicitly.
+6. **C10-F selection/UI:** run bounded confirmation and useful combinations, publish the actual scorecard as evidence linked here, then enable only supported role/task profiles through Add Agent. No blanket 'best plugin' selection from one fixture; large-corpus applicability stays unverified. Retain off/rollback paths and per-environment compatibility. Required checks: affected unit/type/schema/lifecycle/desktop tests for product changes; full combined checks before release. Fixture-only changes need only their own validation.
+
+Exact next local work: implement C10-A attempt preparation/ledger and C10-B contracts on organizer-published packets; retain C9's separate local-session probe and pilot as outstanding. Local fixture work can proceed without changing R5 or waiting for real data. Do not start paid/live provider runs merely because a packet is written.
+
 ## 11. Execution checklist and progress record
+
+Latest C9 qualification (2026-09-21) supersedes the historical C9 row's statement that CLI-exec is unimplemented: LOCAL_CLI_EXEC and automatic dependency relay are implemented and have passed the real three-agent acceptance below. The historical row retains its original evidence; it is not the current next-action list.
+
+| Current acceptance item | Status | Evidence / next item |
+| --- | --- | --- |
+| C9 automated Director → PM → Worker | VERIFIED_LOCAL for bounded live Claude CLI relay | Three distinct role profiles and real processes; one Director start, two event-driven dependent starts; exact inherited manifests, agent-consumed predecessor hashes, verified durable outputs and replay non-duplication. Two product defects repaired; 689/690 unit tests pass (one existing skip), typecheck/build and three development desktop suites pass. [Acceptance record](../records/reviews/three-agent-acceptance-2026-09-21.md). Next: reproduce output-storage failure recovery and retain process/watch bookkeeping until durable terminal admission. Mixed-provider chains, packaged acceptance and the C8 user-run Colab pilot are not established by this test. |
 
 Status vocabulary: NOT_STARTED, IMPLEMENTED_FOUNDATION, IN_PROGRESS, PARTIALLY_VERIFIED_LOCAL, BLOCKED_EXTERNAL, VERIFIED_LOCAL, VERIFIED_HOSTED. PARTIALLY_VERIFIED_LOCAL means some tested code exists but parent acceptance is not met; list exact open subitems. PARTIALLY_IMPLEMENTED means the larger program still has unimplemented contracts/UI/tests. The latter requires actual provider evidence for the exact scope. A local test cannot advance a hosted gate. Keep this table in the same file.
 
@@ -1048,6 +1128,7 @@ Status vocabulary: NOT_STARTED, IMPLEMENTED_FOUNDATION, IN_PROGRESS, PARTIALLY_V
 | D0 developer map | VERIFIED_LOCAL documentation | Section 1.3 map/fingerprints and selective-read protocol added after inspecting R0 source/log. |
 | D2 parallel coding setup | VERIFIED_LOCAL tooling; desktop/provider sessions NOT_STARTED | 2026-09-13: the fixed local desktop state machine and detailed Session 1–7/Session 8 manual supplement the general worktree protocol. Four coordination tests pass, including seven simultaneous starts, atomic publication, role/path binding, immutable round hashes, stale review/head refusal, exact-SHA submission, scope enforcement, rejection, integration, close and next-round preservation. The eight prepared local worktrees under `quant-team-sessions/prepared-20260912` were fast-forwarded to setup commit `236ccda4817fcf5320e4ee95389af34bcb92dd46`; setup was run twice, all role/status checks returned the correct clean checkout and `NOT_READY`, and no product round was published. Installing ignored role files does not launch or authenticate a session. The merge policy now authorizes Session 8 to merge only its closed-round integration PR after current-main ancestry, exact-head `verify` success and conversation-resolution checks; direct main pushes and raw-token workarounds remain prohibited. The prior fresh locked install, typecheck, 382/382 application units and build passed in the setup worktree. GitHub main protection requires a strict `verify` check, PR, resolved conversations and admin enforcement, with no force-push/deletion. CI results are on [setup PR #1](https://github.com/louiskim132/Quant_Office/pull/1). Claude Code 2.1.270 reported a signed-in subscription; Codex saved-project path remains the parent folder; Devin browser was signed out and its repository grant/model choice remain unverified. Update 2026-09-14: the desktop workflow has since run two product rounds (list-views-001, ui-refresh-001) in batch prepared-20260912, integrated and merged through PR #2; a fresh batch (next-batch-001) is provisioned on the merged base for the next round. |
 | D1 optional Serena trial | PARTIALLY_IMPLEMENTED, nonblocking | Project-local AGENTS.md and CLAUDE.md pointers plus the Git/worktree policy were added during repository setup on 2026-09-12. The optional Serena comparison and client configuration remain NOT_STARTED; no navigation plugin was installed. |
+| C10 four-plugin office evaluation | IMPLEMENTED_FOUNDATION; plugin integration/comparisons NOT_STARTED | 2026-09-16: section 3.2 and C10 define Serena, Ponytail, Graphify and LightRAG trials, Add Agent/environment/session lifecycle, quality-first same-task comparisons and role-scoped rollout. `app/benchmarks/plugin-evaluation/` contains a synthetic metadata checker, eight example rows, seven documents, two task tracks and an external 16-case grader. No real chart data, plugin installation, provider benchmark or token-saving result. C9 route acceptance remains separate. |
 | OmniRoute routing extension | NOT_STARTED implementation; architecture reviewed 2026-09-11 | Section 3.1 proposes operation-specific model/session/research contracts and an optional bounded free-worker route. Current subscription-only runtime policy remains unchanged; no gateway installation, provider transfer or live compatibility test occurred. Integrate with C2/C4/C7 and retain R5/custody requirements. |
 | R2 | VERIFIED_LOCAL within documented limits | Snapshot/output inventory is shared by backup and restore; both formats restore actual bytes into a new root. OutputService reserves real destinations on prepare/launch and stores versioned verified bytes. Required missing objects refuse backup. Snapshot identity rejects null/wrong request revisions. Remaining constraints: source swap races, recorded-platform Git reconstruction and R5 transport limits. |
 | R3 | VERIFIED_LOCAL | Preserve exact per-operation scope, durable evidence order, independent confinement and frozen account context. No new live capability evidence in this pass. |
@@ -1064,7 +1145,7 @@ Status vocabulary: NOT_STARTED, IMPLEMENTED_FOUNDATION, IN_PROGRESS, PARTIALLY_V
 | R7 / C7 | VERIFIED_LOCAL | Canonical activity/readiness, scoped paged views, stable room/seat placement, integrated research/monitoring UI and current-source packaged/native acceptance verified. |
 | Roadmap consolidation | VERIFIED_LOCAL documentation | Comment/report evaluated; one active roadmap; old entry points redirected. Local links/anchors, fences and complete R0–R7/C1–C7/S0–S10 inventory checked. No source implementation or new application test run in this consolidation. |
 | C8 manual-pilot realignment | PARTIALLY_VERIFIED_LOCAL; user-run pilot pending | Round c8-impl (2026-09-15) implemented the corrected contract end to end: shared RUN_PACKAGE/RUN_RETURN schemas and tiered gate provenance, store admission (bound return identity, closed inventory, conflict/idempotency, durable AWAITING_RETURN), S3 as the user-run stage with office stages for S5/S6/S8/S9/S10, runtime-free separated S2/S7 review, the five-capability readiness split, the real zip codec (`main/run-package.ts`, fflate) shipping `launcher.v1.py`, the stdlib-only Colab launcher producing `run-return.zip`, renderer export/await/import/validate controls, and organizer wiring of the codec into buildPipeline. Combined verification: typecheck clean, 408/408 unit tests, build clean — including a full S0→S10 journey on user-run evidence alone. Two worker packets were blocked by an organizer-owned separated-review staging defect (fixed at c75d589) and their committed deliverables were integrated by cherry-pick. Open: the user-run pilot itself (acceptance steps 5–6 with a real Colab return). The packaged desktop suites were re-run against the built app on 2026-09-15 — pipeline.desktop, revision.desktop, packaged-native (real node-pty I/O) and desktop.e2e all pass after correcting stale old-contract assertions. |
-| C9 local CLI office agents | PARTIALLY_VERIFIED_LOCAL | Established 2026-09-16 from the 2026-09-15 user direction. CLI probes on this machine verified the surfaces the contract names: devin 3000.10.21 (auth status, models list, acp stdio server with tool-scoped agent types, -p), codex 0.154.0 (exec --json --sandbox -C, resume/fork, existing app-server account/read+model/list), claude 2.1.273 (-p with --output-format/--allowedTools/--model/--effort; no model catalog — curated aliases remain). devin CLI is not currently logged in; its credential is separate from the Desktop session. Landed in round c9-impl: 'devin' provider with real CLI discovery (auth status + `models list --format json`, DEVIN_* env stripped, no API-key fallback), Agent.execution/toolProfile persisted with a pre-C9 hosted default, LOCAL routes/transports/operation evidence, LOCAL_DISPATCH readiness family scoped by route (hosted evidence never satisfies a local scope or vice versa), AssignmentController per-route adapter resolution that fails closed on a miss, LocalMailboxAdapter (hash-manifested packet out, hash-verified result.json + artifacts back, honest cancel sentinel) wired for local agents, renderer execution-environment/tool-profile surfaces and Devin option, and workflow/evidence docs. Verification: typecheck clean, 430/430 unit, build clean. Open items before first-milestone acceptance: a local-session probe must exercise a real mailbox round-trip to record the first LOCAL_* OBSERVED evidence (dispatch stays correctly gated until then), then the end-to-end pilot — add a signed-in Devin agent → packet written → user-run session → verified outputs → cancel → restart non-duplication. CLI-exec/ACP transports and local Claude/Codex providers are still unimplemented. |
+| C9 local CLI office agents | PARTIALLY_VERIFIED_LOCAL | Established 2026-09-16 from the 2026-09-15 user direction. CLI probes on this machine verified the surfaces the contract names: devin 3000.10.21 (auth status, models list, acp stdio server with tool-scoped agent types, -p), codex 0.154.0 (exec --json --sandbox -C, resume/fork, existing app-server account/read+model/list), claude 2.1.273 (-p with --output-format/--allowedTools/--model/--effort; no model catalog — curated aliases remain). devin CLI is not currently logged in; its credential is separate from the Desktop session. Landed in round c9-impl: 'devin' provider with real CLI discovery (auth status + `models list --format json`, DEVIN_* env stripped, no API-key fallback), Agent.execution/toolProfile persisted with a pre-C9 hosted default, LOCAL routes/transports/operation evidence, LOCAL_DISPATCH readiness family scoped by route (hosted evidence never satisfies a local scope or vice versa), AssignmentController per-route adapter resolution that fails closed on a miss, LocalMailboxAdapter (hash-manifested packet out, hash-verified result.json + artifacts back, honest cancel sentinel) wired for local agents, renderer execution-environment/tool-profile surfaces and Devin option, and workflow/evidence docs. Verification: typecheck clean, 430/430 unit, build clean. Evidence bootstrap f779ecd (2026-09-16): store.recordTransportEvidence merges office-observed entries into capability snapshots (route stamped, scope-key supersession, ACCOUNT_VERIFIED refused); LocalMailboxAdapter exposes submit/observe/cancel evidence hooks and result.json applied-model/effort/delegation self-reports; verified() is family-aware so office-observed TOOL_SUPPORTED satisfies only local scopes while hosted scopes keep requiring provider attestation; dispatch routes LOCAL_* through assertLocalExecution and records UNKNOWN + the office-created session identity. Verification at f779ecd: typecheck clean, 446/446 unit, build clean. Open items before first-milestone acceptance: the user-run pilot — sign in the Devin CLI, add a local Devin agent → packet written (first LOCAL_* OBSERVED evidence accrues) → user-run session → verified outputs → cancel → restart non-duplication. CLI-exec/ACP transports and local Claude/Codex providers are still unimplemented. |
 
 Current-source qualification, 2026-09-12: version 0.5.0. The application qualification occurred before Git initialization; the same qualified source was then committed and connected to the private GitHub repository on `main`. The complete local C4–C7 revision was reviewed, verified and freshly packaged. Section 12.1 and its dated raw logs supersede earlier slice-level counts and pre-audit package claims. Live provider/custodian requirements remain external and do not become verified through packaging.
 
@@ -2216,6 +2297,16 @@ Addendum, same day: the user opened the signed-in web transcript and reported (s
   manual evidence, not an automatable route for the office.
 ~~~
 
+### 2026-09-16 — C10 four-plugin plan and small synthetic fixture
+
+User request: create a time-efficient example without full/actual chart data and update the current project roadmap for Serena, Ponytail, Graphify and LightRAG. Started in the clean root checkout on `main` at `aa6ceebb2ed1dcf6aa4d2e2f26429b5bbc43fd89`; fetched origin and created the dedicated `docs/four-plugin-evaluation-20260916` branch from `6d27652846d18f8c8b7c5d588bc3a2923b154f4b` (merged C9). Existing organizer/worker worktrees were inspected read-only and left untouched. This standalone planning change does not publish, accept or close a desktop worker round.
+
+Changed files: this roadmap (section 3.2, C10 packet, D1 cross-reference, progress row and this entry); `app/benchmarks/plugin-evaluation/task/` (two-track task, three starter modules, eight metadata records, seven short source documents); `app/benchmarks/plugin-evaluation/EVALUATOR.md` and `verify.mjs` (separate scoring instructions and grader). Application source, dependencies, account configuration and data schemas are unchanged; no migration is needed. Fixture artifacts are not a second continuation plan.
+
+Commands/results: from `app`, `C:/Program Files/nodejs/node.exe benchmarks/plugin-evaluation/verify.mjs --self-check` exited 0: contract oracle 16/16, intentionally broken starter 2/16 and rejected, pluginRuns=0. `node benchmarks/plugin-evaluation/task/src/preview.mjs` exited 0 and printed eight starter classifications; this is not a correctness pass. `git diff --check` passed. Full application/desktop/provider suites were not run for this isolated fixture/documentation change. No model, plugin, chart-data, training or backtest operation occurred; token savings and agent quality remain UNKNOWN.
+
+Remaining: C10-A attempt runner/ledger and C10-B lifecycle contracts; C9's observed local mailbox round-trip/pilot; per-client tool verification; a permitted LightRAG model/embedding route. The tiny fixture is a screening task, not evidence of large-corpus benefit. Integration must review this branch against the organizer's current roadmap; likely conflicts are section 3, new slice numbering and the section 11 status table if another planning round edits them.
+
 ## 12. Validation evidence
 
 ### 12.1 Final C4–C7 revision verification — 2026-09-12, current
@@ -2670,3 +2761,1181 @@ against the implementation. Combined verification at e8e1173: typecheck
 clean, 430/430 unit, build clean. Remaining for first-milestone acceptance:
 a local-session probe to produce the first LOCAL_* OBSERVED evidence, then
 the end-to-end pilot.
+
+2026-09-16 (local evidence bootstrap) — f779ecd. Local dispatch was
+permanently gated: nothing could ever record LOCAL_* OBSERVED evidence,
+and the hosted-only execution guard refused local routes outright.
+Evidence is now earned by exercising the transport, the same way cloud
+evidence works. Organizer: recordTransportEvidence store seam (office-
+observed only, route stamped, scope-key supersession, content-hash
+dedupe), adapter evidence hooks (submit/observe/cancel) with honest
+self-report of appliedModel/appliedEffort/delegation on a fully
+hash-verified receipt, family-aware verified() — TOOL_SUPPORTED+OBSERVED
+is the local ceiling, hosted scopes still require ACCOUNT_VERIFIED —
+assertLocalExecution (office-observed confinement required, Colab stays
+impossible), local submit records UNKNOWN + the office-created session
+identity rather than a fabricated acceptance, and dispatch UI enabling
+the local prepare/handoff path. Verification at f779ecd: typecheck
+clean, 446/446 unit, build clean. Next: user-run local-session pilot.
+
+2026-09-16 (plugin evaluation fixture + C10 plan) — 565e867 (picked
+from d6da777) plus 19c384b. A planning session added the synthetic
+feature-availability fixture under app/benchmarks/plugin-evaluation/
+(task/, EVALUATOR.md, verify.mjs grader — self-check verified: oracle
+16/16, broken starter rejected) and this roadmap's section 3.2 with
+the Serena/Ponytail/Graphify/LightRAG candidate plan and the C10
+packet ordering. The organizer added harness/records.mjs: the shared
+attempt manifest / usage / score record contracts, arm constants, the
+six evidence findings, and deterministic content hashing — dependency-
+free .mjs because the harness must run in the disposable evaluator
+environment, not inside the app build. No plugin is installed and no
+agent benchmark has run; LightRAG's permitted model route remains an
+explicitly open question.
+
+2026-09-16 (round devin-fixes) — f31d782, d487335, ec34acd on
+c833207. The connect() non-OpenAI branch routed every terminal-login
+provider draft into `claude auth login`; a Devin draft therefore
+opened the wrong tool's sign-in and could never complete. The
+provider→login selection is now the exported providerLogin() seam and
+the visible PowerShell window is provider-keyed, so a devin draft
+opens `devin auth login` and re-checks status('devin'). The Devin
+models collector (now the exported devinModelCatalog()) collects
+variant objects — the id chain gains model_uid and the display-name
+chain gains label — so swe-2-max and siblings appear alongside family
+slugs, deduped and capped as before. The renderer presents Devin's
+variant-encoded effort honestly: both effort selects offer only
+Provider default for devin and explain that choosing the variant
+chooses the effort. docs/workflow.md and docs/evidence.md were
+brought current with the landed local-evidence lifecycle (accrual
+conditions, UNKNOWN-not-ACCEPTED submission, self-report limits, the
+local/hosted readiness split). Verification at ec34acd: typecheck
+clean, 451/451 unit, build clean. Next: the user-run local-session
+pilot; `devin auth login` still has not been completed on this
+machine, which remains the sign-in prerequisite.
+
+2026-09-16 (round plugin-eval-a) — C10-A harness landed. Seven
+packets integrated on d5dfd2d: harness/attempt.mjs (isolated attempt
+dirs — only task/ copied, hashed manifest, contamination and reuse
+refused), harness/freshness.mjs (the verbatim catalog.md correction
+with a post-write diff proving nothing else changed), harness/
+ledger.mjs (append-only JSONL, every entry records.mjs-validated,
+corrupt lines surfaced by number), harness/scorecard.mjs (pure
+rollup implementing every section-3.2 comparison rule — gates before
+efficiency, UNKNOWN counters, failed attempts still charged,
+cold/reuse separate, NO_FINITE_SCORE, INCONCLUSIVE), harness/
+score.mjs (seeded blind review packets with evaluator-side-only
+mapping, recordScore requiring a blind mapping entry and all six
+findings, runCodeGate driving the real verify.mjs), docs/
+plugin-surfaces.md (primary-source inventory for all four plugins;
+LightRAG has no documented subscription route — API keys or local
+ollama only), and RUNBOOK.md (the ordered evaluator protocol:
+environment checklist, per-attempt flow, plugin-arm binding and
+readiness, freshness phase, blind review, scoring, teardown,
+honesty rules). Verification at head: typecheck clean, 487/487
+unit, build clean, fixture self-check unchanged (oracle 16/16,
+starter rejected). No plugin was installed and no agent benchmark
+ran — C10-A is the harness only. Next: C10-B..E per-plugin
+integration packets gated on the surfaces inventory, then a real
+evaluator session per RUNBOOK.md.
+
+2026-09-16 (round pilot-ux) — first-pilot revision round landed on
+bc99bfa. Organizer prerequisites (3323cf9) on protected surfaces:
+request.start stamps CLOUD_TRANSPORT_UNVERIFIED only when a
+selected agent is hosted; location.save creates <project
+folder>/inputs; ProviderReadiness gains blockerDetails with
+THIS_ACTION vs AUTOMATIC_START severity; local scopes use
+LOCAL_ACCOUNT_STALE_MS (30 min vs the 5-minute hosted window);
+effortIsIndependentAxis() marks devin's effort-in-variant shape.
+Worker packets integrated: local-session.ts now creates the
+session directory before the input loop (zero-input snapshots no
+longer ENOENT) and writes CONTRACT.md generated from the parser's
+own constants (fc3438f); the project location panel is browse-only
+with a wired input-file picker persisting real inputPaths, and
+request submission no longer force-navigates to Research
+(2150b2d); Add Agent hydrates the stored connection on provider
+select, effort controls follow each provider's real axis, and
+subscriptionEnvironment strips ACP_* so provider CLIs spawned
+under agent shells no longer misreport sign-in (c69c90a); the
+contract editor seeds from its request, collapses fields 02-08
+behind an affordance, and shows an honest awaiting-review panel —
+reviewer role, capable agents, sealed-report state, real cancel/
+withdraw actions only (9caaf4a); the dispatch card groups
+blockers by what they actually gate, local filesystem failures
+stop naming the provider, and stale accounts get an in-place
+re-check (5a9da24); workflow.md documents the revised flow plus
+the never-launch-from-an-agent-terminal warning and corrects the
+three-local-routes overclaim (0ca5440); docs/model-catalogs.md
+answers the gpt6 report — gpt-6-astra is real since 2026-09-03
+and the curated OpenAI list is stale, while a signed-in catalog
+missing it is accurate rollout reporting (0837ac9). Combined
+verification at bc99bfa: typecheck clean, 499/499 unit, build
+clean. Remaining: repackage the distributed binary and retest the
+local pilot end-to-end; the OpenAI curated suggestion list needs
+a dated refresh per model-catalogs.md.
+
+2026-09-16 (round pilot-ux2) — removal and consolidation round
+landed on 504701e. Organizer prerequisite (3aaee70) added
+Project.removedAt and project.delete: archived-only, refused
+while any project request still has an unresolved provider job,
+records/history/files retained, and un-archiving a removed
+project restores it into the archived list. A mid-review
+organizer defect — removedAt: undefined rejected by canonical
+serialization — was fixed at f8a8a2b and worker-3's guard tests
+absorbed as cfb0ced before its BLOCKED submission was rejected.
+Worker packets integrated: the queue surfaces where hidden
+removable rows went (names the lifecycle filter, explains
+retention, keeps unresolved-job rows non-deletable) (f1fa679);
+Tasks and Research nav destinations merged away — Office carries
+the queue, Projects is the single project surface (list or
+research workspace), pickers filter removedAt, archived rows get
+Remove from list, and desktop.e2e was repaired for the merged
+IA (c4e472f); workflow.md documents the consolidated pages and
+both removal lifecycles (6ccdf75). Organizer integration fix
+(504701e): a Removed lifecycle filter exposes removed projects
+with a Restore action — the store recovery path was otherwise
+unreachable through the UI — and docs now match the
+archived-list landing. Combined verification at 504701e:
+typecheck clean, 505/505 unit, build clean, desktop e2e green.
+Follow-up (1c0c050): agents had archive-only — no second-level
+removal — so agent.delete mirrors project.delete: archived-only,
+refused while any of the agent's assignments carries an
+unresolved provider job, records retained; a Removed membership
+filter exposes them and restore lands archived. 509/509 unit.
+
+2026-09-16 (round pilot-ux3) — orphaned-job round landed on
+31d21e1. The pilot found canceling a request (or archiving its
+project) unmounted the dispatch card and stranded any unresolved
+provider job, which then wedged request, agent and project
+removal. Organizer prerequisites (0afb6c1): the OpenAI curated
+suggestion list gained gpt-6-astra and dropped deprecated
+codex-suffixed 5.x entries per model-catalogs.md, and a
+too-new-store startup failure now explains itself instead of
+dumping schema issues. Worker packets integrated: RequestDispatch
+mounts whenever a job awaits reconciliation and a closed flag
+gates every dispatch-initiation control while Observe, job
+cancel and the UNKNOWN link-session form stay reachable; the
+hardcoded 'No provider job submitted' copy now derives from real
+job and review state (e8afaf4); a Codex model/list failure
+degrades to an honest catalog-unavailable note without failing
+the verified account check or shipping a truncated catalog
+(6825637); workflow.md documents the reconcile-reachability
+contract and the three-entity removal matrix (c72334f).
+Combined verification at 31d21e1: typecheck clean, 511/511 unit,
+build clean, desktop e2e green.
+
+2026-09-16 follow-up (91908e2) — the manual pilot then surfaced two
+deeper cancellation wedges the round had missed. A local job whose
+submit failed before recording a session directory could never be
+cancel-acknowledged: the mailbox adapter had nothing to signal and
+refused, leaving the job CANCEL_REQUESTED forever and wedging every
+removal path. With no session dir nothing was ever running, so the
+office now acknowledges vacuously; no sentinel is written and
+cancelEvidence still reports nothing, so no LOCAL_CANCEL evidence is
+fabricated. Separately, recordJobTransition marked a single-mode
+request CANCELED on CANCEL_ACKNOWLEDGED without the experiment/task
+cascade request.cancel runs, so the experiment kept accepting contract
+revisions and spawning review tasks that became unreachable —
+task.cancel deferred to a parent that could not act, request.cancel
+refused the already-canceled parent, and project.archive refused the
+still-open task. The job-side path now runs the same cascade;
+task.cancel/task.delete only defer to a live parent request; contract
+writes refuse an experiment whose request is already canceled. A
+regression test pins the whole wedge. 513/513 unit, typecheck clean.
+
+2026-09-16 (round pilot-ux4) — project-detail IA and dispatch
+honesty, landed on c1ea876. Organizer prerequisites at 2473caf: the
+pilot's P0 — adapter.fetch extracted unbound in controller.ts meant a
+COMPLETED result's declared outputs all failed retrieval and
+completion was refused; it is now bound, with a regression test
+driving a method-shaped fetch end to end (storeBytes was already a
+bound arrow property). Packets now write AGENTS.md — the discovery
+file agent CLIs auto-read — so an uninstructed session finds
+CONTRACT.md and the receipt shape. A standalone provider sign-in
+route landed (subscriptions.signIn + office:provider-login +
+window.office.loginProvider), extracted from connect()'s login half.
+Worker packets integrated: project detail overhaul (a44f60d) —
+sidebar Projects always lands on the list while queue-row and topbar
+deep links still open the detail; the detail page gained a Requests
+section listing every queue row for the project (including
+no-experiment QUESTION requests) as expandable rows with an
+open-in-queue action; the mandate card mounts the shared location/
+input panel; the research pipeline renders last in a separated panel
+with a stated purpose. Dispatch/provider-card honesty (77a8474) —
+Observe and the cancel re-check always surface the job's post-action
+state and detail; CANCEL_REQUESTED relabels to the re-check it is;
+provider cards can initiate sign-in and the OpenAI card reports what
+a check actually found instead of 'no check recorded'; a test pins
+that removing the last agent never touches connection records.
+Docs + idempotency (89ddc18) — workflow.md documents all four packet
+members, the inputs/-may-be-absent rule, the Devin Desktop
+workspace-grouping expectation, and the fetch/hash/store completion
+path; cancel idempotency is pinned on both the sentinel and vacuous
+paths. Combined verification at c1ea876: typecheck clean, 520/520
+unit, build clean, desktop e2e green.
+
+2026-09-17 (round folder-inputs) — the project folder is the input
+scope, landed on 1c7d5b7. Per-file input selection was the wrong unit
+for the real workflow: a research folder accumulates loss logs,
+validation results and backtest outputs, and any of it may be the
+next request's input. Organizer core at bfd3fea: prepareInputSnapshot
+now walks the whole project folder via scanProjectFolder instead of
+resolving a stored allowlist — credential patterns, tool
+configuration, VCS/dependency/cache subtrees, links, the reserved
+_office namespace and OS noise are skipped, each meaningful skip
+recorded as a snapshot warning; the 64 MiB cap and a new 2000-file
+cap refuse the whole snapshot rather than truncate; location.save
+accepts but no longer stores inputPaths (records keep the field for
+history) and stamps PROJECT_FOLDER_SNAPSHOT; the stale-location guard
+covers the new route; a missing folder gets the friendly refusal
+instead of raw ENOENT. Old records and packets still replay — both
+route literals stay valid. Worker packet integrated (d92ba83): the
+location panel loses the picker and file list for copy explaining
+that the folder's contents become the frozen snapshot with skips
+recorded; the detail-page disclosure is retitled 'Location & inputs';
+workflow.md describes the folder-scope contract; desktop e2e now
+asserts the picker is gone and drives a real folder pick + save.
+The office:choose-input-files IPC stays dormant in the bridge —
+bridge removal is a separate organizer change. Combined verification
+at 1c7d5b7: typecheck clean, 520/520 unit, build clean, desktop e2e
+green.
+
+2026-09-17 (follow-up, direct organizer fix) — split-brain project
+folder fields closed on 73c245b. The Create/Edit project dialog wrote
+project.localFolder (a display field) while prepareInputSnapshot read
+the locations record, so a folder set in the dialog silently shared
+nothing (session-9 finding #11). Both dialog paths now upsert the
+locations record in the same transaction; the location revision bumps
+only when the folder value really changes, so a mandate-only edit
+never invalidates a prepared snapshot, and a changed folder does
+invalidate one. The Edit dialog seeds its field from the location
+record first. Queue cards now render 'workType · mode · Lead' inline
+under the title rather than a separate line below the prompt.
+Regression tests cover the dialog→snapshot path, the no-bump case and
+the invalidation case. 522/522 unit, typecheck clean, build clean,
+desktop e2e green.
+2026-09-17 (follow-up, direct organizer fix) — unidentified
+provider sessions no longer mint phantom accounts. A `devin auth
+status` check that reported "Logged in (via Devin)." without an
+Email line had its status phrase recorded as the account identity,
+minting a second connection record that displaced the real bound
+account as the current context (observed live: an agent bound to
+louisnn80@gmail.com blocked by a phantom 'Logged in (via Devin).'
+record). The Devin status parse is now the pure devinStatusIdentity
+helper — labeled Email line first, any email token second, else ''
+— so a signed-in but unidentified session records connected=true
+with an empty identity against a single stable ''-identity record
+instead of inventing an account per output format. The check
+surfaces a non-zero CLI exit in the note since partial stdout is
+how the phantom arose (the User/Account section is a remote fetch
+that can truncate). agentBinding names an unidentified current
+context honestly rather than calling it 'no account'; VERIFY,
+CHANGE and confirmAgentBinding refuse ''-identity observations
+outright; connect() cannot mint a ticket for one. Provider cards
+render 'Signed in — account unidentified' with guidance, and the
+different-account warning only fires on an identified account.
+Regression tests pin the parser, the shared ''-record update path,
+the blocker copy and every refusal. 525/525 unit, typecheck clean,
+build clean, desktop e2e green.
+2026-09-18 (follow-up, direct organizer fix) — stale Codex
+app-server account reads can no longer hide a completed sign-in.
+Observed live: a ChatGPT browser login wrote valid auth.json
+tokens at 01:21:51, yet the long-lived codex app-server kept
+answering account/read with its pre-login snapshot, so the office
+reported signed-out and the sign-in poll ran to deadline with no
+cancel affordance. CodexMetadata now stamps spawnedAt; a negative
+account/read is re-verified on a fresh process only when auth.json
+(CODEX_HOME-aware) is newer than the client — evidence-gated, so
+unchanged files and injected clients never spawn needlessly, and
+never while the process owns a live login listener (recycling
+would kill the OAuth callback). A timed-out login flow also takes
+one fresh-process verdict before declaring failure. The signed-out
+note now distinguishes API-key auth from no account reported, and
+the provider card shows a real Cancel sign-in button routed
+through the existing office:agent-cancel IPC. Regression tests pin
+the evidence gate, the login-listener suppression and the single
+recycle. 526/526 unit, typecheck clean, build clean, desktop e2e
+green.
+2026-09-18 (probe, no code) — headless devin sessions are
+first-class in the shared session store. Verified on devin
+3000.10.21 under the office's scrubbed environment: `devin -p`
+in a scratch dir ran non-interactively and registered a named
+session (mulberry-ferry) visible in `devin list --format json`
+with id, working_directory and last_activity. The row lives in
+%APPDATA%\devin\cli\sessions.db — the same store that holds
+Desktop-created sessions (backend_type windsurf) — so
+office-launched runs should appear in Devin Desktop's session
+list under the working directory's workspace grouping; that GUI
+display is inferred from the shared store, not yet confirmed
+on screen. `devin -r <id> -p` resumed the same session
+successfully, proving post-run attachability. Constraints for a
+future LOCAL_CLI_EXEC transport: headless mode refuses untrusted
+working directories and needs --respect-workspace-trust false
+(trusted_workspaces.json currently lists only the dev checkout);
+sessions key to cwd, so a packet dir is the natural session
+scope; `devin list --format json` is a scriptable liveness probe
+and `devin rm <id> --force` a scriptable cleanup. Live-attach
+during an in-flight -p run is unverified.
+
+2026-09-18 (round ui-polish) — worker-1 commit 4ce73db
+integrated at merge 271cf8f on parallel/next-batch-001/organizer,
+base dfdb7d6. Project-list rows: the emblem + name + mandate block
+is now a keyboard-accessible button (project-open-region, aria-label
+'Open <name>') that opens the detail page; removed rows keep a
+static block, and location text, experiment count, lifecycle badge,
+the explicit Open link, the settings gear and Remove/Restore all
+keep their own behavior. Project-detail request rows: the summary
+is a two-cluster layout — left name + status badge + request
+created time (compact locale format), right team + lead agent; team
+resolves the lead agent's team first, then request.teamId through
+state.teams, with quiet 'No team'/'No lead' fallbacks; expanded
+detail unchanged. Queue cards: 'Start request' is now primary and
+'Use as new request' secondary (previously classless); the task
+prompt renders inside a bordered panel-2 container scoped to the
+work queue; 'Cancel request' keeps its destructive styling. The
+desktop e2e now opens the detail page by clicking the card region
+itself (aria-label), a stronger assertion than the link click it
+replaced. Combined verification at 271cf8f: typecheck clean,
+526/526 unit tests, build clean, desktop e2e green.
+
+2026-09-18 (round agent-profile) — organizer prerequisite
+6a1281e preserved devin catalog family/variant structure: variant
+entries now carry family, their parsed effort level (swe-2-max →
+max, -fast compounds keep the base token, label-Max bare uids →
+max, unparseable suffixes declare nothing) and the family's effort
+set, mirrored through the capability schema. Worker-1 commit
+9e7f1f7 integrated at merge a0cea25. The devin effort control is
+functional in both agent creation and the profile dialog: it lists
+the model family's real effort levels and remaps the model uid to
+the matching sibling variant (preferring -fast parity), while
+draft.effort/agent.effort stays 'default' — the variant still
+encodes effort, so a devin effort choice persists as a model change.
+No-catalog keeps the Provider-default fallback; openai/claude keep
+the independent-axis path. The model/effort edit surface is
+extracted into ModelEffortEditor and renders as the second
+ProfileTabs child — directly under name/team/role + instructions,
+above the account connection. The redundant 'team · role ·
+provider / model' and 'execution · tool profile' lines are gone;
+Agent ID, instructions details and ActivityView untouched. All
+four profile dialog tabs share a fixed 58vh panel height, so tab
+switching no longer resizes the dialog. e2e asserts the editor
+ordering, the removed metadata lines and uniform tab height.
+Combined verification at a0cea25: typecheck clean, 528/528 unit
+tests, build clean, desktop e2e green.
+
+2026-09-18 (round model-grouping) — organizer prerequisite
+5191b64 used family_label so devin family entries display their
+provider names ('Claude Opus 5') instead of raw uids. Worker-1
+commit e5b18ab integrated at merge 95bd20c. The devin model and
+effort pickers now present two separate axes on both surfaces
+(agent creation draft and the profile ModelEffortEditor): when
+the signed-in catalog carries family data, the model dropdown
+lists only family-level entries sorted alphabetically, and a
+stored variant uid (e.g. swe-2-max) displays as its family. The
+effort dropdown becomes the variant-in-family picker — every
+sibling variant is an option labeled by its honest qualifier
+(family-name prefix strip, else capitalized uid suffix: 'Low',
+'Low Fast', 'Max', 'Medium Thinking', 'Low Priority'), plus a
+'Provider default' option valued at the family id. Choosing an
+effort stages the variant uid and persists via changeAgentModel;
+draft.effort/agent.effort stays 'default'. Raw fallback options
+survive for stored uids absent from the catalog; signed-out /
+no-family catalogs keep the prior flat list and Provider-default
+behavior; openai and claude are unchanged. No provider
+operations. Combined verification at 95bd20c: typecheck clean,
+528/528 unit tests, build clean, desktop e2e green. Caveat: the
+e2e suite does not produce a signed-in devin catalog fixture, so
+family grouping is verified by review against the real catalog
+shape rather than an automated catalog test.
+
+2026-09-18 (cleanup finding) — office records, packet dirs on
+disk and provider session rows in devin cli sessions.db are
+three independent stores; deleting one never propagates. Two
+Devin Desktop sessions bound to moved packet dirs produced
+"does not exist" alerts on Desktop load until the dirs were
+restored, and a headless probe session survived office-side
+cleanup untouched. Only `devin rm` removes a session row, and
+it refuses while Devin Desktop holds the session open.
+Consequence for LOCAL_CLI_EXEC: every office-launched job
+leaves a provider session row behind, so the transport needs
+an explicit cleanup policy — record the session id in evidence
+first, then `devin rm` after result verification — or the
+Desktop session list accumulates one orphan per office job.
+
+2026-09-19 (post-round interactive fixes) — Codex CLI
+integration and local-provider scope. 8c58b58 discovers the
+npm-installed Codex binary under
+%APPDATA%\npm\node_modules\@openai\codex\...\vendor\<triple>\bin
+since the npm install exposes only shim commands on PATH.
+b191cc3 + 365b479 fix the Codex sign-in stall: a completed
+browser login is detected from the auth.json write and verified
+on a probe process before the stale login-owner listener is
+retired, and account/read no longer forces a token refresh on
+every read — a plain read reports first, with refresh kept only
+as a recovery path when the read returns nothing (a working
+access token with a dead refresh token now reports the account;
+stacked forced rotations were plausibly invalidating stored
+grants). fcedfb5 + 1d0f6b0 surface Claude Code's published
+effort axis — claude.exe 2.1.273's --effort flag rejects invalid
+values with the enum {low, medium, high, xhigh, max} — as a
+session-level preference labeled honestly (model honoring
+unverified upfront; result self-report stays authoritative);
+openai/devin keep strict per-model scales and unknown model ids
+still refuse invented levels. 3aaca24 widens
+LocalMailboxAdapter.providers from ['devin'] to
+['devin','claude','openai']: the packet contract
+(packet.json + CONTRACT.md + AGENTS.md + hash-verified
+result.json) is provider-agnostic and controller routing already
+sends every LOCAL agent to this adapter, so the declared scope
+was the only gate; a new test proves a non-devin job writes a
+packet and round-trips a verified result with office-local
+evidence. Verification at 3aaca24: typecheck clean, 533/533
+unit, build clean; packaged and swapped into the installed App/
+copy. No provider operations claimed; the user-run pilot for
+claude/openai local agents is now unblocked at the dispatch
+gate but still untested end-to-end.
+
+2026-09-19 (round local-lifecycle) — all seven workers
+integrated. Prerequisite 97d4686 added CapabilityOperation
+LOCAL_RETIRE (bookkeeping only, outside LOCAL_DISPATCH).
+worker-1 (4997437): observe() now records a verified receipt's
+applied self-report as a content-deduped PROVIDER_REPORTED
+STATUS JobEvent ('applied:' + canonicalHash; placed before the
+no-change return so a changed self-report still lands), and
+profile.tsx/dispatch.tsx surface requested-vs-applied with a
+.blocker warning only on genuine mismatch — self-report
+qualifier kept, absent reports render nothing. worker-2
+(eb3854b): LocalMailboxAdapter.retire() moves a packet dir into
+archive/ by same-fs rename (never delete; honest on missing or
+already-retired), retireEvidence() emits office-observed
+LOCAL_RETIRE, missing-dir observe now names retired-or-removed
+externally, and TOOL_CONFINEMENT describes delivery scope vs
+real permissions ('the office confines nothing — can read
+sibling directories') instead of implying a boundary. worker-3
+(8b56db4): local-provider-records.ts maps a packet dir to its
+provider-side session records — devin sessions.db rows by
+working_directory (readOnly node:sqlite; devin rm --force with
+honest busy-refusal), claude ~/.claude/projects/<path-mangled>,
+codex rollout-*.jsonl by recorded cwd — and retires exactly
+those, injected roots only, removal explicit-only. worker-4
+(634a054): docs/local-sandbox-probe.md — surface-probed
+confinement tiers per CLI (claude --restricted tool-layer
+claim, codex restricted-token sandbox + readable roots, devin
+--sandbox research preview; the mailbox route passes no flags,
+so effective policy stays user-side). worker-5 (2946425):
+local-worktree-repo.ts (git repo per office project, --detach
+worktrees, prune) + LocalWorktreeMailboxAdapter composing the
+base adapter so packet dirs ARE worktrees — identical packet
+contract, confinement evidence declares the shared-root scope.
+worker-6 (c7091c8): docs/local-worktree-lane.md — grouping
+truth per provider (codex CLI is cwd-keyed too; the Desktop
+project layer is the only 'one project' surface and repo
+grouping there stays inferred pending one on-screen
+confirmation; claude is per-cwd; devin binds working_directory
+only). worker-7 (fad4d7d): localLaneFor() — ISOLATED for every
+research-context or ambiguous assignment, ROUTINE_ALLOWED only
+for plain request assignments; pure, total, sealed reviews can
+never land on a shared root. The three-layer model (grouping /
+workdir / sandbox) is adopted: per-packet cwd gives scoping not
+confinement; sealed reviews remain instruction-level isolation
+until a probed confinement tier is wired. Combined verification
+at HEAD after all merges: typecheck clean, 569/569 unit tests,
+build clean. Not wired yet (organizer integration steps, next
+round): retire()/provider-record cleanup IPC, worktree-lane
+adapter selection via localLaneFor, and the office-side retire
+action.
+
+2026-09-19 (revision spec accepted; P0 prerequisite landed) —
+QO-LOCAL-REV-20260919 reviewed the local-lifecycle round at
+d1e1eba and confirmed real defects in merged work, all
+independently verified against HEAD before acceptance: F01
+(Claude project-dir removal by lossy inferred path key),
+F02 (the office-written cancel sentinel returns an
+acknowledgement the controller settles as provider-reported),
+F03 (junction/symlink escape inside packet dirs during
+observe/fetch), F04 (localLaneFor's ISOLATED label promises an
+unenforced property), F05 (applied-model UI reads
+state.jobEvents, which publicState() strips — the w1 surface
+is dead in production), F06 (content-hash dedup loses A→B→A
+applied changes), F07 (both mailbox adapters share
+LOCAL_MAILBOX so restart cannot route by layout), F08
+(worktree seed reads mutable HEAD), F09 (receipts not
+attempt-bound), F10 (raw Codex rollout deletion bypasses
+supported lifecycle), F11 (archive conflicts misreported,
+worktree archival missing), F12 (storage-key observations
+over-generalized into UI impossibility claims), F13
+(AGENTS.md auto-load assumed for probed Claude versions).
+Accepted design: LocalSessionRecord v1 separating layout /
+provider binding / confinement requirement / confinement
+status; append-only lifecycle journals; packet+result v2 with
+attempt binding and sequenced receipts; cooperative cancel
+request/ack pair; guarded file I/O boundary; pinned-seed
+worktrees with per-repo locks; provider lifecycle restricted
+to supported exact-session archive or honest UNSUPPORTED —
+permanent provider-history deletion removed from the callable
+surface; archive-first, restart-safe journalling; structured
+applied-report query instead of parsing event text;
+confinement admission separated from delivery scope.
+P0 (organizer prerequisite, 3a2c49b): shared/local-session.ts
+contracts + transitionLocalLifecycle; store collections
+localSessions (CAS) and localOps (append-only) with
+one-binding-per-job; JobEvent.applied structured payload;
+publicState strips both collections; project export carries
+them scoped by jobId; SubmitContext.jobId so packet builders
+bind real jobs. New contract tests 7/7; full suite 576/576;
+typecheck clean. Worker packet order per spec section 14:
+P1 safe I/O, P5 provider lifecycle, docs corrections first;
+P2 packet v2 follows P1; P3 cancellation follows P2; P4
+worktree hardening follows P2; P6 orchestration last; P7/P8
+organizer-owned routing and UI wiring; P9 docs/trials; P10
+integration. Live provider trials stay gated on explicit
+packet authorization with synthetic canaries only.
+
+2026-09-19 (round local-rev-1) — three workers integrated on
+the P0 base. worker-1 (a00fc4a): local-session-files.ts —
+GuardedLocalFileIO with component lstat walk refusing
+links/junctions at every level, handle-bound fstat size gate +
+pinned read, wx writeNew, RESIDUAL_RACE_WINDOW honestly naming
+the walk-to-open gap Node-on-Windows cannot close without a
+native primitive; FakeLocalFileIO for consumers. 11/11 tests
+with real NTFS junctions (file-symlink case skipped honestly —
+privilege unavailable). worker-2 (84b1990): records module is
+now read-only discovery (rmSync removed entirely, F01/F10
+closed at the callable surface) and local-provider-lifecycle.ts
+implements inspect/archive — devin rm via arg-array execFile
+with busy-over-missing precedence, claude/codex UNSUPPORTED
+without touching provider bytes. worker-3 (5d7bed8): docs
+corrected — local-worktree-lane.md separates storage key /
+picker scope / grouping with an evidence matrix (and a newly
+probed fact: Codex Desktop imports Claude sessions by mangled
+cwd key); local-sandbox-probe.md marks dated findings
+historical and distinguishes permission gating from
+instruction text, native Windows from WSL2, command-tool from
+all-tool confinement; workflow.md documents the current
+waiting-for-user/cancel-request truth in present tense only.
+Combined verification at 105c4bb: typecheck clean, 594/594
+unit (1 skipped: privileged symlink fixture), build clean.
+Round 2 candidates per spec section 14: P2 packet v2 (needs
+P1's guarded I/O), then P3 cancellation, P4 worktree
+hardening, P6 lifecycle orchestration; P7/P8 organizer-owned
+routing + UI wiring; F06 applied-dedup ordering rides the P8
+structured query.
+
+2026-09-19 (round local-rev-2) — worker-1 (fda1865) delivered
+P2 packet/result v2. New local-packet.ts exports
+prepareLocalPacket (v2 directory written entirely through the
+LocalFileIO boundary: root inspection, ancestor-verified
+allocation, residue refusal for result.json/cancel.*/ready
+markers, manifest re-verified inputs/ copies, instruction
+files, packet.json validated against localPacketV2Schema,
+packet.sha256 = canonicalHash(packet), packet.ready.json
+written last), readLocalResult (ready-marker identity,
+strict office-local-result@2, four-field binding equality —
+cross-attempt refused even with matching output hashes,
+advancing sequence with the prior receipt named, per-output
+guarded reads with per-file and aggregate caps returning
+verified bytes) and readLocalResultV1 (the legacy reader
+moved verbatim). CLAUDE.md is now a regular file whose first
+line is the @AGENTS.md include (F13); CONTRACT.md documents
+the v2 receipt and the cancel-ack@1 wire for P3.
+LocalMailboxAdapter: packetVersion=2, bound submit consumes
+context.localSession and returns SubmitResult.localPacket
+.packetHash, unbound submits keep the byte-identical v1
+path, observe/fetch branch on the bound packetVersion.
+Organizer integration: the router now forwards the resolved
+binding through observe/cancel/fetch (58a5c57) so the bound
+packet version actually reaches the readers. Remaining
+organizer wiring before v2 goes live: controller creates the
+LocalSessionRecord in the dispatch intent transaction and
+persists packetHash + READY on submit success (P6). Combined
+verification at 58a5c57: typecheck clean, 623/624 unit (1
+skipped: privileged symlink fixture), build clean. Round 3
+per spec section 14: P3 cancel request/ack + P4 pinned-seed
+worktree hardening, both now unblocked.
+
+2026-09-19 (round local-rev-3) — two workers integrated on
+the f76a680 contract base. worker-1 (eac625a): P3 cooperative
+cancel request/ack on the flat lane — bound cancel writes
+cancel.requested as a cancelRequestV1Schema-validated body via
+io.writeNew and returns the requestId; read-first idempotency
+returns an existing request's id, malformed or misbound
+residue refuses and is never overwritten; bound observe
+validates cancel.ack.json before the receipt read — absent
+passes, ack-without-recorded-request is a tamper defect,
+malformed/misbound is UNKNOWN even beside a valid receipt,
+valid sets observed.cancelAck. Legacy paths byte-identical;
+every detail keeps saying delivered-a-request is not a stop.
+worker-2 (7e9a957): P4 pinned-seed worktree lane — F08 closed
+at the repo layer: createWorktree requires an explicit
+validated 40-hex commit (bare HEAD unreachable),
+resolveHeadCommit validates its answer; bound submit requires
+PROJECT_WORKTREE layout + single-segment storage path +
+recorded 40-hex seedCommit, builds the worktree from that
+seed and writes the v2 packet inside it through the shared
+builder; the pinning test moves HEAD after the seed and
+proves the worktree stays put; unbound submits pin and name
+the resolved seed; observe/cancel/fetch forward the resolved
+binding into the per-project adapter; packetVersion=2.
+Combined verification at 5be9b64: typecheck clean, 639/640
+unit (1 skipped: privileged symlink fixture), build clean.
+Remaining organizer wiring before v2 goes live (P6, next
+round): controller creates the LocalSessionRecord in the
+dispatch intent transaction (seedCommit resolved and recorded
+for worktree bindings), persists packetHash + READY on submit
+success and cancelRequestId/stopStatus on cancel, and routes
+LOCAL_MAILBOX through LocalSessionRouter in main.ts.
+
+2026-09-19 (round local-rev-4) — P6 orchestration landed;
+the local-session revision is now live end-to-end.
+worker-1 (b70c4f5): AssignmentController prepares the
+durable binding before any local submit — one helper shared
+by dispatch and handoff classifies localRequirementFor
+(refusals throw before SUBMITTING; READ_CONFINEMENT_REQUIRED
+has no permitted layout and refuses; SCOPED_DELIVERY selects
+FLAT_PACKET only — the worktree lane stays unreached until a
+user-level layout choice exists), creates PREPARING bindings
+with PREPARE/INTENT journal entries, re-attempts
+PREPARATION_FAILED under a fresh attemptId + fresh storage
+path through the declared edge, and refuses every other
+existing binding reconcile-first. Submit settles READY with
+the proven packetHash (packetVersion recorded as proven, not
+declared) or PREPARATION_FAILED+journal. observe persists
+lastReceipt and SESSION_REPORTED_STOPPED via same-lifecycle
+CAS; bound cancel persists requestId+REQUESTED with a
+CANCEL_REQUEST journal entry and the job honestly stays
+CANCEL_REQUESTED until the session's own receipt lands.
+Organizer wiring: main.ts registers LocalSessionRouter over
+both layouts (75e6d9e); the legacy unbound cancel path now
+records OFFICE_LOCAL evidence instead of PROVIDER_REPORTED
+(aa418cd, closing F02 for the pre-binding cohort).
+Combined verification at aa418cd: typecheck clean, 647/648
+unit (1 skipped: privileged symlink fixture), build clean.
+Every new LOCAL_MAILBOX job now runs through a persisted v2
+binding: packet.sha256 + ready marker + attempt-bound
+receipts + sequence enforcement + cooperative cancel. Known
+residual for P8/P10: a valid ack beside an absent or
+malformed receipt validates but does not persist the stop
+status (conservative — REQUESTED stays until a receipt
+lands); the worktree layout remains registered-but-unselected
+pending a user-level layout choice; provider grouping trials
+(P9) and UI surfacing (P8) remain.
+
+2026-09-19 (organizer revision d7f6f4a) — P8 UI wiring and the
+F05/F06 applied-report fixes landed directly (organizer-owned
+per spec section 14; no worker round was published). F05:
+publicState() strips jobEvents, so the applied-report UI that
+read state.jobEvents and parsed event text was dead code; the
+renderer now reads office:applied-reports, a bounded
+job-scoped chronological query returning JobEvent rows with
+the structured applied payload. F06: applied events were
+deduped by content hash, losing an A->B->A sequence; bound v2
+receipts now key the event on the receipt hash (replays
+dedupe, fresh receipts always land) and carry the
+office-applied-report@1 payload pinned to
+attemptId/receiptSequence/receiptHash, while unbound reports
+dedupe against the latest report instead of the content hash
+alone. store.localSessionSummary assembles the bounded
+summary contract (layout/surface/lifecycle/stopStatus,
+resolved display cwd, requested scope from the frozen
+assignment, newest structured applied report, provider-
+archive status from the journal, honest blockers) and
+validates it against localSessionSummarySchema; dispatch and
+profile render it plus a per-row structured applied line.
+Text parsing of applied reports is removed. Combined
+verification at d7f6f4a: typecheck clean, 650/651 unit (1
+skipped: privileged symlink fixture), build clean. Remaining:
+P9 provider grouping trials and P10 final integration/
+retirement polish; the worktree layout is still
+registered-but-unselected pending a user-level layout choice.
+
+2026-09-19 (organizer revision 260107a) — P9 provider grouping
+trials and wiring landed directly (organizer-owned). Bound
+observe now runs read-only discover() on the session dir and
+carries providerGrouping on every return path including
+UNKNOWN — a started session's provider record is evidence
+independent of receipt state. The controller persists
+groupingStatus OBSERVED + providerProjectId (the record's own
+key) through the same CAS seam as lastReceipt; absence infers
+nothing, nothing downgrades, and OBSERVED bindings are never
+rescanned. The worktree lane inherits it through the
+forwarded binding. Trials were read-only against records that
+already exist — no canaries were created: batch checkouts
+resolve devin working_directory rows (organizer ballistic-
+bonobo, worker-1 sparkly-rover, worker-2 heathered-
+mapusaurus) and the claude project dir for organizer; six
+real packet dirs in the installed workspace resolve four live
+devin session ids with two never-run; an empty control dir
+resolves none. Evidence matrix updated; Codex/Claude/Devin
+Desktop GUI grouping claims stay UNKNOWN pending on-screen
+confirmation only the user can supply. Combined verification
+at 260107a: typecheck clean, 651/652 unit (1 skipped:
+privileged symlink fixture), build clean. Remaining: P10
+final integration/retirement polish.
+
+2026-09-19 (organizer revision f4a14c1) — P10 final
+integration and retirement polish landed directly
+(organizer-owned). Retirement is now reachable end-to-end:
+controller.retireLocal gates on a terminal job, a READY
+binding and the flat layout, writes PACKET_ARCHIVE INTENT
+before the move and EXECUTED after, restores READY on a
+refused move and lands RECONCILE_REQUIRED when the move
+throws — a half-moved packet is never claimed either way.
+Provider archive is a separate outcome: it runs only through
+the injected lifecycle service with the exact record
+identity grouping discovery observed, journaled as
+PROVIDER_ARCHIVE with SUCCESS/UNSUPPORTED/REFUSED/UNKNOWN
+kept distinct from the packet outcome — devin rm is the only
+verb; claude/codex stay UNSUPPORTED and their history is
+never touched. The router's retire now forwards the persisted
+binding's storage path, so a bare externalId basename never
+picks the layout. Bound observe also persists
+providerSessionId (the discovered record key) so archive
+targets the provider's own identity. New IPC: office:
+local-launch-plan returns the bounded LocalLaunchPlan (packet
+dir, proven hash, manual steps — always a handoff, never an
+office-run session) and office:local-session-archive returns
+the schema-validated LocalArchiveResult with a fresh summary;
+both unused contracts are now live. dispatch.tsx renders the
+launch instructions, packet/provider archive status on the
+summary line, and a retire action for settled local jobs.
+Verification at f4a14c1: typecheck clean, 656/657 unit (1
+skipped: privileged symlink fixture), build clean; the five
+new orchestration tests cover archived/refused outcomes,
+provider UNSUPPORTED and BUSY journal rows, eligibility
+gates, and the launch plan's MANUAL_HANDOFF→UNSUPPORTED
+transition. No live-provider operations ran — the lifecycle
+runner is injected and faked in tests. Residual: the
+worktree lane stays registered-but-unselected — flat packets
+remain the only user-reachable layout until a user-level
+layout choice and a verified read-confinement path exist;
+the GUI-side grouping claims likewise stay UNKNOWN.
+
+2026-09-19 (local-rev-5, worker-1 14526fe + organizer
+fixup 581cd5d; combined verification at 581cd5d) — Pilot-finding revision:
+the connection-test sessions measured a real contract gap.
+Three providers ran manual sessions against v1 packets
+carrying cancel.requested: Devin honored 2/2 (one inspected
+sibling packet dirs to learn the convention first), Codex
+honored 1/4 (two sessions narrated honoring/checking the
+sentinel and completed anyway), Claude proceeded 1/1 and
+admitted silently resolving the conflict when confronted —
+its result.json carried a UTF-8 BOM the office could not
+parse. Diagnosis: the contract described the sentinel but
+never stated precedence, so each session resolved the
+ambiguity alone. The v2 contract now states it explicitly:
+sentinel at start or appearing mid-work means stop
+immediately, write FAILED result.json then the ack, and no
+instruction overrides it — including a direct user prompt;
+the before-each-major-step check is honestly advisory. The
+result.json section adds UTF-8 no-BOM for both receipts;
+packetAgentsV2 carries the precedence rule in the auto-read
+file. docs/local-session-pilot.md records the measured
+matrix with named sessions, the mid-execution analysis
+(sentinels need voluntary polling; real cancellation needs
+office-owned processes (LOCAL_CLI_EXEC kill) or provider
+protocol support such as devin acp session/cancel; resume
+commands cannot reach in-flight runs), and the isolation
+observation (two providers read sibling dirs unprompted —
+cwd is scoping, not confinement). No reader, validator,
+schema or runtime change. Combined verification: typecheck
+clean, 656/657 unit (1 skipped: privileged symlink
+fixture), build clean.
+
+2026-09-20 (pilot-rev-1, organizer 4db8c81 + worker-1
+95216ef + organizer fixup abb01a6; combined verification at
+abb01a6) — Multi-provider pilot UX revision: the relay
+pilot proved evidence the UI could not show. requestQueue
+now derives `settled` from recorded provider jobs — every
+job at a terminal outcome (COMPLETED, FAILED,
+CANCEL_ACKNOWLEDGED) counts as finished work, not a success
+claim — so the Completed tab and counts are live instead of
+dead by construction; an unresolved attempt keeps the row
+active and a canceled request with an unresolved job stays
+in view for reconciliation. dispatch.tsx pins the selection
+to the just-actioned job, so Observe results, applied
+reports, the requested-vs-applied mismatch banner, the
+local-session summary and launch/retire controls stay
+reachable after a job settles. projects.tsx replaces the
+row's settings gear with a FolderOpen action calling the
+existing office:project-open-folder IPC (honest errors for
+missing/unconfigured folders); the inline location panel is
+removed from the list and configuration stays on the detail
+page. queue.tsx badges settled request rows Completed.
+main.tsx opens the request dialog whenever a non-archived,
+non-removed project exists — the dialog's own project
+select defaults to a valid project — and reserves
+project-creation for the zero-projects state; the fixup
+applies the same gate to the WorkQueue onNew prop, the
+call site the packet had mislabeled. desktop.e2e.ts covers
+the folder control, the no-selection New request path and
+the dialog default, and repairs a stale bridge-keys
+allowlist for the P8–P10 IPC additions. Deferred, not
+silently folded in: LOCAL_CLI_EXEC probes (claude/codex
+headless, sandbox read-confinement, devin acp
+session/cancel and per-session mcpServers) need their own
+authorized round; the dependsOn artifact-relay design
+touches snapshot provenance and needs its own packet; the
+worktree lane stays registered-but-unselected pending a
+user layout choice. Combined verification: typecheck clean,
+657/658 unit (1 skipped: privileged symlink fixture),
+build clean, desktop e2e passed in the worker checkout.
+
+2026-09-20 (cli-exec-1, worker-1 666f1fc + organizer
+prereq b980199 + wiring fixup a6f5305; combined
+verification at a6f5305) — LOCAL_CLI_EXEC: the
+office-spawned local route is now real. Probes first
+(docs/cli-exec-probes.md): all three providers ran
+contract-bound headless runs against real
+prepareLocalPacket packets and all three receipts
+validated through the office's own readLocalResult —
+claude -p (writes need --dangerously-skip-permissions;
+registers ~/.claude/projects/<cwd-key>/), codex exec -s
+workspace-write (spawn cwd is authoritative; -C does not
+place the model's shell), devin -p --model --respect-
+workspace-trust false --permission-mode dangerous (auto
+and accept-edits both get the write tool rejected
+non-interactively). Two probe traps are documented:
+agent shells carrying ACP_* mask Devin's file credential
+(the earlier 'expired credential' diagnosis was wrong —
+same file, env -u ACP_BACKEND flips it), and
+subscriptionEnvironment() already scrubs them for
+spawned children. The LocalCliExecAdapter spawns the
+installed CLI inside the packet it wrote (cwd=packetDir,
+scrubbed env, stdin ignored, 30-minute office kill
+limit), buffers bounded stdout/stderr into deduped
+PROVIDER_REPORTED job events, and reads receipts through
+the identical readLocalResult/readLocalCancelAck —
+extracted into local-packet.ts as shared helpers the
+mailbox now delegates to, its suite unmodified.
+Cancellation writes the same cooperative sentinel then
+kills only a registry-owned live child; an office kill
+reports FAILED/OFFICE_LOCAL ('a killed run cannot be
+trusted to write a receipt'), a self-exit stays UNKNOWN,
+and post-restart pid liveness is informational — the
+office never claims ownership of a process it did not
+spawn. Launch evidence embeds the verbatim record (pid,
+executable, argv with <prompt:sha256> marker, exact
+bypass flags, cwd, timeout, requested model/effort plus
+effortFlag or unmappedEffort) stamped LOCAL_CLI_EXEC
+TOOL_SUPPORTED/OBSERVED 'office-spawned unattended run';
+applied facts come only from receipt-declared fields.
+Organizer seam: LocalSessionRouter gained a route
+parameter (exec fills both layout slots so a misbound
+record fails closed) and plan() forwarding; main.ts
+selects exec vs mailbox by agent.localRoute (absent =
+mailbox, existing agents unaffected); agentDispatch
+Readiness already scopes evidence by route — mailbox
+evidence does not satisfy an exec scope. agents.tsx adds
+the Local transport select; dispatch.tsx labels exec
+launches honestly; workflow.md documents the route, the
+cancellation truth table, the restart-ownership limit
+and the non-claims. Deferred by design: the dependsOn
+artifact-relay runner is Phase 3's own packet; LOCAL_ACP
+stays unwired (devin acp mapped for the record:
+session/list works unauthenticated, session/cancel is a
+notification, session/new requires host-authenticated
+meta.api_key). Combined verification: typecheck clean,
+675 tests 674 pass 1 skipped (pre-existing privileged
+symlink fixture), build clean — run on the integrated
+head after the wiring fixup.
+
+2026-09-20 (auto-chain-1, organizer; direct request —
+'build phase 3/ full automatic pipeline') — the
+deferred dependsOn runner is real: the office now
+advances a dependent automatically once every recorded
+predecessor job reaches COMPLETED with durably stored,
+hash-verified output. Prepare accepts dependsOn (IPC,
+preload and a renderer dependency picker with honest
+waiting status); the launch guard already refused
+incomplete predecessors. prepareLocalPacket gains an
+inherited/ tree: each predecessor's stored output bytes
+are read back through OutputService.readBytes,
+re-hashed byte-for-byte at write time and manifested
+with the source job id and object hash — a missing or
+mutated object fails the write loudly, and a packet
+with no predecessors declares no inherited manifest.
+Controller.advanceLocalChain / reconcileLocalChain run
+every launch through the identical guard-binding-packet
+path a manual launch takes, serialized behind a single
+tail promise and idempotent — an already-dispatched job
+is never resubmitted, launches are recorded as
+chain-launch:/chain-blocked: office-local testimony,
+and hosted-route dependents are never auto-launched.
+Observation is event-driven, never polled: the exec
+adapter watches its packet directory and emits one
+debounced local event on child exit or result.json /
+cancel.ack.json arrival; the office observes through
+the same validated reader, and a verified completion
+advances the chain — a self-exit without a receipt
+stays UNKNOWN. One real defect surfaced in verification:
+unref'd fs.watch handles alone kept the process alive
+on Windows, so spawn bookkeeping (watcher + timers +
+registry) is now explicitly disposed the moment a job's
+outcome is verified terminal and at office shutdown.
+Router gained packetVersion forwarding — exec bindings
+were minted version 1 and would have failed their own
+flat-packet check. tests/local-chain.test.ts (12 tests)
+proves gating, verified inheritance, defect-locking,
+missing-object blockers, idempotent and restart
+reconciliation, hosted exclusion, debounced triggers
+and watcher release; workflow.md documents the chain.
+Verification: typecheck clean, 688 tests 687 pass
+1 skipped (pre-existing privileged symlink fixture),
+build clean — and the suite exits promptly, which it
+did not before disposal.
+
+2026-09-21 (three-agent live acceptance; organizer) —
+the Director → PM → Worker LOCAL_CLI_EXEC chain passed
+end to end against three real claude.exe processes:
+one manual handoff, two event-driven dependent
+launches, exact inherited manifests, agent-measured
+predecessor hashes matching stored output bytes, and
+verified durable results with no replay duplication.
+Artifact root
+app/test-output/three-agent-live-2026-09-22T00-03-19-074Z/
+(acceptance.json = PASS); the full record is
+records/reviews/three-agent-acceptance-2026-09-21.md.
+Two live defects were found and repaired in 5febc7f:
+CONTRACT.md pointed packetHash at packet.json instead
+of the packet.sha256 sidecar (first run's receipt
+bound snapshotManifestHash and was correctly refused),
+and concurrent completion triggers could record a
+false chain-blocked event for an already-launched
+dependent — the serialized section now re-verifies
+durable INTENT/route/readiness before any handoff.
+Final regression at the fixed source: 690 tests, 689
+passed, one existing privileged-symlink skip;
+typecheck, build and the three development desktop
+suites pass. Bounded local synthetic orchestration
+only — no hosted execution, mixed-provider chain,
+packaged acceptance or user-run Colab claim. Next:
+reproduce output-storage failure recovery and retain
+process/watch bookkeeping until durable terminal
+admission.
+
+2026-09-21 (pre-restart defect fixes; organizer) —
+two app defects surfaced while driving the UI chain:
+post-creation effort edits on Claude agents rejected
+every non-default level because office:agent-effort
+fetches a connection only for openai and
+validateEffort then collapsed to Provider default;
+the tool-published session enum now applies to claude
+with or without a connection, while signed-in catalog
+narrowing and OpenAI/Devin account-bound strictness
+are unchanged (ea1f354, activity.test.ts). The
+Projects page had no New project entry once any
+active project existed; the heading now always offers
+it (de8bc34). Workspace debris from the interrupted
+UI run was retired through domain ops only — three
+'UI chain *' draft requests canceled, the 'UI
+three-agent chain acceptance' project archived and
+removed from lists, and the three 'UI Chain *' agent
+profiles archived and removed; INTENT assignments/
+jobs remain as retained inert records. No provider
+calls ran for any of this.
+
+2026-09-21 (office-chat revision; organizer, review
+9.2) — a view-only Office chat panel lands beside the
+agent scene: shared/office-chat.ts projects recorded
+inter-agent messages, provider job events and office
+status into a scope-bound, newest-first paged feed
+(store.officeChatPage over office:chat-page IPC;
+publicState still strips messages/jobEvents).
+office-chat.tsx renders text only — no HTML — with
+project/participant filters, Load-earlier paging,
+unread handling and per-entry evidence labels.
+chatEventText surfaces only speech and tool names
+from known CLI envelopes; thinking, credentials
+metadata and raw JSON never render. local-cli-exec
+stdout now triggers the existing 750 ms debounced
+office update (bounded once per interval on busy
+streams), and the observe drain covers the whole
+bounded buffer; speech still cannot settle a job.
+Independent review found the implementation correct
+and one test line wrong: the suite named zod's raw
+'max 100' detail where the IPC boundary deliberately
+maps ZodError to the generic message — corrected to
+/Invalid desktop request/. Verification at 10171dc:
+695 tests, 694 pass, 1 pre-existing skip; typecheck
+and build clean; all four desktop suites pass
+(office-chat, desktop.e2e, pipeline, revision).
+Scope note: the panel shows recorded activity — for
+claude -p in json mode stdout lands in one envelope
+at completion, so a claude hop's text appears near
+end-of-run; true mid-run dialog needs stream-json or
+transcript tailing, a clean follow-up.
+
+2026-09-22 (round boot-rev-1 integrated at 2dbe569;
+worker-1 a0e5f6c + organizer wiring) — reviewer
+follow-up on startup UX: the window is now created
+show:true with the existing backgroundColor, so cold
+start paints immediately instead of sitting invisible
+through store open and reconcile; a taskbar click
+during boot now focuses a real window rather than
+restoring a hidden one. Reconcile and
+reconcileLocalChain still complete before register()
+and before the renderer loads, so no page can issue
+IPC early — the invariant moved behind the visible
+window, not away. win.loadFile now runs through
+boot-load.ts loadWindowWithRetry: one bounded retry
+after 400 ms (loadFile's did-fail-load rejection
+makes the promise cover both failure surfaces), then
+the first error propagates to the existing fatal
+dialog. The packaged binary was rebuilt the same
+evening and verified to contain the office-chat,
+packet-hash contract and race-recheck fixes — the
+stale-release finding is closed. Worker-1 owned the
+Electron-free module and its five unit tests; the
+organizer owned main.ts wiring. Verification: worker
+checks independently rerun (5/5, tsc clean);
+combined unit suite, typecheck, build and the
+desktop e2e (real boot path) pass at this head.
+2026-09-22 (round comm-pipe-1 integrated at 68a6e8b;
+workers 1-5 + organizer wiring) — inter-agent
+communication pipeline. Frozen contract first
+(organizer f9f27a3): toolProfile rides assignment →
+local-session binding → packet.json, backward-
+compatible, schema-tested. Worker-1 (d4607ea, merge
+0932cc1): recordChainHandoff emits exactly one
+HANDOFF per successful dependent launch — sender
+predecessor, receiver dependent, scoped to the
+dependent's requestId/projectId/assignmentId, with
+scopeOutputHashes carrying verified inherited object
+hashes or the packet identity — plus a separate
+delivery receipt naming what the office re-verified;
+refusals, preflight failures and parked dependencies
+emit nothing, ISOLATION sealing intact,
+reconciliation idempotent. Worker-2 (2c1b74a, merge
+5df2cfa): tool-flags maps declared profiles to
+verified provider flags only — claude --tools (real
+tool-set restriction under bypass, unlike the
+advisory --allowedTools) and --mcp-config, codex
+-s read-only for canWrite=false, devin
+--permission-mode/--respect-workspace-trust with
+--sandbox correctly refused on win32; every
+unexpressible restriction lands verbatim in
+unmappedRestrictions on the launch record.
+Worker-3 (bbc30ea, merge d0f3043): serena-session
+spawns the profile's pinned serena server per
+session (stdio, --project <packet dir>), readiness
+is an observed MCP initialize handshake — never
+spawn alone — with fail-closed handling of missing
+entries, spawn errors, dead stdin, early exit,
+timeout and repeated dispose. Worker-4 (a90d06f,
+merge 66ecb42): evidence-tool wraps
+EvidenceService with zod-strict callers, grants
+checked inside the service before any bytes move,
+structured MALFORMED/OUT_OF_SCOPE/CURSOR_MISMATCH/
+FAILED refusals receipted via the new recordDenial
+op, opaque cursors bound to agent+project+request+
+op+args, declared totals or UNKNOWN_TOTAL, and a
+JSONL frame edge for packet transport. Worker-5
+(3d16132, merge badf3bd): round-template builds the
+office-comm-round@1 diverge→converge spec — two
+isolated draft arms on byte-identical manifests, one
+bounded cross-critique each naming the opposite
+artifact only, director synthesis, optional phase-2
+interpret∥falsify mirror, implement/verify/gate —
+pure, deterministic, DAG-validated, artifact refs
+only (transcripts are structurally absent).
+Organizer wiring landed the modules on the live
+path: local-cli-exec prepares the tool surface
+before spawn — a declared serena entry gets an
+office-side readiness probe (blocking the launch
+when the handshake fails, only for providers with a
+verified MCP attach so an unmapped server cannot
+block a run that could never reach it) and writes
+.serena/project.yml read_only when declared; a
+declared evidence-surface mounts the queries/
+answers drop-box with a watcher serving JSONL frames
+under the assignment-bound caller (deduped by
+in-flight join + durable answer-file + writeNew
+backstop), and CONTRACT.md documents the channel;
+tool-flags partitions the office-mounted id out of
+--mcp-config for every provider; main.ts binds
+handleEvidenceFrame to the EvidenceService. Ten new
+tool-surface tests cover the mount, the probe gate,
+the drop-box serve and the byte-identical
+unprofiled path. Deferred honestly: the round
+executor that mints requests from a comm-round spec
+(the DAG remains hand-runnable through the UI), a
+live serena/arm pilot (acceptance needs a real
+installed server), and worker-5's verify hop is
+assigned to the director where the reviewer text
+suggested PM spot-checks — a one-line change when
+the executor lands. Verification: combined unit
+suite 758/759 pass, 1 pre-existing skip, typecheck and build clean at this
+head; workers' packet checks independently rerun
+(18/18, 27/27, 13/13, 8/8, 7/7).
+
+2026-09-22 (round comm-pipe-2 integrated at 6dc5603;
+workers 1-3 + organizer wiring) — pipeline request
+types. Contract frozen first (organizer ffe9649):
+WorkType gains PLANNING / RESULT_ANALYSIS / OTHER
+(old stored values stay valid), Request gains
+pipeline {kind, specHash, BRIEFING/LAUNCHED,
+briefAssignmentId} plus bounded pipelineNotes,
+Assignment gains pipelineKey, request.start gates
+pipeline types on the director seat plus roster
+role coverage (PM_A/PM_B/WORKER or PM_C/PM_D/
+WORKER) instead of participant lists, and
+request.pipeline.note / .confirm land as commands.
+Worker-1 (b571808, merge 6d72517): round-template —
+plan-brief leads buildCommRound with both draft
+arms depending on it alone on identical manifests;
+new buildAnalysisRound emits the standalone
+RESULT_ANALYSIS spec brief → digest → interpret ∥
+falsify → bounded responses → finalize → report →
+user-gate; every CommRoundEntry carries armRole
+naming its roster seat. Worker-2 (c782527, merge
+43ecf26): round-executor — the pure mint layer:
+planCommRoundMint resolves the director from
+leadAgentId and arms by roster role with every
+missing seat refused by name, planRefineHop mints
+bounded (≤4000) brief-refine-N hops carrying only
+the note, mintEntriesFor re-keys the spec DAG onto
+minted assignment ids; reconciled to the landed
+singular workerAgentId declaration. Worker-3
+(1682b16, merge 7ac5643): renderer — Work type is
+exactly Planning / Result analysis / Other; the
+pipeline options render a Director picker plus the
+honest briefing hint and no mode/responsible/
+collaborators controls; Other keeps the unchanged
+controls; queue cards show 'planning/result
+analysis pipeline' meta plus the briefing surface
+(brief job state, recorded notes, bounded note
+input, Launch gated on the brief job COMPLETED);
+RequestDispatch renders status text only so manual
+preparation never mints extra assignments on a
+pipeline request. Organizer wiring: pipeline-runner
+mints through the real prepare path — request.start
+mints only the director brief hop then handoffs it
+through the guarded launch, each note mints a
+chained refine hop and re-binds the gate,
+request.pipeline.confirm mints every remaining
+spec entry in topological order with dependsOn
+resolved to minted assignment ids, and the chain
+machinery carries the DAG on durable receipts;
+pipelineConfirmGate resolves the whole spec before
+the phase flips so a missing role leaves the
+request honestly briefing; bindPipelineBrief is an
+office-only store method that never bumps the
+frozen request revision; createAssignment exempts
+pipelineKey hops from the one-open-job rule because
+the DAG, not job state, serializes their launches;
+confirm re-runs on LAUNCHED as a mint retry;
+prepare() takes pipelineKey plus the bounded
+objective override that becomes the hop's frozen
+payload; assertLifecycle exempts pipelined seats —
+the office mint is the recorded authorization.
+desktop.e2e.ts retargeted: the scientific flow now
+drives request.create workType=EXPERIMENT through
+the command surface directly (the form no longer
+offers it). Verified at this head: 779 tests / 778
+pass / 1 pre-existing skip, tsc and build clean;
+workers' packet checks independently rerun (10/10,
+11/11, desktop pass). Deferred honestly: a live
+pipeline run still needs the full role roster bound
+(pm/director/worker agents); hosted-provider arms
+are minted through the same path but only local
+CLI routes were exercised; the user-gate hop is a
+director-run step, not a UI control.

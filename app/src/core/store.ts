@@ -1,12 +1,38 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, realpathSync, statSync } from 'node:fs';
+
+/** stat that returns undefined for missing/unreadable paths instead of throwing raw ENOENT. */
+function safeStat(p: string) { try { return statSync(p); } catch { return undefined; } }
+
+/**
+ * The project dialog's folder field and the location record describe one scope. Writing through
+ * here keeps the record — the field snapshots actually read — in step with the display copy on the
+ * project, in the same transaction. The revision bumps only when the folder value really changes,
+ * so a mandate-only edit never invalidates a prepared snapshot.
+ */
+function upsertLocationScope(state: Projection, changes: Change[], project: Project, root: string, now: string): boolean {
+  const existing = (state.locations ?? []).find(l => l.projectId === project.id);
+  if ((existing?.localFolder ?? '') === root) return false;
+  const location: ProjectLocation = {
+    id: existing?.id ?? randomUUID(), projectId: project.id, localFolder: root, inputPaths: existing?.inputPaths ?? [],
+    outputFolder: existing?.outputFolder ?? '',
+    sourceRepository: root && existsSync(resolve(root, '.git')) ? resolve(root, '.git') : '',
+    snapshotRoute: 'PROJECT_FOLDER_SNAPSHOT',
+    providerTarget: existing?.providerTarget ?? { provider: 'claude', host: 'ANTHROPIC_MANAGED', selection: 'PROVIDER_DEFAULT', environmentId: '', resolved: false },
+    legacyNote: existing?.legacyNote ?? project.cloudWorkspace ?? '',
+    revision: (existing?.revision ?? 0) + 1, createdAt: existing?.createdAt ?? now, updatedAt: now,
+  };
+  changes.push({ collection: 'locations', value: location });
+  return true;
+}
 import { resolve, isAbsolute } from 'node:path';
 import { DatabaseSync, backup as sqliteBackup } from 'node:sqlite';
 import { z } from 'zod';
 import { independenceClaimBlocker } from '../shared/cooperation.js';
-import { requestJobs } from '../shared/queue.js';
+import { requestJobs, UNRESOLVED } from '../shared/queue.js';
 import type { AccountConnection, ProviderCapabilitySnapshot, ProjectLocation, InputSnapshot, Assignment, ProviderJob, JobEvent, JobEvidence, JobState, Team, TeamMembership, Message, ReviewDecision, RequestGrant, ProbeAttempt, ResearchBranch, FrozenResearchSpec, PredictionRecord, TrialLedgerEntry, StageAttempt, GateReceipt, FunctionAssignment, SealedReviewReport, Agent, AgentLog, WorkLog, Effort, AppState, Artifact, Command, Experiment, LineageEvent, Project, ResearchContract, ResearchTask, Request, Settings } from '../shared/types.js';
 import { canonical, canonicalHash, sha256 } from './canonical.js';
+import { officeChatPage, type OfficeChatQuery } from '../shared/office-chat.js';
 import { parseStrictJson } from './strict-json.js';
 import {ResearchAdmission} from './research-admission';
 import {adjudicate,recheckMandatoryGates} from './adjudication';
@@ -15,6 +41,8 @@ import type {HoldoutReservation,EvaluatorResult} from '../shared/holdout';
 import {shadowBatchSchema} from '../shared/shadow';
 import {replayShadow} from './shadow-ledger';
 import { nextJob } from './jobs.js';
+import { appliedReportPayloadSchema, localLaunchPlanSchema, localSessionJournalSchema, localSessionRecordSchema, localSessionSummarySchema, transitionLocalLifecycle, type LocalLaunchPlan, type LocalSessionJournal, type LocalSessionRecord, type LocalSessionSummary } from '../shared/local-session.js';
+import { toolProfileSchema } from '../shared/tool-profile.js';
 import { MAX_BUDGET_CENTS } from './guards.js';
 import {pipelineRecordSchema,stageContextHash,stageContextSchema,stageReportSchema,type PipelineRecord} from '../shared/pipeline';
 import {evidenceRecordSchema,type EvidenceRecord} from '../shared/evidence';
@@ -37,10 +65,12 @@ const gateEnum=z.enum(['G-SPEC','G-CORRECT','G-TIME','G-SPLIT','G-FIT','G-TARGET
 const outcomeEnum=z.enum(['IN_PROGRESS','VALID_NEGATIVE','INCONCLUSIVE','RETIRED','SHADOW_QUALIFIED','SUSPENDED']);
 const common = { idempotencyKey: z.string().min(8).max(128).regex(/^[a-zA-Z0-9_-]+$/) };
 export const commandSchema = z.discriminatedUnion('type', [
-  z.object({...common,type:z.literal('request.create'),projectId:id,name:title,hypothesis:z.string().trim().min(1).max(12000),workType:z.enum(['QUESTION','ANALYSIS','IMPLEMENTATION','CODE_REVIEW','EXPERIMENT']).optional(),mode:z.enum(['SINGLE','GROUP','TEAM']).optional(),leadAgentId:id.nullable().optional(),participantIds:z.array(id).optional(),acceptanceCriteria:text(12000).optional()}).strict(),
+  z.object({...common,type:z.literal('request.create'),projectId:id,name:title,hypothesis:z.string().trim().min(1).max(12000),workType:z.enum(['QUESTION','ANALYSIS','IMPLEMENTATION','CODE_REVIEW','EXPERIMENT','PLANNING','RESULT_ANALYSIS','OTHER']).optional(),mode:z.enum(['SINGLE','GROUP','TEAM']).optional(),leadAgentId:id.nullable().optional(),participantIds:z.array(id).optional(),acceptanceCriteria:text(12000).optional()}).strict(),
   z.object({...common,type:z.literal('request.update'),requestId:id,expectedRevision:z.number().int().nonnegative(),objective:z.string().trim().min(1).max(12000),leadAgentId:id.nullable(),participantIds:z.array(id),acceptanceCriteria:text(12000)}).strict(),
-  ...(['request.start','request.cancel','request.duplicate'] as const).map(type=>z.object({...common,type:z.literal(type),requestId:id,expectedRevision:z.number().int().nonnegative()}).strict()),
+  ...(['request.start','request.cancel','request.duplicate','request.pipeline.confirm'] as const).map(type=>z.object({...common,type:z.literal(type),requestId:id,expectedRevision:z.number().int().nonnegative()}).strict()),
+  z.object({...common,type:z.literal('request.pipeline.note'),requestId:id,expectedRevision:z.number().int().nonnegative(),text:z.string().trim().min(1).max(4000)}).strict(),
   z.object({...common,type:z.literal('agent.remove'),agentId:id,removed:z.boolean()}).strict(),
+  z.object({...common,type:z.literal('agent.delete'),agentId:id}).strict(),
   z.object({...common,type:z.literal('agent.update'),agentId:id,expectedRevision:z.number().int().nonnegative().optional(),name:title,team:title,role,instructions:text(12000)}).strict(),
   z.object({ ...common, type: z.literal('project.create'), name: title, mandate: text(30000), localFolder:text(32000).optional(),cloudWorkspace:text(1000).optional(), budgetCents: cents }).strict(),
   z.object({ ...common, type: z.literal('project.update'), projectId: id, name: title, mandate: text(30000), localFolder:text(32000).optional(),cloudWorkspace:text(1000).optional(), budgetCents: cents }).strict(),
@@ -68,34 +98,37 @@ export const commandSchema = z.discriminatedUnion('type', [
     outcome: outcomeEnum, reason: text(2000) }).strict(),
   z.object({ ...common, type: z.literal('request.grant'), requestId: id, agentId: id, capacity: z.enum(['REVIEW','WORKER','DIRECTOR','DELEGATE']), granted: z.boolean() }).strict(),
   z.object({ ...common, type: z.literal('request.slots'), requestId: id, expectedRevision: z.number().int().nonnegative(), teamId: id.nullable(), slots: z.array(z.object({role,count:z.number().int().min(1).max(64)}).strict()).max(16) }).strict(),
-  z.object({ ...common, type: z.literal('location.save'), projectId: id, expectedRevision: z.number().int().nonnegative(), localFolder: text(32000), inputPaths: z.array(z.string().min(1).max(1000)).max(2000), outputFolder: text(32000) }).strict(),
+  z.object({ ...common, type: z.literal('location.save'), projectId: id, expectedRevision: z.number().int().nonnegative(), localFolder: text(32000), inputPaths: z.array(z.string().min(1).max(1000)).max(2000).optional(), outputFolder: text(32000) }).strict(),
   z.object({ ...common, type: z.literal('experiment.create'), projectId: id, name: title, hypothesis: text(12000) }).strict(),
   z.object({ ...common, type: z.literal('contract.save'), experimentId: id, expectedRevision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER - 1), contract: contractSchema }).strict(),
   z.object({ ...common, type: z.literal('contract.submit'), experimentId: id, expectedRevision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER - 1) }).strict(),
   z.object({ ...common, type: z.literal('task.create'), projectId: id, experimentId: id.nullable(), prompt: z.string().trim().min(1).max(30000), recipient: role }).strict(),
   z.object({ ...common, type: z.literal('task.cancel'), taskId: id }).strict(),
   z.object({ ...common, type: z.literal('task.delete'), taskId: id, expectedRevision: z.number().int().nonnegative().optional() }).strict(),
+  z.object({ ...common, type: z.literal('project.delete'), projectId: id }).strict(),
   z.object({ ...common, type: z.literal('settings.update'), settings: settingsSchema }).strict(),
 ]);
-const projectSchema = z.object({ id, name: title, mandate: text(30000), localFolder:text(32000).optional(),cloudWorkspace:text(1000).optional(), budgetCents: cents, archived: z.boolean(), createdAt: timestamp, updatedAt: timestamp }).strict();
+const projectSchema = z.object({ id, name: title, mandate: text(30000), localFolder:text(32000).optional(),cloudWorkspace:text(1000).optional(), budgetCents: cents, archived: z.boolean(), removedAt: timestamp.optional(), createdAt: timestamp, updatedAt: timestamp }).strict();
 const experimentSchema = z.object({ id, projectId: id, name: title, hypothesis: text(30000), stage: z.enum(['DRAFT', 'CONTRACT_REVIEW', 'CANCELED']), revision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER), contract: contractSchema, createdAt: timestamp, updatedAt: timestamp }).strict();
 const taskSchema = z.object({ id, projectId: id, experimentId: id.nullable(), prompt: text(30000), recipient: role, status: z.enum(['BLOCKED', 'CANCELED', 'SUPERSEDED']), blocker: text(1000).nullable(), removedAt: timestamp.optional(), createdAt: timestamp, updatedAt: timestamp }).strict();
 const artifactSchema = z.object({ id, projectId: id, experimentId: id.nullable(), name: z.string().min(1).max(255).refine(value => !/[\\/\x00-\x1f]/.test(value), 'Artifact name must be a basename'), sha256: hash, size: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER), kind: z.enum(['REFERENCE','RESULT']), classification: z.enum(['UNCLASSIFIED','USER_ATTESTED']), status: z.enum(['STORED','QUARANTINED']), createdAt: timestamp, mediaType: text(160), note: text(4000) }).strict();
 export const effortSchema=z.enum(['default','none','minimal','low','medium','high','xhigh','max','ultra']);
-export const agentDraftSchema = z.object({ name: title, provider: z.enum(['openai','claude','devin']), model: z.string().trim().min(1).max(160), team: title, role, instructions: text(12000), effort: effortSchema.optional(), execution: z.enum(['HOSTED_SETUP_REQUIRED','LOCAL']).optional(), toolProfile: z.enum(['STANDARD','CODE_NAV']).optional() }).strict();
+export const agentDraftSchema = z.object({ name: title, provider: z.enum(['openai','claude','devin']), model: z.string().trim().min(1).max(160), team: title, role, instructions: text(12000), effort: effortSchema.optional(), execution: z.enum(['HOSTED_SETUP_REQUIRED','LOCAL']).optional(), toolProfile: z.enum(['STANDARD','CODE_NAV']).optional(), localRoute: z.enum(['LOCAL_MAILBOX','LOCAL_CLI_EXEC']).optional() }).strict();
 // `account` stays the historical setup identity. `connectionId` is a durable binding fact and is never writable through a profile edit.
-const agentSchema = agentDraftSchema.extend({revision:z.number().int().nonnegative().optional(),removedAt:timestamp.optional(),id, account: title, setupAccount: title.optional(), createdAt: timestamp, connectionVerifiedAt: timestamp, connectionId:id.optional(), bindingVerifiedAt:timestamp.optional(), execution: z.enum(['HOSTED_SETUP_REQUIRED','LOCAL']).default('HOSTED_SETUP_REQUIRED')}).strict();
+const agentSchema = agentDraftSchema.extend({revision:z.number().int().nonnegative().optional(),removedAt:timestamp.optional(),deletedAt:timestamp.optional(),id, account: title, setupAccount: title.optional(), createdAt: timestamp, connectionVerifiedAt: timestamp, connectionId:id.optional(), bindingVerifiedAt:timestamp.optional(), execution: z.enum(['HOSTED_SETUP_REQUIRED','LOCAL']).default('HOSTED_SETUP_REQUIRED')}).strict();
 const logSchema=z.object({id,conversationId:z.string().min(1).max(200),from:z.string().min(1).max(100),to:z.string().min(1).max(100),kind:z.enum(['MESSAGE','TOOL','STATUS']),text:text(64000),timestamp,sourceHash:hash,externalId:z.string().min(1).max(200),provenance:z.literal('USER_IMPORTED')}).strict();
-const requestSchema=z.object({migratedFromTaskId:id.optional(),teamId:id.optional(),roleSlots:z.array(z.object({role,count:z.number().int().min(1).max(64)}).strict()).max(16).optional(),id,projectId:id,experimentId:id.nullable(),name:title,objective:text(12000),workType:z.enum(['QUESTION','ANALYSIS','IMPLEMENTATION','CODE_REVIEW','EXPERIMENT']),mode:z.enum(['SINGLE','GROUP','TEAM']),leadAgentId:id.nullable(),participantIds:z.array(id),acceptanceCriteria:text(12000),revision:z.number().int().nonnegative(),status:z.enum(['DRAFT','READY','CANCELED']),removedAt:timestamp.optional(),blockers:z.array(z.object({code:text(100),message:text(1000),action:text(200)}).strict()),delegation:z.boolean(),createdAt:timestamp,updatedAt:timestamp,sourceRequestId:id.optional()}).strict();
+const requestSchema=z.object({migratedFromTaskId:id.optional(),teamId:id.optional(),roleSlots:z.array(z.object({role,count:z.number().int().min(1).max(64)}).strict()).max(16).optional(),id,projectId:id,experimentId:id.nullable(),name:title,objective:text(12000),workType:z.enum(['QUESTION','ANALYSIS','IMPLEMENTATION','CODE_REVIEW','EXPERIMENT','PLANNING','RESULT_ANALYSIS','OTHER']),mode:z.enum(['SINGLE','GROUP','TEAM']),leadAgentId:id.nullable(),participantIds:z.array(id),acceptanceCriteria:text(12000),revision:z.number().int().nonnegative(),status:z.enum(['DRAFT','READY','CANCELED']),removedAt:timestamp.optional(),blockers:z.array(z.object({code:text(100),message:text(1000),action:text(200)}).strict()),delegation:z.boolean(),createdAt:timestamp,updatedAt:timestamp,sourceRequestId:id.optional(),
+  pipeline:z.object({kind:z.enum(['PLANNING','RESULT_ANALYSIS']),specHash:hash.nullable(),phase:z.enum(['BRIEFING','LAUNCHED']),briefAssignmentId:id.nullable()}).strict().optional(),
+  pipelineNotes:z.array(z.object({id,text:text(4000),createdAt:timestamp}).strict()).max(64).optional()}).strict();
 const providerEnum=z.enum(['openai','claude','devin']);
 /** Defence in depth: durable records must never carry provider secrets, even in free-text fields. */
 const secretFree=(maximum:number)=>text(maximum).refine(value=>!/\b(sk-[A-Za-z0-9_-]{8,}|Bearer\s+[A-Za-z0-9._-]{12,}|eyJ[A-Za-z0-9._-]{16,})/.test(value),'Durable records must not contain credentials');
 const usageWindowSchema=z.object({label:secretFree(200),remainingPercent:z.number().min(0).max(100),resetsAt:z.number().int().nonnegative()}).strict();
 const connectionSchema=z.object({id,provider:providerEnum,identity:secretFree(320),credentialContext:secretFree(200),state:z.enum(['SIGNED_IN','SIGNED_OUT','UNKNOWN']),allowance:z.array(usageWindowSchema).max(32),note:secretFree(2000),revision:z.number().int().nonnegative(),firstSeenAt:timestamp,lastCheckedAt:timestamp,sequence:z.number().int().positive().optional()}).strict();
-const capabilityModelSchema=z.object({id:secretFree(160),name:secretFree(200),efforts:z.array(effortSchema).max(16).optional(),defaultEffort:effortSchema.optional(),effortDescriptions:z.array(z.object({effort:effortSchema,description:secretFree(2000)}).strict()).max(16).optional(),source:secretFree(2000).optional()}).strict();
+const capabilityModelSchema=z.object({id:secretFree(160),name:secretFree(200),efforts:z.array(effortSchema).max(16).optional(),defaultEffort:effortSchema.optional(),effortDescriptions:z.array(z.object({effort:effortSchema,description:secretFree(2000)}).strict()).max(16).optional(),family:secretFree(160).optional(),effort:effortSchema.optional(),source:secretFree(2000).optional()}).strict();
 // 'CLOUD_CANCEL' is retained only so older recorded events still replay; new evidence uses the request/acknowledgement pair.
 const routeEnum=z.enum(['FAKE_ADAPTER','OFFICIAL_TERMINAL_HANDOFF','OFFICIAL_CLI_PTY','LOCAL_MAILBOX','LOCAL_CLI_EXEC','LOCAL_ACP']);
-const operationEnum=z.enum(['ACCOUNT_STATUS','MODEL_CATALOG','ALLOWANCE_READ','CLOUD_SUBMIT','CLOUD_OBSERVE','CLOUD_FOLLOW_UP','CLOUD_OUTPUT_FETCH','CLOUD_CANCEL_REQUEST','CLOUD_CANCEL_ACK','MODEL_APPLICATION','EFFORT_APPLICATION','ENVIRONMENT_IDENTITY','DELEGATION_CONTROL','TOOL_CONFINEMENT','CLOUD_CANCEL','LOCAL_SUBMIT','LOCAL_OBSERVE','LOCAL_OUTPUT_FETCH','LOCAL_CANCEL']);
+const operationEnum=z.enum(['ACCOUNT_STATUS','MODEL_CATALOG','ALLOWANCE_READ','CLOUD_SUBMIT','CLOUD_OBSERVE','CLOUD_FOLLOW_UP','CLOUD_OUTPUT_FETCH','CLOUD_CANCEL_REQUEST','CLOUD_CANCEL_ACK','MODEL_APPLICATION','EFFORT_APPLICATION','ENVIRONMENT_IDENTITY','DELEGATION_CONTROL','TOOL_CONFINEMENT','CLOUD_CANCEL','LOCAL_SUBMIT','LOCAL_OBSERVE','LOCAL_OUTPUT_FETCH','LOCAL_CANCEL','LOCAL_RETIRE']);
 const evidenceSchema=z.object({operation:operationEnum,level:z.enum(['DOCUMENTED','TOOL_SUPPORTED','ACCOUNT_VERIFIED','UNAVAILABLE','UNKNOWN']),detail:secretFree(1000),evidence:z.enum(['OBSERVED','DOCUMENTED']).optional(),verifiedAt:timestamp.optional(),model:secretFree(160).optional(),environment:secretFree(200).optional(),effort:effortSchema.optional(),delegation:z.boolean().optional(),route:routeEnum.optional(),confinement:z.object({tools:secretFree(400),filesystem:secretFree(400),network:secretFree(400),environment:secretFree(400)}).strict().optional(),source:secretFree(1000).optional()}).strict()
   // Only an operation that was actually exercised may claim account verification.
   .refine(value=>value.level!=='ACCOUNT_VERIFIED'||value.evidence==='OBSERVED','Account-verified evidence must come from an observed operation');
@@ -103,23 +136,29 @@ const capabilitySchema=z.object({id,provider:providerEnum,connectionId:id,identi
 export const observationSchema=connectionSchema.omit({id:true,revision:true,firstSeenAt:true,lastCheckedAt:true})
   .merge(capabilitySchema.pick({toolVersion:true,transport:true,environment:true,models:true,operations:true,source:true}))
   .extend({observedAt:timestamp}).strict();
+/**
+ * Office-observed evidence about a local transport, bound to the durable connection it was taken
+ * under. The caller names the connection, the route and the scope the batch ran under; the provider,
+ * identity, tool version and catalog are always taken from the recorded account, never from input.
+ */
+const transportEvidenceSchema=z.object({connectionId:id,route:routeEnum,environment:secretFree(200),model:secretFree(160).optional(),effort:effortSchema.optional(),delegation:z.boolean().optional(),operations:z.array(evidenceSchema).min(1).max(64),source:secretFree(1000),observedAt:timestamp}).strict();
 const relativePath=z.string().min(1).max(1000)
   .refine(value=>!/^([a-zA-Z]:|[\\/])/.test(value),'Selected files are recorded relative to the project folder')
   .refine(value=>!value.split(/[\\/]/).some(part=>part==='..'||part==='.'||part===''),'Selected file paths cannot traverse directories')
   .refine(value=>!/[\x00-\x1f]/.test(value),'Selected file paths cannot contain control characters');
 const locationSchema=z.object({id,projectId:id,localFolder:text(32000),inputPaths:z.array(relativePath).max(2000),outputFolder:text(32000),
-  sourceRepository:text(32000),snapshotRoute:z.literal('SELECTED_FILES_GIT_SNAPSHOT'),
+  sourceRepository:text(32000),snapshotRoute:z.enum(['SELECTED_FILES_GIT_SNAPSHOT','PROJECT_FOLDER_SNAPSHOT']),
   providerTarget:z.object({provider:providerEnum,host:z.enum(['ANTHROPIC_MANAGED','LOCAL_MACHINE']),selection:z.literal('PROVIDER_DEFAULT'),environmentId:secretFree(200),resolved:z.boolean()}).strict(),
   legacyNote:text(1000),revision:z.number().int().nonnegative(),createdAt:timestamp,updatedAt:timestamp}).strict();
 const snapshotSchema=z.object({objectsStored:z.literal(true).optional(),id,projectId:id,requestId:id.nullable(),locationRevision:z.number().int().nonnegative(),requestRevision:z.number().int().nonnegative().nullable(),
-  route:z.enum(['SELECTED_FILES_GIT_SNAPSHOT','GENERATED_REQUEST_ONLY']),
+  route:z.enum(['SELECTED_FILES_GIT_SNAPSHOT','PROJECT_FOLDER_SNAPSHOT','GENERATED_REQUEST_ONLY']),
   files:z.array(z.object({path:relativePath,bytes:z.number().int().min(0),sha256:hash}).strict()).max(2000),
   generated:z.array(z.object({path:relativePath,bytes:z.number().int().min(0),sha256:hash}).strict()).max(64).optional(),
   totalBytes:z.number().int().min(0).max(64*1024*1024),manifestHash:hash,stagingCommit:z.string().regex(/^([a-f0-9]{40})?$/),stagingPath:text(32000),
   warnings:z.array(text(1000)).max(64),provenance:z.literal('OFFICE_STAGED'),createdAt:timestamp}).strict();
 const jobStateEnum=z.enum(['INTENT','SUBMITTING','ACCEPTED','RUNNING','COMPLETED','FAILED','UNKNOWN','CANCEL_REQUESTED','CANCEL_ACKNOWLEDGED']);
 const evidenceKindEnum=z.enum(['OFFICE_LOCAL','PROVIDER_REPORTED','USER_REPORTED']);
-const assignmentSchema=z.object({research:stageContextSchema.optional(),dependsOn:z.array(id).max(64).optional(),id,projectId:id,requestId:id,requestRevision:z.number().int().nonnegative(),agentId:id,agentRevision:z.number().int().nonnegative(),
+const assignmentSchema=z.object({research:stageContextSchema.optional(),dependsOn:z.array(id).max(64).optional(),toolProfile:toolProfileSchema.optional(),pipelineKey:z.string().trim().min(1).max(80).optional(),id,projectId:id,requestId:id,requestRevision:z.number().int().nonnegative(),agentId:id,agentRevision:z.number().int().nonnegative(),
   connectionId:id,capabilitySnapshotId:id,capabilitySnapshotIds:z.array(id).max(64).optional(),snapshotId:id,route:routeEnum,requestedModel:secretFree(160),resolvedModel:secretFree(160),
   requestedEffort:effortSchema,appliedEffort:z.union([effortSchema,z.literal('UNVERIFIED')]),delegation:z.boolean(),objectiveHash:hash,
   frozen:z.object({requestName:title,objective:text(12000),acceptanceCriteria:text(12000),instructions:text(12000),
@@ -131,7 +170,7 @@ const jobSchema=z.object({id,assignmentId:id,projectId:id,requestId:id,provider:
   detail:secretFree(2000),externalId:secretFree(200),externalUrl:secretFree(2000),outputs:z.array(jobOutputSchema).max(256),
   revision:z.number().int().nonnegative(),createdAt:timestamp,updatedAt:timestamp,dispatchedAt:z.union([timestamp,z.literal('')]),settledAt:z.union([timestamp,z.literal('')])}).strict();
 const jobEventSchema=z.object({id,jobId:id,externalId:z.string().min(1).max(200),cursor:z.string().max(200),kind:z.enum(['STATUS','MESSAGE','TOOL','OUTPUT']),
-  text:secretFree(64000),occurredAt:timestamp,receivedAt:timestamp,evidence:evidenceKindEnum}).strict();
+  text:secretFree(64000),occurredAt:timestamp,receivedAt:timestamp,evidence:evidenceKindEnum,applied:appliedReportPayloadSchema.optional()}).strict();
 const roleSlotSchema=z.object({role,count:z.number().int().min(1).max(64)}).strict();
 const teamSchema=z.object({id,projectId:id.nullable(),name:title,revision:z.number().int().nonnegative(),archived:z.boolean(),createdAt:timestamp,updatedAt:timestamp}).strict();
 const membershipSchema=z.object({id,teamId:id,agentId:id,role,createdAt:timestamp,removedAt:timestamp.optional()}).strict();
@@ -215,6 +254,8 @@ const changeSchema = z.discriminatedUnion('collection', [
   z.object({collection:z.literal('assignments'),value:assignmentSchema}).strict(),
   z.object({collection:z.literal('jobs'),value:jobSchema}).strict(),
   z.object({collection:z.literal('jobEvents'),value:jobEventSchema}).strict(),
+  z.object({collection:z.literal('localSessions'),value:localSessionRecordSchema}).strict(),
+  z.object({collection:z.literal('localOps'),value:localSessionJournalSchema}).strict(),
   z.object({collection:z.literal('locations'),value:locationSchema}).strict(),
   z.object({collection:z.literal('snapshots'),value:snapshotSchema}).strict(),
   z.object({collection:z.literal('requests'),value:requestSchema}).strict(),
@@ -231,7 +272,7 @@ const changeSchema = z.discriminatedUnion('collection', [
 type Change = z.infer<typeof changeSchema>;
 const eventSchema = z.object({ sequence: z.number().int().positive(), id, kind: text(100), projectId: id.nullable(), experimentId: id.nullable(), actor: z.literal('USER'), reason: text(4000), createdAt: timestamp, previousHash: hash, hash, payload: z.object({ command: commandSchema.nullable(), changes: z.array(changeSchema) }).strict() }).strict();
 type StoredEvent = z.infer<typeof eventSchema>;
-type Projection = Pick<AppState, 'projects' | 'experiments' | 'tasks' | 'artifacts' | 'settings'> & { pipeline?: PipelineRecord[]; evidence?: EvidenceRecord[]; requests?: Request[]; teams?: Team[]; memberships?: TeamMembership[]; messages?: Message[]; decisions?: ReviewDecision[]; grants?: RequestGrant[]; probes?: ProbeAttempt[]; branches?: ResearchBranch[]; specs?: FrozenResearchSpec[]; predictions?: PredictionRecord[]; trials?: TrialLedgerEntry[]; attempts?: StageAttempt[]; receipts?: GateReceipt[]; functions?: FunctionAssignment[]; sealed?: SealedReviewReport[]; locations?: ProjectLocation[]; snapshots?: InputSnapshot[]; assignments?: Assignment[]; jobs?: ProviderJob[]; jobEvents?: JobEvent[]; connections?: AccountConnection[]; capabilities?: ProviderCapabilitySnapshot[]; agents?: Agent[]; workLogs?: WorkLog[] };
+type Projection = Pick<AppState, 'projects' | 'experiments' | 'tasks' | 'artifacts' | 'settings'> & { pipeline?: PipelineRecord[]; evidence?: EvidenceRecord[]; requests?: Request[]; teams?: Team[]; memberships?: TeamMembership[]; messages?: Message[]; decisions?: ReviewDecision[]; grants?: RequestGrant[]; probes?: ProbeAttempt[]; branches?: ResearchBranch[]; specs?: FrozenResearchSpec[]; predictions?: PredictionRecord[]; trials?: TrialLedgerEntry[]; attempts?: StageAttempt[]; receipts?: GateReceipt[]; functions?: FunctionAssignment[]; sealed?: SealedReviewReport[]; locations?: ProjectLocation[]; snapshots?: InputSnapshot[]; assignments?: Assignment[]; jobs?: ProviderJob[]; jobEvents?: JobEvent[]; localSessions?: LocalSessionRecord[]; localOps?: LocalSessionJournal[]; connections?: AccountConnection[]; capabilities?: ProviderCapabilitySnapshot[]; agents?: Agent[]; workLogs?: WorkLog[] };
 function blank(): Projection { return { projects: [], experiments: [], tasks: [], artifacts: [], settings: { theme: 'dark', reducedMotion: false, globalBudgetCents: 0 } }; }
 function emptyContract(): ResearchContract { return { objective: '', dataPolicy: '', modelFamilies: '', evaluation: '', economics: '', protectedRegions: '', requiredChecks: '', limitations: '' }; }
 function applyChanges(current: Projection, changes: Change[]): Projection {
@@ -261,15 +302,17 @@ function applyChanges(current: Projection, changes: Change[]): Projection {
       if (change.collection === 'decisions' && !next.decisions) next.decisions = [];
       if (change.collection === 'jobs' && !next.jobs) next.jobs = [];
       if (change.collection === 'jobEvents' && !next.jobEvents) next.jobEvents = [];
+      if (change.collection === 'localSessions' && !next.localSessions) next.localSessions = [];
+      if (change.collection === 'localOps' && !next.localOps) next.localOps = [];
       if (change.collection === 'snapshots' && !next.snapshots) next.snapshots = [];
       if (change.collection === 'connections' && !next.connections) next.connections = [];
       if (change.collection === 'capabilities' && !next.capabilities) next.capabilities = [];
       if (change.collection === 'workLogs' && !next.workLogs) next.workLogs = [];
       if (change.collection === 'agents' && !next.agents) next.agents = [];
-      const items = next[change.collection] as Array<Project | Experiment | ResearchTask | Artifact | Agent | WorkLog | Request | AccountConnection | ProviderCapabilitySnapshot | ProjectLocation | InputSnapshot | Assignment | ProviderJob | JobEvent | Team | TeamMembership | Message | ReviewDecision | RequestGrant | ProbeAttempt | ResearchBranch | FrozenResearchSpec | PredictionRecord | TrialLedgerEntry | StageAttempt | GateReceipt | FunctionAssignment | SealedReviewReport | PipelineRecord | EvidenceRecord>;
+      const items = next[change.collection] as Array<Project | Experiment | ResearchTask | Artifact | Agent | WorkLog | Request | AccountConnection | ProviderCapabilitySnapshot | ProjectLocation | InputSnapshot | Assignment | ProviderJob | JobEvent | LocalSessionRecord | LocalSessionJournal | Team | TeamMembership | Message | ReviewDecision | RequestGrant | ProbeAttempt | ResearchBranch | FrozenResearchSpec | PredictionRecord | TrialLedgerEntry | StageAttempt | GateReceipt | FunctionAssignment | SealedReviewReport | PipelineRecord | EvidenceRecord>;
       let lookup=indexes.get(change.collection);if(!lookup){lookup=new Map(items.map((item,i)=>[item.id,i]));indexes.set(change.collection,lookup);}
       const index = lookup.get(change.value.id) ?? -1;
-      if (['pipeline','evidence','artifacts','workLogs','capabilities','snapshots','assignments','jobEvents','decisions','predictions','trials','receipts'].includes(change.collection) && index >= 0) {
+      if (['pipeline','evidence','artifacts','workLogs','capabilities','snapshots','assignments','jobEvents','localOps','decisions','predictions','trials','receipts'].includes(change.collection) && index >= 0) {
         const old=items[index];let lifecycle=false;
         if(change.collection==='pipeline'){
           const before=old as PipelineRecord,after=change.value;
@@ -438,8 +481,11 @@ export class OfficeStore {
     const count=Number((this.db.prepare('SELECT COUNT(*) AS count FROM event_index').get() as {count:number}).count);
     return {hash:row?eventSchema.parse(JSON.parse(row.record)).hash:null,count};
   }
+  officeChatPage(query: OfficeChatQuery = {}) {
+    return officeChatPage(this.snapshot({ history: false }), query);
+  }
   static publicState(state:AppState):AppState {
-    return {...state,events:[],messages:[],jobEvents:[],trials:[],pipeline:[],
+    return {...state,events:[],messages:[],jobEvents:[],localSessions:[],localOps:[],trials:[],pipeline:[],
       // Gate status and stage navigation are queried for the selected research branch.
       receipts:[],sealed:[]};
   }
@@ -1398,29 +1444,105 @@ export class OfficeStore {
       const blockedTask = (prompt: string, recipient: ResearchTask['recipient']): z.infer<typeof taskSchema> => ({ id: randomUUID(), projectId: projectId!, experimentId, prompt, recipient, status: 'BLOCKED', blocker: state.agents?.some(a=>!a.removedAt) ? 'Provider-hosted execution is not configured' : 'No agents configured', createdAt: now, updatedAt: now });
       switch (command.type) {
         case 'project.create': {
-          if(command.localFolder&&(!isAbsolute(command.localFolder)||!statSync(command.localFolder).isDirectory()))throw new Error('Choose an existing project folder');
+          if(command.localFolder&&(!isAbsolute(command.localFolder)||!safeStat(command.localFolder)?.isDirectory()))throw new Error('Choose an existing project folder');
           const project: Project = { ...(command.localFolder?{localFolder:realpathSync(command.localFolder)}:{}),...(command.cloudWorkspace?{cloudWorkspace:command.cloudWorkspace}:{}), id: randomUUID(), name: command.name, mandate: command.mandate, budgetCents: command.budgetCents, archived: false, createdAt: now, updatedAt: now };
-          projectId = project.id; changes.push({ collection: 'projects', value: project }); reason = `Created project: ${project.name}`; break;
+          projectId = project.id; changes.push({ collection: 'projects', value: project });
+          // The dialog's folder field and the location record are one scope: create the record in
+          // the same transaction so a snapshot prepared later actually reads it.
+          if(command.localFolder)upsertLocationScope(state,changes,project,realpathSync(command.localFolder),now);
+          reason = `Created project: ${project.name}`; break;
         }
         case 'project.update': {
-          if(command.localFolder&&(!isAbsolute(command.localFolder)||!statSync(command.localFolder).isDirectory()))throw new Error('Choose an existing project folder');
+          if(command.localFolder&&(!isAbsolute(command.localFolder)||!safeStat(command.localFolder)?.isDirectory()))throw new Error('Choose an existing project folder');
           const project = this.activeProject(state, command.projectId); projectId = project.id;
-          changes.push({ collection: 'projects', value: { ...project,...(command.localFolder!==undefined?{localFolder:command.localFolder?realpathSync(command.localFolder):''}:{}),...(command.cloudWorkspace!==undefined?{cloudWorkspace:command.cloudWorkspace}:{}), name: command.name, mandate: command.mandate, budgetCents: command.budgetCents, updatedAt: now } }); reason = 'Updated project mandate and spending ceiling'; break;
+          const folderMoved=command.localFolder!==undefined&&upsertLocationScope(state,changes,project,command.localFolder.trim()?realpathSync(command.localFolder.trim()):'',now);
+          changes.push({ collection: 'projects', value: { ...project,...(command.localFolder!==undefined?{localFolder:command.localFolder?realpathSync(command.localFolder):''}:{}),...(command.cloudWorkspace!==undefined?{cloudWorkspace:command.cloudWorkspace}:{}), name: command.name, mandate: command.mandate, budgetCents: command.budgetCents, updatedAt: now } }); reason = `Updated project mandate and spending ceiling${folderMoved?' · project folder updated':''}`; break;
         }
         case 'project.archive': {
           const project = state.projects.find(item => item.id === command.projectId);
           if (!project) throw new Error('Project not found');
           projectId = project.id;
+          // Un-archiving a removed project is the recovery path: the removal clears and the
+          // project lands in the archived list — a second restore activates it — so a mistaken
+          // remove is recoverable while pickers stay clean. removedAt is destructured out, not
+          // written as undefined, which canonical serialization rejects.
+          if (project.removedAt && !command.archived) {
+            const { removedAt: _removed, ...restored } = project;
+            changes.push({ collection: 'projects', value: { ...restored, archived: true, updatedAt: now } });
+            reason = `Restored removed project "${project.name}" to the archived list`; break;
+          }
           changes.push({ collection: 'projects', value: { ...project, archived: command.archived, updatedAt: now } });
           if(command.archived&&state.requests?.some(r=>r.projectId===project.id&&r.status!=='CANCELED'))throw new Error('Cancel outstanding requests before archiving this project.');
           if (command.archived && state.tasks.some(item => item.projectId === project.id && !['CANCELED','ACCEPTED','SUPERSEDED'].includes(item.status))) throw new Error('Cancel outstanding requests before archiving this project. Restore never resumes work.');
           reason = command.archived ? 'Archived project; outcomes retained' : 'Restored project'; break;
         }
+        case 'project.delete': {
+          // Removal only hides the project from pickers and lists. Its requests, experiments,
+          // lineage events, location record and stored bytes are all retained — like task.delete,
+          // this never rewrites history. Archiving already guarantees every request and task under
+          // the project is terminal, so the remaining guard is unresolved provider work: an UNKNOWN
+          // outcome still in flight must stay reachable through its request until reconciled.
+          const project = state.projects.find(item => item.id === command.projectId);
+          if (!project) throw new Error('Project not found');
+          projectId = project.id;
+          if (project.removedAt) throw new Error('This project is already removed from the list');
+          if (!project.archived) throw new Error('Archive the project before removing it from the list');
+          for (const request of (state.requests ?? []).filter(item => item.projectId === project.id && !item.removedAt))
+            if (requestJobs(state, request.id).some(job => job.unresolved))
+              throw new Error('A provider job outcome is still unresolved; reconcile it before removing this project');
+          changes.push({ collection: 'projects', value: { ...project, removedAt: now, updatedAt: now } });
+          reason = `Removed archived project "${project.name}" from lists; records and history retained`; break;
+        }
         case 'agent.update':
-        case 'agent.remove': {
+        case 'agent.remove':
+        case 'agent.delete': {
           const agent=state.agents?.find(a=>a.id===command.agentId);if(!agent)throw new Error('Agent not found');
           if(command.type==='agent.update'){if(agent.removedAt)throw new Error('Restore this agent before editing');if(command.expectedRevision!==(agent.revision??0))throw new Error('Stale profile revision; reload before saving');changes.push({collection:'agents',value:{...agent,revision:(agent.revision??0)+1,name:command.name,team:command.team,role:command.role,instructions:command.instructions}});reason=`Updated ${command.name} profile`;}
-          else {const {removedAt,...active}=agent;changes.push({collection:'agents',value:command.removed?{...agent,revision:(agent.revision??0)+1,removedAt:now}:{...active,revision:(agent.revision??0)+1}});reason=`${command.removed?'Archived':'Restored'} ${agent.name}; history retained`;}break;
+          else if(command.type==='agent.delete'){
+            // Same removal lifecycle as projects: archiving already guarantees the profile is
+            // read-only, and removal only hides it — the record, memberships, assignments and
+            // lineage all stay. An unresolved provider outcome under this agent's assignments
+            // must remain reachable until reconciled.
+            if(agent.deletedAt)throw new Error('This agent is already removed from the list');
+            if(!agent.removedAt)throw new Error('Archive the agent before removing it from the list');
+            const assigned=new Set((state.assignments??[]).filter(item=>item.agentId===agent.id).map(item=>item.id));
+            if((state.jobs??[]).some(job=>assigned.has(job.assignmentId)&&UNRESOLVED.includes(job.state)))throw new Error('A provider job outcome is still unresolved; reconcile it before removing this agent');
+            changes.push({collection:'agents',value:{...agent,deletedAt:now}});reason=`Removed archived agent "${agent.name}" from lists; records and history retained`;
+          }
+          else {
+            const {removedAt,deletedAt,...active}=agent;
+            if(command.removed&&agent.deletedAt)throw new Error('Restore this agent before changing it');
+            // Restoring a removed agent clears only the removal so it lands in the archived
+            // list; a second restore reactivates it, mirroring project.archive.
+            changes.push({collection:'agents',value:command.removed?{...agent,revision:(agent.revision??0)+1,removedAt:now}:agent.deletedAt?{...active,removedAt:agent.removedAt,revision:(agent.revision??0)+1}:{...active,revision:(agent.revision??0)+1}});
+            reason=`${command.removed?'Archived':'Restored'} ${agent.name}; history retained`;
+          }
+          break;
+        }
+        case 'request.pipeline.note':
+        case 'request.pipeline.confirm': {
+          const request=state.requests?.find(r=>r.id===command.requestId);if(!request)throw new Error('Request not found');
+          this.activeProject(state,request.projectId);projectId=request.projectId;experimentId=request.experimentId;
+          if(request.revision!==command.expectedRevision)throw new Error('Stale request revision; reload before continuing');
+          if(request.status==='CANCELED')throw new Error('Canceled requests are read-only.');
+          if(!request.pipeline)throw new Error('Only planning or result-analysis requests carry a pipeline.');
+          if(command.type==='request.pipeline.note'){
+            if(request.status!=='READY'||request.pipeline.phase!=='BRIEFING')throw new Error('Director notes land only while the request is briefing.');
+            changes.push({collection:'requests',value:{...request,pipelineNotes:[...(request.pipelineNotes??[]),{id:randomUUID(),text:command.text,createdAt:now}],revision:request.revision+1,updatedAt:now}});
+            reason='Director note recorded; the office queues a brief refinement hop';break;
+          }
+          if(request.status!=='READY')throw new Error('This pipeline is not running.');
+          if(request.pipeline.phase==='BRIEFING'){
+            if(!request.pipeline.briefAssignmentId)throw new Error('No director brief hop exists yet — start the request first.');
+            const briefJob=state.jobs?.find(item=>item.assignmentId===request.pipeline!.briefAssignmentId);
+            if(!briefJob||briefJob.state!=='COMPLETED')throw new Error('The director brief has not completed — the shaped brief must exist before the pipeline launches.');
+            reason='Pipeline confirmed; the office mints the remaining hops';
+          }else reason='Pipeline re-confirmed; the office retries any unminted hops';
+          // Re-confirm on a launched pipeline is the mint-retry path: the record is unchanged,
+          // the revision bump gives the renderer a fresh expectedRevision, and the office's
+          // post-command mint skips already-minted hops by pipelineKey.
+          changes.push({collection:'requests',value:{...request,pipeline:{...request.pipeline,phase:'LAUNCHED'},revision:request.revision+1,updatedAt:now}});
+          break;
         }
         case 'request.update':
         case 'request.start':
@@ -1443,12 +1565,23 @@ export class OfficeStore {
             reason='Saved a request revision; pending reviews superseded';break;
           }
           const blockers:Request['blockers']=[];
-          if(command.type==='request.start'){
+          if(command.type==='request.start'&&request.pipeline){
+            // Pipeline arms resolve by role across the roster; the picked lead is the director
+            // seat, and coverage of the arm roles — not a participant list — is the gate.
+            if(!request.leadAgentId)blockers.push({code:'LEAD_REQUIRED',message:'Choose the director agent when creating the request.',action:'Edit the request'});
+            else{const a=state.agents?.find(item=>item.id===request.leadAgentId);if(!a||a.removedAt)blockers.push({code:'AGENT_UNAVAILABLE',message:'The chosen director agent is archived or unavailable.',action:'Restore the agent or pick another director'});}
+            for(const role of (request.pipeline.kind==='PLANNING'?['PM_A','PM_B','WORKER']:['PM_C','PM_D','WORKER']))
+              if(!state.agents?.some(item=>!item.removedAt&&item.role===role))blockers.push({code:'PIPELINE_ROLE_MISSING',message:`The ${request.pipeline.kind==='PLANNING'?'planning':'result analysis'} pipeline needs a live ${role} agent on the roster.`,action:'Add or restore an agent with that role'});
+          }else if(command.type==='request.start'){
             const selected=[...new Set([request.leadAgentId,...request.participantIds].filter((id):id is string=>!!id))];
             if(!request.leadAgentId)blockers.push({code:'LEAD_REQUIRED',message:'Choose a responsible agent when creating the request.',action:'Edit request participants'});
             for(const id of selected){const a=state.agents?.find(a=>a.id===id);if(!a||a.removedAt)blockers.push({code:'AGENT_UNAVAILABLE',message:'A selected agent is archived or unavailable.',action:'Restore the agent or edit participants'});}
             if(request.mode==='TEAM')for(const role of ['DIRECTOR','PM_A','WORKER'])if(!selected.some(id=>state.agents?.some(a=>a.id===id&&!a.removedAt&&a.role===role)))blockers.push({code:'ROLE_REQUIRED',message:'Full research team requires a selected '+role+'.',action:'Edit request participants'});
-            blockers.push({code:'CLOUD_TRANSPORT_UNVERIFIED',message:'No subscription cloud transport has verified submission, settings, events and cancellation capabilities.',action:'Configure and verify a provider cloud workspace'});
+            // The cloud-transport warning belongs only to work that could reach a hosted route.
+            // An all-local selection is gated by local evidence instead; naming a cloud gap there
+            // tells the user to fix a route they never asked for.
+            const needsHosted=selected.some(id=>{const a=state.agents?.find(a=>a.id===id);return a&&!a.removedAt&&a.execution!=='LOCAL';});
+            if(needsHosted)blockers.push({code:'CLOUD_TRANSPORT_UNVERIFIED',message:'No subscription cloud transport has verified submission, settings, events and cancellation capabilities.',action:'Configure and verify a provider cloud workspace'});
           }
           changes.push({collection:'requests',value:{...request,status:command.type==='request.cancel'?'CANCELED':'READY',blockers,revision:request.revision+1,updatedAt:now}});
           if(command.type==='request.cancel'&&experimentId){const exp=state.experiments.find(e=>e.id===experimentId)!;changes.push({collection:'experiments',value:{...exp,stage:'CANCELED',revision:exp.revision+1,updatedAt:now}});for(const task of state.tasks.filter(t=>t.experimentId===experimentId&&!['CANCELED','SUPERSEDED','ACCEPTED'].includes(t.status)))changes.push({collection:'tasks',value:{...task,status:'CANCELED',blocker:null,updatedAt:now}});}
@@ -1650,25 +1783,28 @@ export class OfficeStore {
           const existing=(state.locations??[]).find(l=>l.projectId===project.id);
           if((existing?.revision??0)!==command.expectedRevision)throw new Error('Project location changed in another view. Reload before saving.');
           const folder=command.localFolder.trim();
-          if(folder&&(!isAbsolute(folder)||!statSync(folder).isDirectory()))throw new Error('Choose an existing project folder on this device.');
+          const folderStats=folder&&isAbsolute(folder)?safeStat(folder):undefined;
+          if(folder&&!folderStats?.isDirectory())throw new Error('Choose an existing project folder on this device.');
           const output=command.outputFolder.trim();
-          if(output&&(!isAbsolute(output)||!statSync(output).isDirectory()))throw new Error('Choose an existing output folder, or leave it empty to use the managed output directory.');
+          const outputStats=output&&isAbsolute(output)?safeStat(output):undefined;
+          if(output&&!outputStats?.isDirectory())throw new Error('Choose an existing output folder, or leave it empty to use the managed output directory.');
           const root=folder?realpathSync(folder):'';
-          const selected=[...new Set(command.inputPaths.map(value=>value.replaceAll('\\\\','/').trim()).filter(Boolean))].sort();
-          if(selected.length&&!root)throw new Error('Choose the project folder before selecting files to share.');
+          // The project folder itself is the input scope: every regular file inside it is walked,
+          // hashed and inventoried when a request snapshot is prepared. Per-file selection is gone;
+          // the field stays on the record so history written under the old model still reads.
           const location:ProjectLocation={
-            id:existing?.id??randomUUID(),projectId:project.id,localFolder:root,inputPaths:selected,
+            id:existing?.id??randomUUID(),projectId:project.id,localFolder:root,inputPaths:[],
             outputFolder:output?realpathSync(output):'',
             // The source repository is recorded for provenance only. Its history is never uploaded.
             sourceRepository:root&&existsSync(resolve(root,'.git'))?resolve(root,'.git'):'',
-            snapshotRoute:'SELECTED_FILES_GIT_SNAPSHOT',
+            snapshotRoute:'PROJECT_FOLDER_SNAPSHOT',
             providerTarget:{provider:'claude',host:'ANTHROPIC_MANAGED',selection:'PROVIDER_DEFAULT',environmentId:'',resolved:false},
             // Any old free-text cloud workspace value stays an inert note; it is never parsed or trusted.
             legacyNote:existing?.legacyNote??project.cloudWorkspace??'',
             revision:(existing?.revision??0)+1,createdAt:existing?.createdAt??now,updatedAt:now,
           };
           changes.push({collection:'locations',value:location});
-          reason=`Project location saved: ${root||'no local folder'}, ${selected.length} selected file${selected.length===1?'':'s'}, output ${location.outputFolder||'managed app directory'}. Nothing was transferred.`;
+          reason=`Project location saved: ${root||'no local folder'} — its contents become each request snapshot (credentials, tool configuration and dependency folders are skipped), output ${location.outputFolder||'managed app directory'}. Nothing was transferred.`;
           break;
         }
         case 'request.create':
@@ -1679,7 +1815,9 @@ export class OfficeStore {
             if(mode==='SINGLE'&&participantIds.some(id=>id!==leadAgentId))throw new Error('Single-agent requests cannot include collaborators');
             for(const id of [leadAgentId,...participantIds].filter(Boolean))if(!state.agents?.some(a=>a.id===id&&!a.removedAt))throw new Error('Choose an active agent');
             experimentId=command.workType==='EXPERIMENT'?randomUUID():null;
-            const request:Request={id:randomUUID(),projectId,experimentId,name:command.name,objective:command.hypothesis,workType:command.workType,mode,leadAgentId,participantIds,acceptanceCriteria:command.acceptanceCriteria??'',revision:0,status:'DRAFT',blockers:[],delegation:mode!=='SINGLE',createdAt:now,updatedAt:now};
+            const pipelineKind=command.workType==='PLANNING'||command.workType==='RESULT_ANALYSIS'?command.workType:null;
+            const request:Request={id:randomUUID(),projectId,experimentId,name:command.name,objective:command.hypothesis,workType:command.workType,mode,leadAgentId,participantIds,acceptanceCriteria:command.acceptanceCriteria??'',revision:0,status:'DRAFT',blockers:[],delegation:mode!=='SINGLE',createdAt:now,updatedAt:now,
+              ...(pipelineKind?{pipeline:{kind:pipelineKind,specHash:null,phase:'BRIEFING' as const,briefAssignmentId:null}}:{})};
             changes.push({collection:'requests',value:request});
             if(experimentId)changes.push({collection:'experiments',value:{id:experimentId,projectId,name:command.name,hypothesis:command.hypothesis,stage:'DRAFT',revision:0,contract:{...emptyContract(),objective:command.hypothesis},createdAt:now,updatedAt:now}});
             reason='Saved draft request; no work queued';break;
@@ -1694,6 +1832,7 @@ export class OfficeStore {
           this.activeProject(state, experiment.projectId); projectId = experiment.projectId; experimentId = experiment.id;
           if (experiment.revision !== command.expectedRevision) throw new Error('Stale contract revision; reload the experiment before saving');
           if(experiment.stage==='CANCELED')throw new Error('Canceled research is read-only. Create a new request to begin another investigation.');
+          if(state.requests?.some(r=>r.experimentId===experiment.id&&r.status==='CANCELED'))throw new Error('The request behind this contract is canceled; contract review is closed. Create a new request to begin another investigation.');
           if (!['DRAFT', 'CONTRACT_REVIEW'].includes(experiment.stage)) throw new Error('Frozen contracts require a scientific amendment');
           if (command.type === 'contract.submit' && experiment.stage === 'CONTRACT_REVIEW') throw new Error('Contract is already awaiting review');
           if (command.type === 'contract.submit' && !experiment.contract.objective.trim()) throw new Error('A research objective is required for contract review');
@@ -1711,7 +1850,9 @@ export class OfficeStore {
           const task = state.tasks.find(item => item.id === command.taskId);
           if (!task) throw new Error('Task not found');
           this.activeProject(state, task.projectId); projectId = task.projectId; experimentId = task.experimentId;
-          if(state.requests?.some(r=>r.experimentId&&r.experimentId===task.experimentId))throw new Error('Cancel the parent request using its request ID');
+          // A live parent request owns the cascade; cancel it instead. A canceled or removed
+          // parent can no longer propagate, so its leftover review children get canceled here.
+          if(state.requests?.some(r=>r.experimentId&&r.experimentId===task.experimentId&&r.status!=='CANCELED'))throw new Error('Cancel the parent request using its request ID');
           if (['CANCELED','ACCEPTED','SUPERSEDED'].includes(task.status)) throw new Error('Terminal task cannot be canceled');
           for(const linked of state.tasks.filter(t=>t.id===task.id||(experimentId&&t.experimentId===experimentId&&t.status!=='CANCELED'&&t.status!=='ACCEPTED'&&t.status!=='SUPERSEDED')))changes.push({collection:'tasks',value:{...linked,status:'CANCELED',blocker:null,updatedAt:now}});
           if(experimentId){const experiment=state.experiments.find(e=>e.id===experimentId)!;changes.push({collection:'experiments',value:{...experiment,stage:'CANCELED',revision:experiment.revision+1,updatedAt:now}});} reason = 'Canceled research request'; break;
@@ -1734,7 +1875,7 @@ export class OfficeStore {
           if(!task)throw new Error('Request not found');
           this.activeProject(state,task.projectId);projectId=task.projectId;experimentId=task.experimentId;
           if(task.removedAt)throw new Error('This request is already removed from the list');
-          if(experimentId&&state.requests?.some(r=>r.experimentId===experimentId))throw new Error('Remove the parent request using its request ID');
+          if(experimentId&&state.requests?.some(r=>r.experimentId===experimentId&&!r.removedAt))throw new Error('Remove the parent request using its request ID');
           const experiment=experimentId?state.experiments.find(e=>e.id===experimentId):undefined;
           const status=experiment?.stage==='CANCELED'?'CANCELED':task.status;
           if(status!=='ACCEPTED'&&status!=='CANCELED')throw new Error('Only a completed or canceled request can be removed from the list');
@@ -1938,6 +2079,60 @@ export class OfficeStore {
     });
   }
   /**
+   * Records transport-operation evidence the office itself observed on a local route.
+   *
+   * This is the local-session evidence bootstrap: the office writes the packet or spawns the child
+   * itself, so what it records is its own observation — never a provider attestation. Provider,
+   * identity, tool version and catalog come from the durable connection and its newest snapshot,
+   * never from the caller. The merged operation list becomes one more immutable capability
+   * snapshot; the connection record itself is untouched, and a re-recording of identical evidence
+   * appends only the history event.
+   */
+  recordTransportEvidence(input:unknown):AppState {
+    const record=transportEvidenceSchema.parse(input);
+    // Hosted-route evidence is recorded through provider observation; this path is local only.
+    if(!record.route.startsWith('LOCAL_'))throw new Error('Hosted-route evidence is recorded through provider observation, not this path.');
+    // An office observation can attest that the office exercised a transport, never that the
+    // provider's account verified it. Attestation levels belong to provider observation.
+    for(const entry of record.operations)if(entry.level==='ACCOUNT_VERIFIED')throw new Error('ACCOUNT_VERIFIED cannot be recorded through the office-observed transport path.');
+    return this.transaction(()=>{
+      const state=this.readProjection();
+      const connection=(state.connections??[]).find(item=>item.id===record.connectionId);
+      if(!connection)throw new Error('That connection was never recorded; observe the provider account first.');
+      const latest=(state.capabilities??[]).filter(item=>item.connectionId===connection.id).at(-1);
+      if(!latest)throw new Error('Transport evidence requires a prior account observation for this connection.');
+      // Every entry's route is the one the office actually exercised; caller-supplied route labels
+      // could otherwise claim a transport this path never touched. Model, effort and delegation
+      // fall back to the batch scope, the conditions the batch was genuinely taken under. A field
+      // left undeclared stays absent — an explicit undefined would not survive canonical hashing.
+      const incoming=record.operations.map(entry=>{
+        const stamped:z.infer<typeof evidenceSchema>={...entry,route:record.route};
+        if(stamped.model===undefined&&record.model!==undefined)stamped.model=record.model;
+        if(stamped.effort===undefined&&record.effort!==undefined)stamped.effort=record.effort;
+        if(stamped.delegation===undefined&&record.delegation!==undefined)stamped.delegation=record.delegation;
+        return evidenceSchema.parse(stamped);
+      });
+      // Same scope key supersedes; a field an entry does not declare is a distinct scope, never a wildcard.
+      const scopeKey=(entry:z.infer<typeof evidenceSchema>)=>JSON.stringify([entry.operation,entry.route,entry.model,entry.environment,entry.effort,entry.delegation]);
+      const superseded=new Set(incoming.map(scopeKey));
+      const merged=[...latest.operations.filter(entry=>!superseded.has(scopeKey(entry))),...incoming];
+      if(merged.length>64)throw new Error('Merging this evidence would exceed the 64-operation snapshot limit.');
+      // Local routes are themselves transport kinds; any other route runs in the official terminal.
+      const transport:ProviderCapabilitySnapshot['transport']=record.route.startsWith('LOCAL_')?capabilitySchema.shape.transport.parse(record.route):'OFFICIAL_CLI_TERMINAL';
+      const {provider,identity}=connection;
+      const {toolVersion,models}=latest;
+      const environment=record.environment,source=record.source,operations=merged;
+      const contentHash=canonicalHash({provider,identity,toolVersion,transport,environment,models,operations,source});
+      // Snapshots are immutable; identical evidence earns a history entry, not a duplicate row.
+      const capabilityChanged=latest.contentHash!==contentHash;
+      const changes:Change[]=capabilityChanged?[{collection:'capabilities',value:capabilitySchema.parse({
+        id:randomUUID(),provider,connectionId:connection.id,identity,toolVersion,transport,environment,models,operations,source,contentHash,observedAt:record.observedAt,
+      } satisfies ProviderCapabilitySnapshot)}]:[];
+      this.append(state,changes,{kind:'TRANSPORT_EVIDENCE_RECORDED',projectId:null,experimentId:null,
+        reason:`Office-observed transport evidence for ${provider} via ${record.route.toLowerCase().replaceAll('_',' ')}: ${incoming.map(entry=>entry.operation.toLowerCase().replaceAll('_',' ')).join(', ')}; ${capabilityChanged?'new capability snapshot recorded':'capabilities unchanged'}. Office observation is not provider attestation.`},null);
+    });
+  }
+  /**
    * Creates one agent and its connection binding in the same transaction as the observation that justifies it.
    * If the evidence cannot be persisted, no agent exists and the caller may retry.
    */
@@ -1946,6 +2141,7 @@ export class OfficeStore {
     const agent=agentSchema.parse(input.agent);
     if(agent.provider!==observation.provider)throw new Error('The observation does not belong to this agent provider');
     if(observation.state!=='SIGNED_IN')throw new Error('Sign in to the subscription account before confirming this agent');
+    if(!observation.identity)throw new Error('The official tool reported a signed-in session but did not identify the account; a profile cannot be bound to an unidentified session. Sign in so the tool reports the account.');
     if(agent.account!==observation.identity)throw new Error('The signed-in account changed. Connect again before confirming.');
     return this.transaction(()=>{
       const state=this.readProjection();
@@ -1976,6 +2172,7 @@ export class OfficeStore {
       if((agent.revision??0)!==input.expectedRevision)throw new Error('Profile changed in another view. Reload before saving.');
       if(agent.provider!==observation.provider)throw new Error('This observation belongs to a different provider');
       if(observation.state!=='SIGNED_IN')throw new Error('The official tool does not report a signed-in subscription for this provider');
+      if(!observation.identity)throw new Error('The official tool reported a signed-in session but did not identify the account; a profile cannot be verified or rebound against an unidentified session. Check the account again after the tool reports it.');
       if(intent==='VERIFY'&&observation.identity!==agent.account)throw new Error(`This profile was created for ${agent.account}, but ${observation.identity} is signed in. Use Change connection to move it deliberately.`);
       if(intent==='CHANGE'&&observation.identity===agent.account&&agent.connectionId)throw new Error('This profile is already bound to the signed-in account');
       const record=this.observationRecord(state,observation);
@@ -2036,7 +2233,7 @@ export class OfficeStore {
       if(!project)throw new Error('Project not found');
       if(project.archived)throw new Error('Archived project is read-only; restore it first');
       const location=state.locations?.find(l=>l.projectId===snapshot.projectId);
-      if(snapshot.route==='SELECTED_FILES_GIT_SNAPSHOT'&&location?.revision!==snapshot.locationRevision)throw new Error('The project location changed while preparing this snapshot. Prepare it again.');
+      if(snapshot.route!=='GENERATED_REQUEST_ONLY'&&location?.revision!==snapshot.locationRevision)throw new Error('The project location changed while preparing this snapshot. Prepare it again.');
       if(snapshot.requestId&&!state.requests?.some(r=>r.id===snapshot.requestId&&r.projectId===snapshot.projectId))throw new Error('Snapshot request does not belong to this project');
       if(state.snapshots?.some(s=>s.id===snapshot.id))throw new Error('Snapshot identities are immutable');
       this.append(state,[{collection:'snapshots',value:snapshot}],{kind:'INPUT_SNAPSHOT_PREPARED',projectId:snapshot.projectId,experimentId:null,
@@ -2103,10 +2300,15 @@ export class OfficeStore {
       }
       if(state.assignments?.some(a=>a.id===assignment.id))throw new Error('Assignment identities are immutable');
       // One open job per agent on a request: cooperation may run several agents, but never the same
-      // agent twice in parallel on the same work.
-      const open=(state.assignments??[]).filter(item=>item.requestId===assignment.requestId&&item.agentId===assignment.agentId)
-        .filter(item=>(state.jobs??[]).some(job=>job.assignmentId===item.id&&!['COMPLETED','FAILED','CANCEL_ACKNOWLEDGED'].includes(job.state)));
-      if(open.length)throw new Error('This agent already has work in flight for this request. Reconcile or cancel it first.');
+      // agent twice in parallel on the same work. Pipeline hops are exempt — the office mints the
+      // whole spec at once (the director holds several INTENT hops), and the dependsOn DAG, not job
+      // state, serializes their launches. Only the office mint can set pipelineKey, so this cannot
+      // be widened from the renderer.
+      if(!assignment.pipelineKey){
+        const open=(state.assignments??[]).filter(item=>item.requestId===assignment.requestId&&item.agentId===assignment.agentId)
+          .filter(item=>(state.jobs??[]).some(job=>job.assignmentId===item.id&&!['COMPLETED','FAILED','CANCEL_ACKNOWLEDGED'].includes(job.state)));
+        if(open.length)throw new Error('This agent already has work in flight for this request. Reconcile or cancel it first.');
+      }
       const now=new Date().toISOString();
       const job=jobSchema.parse({...input.job,state:'INTENT',evidence:'OFFICE_LOCAL',detail:'Submission intent recorded before contacting the provider.',
         externalId:'',externalUrl:'',outputs:[],revision:0,createdAt:now,updatedAt:now,dispatchedAt:'',settledAt:''});
@@ -2118,6 +2320,37 @@ export class OfficeStore {
       this.append(state,changes,
         {kind:'ASSIGNMENT_CREATED',projectId:assignment.projectId,experimentId:null,
          reason:`Froze request revision ${assignment.requestRevision}, profile revision ${assignment.agentRevision}, input snapshot and capability evidence. Nothing has been submitted yet.`},null);
+    });
+  }
+  /**
+   * Records the office-minted director brief hop on a pipeline request — the spec hash and the
+   * assignment the briefing phase gates on. Office-only: this is a store method, not a command,
+   * so the renderer can never reach it. The named assignment must be a real minted brief hop on
+   * this request held by the chosen director seat — the record cannot point at invented work.
+   */
+  bindPipelineBrief(input:{requestId:string;expectedRevision:number;briefAssignmentId:string;specHash?:string}):AppState {
+    id.parse(input.requestId);id.parse(input.briefAssignmentId);
+    if(input.specHash!==undefined)hash.parse(input.specHash);
+    return this.transaction(()=>{
+      const state=this.readProjection();
+      const request=state.requests?.find(r=>r.id===input.requestId);
+      if(!request)throw new Error('Request not found');
+      if(request.revision!==input.expectedRevision)throw new Error('Stale request revision; reload before continuing');
+      if(!request.pipeline)throw new Error('Only planning or result-analysis requests carry a pipeline.');
+      if(request.status!=='READY'||request.pipeline.phase!=='BRIEFING')
+        throw new Error('The brief hop binds only while the request is briefing.');
+      const assignment=state.assignments?.find(a=>a.id===input.briefAssignmentId);
+      if(!assignment||assignment.requestId!==request.id)throw new Error('The brief hop must be a minted assignment on this request.');
+      if(assignment.agentId!==request.leadAgentId)throw new Error('The director brief belongs to the chosen director seat.');
+      if(!assignment.pipelineKey||!/^(plan-brief|analysis-brief|brief-refine-\d+)$/.test(assignment.pipelineKey))
+        throw new Error('Only a minted director brief hop binds as the pipeline brief.');
+      const now=new Date().toISOString();
+      // No revision bump: this is office bookkeeping — a pointer to the hop the office itself
+      // minted — not a change to the request's frozen content. Bumping would stale the minted
+      // hop's requestRevision pin against the very record that binds it.
+      this.append(state,[{collection:'requests',value:{...request,pipeline:{...request.pipeline,briefAssignmentId:input.briefAssignmentId,...(input.specHash?{specHash:input.specHash}:{})},updatedAt:now}}],
+        {kind:'PIPELINE_BRIEF_BOUND',projectId:request.projectId,experimentId:null,
+         reason:`Bound the minted ${assignment.pipelineKey} hop to the briefing phase.`},null);
     });
   }
   /** Applies one job transition through the shared reducer. The renderer can never call this. */
@@ -2136,8 +2369,15 @@ export class OfficeStore {
       }
       const request=state.requests?.find(r=>r.id===job.requestId);
       // Canceling the request cancels dispatch intent, but only the provider can settle dispatched work.
-      if(request&&request.mode==='SINGLE'&&next.state==='CANCEL_ACKNOWLEDGED'&&request.status!=='CANCELED')
+      if(request&&request.mode==='SINGLE'&&next.state==='CANCEL_ACKNOWLEDGED'&&request.status!=='CANCELED'){
         changes.push({collection:'requests',value:{...request,status:'CANCELED',revision:request.revision+1,updatedAt:at}});
+        // The job-side cancellation must run the same cascade request.cancel runs. Without it the
+        // experiment stays under review and keeps accepting contract revisions and spawning review
+        // tasks that no command can terminalize once the request row is removed.
+        const experiment=request.experimentId?state.experiments.find(e=>e.id===request.experimentId):undefined;
+        if(experiment&&experiment.stage!=='CANCELED')changes.push({collection:'experiments',value:{...experiment,stage:'CANCELED',revision:experiment.revision+1,updatedAt:at}});
+        if(request.experimentId)for(const task of state.tasks.filter(t=>t.experimentId===request.experimentId&&!['CANCELED','SUPERSEDED','ACCEPTED'].includes(t.status)))changes.push({collection:'tasks',value:{...task,status:'CANCELED',blocker:null,updatedAt:at}});
+      }
       this.append(state,changes,{kind:'PROVIDER_JOB_'+next.state,projectId:job.projectId,experimentId:null,
         reason:`${job.state} → ${next.state} (${input.evidence.toLowerCase().replaceAll('_',' ')}): ${input.detail}`},null);
     });
@@ -2164,6 +2404,162 @@ export class OfficeStore {
         reason:`Recorded ${added} visible provider event${added===1?'':'s'} for this job. Hidden reasoning is never imported.`},null);
     });
     return added;
+  }
+  /**
+   * Creates the one delivery binding a job may hold (QO-LOCAL-REV §5.1). The record starts at
+   * revision 0; a second binding for the same job is refused outright rather than merged.
+   */
+  createLocalSession(record: Omit<LocalSessionRecord,'id'|'revision'|'createdAt'|'updatedAt'> & { id?: string }): LocalSessionRecord {
+    let created: LocalSessionRecord | null = null;
+    this.transaction(() => {
+      const state = this.readProjection();
+      const job = state.jobs?.find(item => item.id === record.jobId);
+      if (!job) throw new Error('Job not found');
+      if ((state.localSessions ?? []).some(item => item.jobId === record.jobId))
+        throw new Error('This job already has a local-session binding; reconcile it instead of creating a second.');
+      const at = new Date().toISOString();
+      created = localSessionRecordSchema.parse({ ...record, id: record.id ?? randomUUID(), revision: 0, createdAt: at, updatedAt: at });
+      this.append(state, [{ collection: 'localSessions', value: created }], { kind: 'LOCAL_SESSION_BOUND', projectId: record.projectId, experimentId: null,
+        reason: `Bound local session ${record.layout.toLowerCase().replaceAll('_', ' ')} for job ${record.jobId.slice(0, 8)}.` }, null);
+    });
+    return created!;
+  }
+  /**
+   * Compare-and-swap on a local-session record. The caller computes the complete next record; the
+   * store refuses stale revisions and illegal lifecycle edges — the transition table is the law.
+   */
+  updateLocalSession(input: { localSessionId: string; expectedRevision: number; next: Omit<LocalSessionRecord,'revision'|'updatedAt'> }): LocalSessionRecord {
+    let updated: LocalSessionRecord | null = null;
+    this.transaction(() => {
+      const state = this.readProjection();
+      const current = (state.localSessions ?? []).find(item => item.id === input.localSessionId);
+      if (!current) throw new Error('Local session record not found');
+      if (current.revision !== input.expectedRevision) throw new Error('This local-session record changed since it was read. Reconcile before acting again.');
+      const at = new Date().toISOString();
+      const next = localSessionRecordSchema.parse({ ...input.next, revision: current.revision + 1, updatedAt: at });
+      if (next.id !== current.id || next.jobId !== current.jobId) throw new Error('Local-session identity is immutable; create a new record instead of rebinding.');
+      const edge = transitionLocalLifecycle(current.lifecycle, next.lifecycle);
+      if (!edge.allowed) throw new Error(edge.detail);
+      updated = next;
+      this.append(state, [{ collection: 'localSessions', value: next }], { kind: 'LOCAL_SESSION_' + next.lifecycle, projectId: next.projectId, experimentId: null,
+        reason: `Local session ${current.lifecycle} → ${next.lifecycle}.` }, null);
+    });
+    return updated!;
+  }
+  /** The job's delivery binding, or null for legacy/unbound jobs. Read-only. */
+  localSessionForJob(jobId: string): LocalSessionRecord | null {
+    id.parse(jobId);
+    return (this.readProjection().localSessions ?? []).find(item => item.jobId === jobId) ?? null;
+  }
+  /** Bounded page of local-session records for one project — the query surface for summaries. */
+  localSessionPage(input: { projectId: string; limit?: number; offset?: number }): LocalSessionRecord[] {
+    id.parse(input.projectId);
+    const limit = Math.min(Math.max(input.limit ?? 50, 1), 200), offset = Math.max(input.offset ?? 0, 0);
+    return (this.readProjection().localSessions ?? []).filter(item => item.projectId === input.projectId).slice(offset, offset + limit);
+  }
+  /**
+   * Appends lifecycle journal steps. Journals are append-only evidence: durable intent first,
+   * observed outcome second. A journal row is never rewritten — reconciliation adds a new phase.
+   */
+  appendLocalJournal(input: Omit<LocalSessionJournal,'id'|'createdAt'|'schemaVersion'> & { operationId?: string }): LocalSessionJournal {
+    let written: LocalSessionJournal | null = null;
+    this.transaction(() => {
+      const state = this.readProjection();
+      const record = (state.localSessions ?? []).find(item => item.id === input.localSessionId);
+      if (!record) throw new Error('Local session record not found');
+      written = localSessionJournalSchema.parse({ ...input, schemaVersion: 1, id: randomUUID(), operationId: input.operationId ?? randomUUID(), createdAt: new Date().toISOString() });
+      this.append(state, [{ collection: 'localOps', value: written }], { kind: 'LOCAL_OP_' + input.kind + '_' + input.phase, projectId: record.projectId, experimentId: null,
+        reason: `Local-session journal ${input.kind.toLowerCase().replaceAll('_', ' ')} ${input.phase.toLowerCase()}: ${input.outcome.toLowerCase()}.` }, null);
+    });
+    return written!;
+  }
+  /** The ordered journal for one local session — reconciliation reads this, not filesystem guesses. */
+  localJournalFor(localSessionId: string): LocalSessionJournal[] {
+    id.parse(localSessionId);
+    return (this.readProjection().localOps ?? []).filter(item => item.localSessionId === localSessionId);
+  }
+  /**
+   * Chronological applied self-report events for one job, oldest-first and bounded. This is the
+   * structured query the renderer reads: publicState strips jobEvents entirely, so parsing event
+   * text from a pushed snapshot was always dead code. The controller also uses it for ordering
+   * dedup — a repeated identical report is a re-polled file, while a return to an earlier value
+   * (A→B→A) is a new claim and must land.
+   */
+  appliedReports(jobId: string, limit = 50): JobEvent[] {
+    id.parse(jobId); this.assertOpen();
+    const events = (this.readProjection().jobEvents ?? []).filter(event => event.jobId === jobId && event.externalId.startsWith('applied:'));
+    return events.slice(-Math.min(Math.max(limit, 1), 500));
+  }
+  /**
+   * The bounded local-session summary the UI renders. The record carries machine fields; this
+   * assembles the display shape — requested values from the frozen assignment, the newest
+   * structured applied report when one exists (v1 receipts carry none), provider-archive status
+   * from the journal, and the honest blockers. `resolveDir` is injected by main because the
+   * store never knows where the mailbox and worktree roots live.
+   */
+  localSessionSummary(jobId: string, resolveDir: (record: LocalSessionRecord) => string): LocalSessionSummary | null {
+    id.parse(jobId); this.assertOpen();
+    const state = this.readProjection();
+    const binding = (state.localSessions ?? []).find(record => record.jobId === jobId);
+    if (!binding) return null;
+    const assignment = (state.assignments ?? []).find(item => item.id === binding.assignmentId);
+    const applied = (state.jobEvents ?? []).filter(event => event.jobId === jobId && event.applied).at(-1)?.applied ?? null;
+    const providerOp = this.localJournalFor(binding.id).filter(entry => entry.kind === 'PROVIDER_ARCHIVE').at(-1);
+    const blockers: string[] = [];
+    if (binding.lifecycle === 'RECONCILE_REQUIRED') blockers.push('This session record needs reconciliation before it can change state again.');
+    if (binding.lifecycle === 'PREPARATION_FAILED') blockers.push('Preparation failed — the next dispatch starts a fresh attempt.');
+    if (binding.stopStatus === 'REQUESTED') blockers.push('A cancellation request was delivered into the packet; the session has not acknowledged it.');
+    if (binding.requirement === 'READ_CONFINEMENT_REQUIRED' && binding.confinementStatus !== 'VERIFIED')
+      blockers.push('This context requires read confinement that has not been verified — the worktree lane stays unavailable.');
+    const confinementDetail =
+      binding.confinementStatus === 'VERIFIED' ? 'Confinement was verified by recorded office evidence.'
+      : binding.confinementStatus === 'FAILED' ? 'A confinement check failed — this session is not confined.'
+      : binding.confinementStatus === 'STALE' ? 'Confinement verification is stale and must be renewed before relying on it.'
+      : binding.requirement === 'READ_CONFINEMENT_REQUIRED' ? 'Read confinement is required but has not been verified.'
+      : 'Scoped delivery only — no confinement requirement applies.';
+    return localSessionSummarySchema.parse({
+      jobId, localSessionId: binding.id, revision: binding.revision,
+      layout: binding.layout, surface: binding.surface, lifecycle: binding.lifecycle, stopStatus: binding.stopStatus,
+      cwdDisplay: resolveDir(binding).slice(0, 1000),
+      grouping: { status: binding.groupingStatus, label: binding.providerProjectId },
+      confinement: { required: binding.requirement, status: binding.confinementStatus, detail: confinementDetail },
+      requested: { model: assignment?.requestedModel ?? 'unknown', effort: assignment?.requestedEffort ?? 'default', delegation: assignment?.delegation ?? false },
+      applied,
+      archive: {
+        packet: binding.lifecycle === 'ARCHIVED' ? 'ARCHIVED' : 'LIVE',
+        provider: !providerOp ? 'NOT_REQUESTED' : providerOp.outcome === 'SUCCESS' ? 'ARCHIVED'
+          : providerOp.outcome === 'UNSUPPORTED' ? 'UNSUPPORTED' : providerOp.outcome === 'REFUSED' ? 'BUSY' : 'UNKNOWN',
+      },
+      blockers,
+    });
+  }
+  /**
+   * The bounded launch plan for one bound packet: where the packet lives, its proven hash, and
+   * the honest manual steps to run it in the provider's own client. Launching a local packet is
+   * always a manual handoff — the office never starts the session — so availability is
+   * MANUAL_HANDOFF while the packet is ready and UNSUPPORTED once it is archived or unready.
+   */
+  localLaunchPlan(jobId: string, resolveDir: (record: LocalSessionRecord) => string): LocalLaunchPlan | null {
+    id.parse(jobId); this.assertOpen();
+    const binding = (this.readProjection().localSessions ?? []).find(record => record.jobId === jobId);
+    if (!binding || !binding.packetHash) return null;
+    const cwd = resolveDir(binding).slice(0, 1000);
+    const cli = binding.provider === 'claude' ? 'claude' : binding.provider === 'openai' ? 'codex' : 'devin';
+    const ready = binding.lifecycle === 'READY' || binding.lifecycle === 'RESTORED_UNBOUND';
+    const instructions = [
+      `Open a terminal in ${cwd}.`,
+      `Start the ${binding.provider} client there (${cli}) — the packet's AGENTS.md and CONTRACT.md carry the task and the required result shape.`,
+      'Let the session write result.json plus any files under outputs/ inside this same directory.',
+      'Return to this office and Observe the job — a receipt is verified against this packet\'s recorded hash before anything is recorded.',
+    ];
+    return localLaunchPlanSchema.parse({
+      jobId, revision: binding.revision, surface: binding.surface, cwdDisplay: cwd,
+      packetHash: binding.packetHash, instructions,
+      availability: ready ? 'MANUAL_HANDOFF' : 'UNSUPPORTED',
+      detail: ready
+        ? 'Manual handoff: the office prepared and verified this packet; running it is your action in the provider\'s own client.'
+        : `This packet is ${binding.lifecycle.toLowerCase().replaceAll('_', ' ')} — ${binding.lifecycle === 'ARCHIVED' ? 'it was retired into the archive and is retained, not runnable.' : 'it is not in a runnable state; reconcile the record first.'}`,
+    });
   }
   /**
    * Records a session identifier the user reported for a job whose dispatch result the office could

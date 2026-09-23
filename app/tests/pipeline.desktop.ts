@@ -30,8 +30,8 @@ try {
  const page=await app.firstWindow();
  const errors:string[]=[];
  page.on('pageerror',e=>errors.push(e.message));
+ // Selecting a project opens its detail page; the Projects navigation button resets selection.
  await page.getByLabel('Current project',{exact:true}).selectOption(project.id);
- await page.getByRole('button',{name:'Research',exact:true}).click();
  const panel=page.getByRole('region',{name:'Research pipeline'});
  await panel.getByRole('heading',{name:'Research pipeline'}).waitFor();
  await panel.getByLabel('Research branch',{exact:true}).selectOption({label:'Unreviewed candidate · S0'});

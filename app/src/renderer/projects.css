@@ -7,13 +7,19 @@
 .project-row{display:flex;align-items:center;gap:16px;padding:14px 18px}
 .project-row .folder-emblem{width:36px;height:36px;border-radius:8px}
 .project-row-main{flex:1;min-width:0}
-.project-row-main h2{font-size:14px;overflow-wrap:anywhere}
-.project-row-main p{font-size:11px;color:var(--muted);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.project-row-main h2,.project-row-name{font-size:14px;overflow-wrap:anywhere}
+.project-row-name{display:block;font-weight:600}
+.project-row-main p,.project-row-mandate{font-size:11px;color:var(--muted);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.project-row-mandate{display:block}
+.project-open-region{display:flex;align-items:center;gap:16px;flex:1;min-width:0;padding:0;color:inherit;text-align:left;cursor:pointer}
+.project-open-region:hover .project-row-name,.project-open-region:focus-visible .project-row-name{color:var(--accent)}
 .project-row-location{font-size:10px;color:var(--muted);max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .project-row-count{font-size:10px;color:var(--subtle);white-space:nowrap}
 .project-row-count strong{color:var(--text);font-weight:600}
 .project-row-actions{display:flex;align-items:center;gap:10px;margin-left:auto}
 .project-open{display:inline-flex;align-items:center;gap:6px;color:var(--accent);font-size:11px;white-space:nowrap}
+.project-remove{color:var(--muted);font-size:11px;white-space:nowrap}
+.project-remove:hover:not(:disabled){color:var(--text)}
 .project-row .icon-button{border:1px solid var(--border);border-radius:6px;padding:7px}
 .project-row .icon-button[aria-expanded="true"]{color:var(--accent);background:var(--accent-bg);border-color:#a7845144}
 .project-row-panel{border-top:1px solid var(--border);padding:16px 18px;display:grid;gap:12px;font-size:11px}

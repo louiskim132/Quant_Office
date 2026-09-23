@@ -1,10 +1,27 @@
 export type Role = 'DIRECTOR' | 'PM_A' | 'PM_B' | 'PM_C' | 'PM_D' | 'WORKER';
 export type Stage = 'CANCELED' | 'DRAFT' | 'CONTRACT_REVIEW' | 'CONTRACT_FROZEN' | 'IMPLEMENTING' | 'REMOTE_VERIFIED' | 'PREFLIGHT_READY' | 'WAITING_FOR_USER_PREFLIGHT' | 'PREFLIGHT_REVIEW' | 'RUN_APPROVED' | 'WAITING_FOR_USER_RUN' | 'RESULT_VALIDATION' | 'INDEPENDENT_ANALYSIS' | 'DIRECTOR_DECISION';
 export type TaskStatus = 'BLOCKED' | 'QUEUED' | 'RUNNING' | 'ACCEPTED' | 'CANCELED' | 'SUPERSEDED';
-export type WorkType = 'QUESTION' | 'ANALYSIS' | 'IMPLEMENTATION' | 'CODE_REVIEW' | 'EXPERIMENT';
+export type WorkType = 'QUESTION' | 'ANALYSIS' | 'IMPLEMENTATION' | 'CODE_REVIEW' | 'EXPERIMENT'
+ | 'PLANNING' | 'RESULT_ANALYSIS' | 'OTHER';
+/**
+ * A pipeline request's durable orchestration state (inter-agent pipeline). `briefAssignmentId`
+ * names the assignment that carries the current director brief — the first hop, and the target
+ * each user note refines. `phase` flips to LAUNCHED only through an explicit confirm command.
+ */
+export interface RequestPipeline {
+  kind: 'PLANNING' | 'RESULT_ANALYSIS';
+  specHash: string | null;
+  phase: 'BRIEFING' | 'LAUNCHED';
+  briefAssignmentId: string | null;
+}
+/** A bounded user note to the director while a pipeline request is still briefing. */
+export interface PipelineNote { id: string; text: string; createdAt: string }
 export type WorkMode = 'SINGLE' | 'GROUP' | 'TEAM';
-export interface Request { migratedFromTaskId?:string; teamId?:string; roleSlots?:RoleSlot[]; id:string; projectId:string; experimentId:string|null; name:string; objective:string; workType:WorkType; mode:WorkMode; leadAgentId:string|null; participantIds:string[]; acceptanceCriteria:string; revision:number; status:'DRAFT'|'READY'|'CANCELED'; removedAt?:string; blockers:{code:string;message:string;action:string}[]; delegation:boolean; createdAt:string; updatedAt:string; sourceRequestId?:string; }
-export interface Project { localFolder?:string; cloudWorkspace?:string; id: string; name: string; mandate: string; createdAt: string; updatedAt: string; archived: boolean; budgetCents: number; }
+export interface Request { migratedFromTaskId?:string; teamId?:string; roleSlots?:RoleSlot[]; id:string; projectId:string; experimentId:string|null; name:string; objective:string; workType:WorkType; mode:WorkMode; leadAgentId:string|null; participantIds:string[]; acceptanceCriteria:string; revision:number; status:'DRAFT'|'READY'|'CANCELED'; removedAt?:string; blockers:{code:string;message:string;action:string}[]; delegation:boolean; createdAt:string; updatedAt:string; sourceRequestId?:string;
+ /** Present on PLANNING/RESULT_ANALYSIS requests — the comm-round orchestration record. */
+ pipeline?:RequestPipeline; /** Bounded user→director notes recorded while briefing. */
+ pipelineNotes?:PipelineNote[]; }
+export interface Project { localFolder?:string; cloudWorkspace?:string; id: string; name: string; mandate: string; createdAt: string; updatedAt: string; archived: boolean; removedAt?: string; budgetCents: number; }
 export interface Experiment { id: string; projectId: string; name: string; hypothesis: string; stage: Stage; revision: number; createdAt: string; updatedAt: string; contract: ResearchContract; }
 export interface ResearchContract { objective: string; dataPolicy: string; modelFamilies: string; evaluation: string; economics: string; protectedRegions: string; requiredChecks: string; limitations: string; }
 export interface ResearchTask { id: string; projectId: string; experimentId: string | null; prompt: string; recipient: Role; status: TaskStatus; blocker: string | null; removedAt?: string; createdAt: string; updatedAt: string; }
@@ -19,7 +36,7 @@ export type ExecutionEnvironment = 'HOSTED_SETUP_REQUIRED' | 'LOCAL';
 /** What a session may access; navigation profiles (e.g. a Serena-backed index) ride this field later. */
 export type ToolProfile = 'STANDARD' | 'CODE_NAV';
 export type Effort = 'default' | 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
-export interface AgentDraft { name: string; provider: Provider; model: string; team: string; role: Role; instructions: string; effort?: Effort; execution?: ExecutionEnvironment; toolProfile?: ToolProfile; }
+export interface AgentDraft { name: string; provider: Provider; model: string; team: string; role: Role; instructions: string; effort?: Effort; execution?: ExecutionEnvironment; toolProfile?: ToolProfile; /** Which local adapter serves a LOCAL profile: the manual mailbox packet or the office-spawned CLI run. Absent means mailbox. */ localRoute?: 'LOCAL_MAILBOX' | 'LOCAL_CLI_EXEC'; }
 /** `account` is the identity this profile was created for. `connectionId` is set only by an explicit, verified binding. */
 /**
  * `account` is the identity this profile is bound to now; `setupAccount` is the identity it was
@@ -27,9 +44,9 @@ export interface AgentDraft { name: string; provider: Provider; model: string; t
  * the profile's origin stays legible afterwards. Profiles saved before this distinction existed have
  * no `setupAccount`, and their origin is genuinely unknown rather than assumed to be the current one.
  */
-export interface Agent extends AgentDraft { revision?: number; removedAt?: string; id: string; account: string; setupAccount?: string; createdAt: string; connectionVerifiedAt: string; connectionId?: string; bindingVerifiedAt?: string; execution: ExecutionEnvironment; }
+export interface Agent extends AgentDraft { revision?: number; removedAt?: string; deletedAt?: string; id: string; account: string; setupAccount?: string; createdAt: string; connectionVerifiedAt: string; connectionId?: string; bindingVerifiedAt?: string; execution: ExecutionEnvironment; }
 export interface UsageWindow { label: string; remainingPercent: number; resetsAt: number; }
-export interface Connection { provider: Provider; connected: boolean; account: string; models: { id: string; name: string; efforts?: Effort[]; defaultEffort?:Effort; effortDescriptions?:{effort:Effort;description:string}[]; source?:string }[]; windows: UsageWindow[]; checkedAt: string; note: string; }
+export interface Connection { provider: Provider; connected: boolean; account: string; models: { id: string; name: string; efforts?: Effort[]; defaultEffort?:Effort; effortDescriptions?:{effort:Effort;description:string}[]; family?: string; effort?: Effort; source?:string }[]; windows: UsageWindow[]; checkedAt: string; note: string; }
 export interface WorkLog { id: string; conversationId: string; from: string; to: string; kind: 'MESSAGE' | 'TOOL' | 'STATUS'; text: string; timestamp: string; sourceHash: string; externalId: string; provenance: 'USER_IMPORTED'; }
 export interface AgentLog extends Omit<WorkLog,'provenance'> { provenance: 'USER_IMPORTED' | 'OFFICE_EVENT'; }
 export interface TokenTotals { input: number; output: number; cacheRead: number; cacheCreation: number; messages: number; }
@@ -44,7 +61,7 @@ import type { ObjectDescription, ReadResult, SearchResult, StagePacket } from '.
 import type { ResearchBranch, FrozenResearchSpec, PredictionRecord, TrialLedgerEntry, StageAttempt, GateReceipt, FunctionAssignment, StageFunction, Stage as ResearchStage, GateId, SpecSections, ScientificOutcome } from './research.js';
 export type { ResearchBranch, FrozenResearchSpec, PredictionRecord, TrialLedgerEntry, StageAttempt, GateReceipt };
 
-export type CapabilityOperation = 'ACCOUNT_STATUS' | 'MODEL_CATALOG' | 'ALLOWANCE_READ' | 'CLOUD_SUBMIT' | 'CLOUD_OBSERVE' | 'CLOUD_FOLLOW_UP' | 'CLOUD_OUTPUT_FETCH' | 'CLOUD_CANCEL_REQUEST' | 'CLOUD_CANCEL_ACK' | 'MODEL_APPLICATION' | 'EFFORT_APPLICATION' | 'ENVIRONMENT_IDENTITY' | 'DELEGATION_CONTROL' | 'TOOL_CONFINEMENT' | 'CLOUD_CANCEL' | 'LOCAL_SUBMIT' | 'LOCAL_OBSERVE' | 'LOCAL_OUTPUT_FETCH' | 'LOCAL_CANCEL';
+export type CapabilityOperation = 'ACCOUNT_STATUS' | 'MODEL_CATALOG' | 'ALLOWANCE_READ' | 'CLOUD_SUBMIT' | 'CLOUD_OBSERVE' | 'CLOUD_FOLLOW_UP' | 'CLOUD_OUTPUT_FETCH' | 'CLOUD_CANCEL_REQUEST' | 'CLOUD_CANCEL_ACK' | 'MODEL_APPLICATION' | 'EFFORT_APPLICATION' | 'ENVIRONMENT_IDENTITY' | 'DELEGATION_CONTROL' | 'TOOL_CONFINEMENT' | 'CLOUD_CANCEL' | 'LOCAL_SUBMIT' | 'LOCAL_OBSERVE' | 'LOCAL_OUTPUT_FETCH' | 'LOCAL_CANCEL' | 'LOCAL_RETIRE';
 /** The adapter route an observation was taken through. Two routes sharing a transport are not equivalent. */
 export type AdapterRoute = 'FAKE_ADAPTER' | 'OFFICIAL_TERMINAL_HANDOFF' | 'OFFICIAL_CLI_PTY' | 'LOCAL_MAILBOX' | 'LOCAL_CLI_EXEC' | 'LOCAL_ACP';
 /**
@@ -64,17 +81,17 @@ export interface ConfinementPolicy { tools: string; filesystem: string; network:
  * back to the snapshot's own environment, because that is genuinely where the observation happened.
  */
 export interface CapabilityEvidence { operation: CapabilityOperation; level: VerificationLevel; detail: string; evidence?: EvidenceKind; verifiedAt?: string; model?: string; environment?: string; effort?: Effort; delegation?: boolean; route?: AdapterRoute; confinement?: ConfinementPolicy; source?: string }
-export interface CapabilityModel { id: string; name: string; efforts?: Effort[]; defaultEffort?: Effort; effortDescriptions?: { effort: Effort; description: string }[]; source?: string }
+export interface CapabilityModel { id: string; name: string; efforts?: Effort[]; defaultEffort?: Effort; effortDescriptions?: { effort: Effort; description: string }[]; family?: string; effort?: Effort; source?: string }
 /** Immutable evidence of what one provider tool could actually do for one account at one moment. */
 export interface ProviderCapabilitySnapshot { id: string; provider: Provider; connectionId: string; identity: string; toolVersion: string; transport: 'NONE' | 'OFFICIAL_CLI_PIPE' | 'OFFICIAL_CLI_TERMINAL' | 'LOCAL_MAILBOX' | 'LOCAL_CLI_EXEC' | 'LOCAL_ACP'; environment: string; models: CapabilityModel[]; operations: CapabilityEvidence[]; source: string; contentHash: string; observedAt: string; }
 /** Each action is decided on its own evidence. They are deliberately never collapsed into one optimistic boolean. */
 export interface ReadinessActions { prepare: boolean; handoff: boolean; automaticStart: boolean; observe: boolean; requestCancellation: boolean; duplicate: boolean; viewTerminalHistory: boolean; }
 export interface EffectiveEvidence { operation: CapabilityOperation; level: VerificationLevel; evidence: EvidenceKind; verifiedAt: string; model: string; environment: string; effort?: Effort; delegation?: boolean; route?: AdapterRoute; confinement?: ConfinementPolicy; transport: ProviderCapabilitySnapshot['transport']; detail: string; source: string; snapshotId: string; expired: boolean; /** Stamped later than the moment it is being judged at, so it cannot be treated as verified. */ impossible: boolean; }
-export interface ProviderReadiness { provider: Provider; connectionId: string; identity: string; signedIn: boolean; accountFresh: boolean; modelChecked: boolean; dispatchChecked: boolean; ready: boolean; model: string; lastObservedAt: string; lastCheckedAt: string; actions: ReadinessActions; evidence: EffectiveEvidence[]; blockers: string[]; }
+export interface ProviderReadiness { provider: Provider; connectionId: string; identity: string; signedIn: boolean; accountFresh: boolean; modelChecked: boolean; dispatchChecked: boolean; ready: boolean; model: string; lastObservedAt: string; lastCheckedAt: string; actions: ReadinessActions; evidence: EffectiveEvidence[]; blockers: string[]; blockerDetails?: { message: string; blocks: 'THIS_ACTION' | 'AUTOMATIC_START' }[]; }
 /** Where a project's inputs come from and where its outputs go. Versioned; edits carry an expected revision. */
 export interface ProjectLocation {
   id: string; projectId: string; localFolder: string; inputPaths: string[]; outputFolder: string;
-  sourceRepository: string; snapshotRoute: 'SELECTED_FILES_GIT_SNAPSHOT';
+  sourceRepository: string; snapshotRoute: 'SELECTED_FILES_GIT_SNAPSHOT' | 'PROJECT_FOLDER_SNAPSHOT';
   providerTarget: { provider: Provider; host: 'ANTHROPIC_MANAGED' | 'LOCAL_MACHINE'; selection: 'PROVIDER_DEFAULT'; environmentId: string; resolved: boolean };
   legacyNote: string; revision: number; createdAt: string; updatedAt: string;
 }
@@ -84,7 +101,7 @@ export interface InputSnapshot {
   /** New snapshots with durable objects require those objects in backups and restores. */
   objectsStored?: true;
   id: string; projectId: string; requestId: string | null; locationRevision: number; requestRevision: number | null;
-  route: 'SELECTED_FILES_GIT_SNAPSHOT' | 'GENERATED_REQUEST_ONLY'; files: SnapshotFile[];
+  route: 'SELECTED_FILES_GIT_SNAPSHOT' | 'PROJECT_FOLDER_SNAPSHOT' | 'GENERATED_REQUEST_ONLY'; files: SnapshotFile[];
   /** Office-written bookkeeping under the reserved directory. Absent on snapshots prepared before R2. */
   generated?: SnapshotFile[]; totalBytes: number;
   manifestHash: string; stagingCommit: string; stagingPath: string; warnings: string[]; provenance: 'OFFICE_STAGED'; createdAt: string;
@@ -168,6 +185,10 @@ export type DispatchRoute = 'FAKE_ADAPTER' | 'OFFICIAL_TERMINAL_HANDOFF' | 'OFFI
 export interface Assignment {
   research?: import('./pipeline').StageContext;
   dependsOn?: string[];
+  /** Declared tool scope for this assignment; absent on records frozen before the field existed. */
+  toolProfile?: import('./tool-profile').ToolProfile;
+  /** The comm-round spec entry this assignment was minted for — idempotent mints key on it. */
+  pipelineKey?: string;
   id: string; projectId: string; requestId: string; requestRevision: number; agentId: string; agentRevision: number;
   connectionId: string; capabilitySnapshotId: string; snapshotId: string; route: DispatchRoute;
   requestedModel: string; resolvedModel: string; requestedEffort: Effort; appliedEffort: Effort | 'UNVERIFIED';
@@ -197,14 +218,18 @@ export interface ProviderJob {
 export interface JobEvent {
   id: string; jobId: string; externalId: string; cursor: string; kind: 'STATUS' | 'MESSAGE' | 'TOOL' | 'OUTPUT';
   text: string; occurredAt: string; receivedAt: string; evidence: JobEvidence;
+  /** Structured self-report payload; absent on historical events and non-applied events. */
+  applied?: import('./local-session.js').AppliedReportPayload;
 }
 export type { FunctionAssignment, StageFunction };
-export interface AppState { pipeline?: import("./pipeline").PipelineRecord[]; schemaVersion: 1; requests?:Request[]; grants?:RequestGrant[]; probes?:ProbeAttempt[]; branches?:ResearchBranch[]; specs?:FrozenResearchSpec[]; predictions?:PredictionRecord[]; trials?:TrialLedgerEntry[]; attempts?:StageAttempt[]; receipts?:GateReceipt[]; functions?:FunctionAssignment[]; sealed?:SealedReviewReport[]; teams?:Team[]; memberships?:TeamMembership[]; messages?:Message[]; decisions?:ReviewDecision[]; locations?:ProjectLocation[]; snapshots?:InputSnapshot[]; assignments?:Assignment[]; jobs?:ProviderJob[]; jobEvents?:JobEvent[]; connections?:AccountConnection[]; capabilities?:ProviderCapabilitySnapshot[]; projects: Project[]; experiments: Experiment[]; tasks: ResearchTask[]; artifacts: Artifact[]; reviews: ReviewReport[]; events: LineageEvent[]; agents: Agent[]; settings: Settings; spend: Spend; }
+export interface AppState { pipeline?: import("./pipeline").PipelineRecord[]; schemaVersion: 1; requests?:Request[]; grants?:RequestGrant[]; probes?:ProbeAttempt[]; branches?:ResearchBranch[]; specs?:FrozenResearchSpec[]; predictions?:PredictionRecord[]; trials?:TrialLedgerEntry[]; attempts?:StageAttempt[]; receipts?:GateReceipt[]; functions?:FunctionAssignment[]; sealed?:SealedReviewReport[]; teams?:Team[]; memberships?:TeamMembership[]; messages?:Message[]; decisions?:ReviewDecision[]; locations?:ProjectLocation[]; snapshots?:InputSnapshot[]; assignments?:Assignment[]; jobs?:ProviderJob[]; jobEvents?:JobEvent[]; connections?:AccountConnection[]; capabilities?:ProviderCapabilitySnapshot[]; localSessions?: import('./local-session.js').LocalSessionRecord[]; localOps?: import('./local-session.js').LocalSessionJournal[]; projects: Project[]; experiments: Experiment[]; tasks: ResearchTask[]; artifacts: Artifact[]; reviews: ReviewReport[]; events: LineageEvent[]; agents: Agent[]; settings: Settings; spend: Spend; }
 export type Command =
  | { type: 'request.create'; idempotencyKey: string; projectId: string; name: string; hypothesis: string; workType?:WorkType; mode?:WorkMode; leadAgentId?:string|null; participantIds?:string[]; acceptanceCriteria?:string }
  | { type:'request.update';idempotencyKey:string;requestId:string;expectedRevision:number;objective:string;leadAgentId:string|null;participantIds:string[];acceptanceCriteria:string }
- | { type: 'request.start' | 'request.cancel' | 'request.duplicate'; idempotencyKey:string; requestId:string; expectedRevision:number }
+ | { type: 'request.start' | 'request.cancel' | 'request.duplicate' | 'request.pipeline.confirm'; idempotencyKey:string; requestId:string; expectedRevision:number }
+ | { type: 'request.pipeline.note'; idempotencyKey:string; requestId:string; expectedRevision:number; text:string }
  | { type: 'agent.remove'; idempotencyKey: string; agentId: string; removed: boolean }
+ | { type: 'agent.delete'; idempotencyKey: string; agentId: string }
  | { type: 'agent.update'; idempotencyKey: string; agentId: string; expectedRevision?: number; name: string; team: string; role: Role; instructions: string }
  | { type: 'project.create'; idempotencyKey: string; name: string; mandate: string; budgetCents: number; localFolder?:string; cloudWorkspace?:string }
  | { type: 'project.update'; idempotencyKey: string; projectId: string; name: string; mandate: string; budgetCents: number; localFolder?:string; cloudWorkspace?:string }
@@ -227,6 +252,7 @@ export type Command =
  | { type: 'task.create'; idempotencyKey: string; projectId: string; experimentId: string | null; prompt: string; recipient: Role }
  | { type: 'task.cancel'; idempotencyKey: string; taskId: string }
  | { type: 'task.delete'; idempotencyKey: string; taskId: string; expectedRevision?: number }
+ | { type: 'project.delete'; idempotencyKey: string; projectId: string }
  | { type: 'settings.update'; idempotencyKey: string; settings: Settings };
 export interface FileActionResult { canceled: boolean; count: number; message: string; state: AppState; }
 export interface AppInfo { version: string; dataDirectory: string; platform: string; packaged: boolean; transportModule: boolean; transportDetail: string; }
@@ -246,6 +272,8 @@ export interface OfficeAPI {
  confirmAgent(ticket: string): Promise<AppState>;
  cancelAgent(): Promise<void>;
  connectionStatus(provider: Provider): Promise<Connection>;
+ /** Run the provider's official sign-in outside the add-agent flow and record the observation. */
+ loginProvider(provider: Provider): Promise<Connection>;
  selectProviderTool(provider: Provider): Promise<void>;
  openProviderUsage(provider: Provider): Promise<void>;
  /** Freeze one request's inputs and record the intent to submit. Nothing is transferred. */
@@ -262,6 +290,14 @@ export interface OfficeAPI {
  historyPage(input: { projectId?: string | null; limit?: number; cursor?: number }): Promise<{ entries: LineageEvent[]; nextCursor: number | null; total: number }>;
  logPage(input: { agentId?: string; conversationId?: string; limit?: number; cursor?: string }): Promise<{ entries: WorkLog[]; nextCursor: string | null; total: number }>;
  jobEventPage(input: { jobId: string; limit?: number; cursor?: string }): Promise<{ entries: JobEvent[]; nextCursor: string | null; total: number }>;
+ officeChatPage(input: import('./office-chat').OfficeChatQuery): Promise<import('./office-chat').OfficeChatPage>;
+ /** Chronological applied self-report events for one job — the structured query the applied-report
+  *  UI reads. publicState strips jobEvents, so the pushed snapshot never carries them. */
+ appliedReports(input: { jobId: string; limit?: number }): Promise<{ entries: JobEvent[] }>;
+ /** The bounded local-session summary for one job, or null when the job has no local binding. */
+ localSessionSummary(jobId: string): Promise<import('./local-session').LocalSessionSummary | null>;
+ localLaunchPlan(jobId: string): Promise<import('./local-session').LocalLaunchPlan | null>;
+ localSessionArchive(assignmentId: string): Promise<{ state: AppState; archive: import('./local-session').LocalArchiveResult }>;
  /** Give old task records a native request, after a database copy and replay verification. */
  migrateLegacyRecords(): Promise<{ migrated: number; skipped: number; state: AppState }>;
  getState(): Promise<AppState>;

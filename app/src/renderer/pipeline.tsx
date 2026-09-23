@@ -47,6 +47,7 @@ export function ResearchPipeline({state,projectId}:{state:AppState;projectId:str
  const field=(form:HTMLFormElement,name:string)=>String(new FormData(form).get(name)??'');
  return <section aria-label="Research pipeline" className="standing pipeline">
   <h2>Research pipeline</h2>
+ <p className="pipeline-sub">Separated review branches and evidence readers for this project.</p>
   {error&&<p role="alert" className="notice error">{error}</p>}{message&&<p role="status">{message}</p>}
   {archived&&<p>Archived project · research is read-only.</p>}
   {!branches.length?<p>No research branches are recorded for this project.</p>:<label>Research branch<select aria-label="Research branch" value={branch?.id??''} onChange={e=>{setBranchId(e.target.value);setSubject('');setRecords([]);setTrials([]);}}><option value="">Select a branch</option>{branches.map(b=><option key={b.id} value={b.id}>{b.name} · {b.stage}</option>)}</select></label>}

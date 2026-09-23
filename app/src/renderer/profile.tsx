@@ -1,6 +1,31 @@
 import React,{useEffect,useState} from 'react';
-import type {Agent,AppState,JobEvent,WorkLog,Message} from '../shared/types';
+import type {Agent,AppState,Assignment,JobEvent,Message,ProviderJob,Request,WorkLog} from '../shared/types';
 import {agentDispatchReadiness} from '../shared/readiness';
+
+/**
+ * One frozen assignment and the job that runs it. The applied self-report comes from the bounded
+ * structured query, never the pushed snapshot — publicState strips jobEvents entirely. Structured
+ * payloads exist only on bound v2 receipts, so the mismatch check reads them directly; unbound
+ * legacy reports still show their recorded text.
+ */
+function AssignmentRow({assignment,job,request,state}:{assignment:Assignment;job:ProviderJob|undefined;request:Request|undefined;state:AppState}){
+ const [report,setReport]=useState<JobEvent|undefined>(undefined);
+ useEffect(()=>{
+  if(!job)return;let canceled=false;
+  void window.office.appliedReports({jobId:job.id,limit:20}).then(page=>{if(!canceled)setReport(page.entries.at(-1));}).catch(()=>{});
+  return()=>{canceled=true;};
+ },[job?.id,job?.revision,state]);
+ const applied=report?.applied;
+ const appliedMismatch=Boolean(applied&&((applied.model!==undefined&&applied.model!==assignment.requestedModel)||(applied.effort!==undefined&&applied.effort!==assignment.requestedEffort)));
+ return <article className="assignment-row">
+  <strong>{request?.name??'Request'}</strong>
+  <p className="muted">{assignment.requestedModel} · requested effort {assignment.requestedEffort} · applied {assignment.appliedEffort.toLowerCase()}</p>
+  {report&&<p className="muted">{report.text}</p>}
+  {appliedMismatch&&<p className="blocker">The session's self-reported applied values differ from the requested model/effort — self-reported, not office-verified.</p>}
+  <p>{job?`${job.state.replaceAll('_',' ').toLowerCase()}${job.externalId?` · ${job.externalId}`:''}`:'No job record'}</p>
+  {job?.detail&&<p className="muted">{job.detail}</p>}
+ </article>;
+}
 
 const tabs=['Profile','Assignments','Conversation','Logs'] as const;
 type Tab=typeof tabs[number];
@@ -51,15 +76,9 @@ export function ProfileTabs({agent,state,children,onState:_onState}:{agent:Agent
    {jobs.length>0&&<label>Assignment event scope<select aria-label="Assignment event scope" value={selectedJob?.id??''} onChange={e=>setSelectedJobId(e.target.value)}>{jobs.map(job=><option key={job.id} value={job.id}>{job.assignmentId.slice(0,8)} · {job.state}</option>)}</select></label>}
    <p className="muted">{assignments.length} assignment{assignments.length===1?'':'s'} · dispatch {gate.canStart?'available':'blocked'}</p>
    {!assignments.length&&<p>No work has been frozen for this profile yet.</p>}
-   {assignments.map(assignment=>{
-    const job=jobs.find(item=>item.assignmentId===assignment.id);
-    const request=(state.requests??[]).find(item=>item.id===assignment.requestId);
-    return <article className="assignment-row" key={assignment.id}>
-     <strong>{request?.name??'Request'}</strong>
-     <p className="muted">{assignment.requestedModel} · requested effort {assignment.requestedEffort} · applied {assignment.appliedEffort.toLowerCase()}</p>
-     <p>{job?`${job.state.replaceAll('_',' ').toLowerCase()}${job.externalId?` · ${job.externalId}`:''}`:'No job record'}</p>
-     {job?.detail&&<p className="muted">{job.detail}</p>}
-    </article>;})}
+   {assignments.map(assignment=><AssignmentRow key={assignment.id} assignment={assignment} state={state}
+    job={jobs.find(item=>item.assignmentId===assignment.id)}
+    request={(state.requests??[]).find(item=>item.id===assignment.requestId)}/>)}
    {events.length>0&&<details><summary>Latest provider events ({events.length})</summary>
     <ul className="evidence-list">{events.map(event=><li key={event.id}>{new Date(event.occurredAt).toLocaleString()} — {event.text}</li>)}</ul></details>}
   </div>}

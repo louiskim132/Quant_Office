@@ -2,6 +2,10 @@ import type { AccountConnection, AdapterRoute, Agent, AppState, CapabilityOperat
 
 /** Conservative application defaults. They are our own staleness rules, not provider guarantees. */
 export const ACCOUNT_STALE_MS = 5 * 60 * 1000;
+// A local account check is an office-observed CLI probe, not provider attestation; the manual
+// packet/handoff flow spans more wall-clock than a hosted dispatch, so local scopes get a wider
+// window before the check reads as stale.
+export const LOCAL_ACCOUNT_STALE_MS = 30 * 60 * 1000;
 export const CAPABILITY_EXPIRY_MS = 24 * 60 * 60 * 1000;
 type Records = Pick<AppState, 'connections' | 'capabilities'>;
 type Options = { now?: number; model?: string; environment?: string; effort?: Effort; delegation?: boolean; route?: AdapterRoute; execution?: ExecutionEnvironment };
@@ -69,7 +73,7 @@ export function scopeMismatches(state: Records, scope: RequestedScope, options: 
     if (operation === 'DELEGATION_CONTROL') scoped.delegation = scope.delegation;
     const evidence = effectiveEvidence(state, connection, operation, scoped);
     if (evidence) supplying.add(evidence.snapshotId);
-    if (!verified(evidence)) {
+    if (!verified(evidence, scope.route.startsWith('LOCAL_'))) {
       problems.push(`Unverified ${LABEL[operation]} for this exact scope: ${evidence ? (evidence.impossible ? `evidence is dated after the moment it is being checked at (${evidence.verifiedAt})` : evidence.expired ? `evidence expired (checked ${evidence.verifiedAt})` : `${evidence.level.toLowerCase().replaceAll('_', ' ')}, ${evidence.evidence.toLowerCase()}`) : 'no evidence recorded for these conditions'}.`);
       continue;
     }
@@ -175,10 +179,16 @@ export function effectiveEvidence(state: Records, connection: AccountConnection,
   };
 }
 
-/** An operation counts as usable only when it was observed for this exact scope and has not expired. */
-function verified(evidence: EffectiveEvidence | undefined): boolean {
-  return Boolean(evidence && evidence.level === 'ACCOUNT_VERIFIED' && evidence.evidence === 'OBSERVED'
-    && !evidence.expired && !evidence.impossible);
+/**
+ * An operation counts as usable only when it was observed for this exact scope and has not expired.
+ * For local scopes the office itself is the observing authority — it writes the packet, reads the
+ * receipt and lands the sentinel — so office-observed TOOL_SUPPORTED is the local ceiling. Hosted
+ * scopes keep requiring provider-side ACCOUNT_VERIFIED attestation, and the two families share no
+ * operations, so office testimony can never stand in for a provider's.
+ */
+function verified(evidence: EffectiveEvidence | undefined, local = false): boolean {
+  return Boolean(evidence && evidence.evidence === 'OBSERVED' && !evidence.expired && !evidence.impossible
+    && (evidence.level === 'ACCOUNT_VERIFIED' || (local && evidence.level === 'TOOL_SUPPORTED')));
 }
 
 /**
@@ -201,7 +211,7 @@ const LABEL: Record<CapabilityOperation, string> = {
   CLOUD_OUTPUT_FETCH: 'output retrieval', CLOUD_CANCEL_REQUEST: 'cancellation request', CLOUD_CANCEL_ACK: 'cancellation acknowledgement',
   MODEL_APPLICATION: 'applied model', EFFORT_APPLICATION: 'applied effort', ENVIRONMENT_IDENTITY: 'environment identity',
   DELEGATION_CONTROL: 'delegation control', TOOL_CONFINEMENT: 'tool, filesystem and network confinement', CLOUD_CANCEL: 'cancellation (legacy record)',
-  LOCAL_SUBMIT: 'local session submission', LOCAL_OBSERVE: 'local session observation', LOCAL_OUTPUT_FETCH: 'local output retrieval', LOCAL_CANCEL: 'local session cancellation',
+  LOCAL_SUBMIT: 'local session submission', LOCAL_OBSERVE: 'local session observation', LOCAL_OUTPUT_FETCH: 'local output retrieval', LOCAL_CANCEL: 'local session cancellation', LOCAL_RETIRE: 'local session retirement',
 };
 
 /**
@@ -230,10 +240,14 @@ export function providerReadiness(state: Records, provider: Provider, options: O
   // It is only ever read for the message; `has` below stays strictly scoped.
   const described = new Map((connection ? REPORTED.map(operation => effectiveEvidence(state, connection, operation, { now }))
     .filter((item): item is EffectiveEvidence => Boolean(item)) : []).map(item => [item.operation, item]));
-  const has = (operation: CapabilityOperation) => verified(found.get(operation));
+  // The verification bar follows the requested family: an explicit route is the ground truth,
+  // otherwise the execution environment chooses. A route's family never relaxes for the other one.
+  const localScope = options.route ? options.route.startsWith('LOCAL_') : options.execution === 'LOCAL';
+  const has = (operation: CapabilityOperation) => verified(found.get(operation), localScope);
 
   const signedIn = connection?.state === 'SIGNED_IN' && has('ACCOUNT_STATUS');
-  const accountFresh = Boolean(connection && now - Date.parse(connection.lastCheckedAt) <= ACCOUNT_STALE_MS);
+  const accountStaleMs = localScope ? LOCAL_ACCOUNT_STALE_MS : ACCOUNT_STALE_MS;
+  const accountFresh = Boolean(connection && now - Date.parse(connection.lastCheckedAt) <= accountStaleMs);
   // A provider-wide catalog does not verify the selected model; scoped application evidence does.
   const modelChecked = model
     ? has('MODEL_APPLICATION') && found.get('MODEL_APPLICATION')?.model === model
@@ -244,17 +258,22 @@ export function providerReadiness(state: Records, provider: Provider, options: O
   const ready = signedIn && accountFresh && modelChecked && dispatchChecked;
 
   const blockers: string[] = [];
-  if (!connection) blockers.push('No account check has been recorded for this provider yet.');
-  else if (connection.state !== 'SIGNED_IN') blockers.push(connection.note || 'The official tool does not report a signed-in subscription.');
-  else if (!has('ACCOUNT_STATUS')) blockers.push('The signed-in state has not been confirmed by an observed account check.');
-  if (connection && !snapshot) blockers.push('No capability snapshot has been recorded for this account.');
-  if (connection && !accountFresh) blockers.push('The account check is stale; recheck before any external action.');
-  if (signedIn && !modelChecked) blockers.push(model ? `The office has not verified that ${model} is the model a job would actually use.` : 'Model entitlement has not been verified for this account.');
+  const blockerDetails: NonNullable<ProviderReadiness['blockerDetails']> = [];
+  // A blocker that fails the actions.handoff conditions (signed-in + fresh account) blocks the
+  // manual action in front of the user. Evidence gaps for individual dispatch operations gate only
+  // automatic start — manual packet write and handoff stay available while they are unverified.
+  const block = (message: string, blocks: 'THIS_ACTION' | 'AUTOMATIC_START') => { blockers.push(message); blockerDetails.push({ message, blocks }); };
+  if (!connection) block('No account check has been recorded for this provider yet.', 'THIS_ACTION');
+  else if (connection.state !== 'SIGNED_IN') block(connection.note || 'The official tool does not report a signed-in subscription.', 'THIS_ACTION');
+  else if (!has('ACCOUNT_STATUS')) block('The signed-in state has not been confirmed by an observed account check.', 'THIS_ACTION');
+  if (connection && !snapshot) block('No capability snapshot has been recorded for this account.', 'THIS_ACTION');
+  if (connection && !accountFresh) block('The account check is stale; recheck before any external action.', 'THIS_ACTION');
+  if (signedIn && !modelChecked) block(model ? `The office has not verified that ${model} is the model a job would actually use.` : 'Model entitlement has not been verified for this account.', 'AUTOMATIC_START');
   for (const operation of requiredDispatch) {
     if (has(operation)) continue;
     const item = found.get(operation) ?? described.get(operation);
     const outOfScope = !found.has(operation) && described.has(operation) ? ' for these exact conditions' : '';
-    blockers.push(`Unverified ${LABEL[operation]}${outOfScope}: ${item ? (item.expired ? `evidence expired (${item.level.toLowerCase().replace('_', ' ')}, checked ${item.verifiedAt})` : `${item.level.toLowerCase().replace('_', ' ')}, ${item.evidence.toLowerCase()}`) : 'no evidence recorded'}.`);
+    block(`Unverified ${LABEL[operation]}${outOfScope}: ${item ? (item.expired ? `evidence expired (${item.level.toLowerCase().replace('_', ' ')}, checked ${item.verifiedAt})` : `${item.level.toLowerCase().replace('_', ' ')}, ${item.evidence.toLowerCase()}`) : 'no evidence recorded'}.`, 'AUTOMATIC_START');
   }
 
   const actions: ReadinessActions = {
@@ -268,7 +287,7 @@ export function providerReadiness(state: Records, provider: Provider, options: O
   return {
     provider, connectionId: connection?.id ?? '', identity: connection?.identity ?? '', signedIn, accountFresh,
     modelChecked, dispatchChecked, ready, model, lastObservedAt: connection?.lastCheckedAt ?? '', lastCheckedAt: connection?.lastCheckedAt ?? '',
-    actions, evidence, blockers,
+    actions, evidence, blockers, blockerDetails,
   };
 }
 
@@ -293,7 +312,9 @@ export function agentBinding(state: Records, agent: Pick<Agent, 'provider' | 'ac
   const blockers: string[] = [];
   if (!agent.connectionId) blockers.push(`Unverified: this profile was created for ${agent.account} and has not been checked against a recorded account. Use Verify connection.`);
   else if (!bound) blockers.push('This profile references an account record that is not in this workspace.');
-  else if (!matchesActiveContext) blockers.push(`Bound to ${bound.identity}, but ${active?.identity || 'no account'} is the current context. Sign that account back in, or change the binding deliberately.`);
+  else if (!matchesActiveContext) blockers.push(active?.identity
+    ? `Bound to ${bound.identity}, but ${active.identity} is the current context. Sign that account back in, or change the binding deliberately.`
+    : `Bound to ${bound.identity}, but the current ${agent.provider} context did not report an account identity, so the binding cannot be verified. Check the account again; if the official tool still cannot name it, sign in through it.`);
   else if (active?.state !== 'SIGNED_IN') blockers.push('The bound account is not signed in right now.');
   if (agent.removedAt) blockers.push('Archived profiles are read-only until restored.');
   const setupIdentity = agent.setupAccount ?? agent.account;
@@ -308,13 +329,17 @@ export function agentBinding(state: Records, agent: Pick<Agent, 'provider' | 'ac
  * The full gate one profile must pass before any external dispatch: an available binding, a fresh
  * account check, and verified transport evidence for the exact model this profile would use.
  */
-export function agentDispatchReadiness(state: Records, agent: Pick<Agent, 'provider' | 'model' | 'effort' | 'account' | 'setupAccount' | 'connectionId' | 'bindingVerifiedAt' | 'removedAt' | 'execution'>, options: Options = {}) {
+export function agentDispatchReadiness(state: Records, agent: Pick<Agent, 'provider' | 'model' | 'effort' | 'account' | 'setupAccount' | 'connectionId' | 'bindingVerifiedAt' | 'removedAt' | 'execution' | 'localRoute'>, options: Options = {}) {
   const binding = agentBinding(state, agent);
   // The profile's own effort is part of what would actually be requested, so readiness answers for
   // it rather than for an unspecified one. Route and delegation come from the caller when known.
   // The execution environment picks the dispatch family: LOCAL agents are gated on office-observed
-  // local transport evidence, never silently on the hosted family.
-  const readiness = providerReadiness(state, agent.provider, { ...options, execution: agent.execution ?? 'HOSTED_SETUP_REQUIRED', model: agent.model, effort: options.effort ?? agent.effort ?? 'default' });
+  // local transport evidence, never silently on the hosted family. A local profile's declared
+  // localRoute scopes that evidence to the exact transport — mailbox runs do not verify exec and
+  // exec runs do not verify mailbox.
+  const readiness = providerReadiness(state, agent.provider, { ...options,
+    route: agent.execution === 'LOCAL' ? (agent.localRoute ?? 'LOCAL_MAILBOX') : options.route,
+    execution: agent.execution ?? 'HOSTED_SETUP_REQUIRED', model: agent.model, effort: options.effort ?? agent.effort ?? 'default' });
   return {
     binding, readiness,
     canPrepare: !agent.removedAt,

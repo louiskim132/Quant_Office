@@ -7,6 +7,9 @@ export interface QueueEntry {
  status: ResearchTask['status'] | 'DRAFT' | 'READY';
  request?: Request;
  active: boolean;
+ /** Every recorded provider job reached a terminal outcome. Failed and canceled jobs count — a
+  * settled row is finished work with a recorded outcome, not a claim of success. */
+ settled: boolean;
  canCancel: boolean;
  /** Removal from the queue is a view change on a terminal record; the record itself is retained. */
  deletable: boolean;
@@ -39,7 +42,7 @@ export interface RequestActions {
 }
 
 const SETTLED: ProviderJob['state'][] = ['COMPLETED', 'FAILED', 'CANCEL_ACKNOWLEDGED'];
-const UNRESOLVED: ProviderJob['state'][] = ['SUBMITTING', 'ACCEPTED', 'RUNNING', 'UNKNOWN', 'CANCEL_REQUESTED'];
+export const UNRESOLVED: ProviderJob['state'][] = ['SUBMITTING', 'ACCEPTED', 'RUNNING', 'UNKNOWN', 'CANCEL_REQUESTED'];
 
 /**
  * Aggregates every job on a request rather than reporting the latest assignment.
@@ -84,7 +87,7 @@ export function requestQueue(state: Pick<AppState, 'tasks' | 'experiments' | 'pr
   const experiment = state.experiments.find(e => e.id === root.experimentId);
   const status = experiment?.stage === 'CANCELED' ? 'CANCELED' : root.status;
   const active = !['CANCELED', 'ACCEPTED', 'SUPERSEDED'].includes(status);
-  return {id: root.id, root, tasks, status, active,
+  return {id: root.id, root, tasks, status, active, settled: status === 'ACCEPTED',
    canCancel: active && !state.projects.find(p => p.id === root.projectId)?.archived,
    deletable: status === 'ACCEPTED' || status === 'CANCELED'};
  });
@@ -94,9 +97,11 @@ export function requestQueue(state: Pick<AppState, 'tasks' | 'experiments' | 'pr
   return {
    id:request.id,request,tasks:[],status:request.blockers.length?'BLOCKED':request.status,
    root:{id:request.id,projectId:request.projectId,experimentId:request.experimentId,prompt:request.objective,recipient:'WORKER',status:request.status==='CANCELED'?'CANCELED':'BLOCKED',blocker:null,createdAt:request.createdAt,updatedAt:request.updatedAt},
-   // Active while the request is open or any job is still unresolved: an unknown outcome keeps the
-   // work in view rather than letting a later completed job settle the whole request.
-   active:request.status!=='CANCELED'||jobs.some(job=>job.unresolved),
+   // Active while the request is open and its recorded work has not all reached a terminal outcome:
+   // an unknown attempt is exactly what must stay in view until it is reconciled. A canceled request
+   // with an unresolved job stays in view too — the outcome is not established yet.
+   settled:request.status!=='CANCELED'&&jobs.length>0&&jobs.every(job=>job.settled),
+   active:request.status==='CANCELED'?jobs.some(job=>job.unresolved):!(jobs.length>0&&jobs.every(job=>job.settled)),
    canCancel:request.status!=='CANCELED'&&!archived,
    // Only a terminal record leaves the queue, and an unresolved provider job outcome never does:
    // an unknown attempt is exactly what must stay in view until it is reconciled.
@@ -141,7 +146,10 @@ export function queueScope(state: Pick<AppState,'tasks'|'experiments'|'projects'
   }
   return true;
  });
- const completed = (entry: QueueEntry) => entry.status === 'ACCEPTED';
+ // Completed means the recorded work finished: a legacy group at ACCEPTED, or a request whose
+ // provider jobs all reached a terminal outcome. The job list, not provider self-report, is the
+ // evidence — an unresolved attempt never counts as completed.
+ const completed = (entry: QueueEntry) => entry.status === 'ACCEPTED' || (entry.request !== undefined && entry.settled);
  const canceled = (entry: QueueEntry) => entry.status === 'CANCELED';
  const counts = {
   active: scoped.filter(entry => entry.active).length,

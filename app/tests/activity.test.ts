@@ -48,5 +48,18 @@ test('effort changes use optimistic checks, create work-log events and restore w
 });
 test('effort capability validation rejects unsupported levels instead of substitution',async()=>{
  const root=await mkdtemp(path.join(tmpdir(),'qro-capabilities-')),service=new Subscriptions(root,async()=>{});
- try{assert.throws(()=>service.validateEffort('claude','opus','max'),/not supported/);assert.throws(()=>service.validateEffort('claude','haiku','high'),/not supported/);assert.throws(()=>service.validateEffort('claude','opus','ultra'),/not supported/);assert.throws(()=>service.validateEffort('openai','model','high',{provider:'openai',connected:true,account:'test',models:[{id:'model',name:'Model',efforts:['low']}],windows:[],checkedAt:new Date().toISOString(),note:''}),/not supported/);}finally{service.close();}
+ try{
+  // Claude's session-level enum is tool-published, so post-creation edits validate without a
+  // connection; values outside the CLI's enum still refuse. OpenAI/Devin stay account-bound.
+  assert.doesNotThrow(()=>service.validateEffort('claude','claude-sonnet-5','low'));
+  assert.doesNotThrow(()=>service.validateEffort('claude','opus','max'));
+  assert.throws(()=>service.validateEffort('claude','opus','ultra'),/not supported/);
+  assert.throws(()=>service.validateEffort('claude','opus','none'),/not supported/);
+  assert.throws(()=>service.validateEffort('openai','model','high'),/not supported/);
+  assert.throws(()=>service.validateEffort('devin','swe-2-max','low'),/not supported/);
+  // A signed-in catalog that narrows a model's levels still wins over the published enum.
+  const narrowed={provider:'claude' as const,connected:true,account:'test',models:[{id:'opus',name:'Opus',efforts:['low' as const]}],windows:[],checkedAt:new Date().toISOString(),note:''};
+  assert.throws(()=>service.validateEffort('claude','opus','max',narrowed),/not supported/);
+  assert.throws(()=>service.validateEffort('openai','model','high',{provider:'openai',connected:true,account:'test',models:[{id:'model',name:'Model',efforts:['low']}],windows:[],checkedAt:new Date().toISOString(),note:''}),/not supported/);
+ }finally{service.close();}
 });

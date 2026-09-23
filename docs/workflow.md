@@ -46,6 +46,34 @@ All stages can enter a named BLOCKED or FAILED branch with original stage, cause
 
 BLOCKED_DATA and BLOCKED_POLICY identify missing inputs. INVALID identifies a failed validity gate. INCONCLUSIVE identifies insufficient evidence/sample size/detector power. EXECUTION_FAILED is not a null result. PILOT_COMPLETE alone cannot authorize promotion or protected-data access. CANDIDATE_FOR_NEXT_STAGE requires valid evidence satisfying the separate advancement contract.
 
+## The desktop surface
+
+The sidebar groups the office into a small set of pages, and two of them carry most of the work:
+
+- **Office** is the landing view and carries the full work queue: every request across every project, with lifecycle, project, agent, team and text filters. There is no separate Tasks page — the queue is part of the office view.
+- **Projects** is the single project surface. With nothing selected it is the project list — active and archived, each row showing the mandate, location and experiment count. Selecting a project — from the topbar selector, a list row's Open project, or a queue card — opens that project's research workspace in place of the list: the mandate, its experiment tabs, the research contract, and the project folder that is the request's input scope. Deselecting returns to the list.
+
+Agents manages profiles and membership, and Add Agent creates them. Reviews, Artifacts, History, Usage and Settings remain their own pages.
+
+## Removal is a view, not an erasure
+
+Canceling and removing are different acts, and neither rewrites the record.
+
+- **Canceling a request** (`request.cancel`; legacy task groups use `task.cancel`) ends the open work: the request goes CANCELED and its linked experiment and tasks are canceled with it. The row stays in the queue — visible under the Canceled filter — and 'Use as new request' copies its objective into a fresh draft. Canceling never orphans a provider job: the job records stay attached to the request, the row counts as active — and so stays in view — while any outcome is unresolved, and the card's reconcile controls (observe the job, request its cancellation, and for an UNKNOWN outcome the session link) remain on it until every outcome is settled, on a canceled request and under an archived project alike. That reachability is exactly what keeps the removals below unblocked: an unresolved outcome can always be found and reconciled, so the unresolved-job refusal is a pause, never a dead end.
+- **Removing a row** (`task.delete`) only hides it. The command is refused while the request is still open, and again while a provider job outcome is unresolved — an UNKNOWN attempt must stay reachable until it is reconciled — so only terminal rows can leave the list. Removal is one-way; the request, its tasks and every lineage event are retained and remain readable in History.
+- **Removing a project** is the same shape one level up. Archive first — refused while any request or task under the project is still open — then Remove from list (`project.delete`) hides it from pickers and lists, and is refused while any of its requests still has an unresolved provider outcome. A removed project stays reachable through the project list's Removed lifecycle filter; restoring it clears the removal and lands it in the archived list, where a second restore makes it active again.
+- **Removing an agent** follows the same lifecycle on the Agents page. Archive first — the profile goes read-only and leaves pickers and assignment — then Remove from list (`agent.delete`) hides it from every membership filter except Removed, and is refused while any assignment under the agent still has an unresolved provider outcome. Restore clears the removal into the archived list; a second restore reactivates the profile.
+
+The same contract repeats at each level of ownership:
+
+| Entity | First step | Remove command | Refused while | Way back |
+| --- | --- | --- | --- | --- |
+| Request | Cancel (`request.cancel`; legacy groups `task.cancel`) | Remove (`task.delete`) | the request is still open, any of its provider jobs is unresolved, or its project is archived | None — one-way; the record stays readable in History |
+| Project | Archive (`project.archive`) | Remove from list (`project.delete`) | the project is still active, or any request under it still carries an unresolved provider outcome | Restore clears the removal into the archived list; a second restore reactivates |
+| Agent | Archive agent (`agent.remove`) | Remove from list (`agent.delete`) | the profile is still active, or any assignment under it still carries an unresolved provider outcome | Restore clears the removal into the archived list; a second restore reactivates |
+
+Nothing on this page deletes evidence: canceled, removed and archived records all keep their history, stored files stay on disk, and a provider job whose outcome is still unknown keeps its place in the queue until it is reconciled.
+
 ## Exact export contents
 
 An export contains a finalized payload archive and a detached release envelope. The payload contains source, dependency lock, fixed launcher/notebook as a static file, configuration, frozen contract, data manifest, approved schedule/mode, seeds where relevant, check definitions, expected artifact schemas, inventory and user instructions. The detached envelope contains the payload byte hash and approval/verification references. Export no API credentials, remote session IDs that grant access, live links or callback configuration.
@@ -83,7 +111,13 @@ The office can also assign bounded office labor — notes, file passes, draft te
 
 ### Adding a local agent
 
-Add Agent can create a Devin, Claude Code or Codex agent whose execution environment is LOCAL. Setup uses only the official installed tool signed in to the user's own subscription: Devin is probed through `devin auth status` and `devin models list --format json`, Codex through its app-server account and model endpoints, and Claude Code through `claude auth status` with the curated alias list — an alias is built into the application and is not an entitlement check for the account. No API key is accepted: the child environment is stripped of provider credential variables and there is no API-key fallback. The Devin CLI sign-in is a separate credential from the signed-in Devin Desktop session.
+Add Agent can create a Devin, Claude Code or Codex agent whose execution environment is LOCAL. Setup uses only the official installed tool signed in to the user's own subscription: Devin is probed through `devin auth status` and `devin models list --format json`, Codex through its app-server account and model endpoints, and Claude Code through `claude auth status` with the curated alias list — an alias is built into the application and is not an entitlement check for the account. No API key is accepted: the child environment is stripped of provider credential variables and there is no API-key fallback.
+
+When the official tool is not signed in, the app opens a visible terminal running that tool's own login — for Devin, `devin auth login` — and re-checks status afterward; the same command can be run manually in any terminal. The Devin CLI credential is separate from the signed-in Devin Desktop session: signing in to the desktop app does not sign in the CLI, and the office checks only the CLI. The Devin model catalog is read from `devin models list --format json` once the CLI is signed in; there is no provisional suggestion list before that.
+
+**Never launch the office itself from an agent terminal.** Provider CLIs read their environment when they resolve credentials: a CLI spawned under an agent-protocol environment — one carrying `ACP_BACKEND` or other `ACP_*` variables, as happens when the office process is started from inside a coding agent's terminal — can falsely report a signed-out account even though the tool is signed in. The office strips `ACP_*` variables from the environment of every child process it spawns, alongside the provider credential variables it already removes, but it cannot repair the environment it was itself launched under. Start the app from an ordinary desktop or shell session; if a signed-in tool reports signed-out inside the app, suspect the launch environment before re-authenticating.
+
+Devin encodes effort in the model variant rather than a separate effort axis — `swe-2-max` is the max-effort variant, `swe-2-high` a lower one — so the variant is chosen in the Model field and the separate effort field stays at Provider default unless a catalog entry explicitly declares real effort levels.
 
 Two fields beyond provider, model and team describe how a local agent is configured:
 
@@ -92,23 +126,80 @@ Two fields beyond provider, model and team describe how a local agent is configu
 
 A saved local profile is never proof that the runtime exists. Signing in is not proof a local session can run: readiness requires office-observed LOCAL_* evidence for the scope's actual route, and a route with no configured local adapter fails closed rather than dispatching through another surface.
 
+### Preparing a local request
+
+A local session sees only what the office stages for it, and staging starts from the project's recorded location:
+
+- The project folder is chosen through the system's folder dialog; the field in the project form is read-only and not free-typed, and saving revalidates that the path is absolute and an existing directory. Choosing a folder never uploads, indexes or reads its contents — it is recorded for provenance and file selection only, and the office database stays in application data.
+- The saved folder is the request's input scope: preparing a request hashes the folder's whole contents into a frozen snapshot. Credential patterns, tool configuration, VCS/dependency/cache subtrees (`.git`, `node_modules`, `.venv`, …), links and the reserved `_office/` namespace are skipped, and each meaningful skip is recorded as a snapshot warning. A folder holding more than 2000 files or 64 MiB refuses the whole snapshot rather than silently truncating, and a file added later joins the next snapshot — never retroactively.
+- Preparing the request snapshots the folder's files into office-owned staging: each file is copied, hashed and inventoried, generated bookkeeping lands under `_office/` (a README naming the staged set and a manifest listing every byte), and the snapshot can be rebuilt from stored workspace bytes after a restore — the source folder is never reread.
+
 ### Delivering work locally
 
-Three local routes exist: LOCAL_MAILBOX, LOCAL_CLI_EXEC and LOCAL_ACP. The mailbox transport works as follows:
+The readiness model names three local routes — LOCAL_MAILBOX, LOCAL_CLI_EXEC and LOCAL_ACP; the mailbox and the office-spawned exec route have transport adapters, while LOCAL_ACP remains unwired — a scope bound to an unwired route fails closed rather than falling back to another surface. The mailbox transport works as follows:
 
-1. The office writes a scoped packet directory under a workspace-local sessions root: `packet.json` plus the declared input files copied from the snapshot staging path, each hashed. The packet directory is the session's external identity.
-2. The user runs the local session against that directory in the official tool.
-3. The session writes `result.json` plus its declared artifact files.
-4. The office reads the directory back, verifies every declared sha256 against the bytes on disk and reports the outputs through the normal inventory. Undeclared or mismatched files are not results.
+1. The office writes a scoped packet directory under a workspace-local sessions root: `packet.json` (the frozen assignment plus the declared file manifest), `CONTRACT.md` (the result contract, generated from the same constants the receipt parser enforces), `AGENTS.md` (the discovery file agent CLIs auto-read when the packet directory is the working directory — it points an uninstructed session at the contract), and `inputs/` holding the folder's files copied from snapshot staging and hashed. `inputs/` appears only when the snapshot carried files — a zero-input packet may have no such directory, so an objective must never assume it exists. The packet directory is the session's external identity.
+2. The user runs the local session against that directory in the official tool. A Devin Desktop session opened on the packet directory appears under its own workspace grouping, not inside the Quant_Office space — expected behavior, not a registration failure.
+3. The session writes `result.json` plus its declared artifact files. The receipt must carry exactly `state`, `detail` and `outputs` — each output naming its path, sha256 and byte count — and may additionally self-report `appliedModel`, `appliedEffort` and `delegation`.
+4. On Observe the office reads the directory back and validates `result.json` as a strict receipt — exact keys, known states, the size cap — and confirms every declared output exists on disk at its declared sha256 and byte count before accepting the receipt at all. It then fetches each declared output's bytes, re-hashes and re-counts them, and stores matching bytes as content-addressed objects for the normal inventory; a declared output that cannot be retrieved blocks the completion — the miss is recorded as a job event and the read fails loudly, never a partial or fabricated success. Undeclared or mismatched files are not results, and a missing, oversized, malformed or hash-mismatched receipt is an office-local UNKNOWN reading, never a session report.
 
-Cancellation writes a cancel sentinel in the packet directory: ending the session is a real cancellation of that local session, honestly labeled — it is not a provider cancellation acknowledgement, and no provider-side job exists to acknowledge. The recorded route and packet identity are the durable facts, so a restart cannot duplicate a dispatch.
+Each step records only what the office itself did, as office-observed evidence:
+
+- Writing the packet records LOCAL_SUBMIT, TOOL_CONFINEMENT (the scoped workspace delivery) and DELEGATION_CONTROL (the packet carries the frozen single-agent payload; the mailbox has no delegation channel), and the job is left UNKNOWN awaiting a session — a written packet is not an acceptance, and the office does not record one it did not observe.
+- Reading a fully verified `result.json` records LOCAL_OBSERVE plus LOCAL_OUTPUT_FETCH for the verified output inventory, and records MODEL_APPLICATION, EFFORT_APPLICATION or DELEGATION_CONTROL only for the self-report fields the receipt actually declared — an absent field stays absent.
+- Cancellation writes a `cancel.requested` sentinel in the packet directory and records LOCAL_CANCEL once that sentinel is on disk: the office's cancel request, honestly labeled — it is not a provider cancellation acknowledgement, no provider-side job exists to acknowledge, and the sentinel is a cooperative request the session may never see, not a termination guarantee.
+
+The recorded route and packet identity are the durable facts, so a restart cannot duplicate a dispatch.
+
+### Local session lifecycle — current state
+
+The mailbox is a manual handoff, and every lifecycle step below is office-local:
+
+- **Delivery waits for the user.** Writing the packet is the whole dispatch — the office does not spawn, poll or signal a session. The job sits UNKNOWN until the user launches the official tool against the packet directory and a verified receipt says otherwise.
+- **Cancellation is a request, not a termination guarantee.** `cancel.requested` is a sentinel file in the session's own directory — a cooperative signal the session may never see. LOCAL_CANCEL records that the office wrote the request; it does not attest that the session ended, and nothing forcibly stops the session process.
+- **Retire archives office bytes only.** The adapter's retire moves the packet directory under `archive/` by rename — every byte survives, and an absent or already-retired directory is reported rather than thrown. Nothing calls it automatically.
+- **Provider-side records are a separate store.** A packet's session can leave provider-side traces — Devin `sessions.db` rows, Claude project directories, Codex rollout files — that office archival does not touch. Office code can discover those records and retire them explicitly, but retirement is never automatic, and ordering it against evidence collection stays the caller's responsibility.
+
+Planned, not yet implemented: versioned packet/result contracts, lifecycle journalling, the office-side retire/archive IPC and worktree-lane adapter selection are in flight; nothing above should be read as describing them.
+
+### The office-spawned route — LOCAL_CLI_EXEC
+
+Where the mailbox waits for the user to launch a session, the exec route has the office spawn the provider's installed CLI itself — unattended, inside the packet directory it just wrote. The packet, receipt and cooperative-stop contracts are the same office-local-session@2 files read by the same validators; what differs is who starts the process.
+
+- **Spawn.** Dispatch writes the packet exactly as the mailbox does, then spawns the provider CLI with the frozen payload text plus a fixed pointer at the packet contract. The spawn working directory is the packet directory — a CLI flag like codex `-C` does not place the model's shell, so the spawn cwd is authoritative. Commands per provider, every flag verified against the installed tool's `--help`: `claude -p <prompt> --output-format json --dangerously-skip-permissions --model <model> [--effort <level>]`; `codex exec -s workspace-write --skip-git-repo-check -m <model> <prompt>`; `devin -p <prompt> --model <model> --respect-workspace-trust false --permission-mode dangerous`. Devin runs `dangerous` because the probed `auto`/`accept-edits` modes get the write tool rejected in non-interactive use — it is the least privileged documented mode that covers the contract writes, and it is recorded verbatim. Only claude documents an effort flag; a requested effort with no documented mapping is recorded as unmapped in the launch evidence, never silently dropped.
+- **Launch evidence.** LOCAL_SUBMIT's detail carries the launch record — pid, executable, the argv with the prompt slot reduced to a `<prompt:sha256>` marker, the exact bypass flags, spawn time, working directory and timeout — stamped LOCAL_CLI_EXEC and worded 'office-spawned unattended run'. TOOL_SUPPORTED/OBSERVED, never provider attestation.
+- **Environment.** The child runs under the office's scrubbed subscription environment — agent-shell variables (`ACP_*`, provider API keys) that would mask the CLI's own file credential are removed. The run still executes under the user's own sign-in and filesystem permissions.
+- **Output.** Buffered child stdout/stderr drains into job events as PROVIDER_REPORTED lines keyed `spawn:<pid>:<seq>` — the provider tool's own output, deduped on repeat observations, capped per read and bounded in memory.
+- **Cancellation truth table.** The office writes the same `cancel.requested` sentinel as the mailbox, then kills a child it still owns. An office-owned pid kill is a real cancellation of that process — the next observation reports FAILED with OFFICE_LOCAL provenance because a killed run cannot be trusted to write a receipt. A self-exited process without a receipt stays UNKNOWN — a process that died on its own is not a failure claim. A provider-reported FAILED arrives only through a valid receipt. A missing or malformed receipt is an UNKNOWN defect naming the defect. When no office-owned process is alive, the sentinel alone is advisory.
+- **Restart-ownership limit.** The process registry is in-memory. After an office restart the recorded pid is checked for liveness and reported as informational — the office cannot re-own, signal or attest a process it did not spawn, and says so.
+- **Non-claims.** No sandbox confinement beyond what was probed (codex `workspace-write` was observed refusing an out-of-workspace `cd`; Windows read confinement is untested). No provider attestation — the receipt is the session's own report. A pid liveness check is not ownership. All three providers' contract adherence is probe-validated through the office's own `readLocalResult` (docs/cli-exec-probes.md); note that agent shells carrying `ACP_*` variables mask Devin's file credential — a probe must run under the same scrubbed environment the adapter spawns with.
+
+### The automatic local chain — dependencies and verified inheritance
+
+An assignment may declare `dependsOn` — recorded predecessor assignment ids — at preparation time. Dependents prepared this way form the automatic local chain:
+
+- **Waiting is honest.** A dependent's job stays INTENT and the dispatch UI names the predecessors it waits on. The existing dependency guard refuses launch while any predecessor job is missing, terminal-non-completed, or still open — 'running' is reported as running, never assumed finished.
+- **Inheritance is verified bytes.** When every predecessor job has reached COMPLETED with durably stored output, the dependent's packet gains an `inherited/` tree: each verified output file is read back from the content-addressed object store, re-hashed byte-for-byte at write time, and recorded in the packet manifest with the source job id and object hash. A missing or mutated predecessor object fails the packet write honestly — the dependent stays prepared and the blocker is recorded, never a silently empty inheritance.
+- **The launch is automatic but identical.** The chain launches the dependent through the same guard, binding, packet and adapter path a manual launch would — the difference is only who pressed the button. Launches are serialized behind a single tail promise so two predecessors settling together cannot race one dependent, and a job already submitted is never resubmitted — repeated advance or reconcile calls are idempotent. Each automatic launch is recorded on the job as office-local testimony (`chain-launch:`/`chain-blocked:` event ids), and a refused launch leaves the work prepared for a manual attempt, not swallowed.
+- **Observation is event-driven, never polled.** For office-spawned runs the adapter emits one debounced local event when the child exits or `result.json`/`cancel.ack.json` lands in the watched packet directory; the office then observes through the same validated receipt reader a manual Observe uses, and a verified completion advances the chain. A process exit without a trusted receipt stays UNKNOWN — exit is a trigger, not an outcome. Spawn bookkeeping is released the moment a job's outcome is verified terminal and again at office shutdown.
+- **Restart reconciles, never invents.** At startup the office observes open local jobs and runs the same chain pass over durable records: a dependent left parked by a predecessor that completed while the office was closed is launched, while anything already dispatched is left alone. Nothing is reconciled into an outcome the receipts do not support.
+- **Routes stay in their lanes.** The chain only dispatches local routes (mailbox and exec — a mailbox dependent simply gets its packet written automatically for manual launch). Hosted-route dependents are never auto-launched, and nothing in the chain path reaches hosted providers.
+
+### What the request view shows
+
+Start request records readiness blockers in two groups. Blockers that fail the manual step in front of the user — no account check, an unsigned-in tool, a missing capability snapshot, a stale check — stop that action. Blockers that only gate automatic start — unverified model application, or missing dispatch-family evidence for this scope — leave preparation and the packet write available, because writing a packet records the office's own first local evidence rather than claiming capability. A hosted-transport warning appears only when a selected participant could actually reach a hosted route; an all-local selection records no cloud-transport blocker.
+
+Account checks go stale on the office's own clock, not a provider guarantee: five minutes for hosted scopes, thirty minutes for local scopes, because the manual packet/handoff flow spans more wall-clock than a hosted dispatch. A stale check blocks external action until the account is rechecked; staleness is a freshness rule, never a claim the account signed out.
+
+Local-route errors describe only what the office found. A missing session directory or missing `result.json` reads as UNKNOWN awaiting a session — silence is never reported as a failed or completed job — and a malformed, oversized or hash-mismatched receipt names its defect rather than guessing at a session report.
 
 ### What local evidence establishes
 
-Local evidence is office-observed: the office itself wrote, spawned, read or terminated, so it is recorded as OBSERVED evidence at TOOL_SUPPORTED level — never ACCOUNT_VERIFIED provider attestation. The labels mean only what they say:
+Local evidence is office-observed: the office itself wrote, spawned, read or terminated, so it is recorded as OBSERVED evidence at TOOL_SUPPORTED level — never ACCOUNT_VERIFIED provider attestation. Because the office is the observing authority on a local route, that TOOL_SUPPORTED/OBSERVED evidence is what a local readiness scope requires; hosted scopes still require provider-side ACCOUNT_VERIFIED attestation. The local and hosted families share no operations, so neither can ever satisfy the other. The labels mean only what they say:
 
 - Scoped workspace delivery, recorded under TOOL_CONFINEMENT, is not enforced isolation, sandboxing or blinding.
-- A model or effort reported by a local session is self-report unless the tool's own output verifies it.
+- A model, effort or delegation setting reported by a local session is self-report unless the tool's own output verifies it.
+- A local cancel writes a request sentinel in the packet directory; it is not a provider acknowledgement and not a termination guarantee.
 - No usage or allowance accounting exists for local sessions; the Devin CLI reports no usage windows to this application.
 
 Because scoped delivery is not isolation, local agents are ineligible for blinded-review, holdout-custody and independently-verified-gate roles unless enforced isolation is separately verified. Label definitions: [evidence.md](evidence.md).

@@ -1,16 +1,20 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import type { AdapterRoute, Agent, Assignment, AppState, Effort, InputSnapshot, JobEvent, JobOutput, Provider, ProviderJob } from '../shared/types.js';
+import type { AdapterRoute, Agent, Assignment, AppState, CapabilityEvidence, Effort, InputSnapshot, JobEvent, JobOutput, Provider, ProviderJob } from '../shared/types.js';
 import { canonicalHash } from '../core/canonical.js';
 import { isTerminalJob, reconciliationPlan } from '../core/jobs.js';
-import { assertHostedExecution, assertWorkerCapacity } from '../core/guards.js';
+import { assertHostedExecution, assertLocalExecution, assertWorkerCapacity } from '../core/guards.js';
 import type { OfficeStore } from '../core/store.js';
+import { appliedReportPayloadSchema, type LocalSessionRecord } from '../shared/local-session.js';
 import { agentDispatchReadiness, currentConnection, effectiveEvidence, latestCapability, scopeMismatches, supplyingSnapshotIds, type RequestedScope } from '../shared/readiness.js';
 import { dependencyStatus } from '../shared/cooperation.js';
+import { recordChainHandoff } from './chain-messages.js';
 import { verifySnapshotForTransfer, type OutputDestination } from './locations.js';
+import { localRequirementFor } from './local-lane.js';
 import { safeEntry, MAX_FILE } from './artifacts.js';
 import { pipelineStageBlocker, type FrozenResearchSpec } from '../shared/research.js';
 import { stageContextHash } from '../shared/pipeline.js';
+import type { ToolProfile } from '../shared/tool-profile.js';
 
 /**
  * The complete text one external action would deliver, assembled once and reviewable before launch.
@@ -46,8 +50,27 @@ export function buildProviderPayload(frozen: Omit<ProviderPayload, 'text'>): Pro
   return { ...frozen, text: sections.join('\n\n') };
 }
 
-export interface SubmitContext { assignment: Assignment; snapshot: InputSnapshot; objective: string; requestName: string; payload: ProviderPayload }
-export interface SubmitResult { externalId: string; externalUrl: string; detail: string; resolvedModel?: string; appliedEffort?: Effort | 'UNVERIFIED' }
+export interface SubmitContext {
+  assignment: Assignment; snapshot: InputSnapshot; objective: string; requestName: string; payload: ProviderPayload;
+  /** The durable job this submission serves — created before submit so a packet can bind it. */
+  jobId: string;
+  /** The persisted local delivery binding when one exists; hosted adapters ignore it. */
+  localSession?: LocalSessionRecord;
+  /**
+   * Verified bytes of completed predecessor outputs, resolved from content-addressed storage by
+   * the controller. A local packet writes them under `inputs/inherited/<sourceJobId>/` and binds
+   * the exact {sourceJobId, objectHash} provenance in its manifest; hosted adapters ignore this.
+   */
+  inherited?: { name: string; bytes: Uint8Array; sourceJobId: string; objectHash: string }[];
+}
+export interface SubmitResult {
+  externalId: string; externalUrl: string; detail: string; resolvedModel?: string; appliedEffort?: Effort | 'UNVERIFIED';
+  /**
+   * Set only by local-layout adapters that wrote a versioned packet: the verified packet hash the
+   * service persists on the binding before reporting delivery. Hosted adapters never set it.
+   */
+  localPacket?: { packetHash: string };
+}
 export interface ObserveResult {
   state: 'ACCEPTED' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'UNKNOWN'; detail: string;
   events?: Omit<JobEvent, 'id' | 'jobId'>[];
@@ -61,6 +84,31 @@ export interface ObserveResult {
    * between evidence and silence. Defaults to local for UNKNOWN, which is the safe reading.
    */
   provenance?: 'PROVIDER_REPORTED' | 'OFFICE_LOCAL';
+  /**
+   * Self-reported applied facts a verified receipt declared — what the session says it ran, not
+   * what the office asked for. Absent keys mean the tool said nothing; they are never inferred.
+   */
+  applied?: { model?: string; effort?: Effort; delegation?: boolean };
+  /**
+   * A validated cooperative-stop acknowledgement the session wrote for the recorded cancel
+   * request. Present only when the bytes satisfied the ack contract and bound the exact request
+   * — a local record the caller persists as stop status, never a provider acknowledgement.
+   */
+  cancelAck?: { requestId: string; outcome: 'STOPPED'; detail: string };
+  /**
+   * The identity of a receipt the local adapter verified this observation — its declared sequence
+   * and the sha256 of the bytes as read. The caller persists it as the binding's lastReceipt so a
+   * replayed or rewound receipt is refused next time. Hosted adapters never set it.
+   */
+  receipt?: { sequence: number; hash: string };
+  /**
+   * An office-observed provider-side record for this session's directory — the record's own
+   * identity (session id, project key, rollout name), found by read-only discovery. Present only
+   * when discovery actually resolved a record; absence downgrades nothing. This observation is
+   * independent of receipt state — a started session's record is real even while the receipt is
+   * absent or defective.
+   */
+  providerGrouping?: { key: string; kind: string };
 }
 
 /** Fetches the bytes an output claims to be, so a deliverable is never certified by a hash alone. */
@@ -81,9 +129,31 @@ export interface ProviderAdapter {
   readonly route: AdapterRoute;
   /** Which providers this adapter can actually reach. Omitted means the route's default below. */
   readonly providers?: readonly Provider[];
+  /** The packet contract version a local adapter writes; the binding records it at preparation. */
+  readonly packetVersion?: 1 | 2;
   submit(context: SubmitContext): Promise<SubmitResult>;
-  observe(job: ProviderJob): Promise<ObserveResult>;
-  cancel(job: ProviderJob): Promise<{ acknowledged: boolean; detail: string }>;
+  /**
+   * `local` carries the resolved delivery binding on local routes so the adapter can enforce the
+   * bound packet version, attempt identity and storage path. Hosted adapters ignore it.
+   */
+  observe(job: ProviderJob, local?: LocalSessionRecord | null): Promise<ObserveResult>;
+  /**
+   * Requests cooperative cancellation. `acknowledged` means the office delivered the request —
+   * never that anything stopped. `requestId` names the request the office wrote so the caller can
+   * persist it on the binding; an absent or mismatched acknowledgement later is its own state.
+   */
+  cancel(job: ProviderJob, local?: LocalSessionRecord | null): Promise<{ acknowledged: boolean; detail: string; requestId?: string }>;
+  /**
+   * Office-observed evidence from a completed local operation. Only local-route adapters implement
+   * these; what they return is the office's own testimony about work it performed — the caller
+   * scopes it to the recorded route and request, and it is never provider attestation. Returning
+   * no entries records nothing.
+   */
+  submitEvidence?(context: SubmitContext, result: SubmitResult): CapabilityEvidence[];
+  observeEvidence?(job: ProviderJob, result: ObserveResult): CapabilityEvidence[];
+  cancelEvidence?(job: ProviderJob): CapabilityEvidence[];
+  /** Reads bytes for an output this route verifies itself, when the office has no fetcher for it. */
+  fetch?(job: ProviderJob, output: { path: string; sha256: string; bytes: number }, local?: LocalSessionRecord | null): Promise<Uint8Array>;
 }
 
 /** Everything one external action needs, gathered and validated together by `launchGuard`. */
@@ -133,6 +203,16 @@ export class AssignmentController {
      * configured, a miss is a hard failure — there is never a silent fallback to another route.
      */
     private readonly adapters?: (ref: { agent?: Agent; route?: AdapterRoute }) => ProviderAdapter | undefined,
+    /**
+     * Provider-side session lifecycle for local packets — inspect/archive against the provider's
+     * own record identity. Absent means provider archive is never attempted and honestly says so.
+     */
+    private readonly providerLifecycle?: import('./local-provider-lifecycle.js').ProviderLifecycle,
+    /**
+     * Reads a content-addressed stored output back, hash-verified. Dependent packets inherit
+     * predecessor bytes only through this path — absent means a dependent can never be prepared.
+     */
+    private readonly readObject?: (sha256: string) => Promise<Uint8Array>,
   ) {}
 
   /** One clock for gates and records, so evidence freshness never depends on the wall calendar. */
@@ -145,14 +225,41 @@ export class AssignmentController {
     return adapter;
   }
 
+  /**
+   * Persists office-observed transport evidence for a local route. The connection and the model the
+   * evidence answers for come from the recorded assignment and its bound snapshot — never from
+   * adapter-supplied identity — and the route stamped on every entry is the job's recorded one.
+   * A recording failure is reported on the job rather than corrupting the outcome it describes:
+   * the operation the evidence would describe genuinely happened.
+   */
+  private noteLocalEvidence(job: ProviderJob, entries: CapabilityEvidence[]): void {
+    if (!entries.length || !job.route.startsWith('LOCAL_')) return;
+    try {
+      const state = this.store.snapshot({ history: false });
+      const assignment = (state.assignments ?? []).find(item => item.id === job.assignmentId);
+      const capability = assignment ? (state.capabilities ?? []).find(item => item.id === assignment.capabilitySnapshotId) : undefined;
+      const connection = capability ? (state.connections ?? []).find(item => item.id === capability.connectionId) : undefined;
+      if (!assignment || !connection) return;
+      this.store.recordTransportEvidence({
+        connectionId: connection.id, route: job.route, environment: 'LOCAL_MACHINE',
+        model: assignment.requestedModel, operations: entries,
+        source: 'office-local-transport', observedAt: this.now(),
+      });
+    } catch (error) {
+      this.store.recordJobEvents(job.id, [{ externalId: `transport-evidence:${job.revision}:${Date.parse(this.now())}`, cursor: '', kind: 'STATUS',
+        text: `Office-observed transport evidence could not be recorded: ${error instanceof Error ? error.message : 'unknown error'}`,
+        occurredAt: this.now(), receivedAt: this.now(), evidence: 'OFFICE_LOCAL' }]);
+    }
+  }
+
   /** Freezes the exact inputs for one request and records the intent to submit. */
-  prepare(input: { requestId: string; agentId: string; snapshotId: string; expectedRequestRevision?: number; expectedAgentRevision?: number; dependsOn?: string[]; research?: Assignment['research'] }): { state: AppState; assignment: Assignment } {
+  prepare(input: { requestId: string; agentId: string; snapshotId: string; expectedRequestRevision?: number; expectedAgentRevision?: number; dependsOn?: string[]; research?: Assignment['research']; toolProfile?: ToolProfile; pipelineKey?: string; objective?: string }): { state: AppState; assignment: Assignment } {
     const state = this.store.snapshot({history:false});
     const request = state.requests?.find(item => item.id === input.requestId);
     if (!request) throw new Error('Request not found.');
     const agent = state.agents.find(item => item.id === input.agentId);
     if (!agent) throw new Error('Agent not found.');
-    this.assertLifecycle(state, request, agent);
+    this.assertLifecycle(state, request, agent, Boolean(input.pipelineKey));
     // The caller freezes the versions it actually showed the user; a concurrent edit must not be swept in.
     if (input.expectedRequestRevision !== undefined && input.expectedRequestRevision !== request.revision) throw new Error('The request changed in another view. Reload before starting it.');
     if (input.expectedAgentRevision !== undefined && input.expectedAgentRevision !== (agent.revision ?? 0)) throw new Error('The profile changed in another view. Reload before starting it.');
@@ -178,17 +285,20 @@ export class AssignmentController {
         model: agent.model, effort: agent.effort ?? 'default', delegation: request.delegation,
       }, { now: this.nowMs() }),
       requestedEffort: agent.effort ?? 'default', appliedEffort: 'UNVERIFIED', delegation: request.delegation,
-      objectiveHash: canonicalHash({ objective: request.objective, criteria: request.acceptanceCriteria }),
+      objectiveHash: canonicalHash({ objective: input.objective ?? request.objective, criteria: request.acceptanceCriteria }),
       // The exact text the adapter will receive, captured now. Launch uses this and never re-reads
       // the request, so a later edit cannot ride along with these frozen inputs and this binding.
+      // Pipeline hops override the objective with the minted hop's bounded instruction.
       frozen: {
-        requestName: request.name, objective: request.objective, acceptanceCriteria: request.acceptanceCriteria,
+        requestName: request.name, objective: input.objective ?? request.objective, acceptanceCriteria: request.acceptanceCriteria,
         instructions: agent.instructions, model: agent.model, effort: agent.effort ?? 'default', delegation: request.delegation,
         accountIdentity: connection.identity, credentialContext: connection.credentialContext,
         outputFolder: state.locations?.find(item => item.projectId === request.projectId)?.outputFolder ?? '',
       },
       createdAt: this.now(),
       ...(input.dependsOn?.length ? { dependsOn: input.dependsOn } : {}),
+      ...(input.toolProfile ? { toolProfile: input.toolProfile } : {}),
+      ...(input.pipelineKey ? { pipelineKey: input.pipelineKey } : {}),
       // The staged-scientific context is part of what is frozen; the store re-validates it against
       // the recorded link, so a caller cannot name a stage or subject the branch is not on.
       ...(input.research ? { research: input.research } : {}),
@@ -207,7 +317,7 @@ export class AssignmentController {
    * A request can be canceled, or its project archived, at any point after preparation. Checking
    * only at creation means a canceled request can still be launched from a window opened earlier.
    */
-  private assertLifecycle(state: AppState, request: { id: string; projectId: string; status: string; participantIds: string[]; leadAgentId: string | null; mode: string }, agent: { id: string; removedAt?: string; name: string }): void {
+  private assertLifecycle(state: AppState, request: { id: string; projectId: string; status: string; participantIds: string[]; leadAgentId: string | null; mode: string }, agent: { id: string; removedAt?: string; name: string }, pipelineSeat = false): void {
     const project = state.projects.find(item => item.id === request.projectId);
     if (!project) throw new Error('Project not found.');
     if (project.archived) throw new Error('This project is archived. Restore it before starting work.');
@@ -216,7 +326,9 @@ export class AssignmentController {
     // A single-agent request has a closed roster by definition. Group and team work deliberately
     // draws in agents who are not listed participants - a reviewer must not be the author - but that
     // explains who may be added, it does not authorize everyone: an unlisted agent needs an explicit
-    // grant recorded against this request.
+    // grant recorded against this request. Pipeline hops are the exception: their seats resolve by
+    // roster role through the office mint, which is itself the recorded authorization.
+    if (pipelineSeat) return;
     if (request.mode === 'SINGLE') {
       if (request.leadAgentId !== agent.id)
         throw new Error(`${agent.name} is not the agent this single-agent request was assigned to.`);
@@ -251,7 +363,7 @@ export class AssignmentController {
 
     const request = state.requests?.find(item => item.id === assignment.requestId);
     if (!request) throw new Error('Request not found.');
-    this.assertLifecycle(state, request, agent);
+    this.assertLifecycle(state, request, agent, Boolean(assignment.pipelineKey));
     const frozen = this.frozenPayload(assignment);
     const snapshot = state.snapshots?.find(item => item.id === assignment.snapshotId);
     if (!snapshot) throw new Error('The prepared inputs for this work are no longer recorded.');
@@ -386,17 +498,27 @@ export class AssignmentController {
       now, model: scope.model, environment: scope.environment, route: scope.route,
     });
     const policy = confinement?.confinement;
-    const toolsConfined = Boolean(confinement && confinement.level === 'ACCOUNT_VERIFIED' && confinement.evidence === 'OBSERVED'
+    const localRoute = assignment.route.startsWith('LOCAL_');
+    // The confinement level bar follows the route family: the office is the observing authority for
+    // local delivery, so TOOL_SUPPORTED is its ceiling, exactly as the scope check already applied.
+    const levelOk = confinement && (confinement.level === 'ACCOUNT_VERIFIED' || (localRoute && confinement.level === 'TOOL_SUPPORTED'));
+    const toolsConfined = Boolean(confinement && levelOk && confinement.evidence === 'OBSERVED'
       && !confinement.expired && !confinement.impossible
       && policy && policy.tools.trim() && policy.filesystem.trim() && policy.network.trim() && policy.environment.trim());
-    assertHostedExecution({
-      provider: agent.provider === 'claude' ? 'ANTHROPIC' : 'OPENAI',
-      location: capability?.environment === 'anthropic-managed' ? 'PROVIDER_HOSTED' : 'UNVERIFIED',
-      constrainedTools: toolsConfined,
-      // Every permitted route submits to provider-hosted infrastructure; the office never runs research locally.
-      colabAccess: false,
-      localExecution: false,
-    });
+    if (localRoute) {
+      // A local route runs only under office-observed scoped delivery — honestly labeled, never a
+      // claim of enforced isolation or provider attestation.
+      assertLocalExecution({ constrainedTools: toolsConfined, colabAccess: false });
+    } else {
+      assertHostedExecution({
+        provider: agent.provider === 'claude' ? 'ANTHROPIC' : 'OPENAI',
+        location: capability?.environment === 'anthropic-managed' ? 'PROVIDER_HOSTED' : 'UNVERIFIED',
+        constrainedTools: toolsConfined,
+        // Every permitted route submits to provider-hosted infrastructure; the office never runs research locally.
+        colabAccess: false,
+        localExecution: false,
+      });
+    }
     // Every open job in the workspace counts against capacity, including this one.
     assertWorkerCapacity((state.jobs ?? []).map(job => ({ id: job.id, state: job.state === 'INTENT' ? 'RESERVED' : job.state === 'SUBMITTING' ? 'SUBMITTED' : job.state === 'CANCEL_ACKNOWLEDGED' ? 'CANCELED_ACKNOWLEDGED' : job.state === 'ACCEPTED' ? 'SUBMITTED' : job.state })), 1);
     // The frozen bytes are re-checked against the staged tree and its commit immediately before the
@@ -411,18 +533,41 @@ export class AssignmentController {
     this.prepareOutputs?.(assignment, staged);
     ({ state, frozen, connection, now } = context);
     let job = this.job(assignmentId);
+    const adapter = this.adapterFor({ route: assignment.route });
+    // Dependent work inherits only verified predecessor bytes — resolved before the durable intent
+    // binding so an unreadable or corrupted object fails the launch as a preflight, never a
+    // stranded submission.
+    const inherited = localRoute && assignment.dependsOn?.length ? await this.inheritedInputs(assignment) : undefined;
+    // A local route submits only through a persisted delivery binding: the record is the durable
+    // intent the router requires, written before the job says SUBMITTING so a refused
+    // classification or an un-retryable binding leaves the job honestly undispatched.
+    const attempt = localRoute ? this.prepareLocalSession({ assignment, agent, adapter, job }) : null;
     this.store.recordJobTransition({ jobId: job.id, expectedRevision: job.revision, to: 'SUBMITTING', evidence: 'OFFICE_LOCAL', detail: `Submitting through ${assignment.route}.`, at: this.now() });
     job = this.job(assignmentId);
-    const adapter = this.adapterFor({ route: assignment.route });
+    const submitContext: SubmitContext = { assignment, snapshot: staged, objective: frozen.objective, requestName: frozen.requestName, payload: this.providerPayload(assignment), jobId: job.id };
+    if (attempt) submitContext.localSession = attempt.binding;
+    if (inherited?.length) submitContext.inherited = inherited;
     try {
-      const result = await adapter.submit({ assignment, snapshot: staged, objective: frozen.objective, requestName: frozen.requestName, payload: this.providerPayload(assignment) });
+      const result = await adapter.submit(submitContext);
       if (!result.externalId) throw new UnknownDispatchError('The provider returned no identifier for this submission.');
-      return this.store.recordJobTransition({
-        jobId: job.id, expectedRevision: job.revision, to: 'ACCEPTED', evidence: 'PROVIDER_REPORTED',
-        detail: result.detail, externalId: result.externalId, externalUrl: result.externalUrl, at: this.now(),
-      });
+      if (attempt) this.settleLocalPreparation(attempt, 'READY', result.localPacket?.packetHash ?? null, null);
+      // A local transport delivers into a mailbox the office owns; nothing has run or been accepted
+      // yet, so the honest record is the office's submission awaiting a session — never ACCEPTED.
+      const submitted = localRoute
+        ? this.store.recordJobTransition({
+          jobId: job.id, expectedRevision: job.revision, to: 'UNKNOWN', evidence: 'OFFICE_LOCAL',
+          detail: result.detail, externalId: result.externalId, externalUrl: result.externalUrl, at: this.now(),
+        })
+        : this.store.recordJobTransition({
+          jobId: job.id, expectedRevision: job.revision, to: 'ACCEPTED', evidence: 'PROVIDER_REPORTED',
+          detail: result.detail, externalId: result.externalId, externalUrl: result.externalUrl, at: this.now(),
+        });
+      // The office itself performed this delivery, so what it did is recorded as office evidence.
+      this.noteLocalEvidence(job, adapter.submitEvidence?.(submitContext, result) ?? []);
+      return submitted;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'The dispatch failed for an unknown reason.';
+      if (attempt) this.settleLocalPreparation(attempt, 'PREPARATION_FAILED', null, `Dispatch outcome unknown: ${message}`);
       // Any failure after the call started leaves the provider's view unknown, never "not submitted".
       return this.store.recordJobTransition({ jobId: job.id, expectedRevision: job.revision, to: 'UNKNOWN', evidence: 'OFFICE_LOCAL',
         detail: `Dispatch outcome unknown: ${message} The office will not resubmit automatically.`, at: this.now() });
@@ -460,7 +605,7 @@ export class AssignmentController {
     const snapshot = state.snapshots!.find(item => item.id === assignment.snapshotId)!;
     const frozen = this.frozenPayload(assignment);
     // The preview and the launch read the same frozen values, so what the user approves is what runs.
-    return { ...adapter.plan({ assignment, snapshot, objective: frozen.objective, requestName: frozen.requestName, payload: this.providerPayload(assignment) }),
+    return { ...adapter.plan({ assignment, snapshot, objective: frozen.objective, requestName: frozen.requestName, payload: this.providerPayload(assignment), jobId: this.job(assignmentId).id }),
       outputDestination: this.prepareOutputs?.(assignment, snapshot) };
   }
 
@@ -483,15 +628,38 @@ export class AssignmentController {
     this.prepareOutputs?.(assignment, staged);
     const frozen = context.frozen;
     let job = this.job(assignmentId);
+    const adapter = this.adapterFor({ route: assignment.route });
+    const localRoute = assignment.route.startsWith('LOCAL_');
+    // Same preflight rule as dispatch: verified predecessor bytes resolve before the durable
+    // intent binding, so a dependent with unreadable inputs stays honestly prepared.
+    const inherited = localRoute && assignment.dependsOn?.length ? await this.inheritedInputs(assignment) : undefined;
+    // Same durable-intent rule as dispatch: the persisted binding goes with the submission.
+    const attempt = localRoute ? this.prepareLocalSession({ assignment, agent: context.agent, adapter, job }) : null;
     this.store.recordJobTransition({ jobId: job.id, expectedRevision: job.revision, to: 'SUBMITTING', evidence: 'OFFICE_LOCAL', detail: 'Opening the official terminal for a manual submission.', at: this.now() });
     job = this.job(assignmentId);
-    const adapter = this.adapterFor({ route: assignment.route });
+    const submitContext: SubmitContext = { assignment, snapshot: staged, objective: frozen.objective, requestName: frozen.requestName, payload: this.providerPayload(assignment), jobId: job.id };
+    if (attempt) submitContext.localSession = attempt.binding;
+    if (inherited?.length) submitContext.inherited = inherited;
     try {
-      const result = await adapter.submit({ assignment, snapshot: staged, objective: frozen.objective, requestName: frozen.requestName, payload: this.providerPayload(assignment) });
-      return this.store.recordJobTransition({ jobId: job.id, expectedRevision: job.revision, to: 'UNKNOWN', evidence: 'OFFICE_LOCAL', detail: result.detail, at: this.now() });
+      const result = await adapter.submit(submitContext);
+      if (attempt) this.settleLocalPreparation(attempt, 'READY', result.localPacket?.packetHash ?? null, null);
+      // For a local transport the office knows the session identity it created; recording it keeps
+      // observation and cancellation pointed at the packet directory that actually exists.
+      const opened = this.store.recordJobTransition({ jobId: job.id, expectedRevision: job.revision, to: 'UNKNOWN', evidence: 'OFFICE_LOCAL',
+        detail: result.detail, externalId: localRoute ? result.externalId : undefined, at: this.now() });
+      this.noteLocalEvidence(job, adapter.submitEvidence?.(submitContext, result) ?? []);
+      return opened;
     } catch (error) {
+      const failure = error instanceof Error ? error.message : 'unknown launcher failure';
+      if (attempt) this.settleLocalPreparation(attempt, 'PREPARATION_FAILED', null, failure);
+      // The failure class follows where the launcher ran. A local route fails writing the session
+      // packet on this machine — the provider never saw the attempt, so naming it would send the
+      // user to the wrong place. Only a hosted-route failure points at the provider.
+      const detail = localRoute
+        ? `The local session packet could not be written on this machine: ${failure} Check the workspace and try again.`
+        : `The handoff could not be completed: ${failure} Check the provider before trying again.`;
       return this.store.recordJobTransition({ jobId: job.id, expectedRevision: job.revision, to: 'UNKNOWN', evidence: 'OFFICE_LOCAL',
-        detail: `The handoff could not be completed: ${error instanceof Error ? error.message : 'unknown launcher failure'} Check the provider before trying again.`, at: this.now() });
+        detail, at: this.now() });
     }
   }
 
@@ -501,12 +669,240 @@ export class AssignmentController {
     return this.store.recordUserReportedLink({ jobId: job.id, expectedRevision: job.revision, externalId, externalUrl, at: this.now() });
   }
 
+  /**
+   * The verified predecessor bytes a dependent packet inherits.
+   *
+   * Only outputs the office fetched, hash-checked and durably stored qualify — `stored: true` is
+   * set only after that retrieval path completes, so an output claimed but never verified never
+   * reaches a dependent. The bytes are then read back from content-addressed storage and the hash
+   * is re-verified before they are handed to the packet writer; a missing or corrupted object is
+   * a launch refusal, never a partially delivered input.
+   */
+  private async inheritedInputs(assignment: Assignment): Promise<NonNullable<SubmitContext['inherited']>> {
+    const state = this.store.snapshot({history:false});
+    const inherited: NonNullable<SubmitContext['inherited']> = [];
+    for (const dependency of assignment.dependsOn ?? []) {
+      const job = (state.jobs ?? []).find(item => item.assignmentId === dependency);
+      for (const output of job?.outputs ?? []) {
+        if (!output.stored) continue;
+        if (!this.readObject) throw new Error('This workspace cannot read stored predecessor output for a dependent packet.');
+        const bytes = await this.readObject(output.sha256);
+        if (createHash('sha256').update(bytes).digest('hex') !== output.sha256)
+          throw new Error(`The recorded output ${output.path} could not be read back intact for the dependent packet.`);
+        inherited.push({ name: output.path, bytes, sourceJobId: job!.id, objectHash: output.sha256 });
+      }
+    }
+    return inherited;
+  }
+
+  /**
+   * Advances the local dependency chain after one assignment's job was observed COMPLETED.
+   *
+   * A dependent launches only while it is still INTENT — an already-dispatched or discarded job
+   * is never resubmitted by this path, which makes repeated calls idempotent. Every launch runs
+   * the same guard, binding and packet path a manual launch would, so a chain step records exactly
+   * the evidence a user-initiated launch does. Hosted-route dependents are never auto-launched;
+   * a refused launch is recorded on the job as office-local testimony, not swallowed.
+   */
+  async advanceLocalChain(assignmentId: string): Promise<AppState> {
+    const state = this.store.snapshot({history:false});
+    const settled = (state.jobs ?? []).find(item => item.assignmentId === assignmentId);
+    if (!settled || settled.state !== 'COMPLETED') return state;
+    for (const dependent of (state.assignments ?? []).filter(item => (item.dependsOn ?? []).includes(assignmentId)))
+      await this.launchChainDependent(state, dependent, assignmentId);
+    return this.store.snapshot({history:false});
+  }
+
+  /**
+   * Startup and reconciliation pass for the chain: every INTENT dependent whose recorded
+   * predecessors all completed is launched through the same guarded path. Durable and
+   * idempotent — a job already launched is never touched, and nothing outside the recorded
+   * `dependsOn` set is considered.
+   */
+  async reconcileLocalChain(): Promise<AppState> {
+    const state = this.store.snapshot({history:false});
+    for (const dependent of (state.assignments ?? []).filter(item => item.dependsOn?.length))
+      await this.launchChainDependent(state, dependent);
+    return this.store.snapshot({history:false});
+  }
+
+  /** Serializes chain launches — two predecessors settling together must not race one dependent. */
+  private chainTail: Promise<unknown> = Promise.resolve();
+
+  private async launchChainDependent(state: AppState, dependent: Assignment, settledAssignmentId?: string): Promise<void> {
+    const job = (state.jobs ?? []).find(item => item.assignmentId === dependent.id);
+    if (!job || job.state !== 'INTENT' || !dependent.route.startsWith('LOCAL_')) return;
+    if (!dependencyStatus(state, dependent).ready) return;
+    const run = this.chainTail.then(async () => {
+      // Another completion signal may already have launched this job while this callback waited.
+      // Recheck durable eligibility inside the serialized section, before account checks or handoff.
+      const current = this.store.snapshot({ history: false });
+      const currentAssignment = current.assignments?.find(item => item.id === dependent.id);
+      const currentJob = current.jobs?.find(item => item.id === job.id);
+      if (!currentAssignment || currentJob?.state !== 'INTENT'
+        || !currentAssignment.route.startsWith('LOCAL_') || !dependencyStatus(current, currentAssignment).ready) return;
+      let launched = false;
+      try {
+        await this.handoff(dependent.id);
+        launched = true;
+        this.store.recordJobEvents(job.id, [{ externalId: `chain-launch:${job.id}`, cursor: '', kind: 'STATUS',
+          text: 'The office launched this work automatically — its recorded predecessor work completed with verified output.',
+          occurredAt: this.now(), receivedAt: this.now(), evidence: 'OFFICE_LOCAL' }]);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : 'unknown error';
+        this.store.recordJobEvents(job.id, [{ externalId: `chain-blocked:${canonicalHash({ job: job.id, revision: job.revision, detail })}`, cursor: '', kind: 'STATUS',
+          text: `The automatic chain launch could not run: ${detail} The work stays prepared; launch it manually when the blocker clears.`,
+          occurredAt: this.now(), receivedAt: this.now(), evidence: 'OFFICE_LOCAL' }]);
+      }
+      // The handoff message rides only on a launch that actually ran: the helper itself confirms
+      // the packet settled READY before naming it, and every other path stays silent by contract.
+      if (launched) this.chainHandoff(dependent.id, settledAssignmentId);
+    });
+    this.chainTail = run;
+    await run;
+  }
+
+  /**
+   * Writes the chain hop's durable record — one HANDOFF message plus the office's delivery
+   * receipt — after a chain launch that actually ran. A refusal is recorded on the job with its
+   * true reason; it is never folded into the launch failure event, because the launch succeeded.
+   */
+  private chainHandoff(dependentId: string, settledAssignmentId?: string): void {
+    const state = this.store.snapshot({ history: false });
+    const dependent = state.assignments?.find(item => item.id === dependentId);
+    const job = dependent ? state.jobs?.find(item => item.assignmentId === dependentId) : undefined;
+    if (!dependent || !job) return;
+    try {
+      const outcome = recordChainHandoff({ store: this.store, state, dependent, settledAssignmentId, now: this.now });
+      if (!outcome.recorded)
+        this.store.recordJobEvents(job.id, [{ externalId: `chain-handoff-note:${job.id}`, cursor: '', kind: 'STATUS',
+          text: `The chain launch stands, but no handoff message was recorded: ${outcome.reason}`,
+          occurredAt: this.now(), receivedAt: this.now(), evidence: 'OFFICE_LOCAL' }]);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : 'unknown error';
+      this.store.recordJobEvents(job.id, [{ externalId: `chain-handoff-blocked:${canonicalHash({ job: job.id, detail })}`, cursor: '', kind: 'STATUS',
+        text: `The chain launch ran, but its handoff record could not be written: ${detail}`,
+        occurredAt: this.now(), receivedAt: this.now(), evidence: 'OFFICE_LOCAL' }]);
+    }
+  }
+
+  /**
+   * Prepares the durable local-session binding a local route submits against (QO-LOCAL-REV §10).
+   *
+   * The assignment's confinement requirement is classified before anything is persisted: a
+   * requirement with no permitted layout refuses loudly, and scoped delivery selects the flat
+   * packet lane — the worktree lane is never silently selected; it becomes reachable only when a
+   * user-level layout choice exists. The record lands PREPARING as durable intent before the job
+   * claims SUBMITTING, so a refused classification or an un-retryable existing binding leaves the
+   * job honestly undispatched. Hosted routes never reach this helper.
+   */
+  private prepareLocalSession(input: { assignment: Assignment; agent: Agent; adapter: ProviderAdapter; job: ProviderJob }): { binding: LocalSessionRecord; operationId: string } {
+    const { assignment, agent, adapter, job } = input;
+    const decision = localRequirementFor(assignment);
+    if (!decision.allowed)
+      throw new Error(`This assignment cannot be delivered to a local session: ${decision.reason}`);
+    if (decision.requirement === 'READ_CONFINEMENT_REQUIRED')
+      throw new Error(decision.detail);
+    const operationId = randomUUID();
+    const mint = () => `session-${this.now().replace(/[^0-9A-Za-z]/g, '')}-${randomUUID()}`;
+    const existing = this.store.localSessionForJob(job.id);
+    if (!existing) {
+      const binding = this.store.createLocalSession({
+        schemaVersion: 1, jobId: job.id, assignmentId: assignment.id, projectId: assignment.projectId,
+        attemptId: randomUUID(), provider: agent.provider, surface: 'UNKNOWN', layout: 'FLAT_PACKET',
+        packetVersion: adapter.packetVersion ?? 1, packetHash: null, storageRelativePath: mint(),
+        originalCwd: null, repoRelativePath: null, seedCommit: null, providerSessionId: null,
+        providerProjectId: null, confinementEvidenceId: null, archiveRelativePath: null,
+        worktreeOwner: 'NONE', bindingEvidence: 'UNBOUND', groupingStatus: 'UNKNOWN',
+        requirement: decision.requirement, confinementStatus: 'UNVERIFIED', lastReceipt: null,
+        cancelRequestId: null, stopStatus: 'NOT_REQUESTED', lifecycle: 'PREPARING',
+        // An explicit undefined would break canonical hashing — the field rides along only when set.
+        ...(assignment.toolProfile ? { toolProfile: assignment.toolProfile } : {}),
+      });
+      this.store.appendLocalJournal({ operationId, localSessionId: binding.id, jobId: job.id, kind: 'PREPARE', phase: 'INTENT',
+        expectedRevision: binding.revision, source: null, destination: binding.storageRelativePath, outcome: 'NONE', failureDetail: null });
+      return { binding, operationId };
+    }
+    if (existing.lifecycle === 'PREPARATION_FAILED') {
+      // The declared re-attempt edge: a fresh attempt in a fresh directory. The failed attempt's
+      // residue is never touched — its receipts and cancel records die on attemptId mismatch, so
+      // attempt-scoped state resets and the new attempt's first receipt starts at sequence 1.
+      const { revision: _revision, updatedAt: _updatedAt, ...rest } = existing;
+      const binding = this.store.updateLocalSession({
+        localSessionId: existing.id, expectedRevision: existing.revision,
+        next: { ...rest, lifecycle: 'PREPARING', attemptId: randomUUID(), storageRelativePath: mint(),
+          packetHash: null, lastReceipt: null, cancelRequestId: null, stopStatus: 'NOT_REQUESTED' },
+      });
+      this.store.appendLocalJournal({ operationId, localSessionId: binding.id, jobId: job.id, kind: 'PREPARE', phase: 'INTENT',
+        expectedRevision: binding.revision, source: null, destination: binding.storageRelativePath, outcome: 'NONE', failureDetail: null });
+      return { binding, operationId };
+    }
+    throw new Error(`This job already has a local-session binding in ${existing.lifecycle}; reconcile it before dispatching again — the office never silently rebinds.`);
+  }
+
+  /**
+   * Records what submit actually did to a bound delivery. A returned packet hash is the adapter's
+   * proof it wrote a versioned (v2) packet — the record then carries the proven contract, not only
+   * the adapter's declaration — and a thrown submit fails the preparation. The CAS only ever acts
+   * on the PREPARING record this attempt observed; a binding that already moved belongs to
+   * reconciliation and is never overwritten by a dispatch finishing late.
+   */
+  private settleLocalPreparation(attempt: { binding: LocalSessionRecord; operationId: string }, outcome: 'READY' | 'PREPARATION_FAILED', packetHash: string | null, failureDetail: string | null): void {
+    const current = this.store.localSessionForJob(attempt.binding.jobId);
+    if (!current || current.id !== attempt.binding.id || current.lifecycle !== 'PREPARING') return;
+    try {
+      const { revision: _revision, updatedAt: _updatedAt, ...rest } = current;
+      const next = this.store.updateLocalSession({
+        localSessionId: current.id, expectedRevision: current.revision,
+        next: outcome === 'READY'
+          ? { ...rest, lifecycle: 'READY', packetHash, packetVersion: packetHash ? 2 : current.packetVersion }
+          : { ...rest, lifecycle: 'PREPARATION_FAILED' },
+      });
+      this.store.appendLocalJournal({
+        operationId: attempt.operationId, localSessionId: next.id, jobId: next.jobId, kind: 'PREPARE',
+        phase: outcome === 'READY' ? 'VERIFIED' : 'FAILED', expectedRevision: next.revision,
+        source: null, destination: current.storageRelativePath, outcome: outcome === 'READY' ? 'SUCCESS' : 'UNKNOWN',
+        failureDetail: failureDetail === null ? null : failureDetail.slice(0, 2000),
+      });
+    } catch {
+      // A record that already moved belongs to reconciliation, not to this dispatch.
+    }
+  }
+
+  /**
+   * Persists what a bound local observation verified: a receipt's sequence and read-hash become
+   * the binding's lastReceipt — the next receipt must advance past it — and a validated cancel
+   * acknowledgement marks the stop status SESSION_REPORTED_STOPPED, the session's own word that it
+   * stopped. These are same-lifecycle metadata updates through the store's CAS; the job's own
+   * observation handling is unchanged.
+   */
+  private recordLocalObservation(job: ProviderJob, result: ObserveResult): void {
+    if (!result.receipt && !result.cancelAck && !result.providerGrouping) return;
+    const binding = this.store.localSessionForJob(job.id);
+    if (!binding) return;
+    const { revision: _revision, updatedAt: _updatedAt, ...rest } = binding;
+    const next = { ...rest };
+    if (result.receipt) next.lastReceipt = { sequence: result.receipt.sequence, hash: result.receipt.hash, observedAt: this.now() };
+    if (result.cancelAck) next.stopStatus = 'SESSION_REPORTED_STOPPED';
+    // A resolved provider record upgrades the grouping claim only — a later observe that finds
+    // nothing reports no field and downgrades nothing. The record's own key is also the exact
+    // identity provider-side inspect/archive needs (session id, project key or rollout name).
+    if (result.providerGrouping) {
+      next.groupingStatus = 'OBSERVED';
+      next.providerProjectId = result.providerGrouping.key;
+      next.providerSessionId = result.providerGrouping.key;
+    }
+    this.store.updateLocalSession({ localSessionId: binding.id, expectedRevision: binding.revision, next });
+  }
+
   /** Records what the provider currently reports, including its visible events. */
   async observe(assignmentId: string): Promise<AppState> {
     let job = this.job(assignmentId);
     if (isTerminalJob(job.state)) return this.store.snapshot({history:false});
-    const result = await this.adapterFor({ route: job.route }).observe(job);
+    const adapter = this.adapterFor({ route: job.route });
+    const result = await adapter.observe(job);
     if (result.events?.length) this.store.recordJobEvents(job.id, result.events);
+    this.recordLocalObservation(job, result);
     job = this.job(assignmentId);
     if (isTerminalJob(job.state)) return this.store.snapshot({history:false});
     // An adapter that cannot observe anything is describing its own limits, not reporting what the
@@ -534,10 +930,13 @@ export class AssignmentController {
       const previous = names.get(output.path.toLowerCase());
       if (previous && previous !== output.sha256) { failures.push('The output inventory has conflicting paths.'); continue; }
       names.set(output.path.toLowerCase(), output.sha256);
-      if (!this.fetchOutput) { failures.push(`${output.path} was reported but this route cannot retrieve bytes.`); continue; }
+      // adapter.fetch is a method that reads its own adapter state (the session root), so it
+      // must stay bound to the adapter — extracting it bare crashes every declared output.
+      const fetch = adapter.fetch ? adapter.fetch.bind(adapter) : this.fetchOutput;
+      if (!fetch) { failures.push(`${output.path} was reported but this route cannot retrieve bytes.`); continue; }
       if (!this.storeOutput) { failures.push(`${output.path} cannot be durably stored by this route.`); continue; }
       try {
-        const bytes = await this.fetchOutput(job, output);
+        const bytes = await fetch(job, output);
         const digest = createHash('sha256').update(bytes).digest('hex');
         if (bytes.byteLength !== output.bytes) { failures.push(`${output.path} arrived as ${bytes.byteLength} bytes, not the ${output.bytes} reported.`); continue; }
         if (digest !== output.sha256) { failures.push(`${output.path} does not match the identity the provider reported.`); continue; }
@@ -556,12 +955,54 @@ export class AssignmentController {
     }
     job = this.job(assignmentId);
     if (isTerminalJob(job.state)) return this.store.snapshot({history:false});
+    // A verified receipt's applied self-report is the session's own claim about what ran — never
+    // folded into the job's verified outcome. A bound v2 receipt names its own event identity
+    // (the receipt hash), so replaying the same receipt dedupes while a fresh receipt reporting
+    // identical values still lands. An unbound report has no receipt identity, so it dedupes
+    // against the latest report instead of the content hash alone — that keeps repeated polls of
+    // an unchanged file quiet while a return to an earlier value (A→B→A) still lands.
+    if (result.applied && (result.applied.model !== undefined || result.applied.effort !== undefined || result.applied.delegation !== undefined)) {
+      const declared: string[] = [];
+      if (result.applied.model !== undefined) declared.push(`appliedModel=${JSON.stringify(result.applied.model)}`);
+      if (result.applied.effort !== undefined) declared.push(`appliedEffort=${JSON.stringify(result.applied.effort)}`);
+      if (result.applied.delegation !== undefined) declared.push(`delegation=${result.applied.delegation}`);
+      const text = `Session self-reported ${declared.join(', ')} on a verified receipt — the session's own claim, not office-verified.`;
+      // Present-but-undefined fields are stripped before hashing — canonical values carry none.
+      const stripped = {
+        ...(result.applied.model !== undefined ? { model: result.applied.model } : {}),
+        ...(result.applied.effort !== undefined ? { effort: result.applied.effort } : {}),
+        ...(result.applied.delegation !== undefined ? { delegation: result.applied.delegation } : {}),
+      };
+      const latest = this.store.appliedReports(job.id, 1).at(-1);
+      let externalId: string | null;
+      let applied;
+      if (result.receipt) {
+        externalId = `applied:${result.receipt.hash}`;
+        const binding = this.store.localSessionForJob(job.id);
+        applied = binding ? appliedReportPayloadSchema.parse({
+          schema: 'office-applied-report@1', attemptId: binding.attemptId,
+          receiptSequence: result.receipt.sequence, receiptHash: result.receipt.hash, ...stripped,
+        }) : undefined;
+      } else {
+        externalId = latest?.text === text ? null
+          : `applied:${canonicalHash({ report: stripped, after: latest?.id ?? 'none' })}`;
+        applied = undefined;
+      }
+      if (externalId) this.store.recordJobEvents(job.id, [{ externalId, cursor: '', kind: 'STATUS', text,
+        occurredAt: this.now(), receivedAt: this.now(), evidence: 'PROVIDER_REPORTED',
+        // A present-but-undefined key would survive zod and poison the change's canonical hash.
+        ...(applied ? { applied } : {}) }]);
+    }
     const fresh = retrieved.filter(output => !job.outputs.some(old => old.path === output.path && old.sha256 === output.sha256 && old.stored));
     if (job.state === result.state && !fresh.length) return this.store.snapshot({history:false});
-    return this.store.recordJobTransition({
+    const transitioned = this.store.recordJobTransition({
       jobId: job.id, expectedRevision: job.revision, to: result.state, evidence: 'PROVIDER_REPORTED',
       detail, outputs: fresh.length ? fresh : undefined, at: this.now(),
     });
+    // A verified observation of a local session is itself office evidence — recorded only when the
+    // observation changed something, so repeated polls do not churn capability snapshots.
+    this.noteLocalEvidence(job, adapter.observeEvidence?.(job, result) ?? []);
+    return transitioned;
   }
 
   /**
@@ -580,14 +1021,139 @@ export class AssignmentController {
         detail: 'Cancellation requested; no dependent work will be dispatched while this is open.', at: this.now() });
       job = this.job(assignmentId);
     }
-    const result = await this.adapterFor({ route: job.route }).cancel(job);
+    const adapter = this.adapterFor({ route: job.route });
+    const result = await adapter.cancel(job);
+    const binding = this.store.localSessionForJob(job.id);
     if (!result.acknowledged) {
+      if (binding) this.store.appendLocalJournal({
+        operationId: randomUUID(), localSessionId: binding.id, jobId: job.id, kind: 'CANCEL_REQUEST',
+        phase: 'EXECUTED', expectedRevision: binding.revision, source: null, destination: null,
+        outcome: 'REFUSED', failureDetail: result.detail.slice(0, 2000),
+      });
       this.store.recordJobEvents(job.id, [{ externalId: `cancel-attempt:${job.revision}`, cursor: '', kind: 'STATUS',
         text: `Cancellation not acknowledged: ${result.detail}`, occurredAt: this.now(), receivedAt: this.now(), evidence: 'OFFICE_LOCAL' }]);
       return this.store.snapshot({history:false});
     }
-    return this.store.recordJobTransition({ jobId: job.id, expectedRevision: job.revision, to: 'CANCEL_ACKNOWLEDGED', evidence: 'PROVIDER_REPORTED',
-      detail: result.detail, at: this.now() });
+    if (binding && result.requestId) {
+      // A cooperative cancel request was delivered into the packet — persist which request and
+      // that a request is now outstanding. The job stays CANCEL_REQUESTED: delivering a request
+      // is not a stopped session, and the session's own acknowledgement arrives through observe().
+      const { revision: _r, updatedAt: _u, ...rest } = binding;
+      const requested = this.store.updateLocalSession({
+        localSessionId: binding.id, expectedRevision: binding.revision,
+        next: { ...rest, cancelRequestId: result.requestId, stopStatus: 'REQUESTED' },
+      });
+      this.store.appendLocalJournal({
+        operationId: randomUUID(), localSessionId: requested.id, jobId: job.id, kind: 'CANCEL_REQUEST',
+        phase: 'EXECUTED', expectedRevision: requested.revision, source: null, destination: null,
+        outcome: 'SUCCESS', failureDetail: null,
+      });
+      this.noteLocalEvidence(job, adapter.cancelEvidence?.(job) ?? []);
+      return this.store.snapshot({history:false});
+    }
+    // The acknowledgement's provenance follows who actually answered: a hosted provider's reply is
+    // PROVIDER_REPORTED, but a local route's acknowledgement is the office's own sentinel write —
+    // recording that as provider testimony manufactures evidence (defect F02, legacy path).
+    const acknowledged = this.store.recordJobTransition({ jobId: job.id, expectedRevision: job.revision, to: 'CANCEL_ACKNOWLEDGED',
+      evidence: job.route.startsWith('LOCAL_') ? 'OFFICE_LOCAL' : 'PROVIDER_REPORTED', detail: result.detail, at: this.now() });
+    this.noteLocalEvidence(job, adapter.cancelEvidence?.(job) ?? []);
+    return acknowledged;
+  }
+
+  /**
+   * Retires one settled local session: the packet directory moves under archive/ (bytes retained,
+   * never deleted), and the provider-side record is archived only through a supported exact-id
+   * verb — providers without one report UNSUPPORTED and are never touched. The journal records
+   * durable intent before anything moves, so a crash mid-retire leaves a reconcilable record
+   * instead of a half-moved packet. Retirement changes the packet's storage, never the job's
+   * recorded outcome.
+   */
+  async retireLocal(assignmentId: string): Promise<{
+    state: AppState;
+    archive: { operationId: string; packetOutcome: 'ARCHIVED' | 'ALREADY_ARCHIVED' | 'REFUSED' | 'UNKNOWN'; providerOutcome: 'NOT_REQUESTED' | 'ARCHIVED' | 'ALREADY_ARCHIVED' | 'UNSUPPORTED' | 'BUSY' | 'UNKNOWN'; detail: string };
+  }> {
+    const job = this.job(assignmentId);
+    const binding = this.store.localSessionForJob(job.id);
+    if (!binding) throw new Error('This job has no local-session binding — nothing to retire.');
+    if (!isTerminalJob(job.state))
+      throw new Error(`This job is ${job.state.toLowerCase().replaceAll('_', ' ')} — only finished work retires; observe or cancel it first.`);
+    if (binding.lifecycle !== 'READY')
+      throw new Error(`This packet is ${binding.lifecycle.toLowerCase().replaceAll('_', ' ')} — only a ready packet archives; reconcile the record first if it disagrees.`);
+    if (binding.layout !== 'FLAT_PACKET')
+      throw new Error('The worktree layout carries no retire operation — reconcile it manually.');
+    const operationId = randomUUID();
+    const destination = `archive/${binding.storageRelativePath}`;
+    this.store.appendLocalJournal({
+      operationId, localSessionId: binding.id, jobId: job.id, kind: 'PACKET_ARCHIVE', phase: 'INTENT',
+      expectedRevision: binding.revision, source: binding.storageRelativePath, destination, outcome: 'NONE', failureDetail: null,
+    });
+    const { revision: _r0, updatedAt: _u0, ...rest0 } = binding;
+    let current = this.store.updateLocalSession({
+      localSessionId: binding.id, expectedRevision: binding.revision, next: { ...rest0, lifecycle: 'ARCHIVING' },
+    });
+    const adapter = this.adapterFor({ route: job.route });
+    const retiring = adapter as ProviderAdapter & { retire?: (job: ProviderJob) => Promise<{ retired: boolean; alreadyArchived?: boolean; archivedAs?: string; detail: string }> };
+    let retired: { retired: boolean; alreadyArchived?: boolean; archivedAs?: string; detail: string };
+    try {
+      retired = typeof retiring.retire === 'function'
+        ? await retiring.retire(job)
+        : { retired: false, detail: 'This route carries no retire operation.' };
+    } catch (error) {
+      // A thrown retire may have partially moved the packet — the record claims neither side.
+      const message = error instanceof Error ? error.message : 'unknown error';
+      const { revision: _rx, updatedAt: _ux, ...restx } = current;
+      current = this.store.updateLocalSession({
+        localSessionId: current.id, expectedRevision: current.revision, next: { ...restx, lifecycle: 'RECONCILE_REQUIRED' },
+      });
+      this.store.appendLocalJournal({
+        operationId, localSessionId: binding.id, jobId: job.id, kind: 'PACKET_ARCHIVE', phase: 'FAILED',
+        expectedRevision: current.revision, source: binding.storageRelativePath, destination,
+        outcome: 'UNKNOWN', failureDetail: `The packet move threw (${message.slice(0, 1900)}) — the directory may be partially moved; reconcile before trusting either side.`,
+      });
+      return { state: this.store.snapshot({ history: false }),
+        archive: { operationId, packetOutcome: 'UNKNOWN', providerOutcome: 'NOT_REQUESTED',
+          detail: `The packet move threw: ${message.slice(0, 1800)} The record is reconcile-required; provider archive was not attempted.` } };
+    }
+    const packetOutcome = retired.retired ? (retired.alreadyArchived ? 'ALREADY_ARCHIVED' : 'ARCHIVED') : 'REFUSED';
+    {
+      const { revision: _r1, updatedAt: _u1, ...rest1 } = current;
+      current = this.store.updateLocalSession({
+        localSessionId: current.id, expectedRevision: current.revision,
+        next: retired.retired
+          ? { ...rest1, lifecycle: 'ARCHIVED', archiveRelativePath: retired.archivedAs ?? destination }
+          : { ...rest1, lifecycle: 'READY' },
+      });
+      this.store.appendLocalJournal({
+        operationId, localSessionId: binding.id, jobId: job.id, kind: 'PACKET_ARCHIVE', phase: 'EXECUTED',
+        expectedRevision: current.revision, source: binding.storageRelativePath, destination,
+        outcome: retired.retired ? 'SUCCESS' : 'REFUSED', failureDetail: retired.retired ? null : retired.detail.slice(0, 2000),
+      });
+    }
+    // Provider-side archive runs only when discovery recorded an exact record identity, and only
+    // through a supported verb — an unobserved or unsupported record is honestly NOT_REQUESTED or
+    // UNSUPPORTED, and no provider bytes are ever deleted by the office.
+    let providerOutcome: 'NOT_REQUESTED' | 'ARCHIVED' | 'ALREADY_ARCHIVED' | 'UNSUPPORTED' | 'BUSY' | 'UNKNOWN' = 'NOT_REQUESTED';
+    let detail = retired.detail;
+    if (!binding.providerSessionId) {
+      detail += ' No provider-side record identity was observed for this session — provider archive was not requested.';
+    } else if (!this.providerLifecycle) {
+      providerOutcome = 'UNKNOWN';
+      detail += ' No provider lifecycle service is configured — provider archive was not attempted.';
+    } else {
+      const outcome = await this.providerLifecycle.archive({ provider: binding.provider, providerSessionId: binding.providerSessionId }, operationId);
+      providerOutcome = outcome.status;
+      detail += ` ${outcome.detail}`;
+      this.store.appendLocalJournal({
+        operationId, localSessionId: binding.id, jobId: job.id, kind: 'PROVIDER_ARCHIVE', phase: 'EXECUTED',
+        expectedRevision: current.revision, source: null, destination: null,
+        outcome: outcome.status === 'ARCHIVED' || outcome.status === 'ALREADY_ARCHIVED' ? 'SUCCESS'
+          : outcome.status === 'UNSUPPORTED' ? 'UNSUPPORTED' : outcome.status === 'BUSY' ? 'REFUSED' : 'UNKNOWN',
+        failureDetail: outcome.status === 'ARCHIVED' || outcome.status === 'ALREADY_ARCHIVED' ? null : outcome.detail.slice(0, 2000),
+      });
+    }
+    this.noteLocalEvidence(job, (adapter as { retireEvidence?: (id: string) => CapabilityEvidence[] }).retireEvidence?.(job.externalId) ?? []);
+    return { state: this.store.snapshot({ history: false }),
+      archive: { operationId, packetOutcome, providerOutcome, detail: detail.slice(0, 2000) } };
   }
 
   /** Retire only a proven-undispatched preparation so a new revision can be prepared. */

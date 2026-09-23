@@ -8,20 +8,29 @@ import { OfficeStore, effortSchema } from '../core/store.js';
 import { ArtifactService, MAX_TOTAL } from './artifacts.js';
 import { createRunPackageCodec } from './run-package.js';
 import { EvidenceService } from './evidence.js';
+import { handleEvidenceFrame } from './evidence-tool.js';
 import { promotable, scheduleStage, STAGE_FUNCTIONS_REQUIRED } from './research-controller.js';
 import { STAGE_DELIVERY } from '../shared/run-package.js';
 import { migrateRolesToFunctions, resolveFunctions } from './context-policy.js';
 import { stat, readFile } from 'node:fs/promises';
 import { reconstructUsage } from './local-usage.js';
+import { loadWindowWithRetry } from './boot-load.js';
 import { parseWorkLogs } from './work-logs.js';
 import { workspaceDirectory, recoverInterruptedRestore, prepareRestore, discardCandidate, commitRestore } from './recovery.js';
 import { resolveSelection, prepareInputSnapshot, reconstructSnapshot, verifySnapshotForTransfer } from './locations.js';
 import { AssignmentController } from './controller.js';
+import { mintPipelineBrief, mintPipelineRefine, mintPipelineRound, pipelineConfirmGate, type PipelineMintContext } from './pipeline-runner.js';
 import { PipelineService } from './pipeline.js';
 import { HoldoutCustody } from './holdout.js';
 import { OutputService } from './outputs.js';
 import { TerminalHandoffAdapter } from './handoff.js';
+import { LocalCliExecAdapter } from './local-cli-exec.js';
 import { LocalMailboxAdapter } from './local-session.js';
+import { LocalWorktreeMailboxAdapter } from './local-worktree-session.js';
+import { WORKTREES_DIR } from './local-worktree-repo.js';
+import { LocalSessionRouter } from './local-session-router.js';
+import { createLocalProviderLifecycle } from './local-provider-lifecycle.js';
+import { localArchiveResultSchema } from '../shared/local-session.js';
 import { PtyCloudAdapter, transportModuleStatus } from './pty.js';
 import { probeCloudTransport } from './probe.js';
 import { currentConnection } from '../shared/readiness.js';
@@ -50,6 +59,7 @@ let activeWorkspaceCalls=0;
 /** Set for the whole restore lifecycle, from candidate preparation to commit. */
 let workspaceLocked=false;
 let controller:AssignmentController;
+let exec:LocalCliExecAdapter|undefined;
 let pipeline:PipelineService;
 let custody:HoldoutCustody;
 let dispatchBusy=false;
@@ -59,39 +69,65 @@ const id=z.string().uuid();
 const importSchema=z.object({projectId:id,experimentId:id.nullable(),kind:z.enum(['REFERENCE','RESULT'])}).strict();
 const selectedRoot=process.env.QRO_USER_DATA_DIR;
 if(selectedRoot){app.setPath('userData',path.resolve(selectedRoot));}
+// One stable application identity so the taskbar groups dev and packaged windows under the
+// same icon rather than falling back to the Electron binary's generic one.
+app.setAppUserModelId('Quant Research Office');
 const hasLock=app.requestSingleInstanceLock();
 if(!hasLock) app.quit();
 else {
  app.on('second-instance',()=>{if(win){if(win.isMinimized())win.restore();win.focus();}});
- app.whenReady().then(start).catch(error=>{dialog.showErrorBox('Workspace could not be opened',`${error instanceof Error?error.message:'Unknown startup error'}\n\nYour files have not been reset. Keep the data folder and use a compatible build or a verified backup.`);app.quit();});
+ app.whenReady().then(start).catch(error=>{
+  // A schema-replay failure almost always means this build is older than the one that wrote the
+  // workspace — the strict event schemas fail closed on values they do not know. Say that plainly
+  // instead of dumping the raw validation issues.
+  const detail=error instanceof z.ZodError
+   ?'The stored workspace does not match this build’s record schema — most often because it was written by a newer version of Quant Research Office. Open it with the newer build, or restore a verified backup.\n\nYour files have not been reset.'
+   :`${error instanceof Error?error.message:'Unknown startup error'}\n\nYour files have not been reset. Keep the data folder and use a compatible build or a verified backup.`;
+  dialog.showErrorBox('Workspace could not be opened',detail);app.quit();});
  app.on('window-all-closed',()=>app.quit());
- app.on('before-quit',()=>{subscriptions?.close();if(store)store.close();});
+ app.on('before-quit',()=>{exec?.disposeAll();subscriptions?.close();if(store)store.close();});
 }
 async function start(){
  const root=app.getPath('userData');await mkdir(root,{recursive:true});await recoverInterruptedRestore(root);const workspace=workspaceDirectory(root);await mkdir(workspace,{recursive:true});store=new OfficeStore(path.join(workspace,'workspace.sqlite'),{includeHistoryInResults:false});artifacts=new ArtifactService(store,workspace);evidence=new EvidenceService(store,workspace);
- subscriptions=new Subscriptions(path.join(root,'connections'),url=>shell.openExternal(url));
+ subscriptions=new Subscriptions(path.join(root,'connections'),url=>shell.openExternal(url),
+  // The most recent recorded observation that named an account for this provider — the
+  // still-fresh fallback a connected-but-unidentified live check resolves through.
+  provider=>[...(store.snapshot().connections??[])].reverse().find(c=>c.provider===provider&&c.state==='SIGNED_IN'&&c.identity));
  // The interim transport is the labeled handoff. Automatic dispatch stays gated on verified evidence.
  controller=buildController();
  // Custody lives outside the workspace tree so no backup or restore can reach it. This build has no
  // isolated evaluator, which the capability states honestly and which keeps S8 reservations refused.
  custody=buildCustody(root,workspace);
  pipeline=buildPipeline();
- // Interrupted work is reconciled before the window opens; a crash never resubmits or invents an outcome.
- try{await controller.reconcile();}catch{}
  session.defaultSession.setPermissionRequestHandler((_webContents,_permission,callback)=>callback(false));
  session.defaultSession.setPermissionCheckHandler(()=>false);
  session.defaultSession.webRequest.onBeforeRequest((details,callback)=>{
   // No renderer network or live content. Future provider transport belongs in guarded main-process adapters.
   callback({cancel:!details.url.startsWith('file:') && !details.url.startsWith('devtools:') && !details.url.startsWith('data:')});
  });
- win=new BrowserWindow({width:1440,height:1000,minWidth:1050,minHeight:720,title:'Quant Research Office',backgroundColor:'#101414',show:false,autoHideMenuBar:true,icon:path.join(__dirname,'../assets/icon.png'),webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,webSecurity:true,allowRunningInsecureContent:false,devTools:!app.isPackaged}});
+  // The .ico keeps window and taskbar pinned to the same artwork the packager embeds in the exe;
+ // the .png remains for platforms without multi-size ico support.
+ const appIcon=path.join(__dirname,process.platform==='win32'?'../assets/icon.ico':'../assets/icon.png');
+ win=new BrowserWindow({width:1440,height:1000,minWidth:1050,minHeight:720,title:'Quant Research Office',backgroundColor:'#101414',show:true,autoHideMenuBar:true,icon:appIcon,webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,webSecurity:true,allowRunningInsecureContent:false,devTools:!app.isPackaged}});
  Menu.setApplicationMenu(Menu.buildFromTemplate([{label:'Office',submenu:[{label:'Quit',role:'quit'}]},{label:'Edit',submenu:[{role:'undo'},{role:'redo'},{type:'separator'},{role:'cut'},{role:'copy'},{role:'paste'},{role:'selectAll'}]},{label:'View',submenu:[{role:'resetZoom'},{role:'zoomIn'},{role:'zoomOut'},{role:'togglefullscreen'}]}]));
  win.webContents.setWindowOpenHandler(()=>({action:'deny'}));
  win.webContents.on('will-navigate',event=>event.preventDefault());
  win.webContents.on('will-attach-webview',event=>event.preventDefault());
  win.on('close',event=>{if(transferBusy){event.preventDefault();void dialog.showMessageBox(win!,{type:'info',message:'A file transfer is still being finalized.',detail:'Please wait for the transfer to finish before closing the office.'});}});
  win.on('closed',()=>{win=null;});
- register();await win.loadFile(html);win.show();
+ // Interrupted work is reconciled while the window is already visible but before the renderer
+ // loads; a crash never resubmits or invents an outcome, and no page exists to serve IPC yet.
+ try{await controller.reconcile();}catch{}
+ // Work that finished while the office was closed may now unlock dependents — the same guarded
+ // chain-advance runs once here, so a completed predecessor never leaves its chain parked.
+ try{await controller.reconcileLocalChain();}catch{}
+ register();await loadWindowWithRetry(win,html);
+ // The office opens on re-observed accounts, not on however stale the recorded check is.
+ // Each provider is re-observed once, off the load path; a failed observation leaves the
+ // last recorded state standing with its real timestamp — never a refreshed-looking lie.
+ for(const provider of ['openai','claude','devin'] as const)void subscriptions.observe(provider)
+  .then(({observation})=>{try{store.recordAccountObservation(observation);win?.webContents.send('office:changed');}catch{}})
+  .catch(()=>{});
 }
 function register(){
  const handle=(channel:string,fn:(value:unknown)=>unknown|Promise<unknown>)=>ipcMain.handle(channel,async(event,value)=>{
@@ -138,6 +174,11 @@ const changed=()=>win?.webContents.send('office:changed');
   // Provider evidence is persisted here, in the main process. The renderer never supplies observations.
   try{store.recordAccountObservation(observation);changed();}catch(error){connection.note=`${connection.note} Durable record not saved: ${error instanceof Error?error.message:'unknown error'}`.trim();}
   return connection;});
+ handle('office:provider-login',async value=>{const provider=providerSchema.parse(value);await subscriptions.signIn(provider);
+  // A completed sign-in is immediately re-observed and recorded like any account check.
+  const {connection,observation}=await subscriptions.observe(provider);
+  try{store.recordAccountObservation(observation);changed();}catch(error){connection.note=`${connection.note} Durable record not saved: ${error instanceof Error?error.message:'unknown error'}`.trim();}
+  return connection;});
  handle('office:provider-tool',async value=>{const provider=providerSchema.parse(value);const result=await dialog.showOpenDialog(win!,{title:'Locate the official '+(provider==='openai'?'codex.exe':'claude.exe'),properties:['openFile'],filters:[{name:'Provider executable',extensions:['exe']}]});if(!result.canceled&&result.filePaths[0])subscriptions.select(provider,result.filePaths[0]);});
  handle('office:provider-usage',value=>shell.openExternal(providerSchema.parse(value)==='claude'?'https://claude.ai/settings/usage':'https://chatgpt.com/codex/settings/usage'));
  
@@ -177,7 +218,7 @@ const changed=()=>win?.webContents.send('office:changed');
   }finally{dispatchBusy=false;openRequestActions--;}
  };
  handle('office:request-prepare',async value=>{
-  const input=z.object({requestId:id,expectedRequestRevision:z.number().int().nonnegative(),agentId:id,expectedAgentRevision:z.number().int().nonnegative()}).strict().parse(value);
+  const input=z.object({requestId:id,expectedRequestRevision:z.number().int().nonnegative(),agentId:id,expectedAgentRevision:z.number().int().nonnegative(),dependsOn:z.array(id).max(64).optional()}).strict().parse(value);
   return dispatch(async()=>{
    const state=store.snapshot({history:false});
    const request=state.requests?.find(item=>item.id===input.requestId);
@@ -188,14 +229,17 @@ const changed=()=>win?.webContents.send('office:changed');
     objectRoot:workspaceDirectory(app.getPath('userData')),
     projectId:request.projectId,requestId:request.id,requestRevision:request.revision,objective:request.objective});
    const result=controller.prepare({requestId:input.requestId,agentId:input.agentId,snapshotId:snapshot.id,
-    expectedRequestRevision:input.expectedRequestRevision,expectedAgentRevision:input.expectedAgentRevision});
+    expectedRequestRevision:input.expectedRequestRevision,expectedAgentRevision:input.expectedAgentRevision,dependsOn:input.dependsOn});
    changed();return {state:result.state,assignmentId:result.assignment.id,snapshot};
   });
  });
  handle('office:request-plan',value=>{const input=assignmentInput.parse(value);return controller.handoffPlan(input.assignmentId);});
  handle('office:request-handoff',async value=>{const input=assignmentInput.parse(value);return dispatch(async()=>{
   const state=await controller.handoff(input.assignmentId);changed();return state;});});
- handle('office:request-observe',async value=>{const input=assignmentInput.parse(value);return dispatch(async()=>{const state=await controller.observe(input.assignmentId);changed();return state;});});
+ handle('office:request-observe',async value=>{const input=assignmentInput.parse(value);return dispatch(async()=>{
+ // A completed observation may unlock dependent work — the same guarded chain-advance the
+ // automatic path uses runs here, so manual and automatic observation settle identically.
+ await controller.observe(input.assignmentId);const state=await controller.advanceLocalChain(input.assignmentId);changed();return state;});});
  handle('office:request-cancel-job',async value=>{const input=assignmentInput.parse(value);return dispatch(async()=>{const state=await controller.cancel(input.assignmentId);changed();return state;});});
  handle('office:request-discard-preparation',async value=>{const input=assignmentInput.parse(value);return dispatch(async()=>{const state=controller.discardPreparation(input.assignmentId);changed();return state;});});
  handle('office:request-link',value=>{
@@ -221,9 +265,27 @@ const changed=()=>win?.webContents.send('office:changed');
   });
  });
  const pageLimit=z.number().int().min(1).max(500).optional();
+ handle('office:chat-page',value=>store.officeChatPage(z.object({projectId:id.optional(),requestId:id.optional(),agentId:id.optional(),limit:z.number().int().min(1).max(100).optional(),cursor:z.string().max(1000).optional()}).strict().parse(value)));
  handle('office:history-page',value=>store.historyPage(z.object({projectId:id.nullable().optional(),limit:pageLimit,cursor:z.number().int().positive().optional()}).strict().parse(value)));
  handle('office:log-page',value=>store.logPage(z.object({agentId:id.optional(),conversationId:z.string().max(200).optional(),limit:pageLimit,cursor:z.string().max(300).optional()}).strict().parse(value)));
  handle('office:job-events',value=>{const input=z.object({jobId:id,limit:pageLimit,cursor:z.string().max(300).optional()}).strict().parse(value);return store.jobEventPage(input.jobId,input);});
+ // The structured applied-report query: publicState strips jobEvents, so the applied-report UI
+ // must query them rather than read the pushed snapshot (QO-LOCAL-REV F05/F06).
+ handle('office:applied-reports',value=>{const input=z.object({jobId:id,limit:pageLimit}).strict().parse(value);return {entries:store.appliedReports(input.jobId,input.limit??50)};});
+ handle('office:local-session-summary',value=>{const jobId=id.parse(value);const workspace=workspaceDirectory(app.getPath('userData'));
+  return store.localSessionSummary(jobId,record=>path.join(workspace,record.layout==='PROJECT_WORKTREE'?path.join('local-repos',record.projectId,WORKTREES_DIR):'local-sessions',record.archiveRelativePath??record.storageRelativePath));});
+ // The launch plan for one bound packet — where it lives, its proven hash, and the manual steps.
+ handle('office:local-launch-plan',value=>{const jobId=id.parse(value);const workspace=workspaceDirectory(app.getPath('userData'));
+  return store.localLaunchPlan(jobId,record=>path.join(workspace,record.layout==='PROJECT_WORKTREE'?path.join('local-repos',record.projectId,WORKTREES_DIR):'local-sessions',record.archiveRelativePath??record.storageRelativePath));});
+ // Retire one settled local session: packet dir moves under archive/ (bytes retained), then a
+ // provider-side archive is attempted only through a supported exact-id verb. The result is
+ // schema-validated at the boundary with a fresh summary of the post-retire record.
+ handle('office:local-session-archive',value=>{const assignmentId=id.parse(value);return dispatch(async()=>{
+  const {state,archive}=await controller.retireLocal(assignmentId);changed();
+  const job=state.jobs?.find(item=>item.assignmentId===assignmentId);
+  const workspace=workspaceDirectory(app.getPath('userData'));
+  const summary=job?store.localSessionSummary(job.id,record=>path.join(workspace,record.layout==='PROJECT_WORKTREE'?path.join('local-repos',record.projectId,WORKTREES_DIR):'local-sessions',record.archiveRelativePath??record.storageRelativePath)):null;
+  return {state,archive:localArchiveResultSchema.parse({...archive,summary})};});});
  handle('office:migrate-legacy',value=>{noInput(value);if(transferBusy)throw new Error('Wait for the file operation to finish.');
   const result=store.migrateLegacyRequests();changed();return {...result,state:store.snapshot({history:false})};});
  handle('office:state',value=>{noInput(value);return store.snapshot({history:false});});
@@ -249,7 +311,53 @@ const changed=()=>win?.webContents.send('office:changed');
    });
  });
  handle('office:info',value=>{noInput(value);const transport=transportModuleStatus();return {version:app.getVersion(),dataDirectory:workspaceDirectory(app.getPath('userData')),platform:process.platform,packaged:app.isPackaged,transportModule:transport.available,transportDetail:transport.detail};});
- handle('office:command',value=>{if(transferBusy)throw new Error('Wait for the file operation to finish.');const state=store.execute(value);changed();return state;});
+ handle('office:command',async value=>{
+  if(transferBusy)throw new Error('Wait for the file operation to finish.');
+  // Pipeline commands carry office-side minting after the durable command lands: the brief hop on
+  // start, a refine hop per note, the remaining spec on confirm. They run inside the dispatch
+  // serializer like every other request action; every other command keeps the plain sync path.
+  const type=(value as {type?:string}|null|undefined)?.type;
+  const requestId=(value as {requestId?:string}|null|undefined)?.requestId;
+  const isPipeline=type==='request.pipeline.note'||type==='request.pipeline.confirm'
+    ||(type==='request.start'&&!!requestId&&!!store.snapshot({history:false}).requests?.find(r=>r.id===requestId)?.pipeline);
+  if(!isPipeline){const state=store.execute(value);changed();return state;}
+  return dispatch(async()=>{
+   if(type==='request.pipeline.confirm'){
+    // The whole spec must resolve before the phase flips — a refusal leaves the request briefing.
+    const gate=pipelineConfirmGate(store,requestId!);
+    if(!gate.ok)throw new Error(gate.detail);
+   }
+   let state=store.execute(value);
+   const request=state.requests?.find(r=>r.id===requestId);
+   if(request?.pipeline){
+    const workspace=workspaceDirectory(app.getPath('userData'));
+    const ctx:PipelineMintContext={store,
+     snapshotFor:req=>prepareInputSnapshot({store,stagingRoot:path.join(workspace,'snapshots'),objectRoot:workspace,
+      projectId:req.projectId,requestId:req.id,requestRevision:req.revision,objective:req.objective}),
+     prepare:input=>controller.prepare(input)};
+    if(type==='request.start'&&request.status==='READY'&&!request.blockers.length){
+     const minted=await mintPipelineBrief(ctx,request);
+     if(!minted.minted)throw new Error(`The request is ready but its director brief could not be minted: ${minted.detail}`);
+     const briefJob=(store.snapshot({history:false}).jobs??[]).find(j=>j.assignmentId===minted.assignment!.id);
+     // A re-start with the hop already launched is a no-op — only an INTENT job can hand off.
+     if(briefJob?.state==='INTENT')
+     try{await controller.handoff(minted.assignment.id);}
+     catch(error){if(briefJob)store.recordJobEvents(briefJob.id,[{externalId:`pipeline-brief-launch:${randomUUID()}`,cursor:'',kind:'STATUS',
+      text:`The director brief hop was minted but its automatic launch could not run: ${error instanceof Error?error.message:'unknown error'} The work stays prepared; launch it manually when the blocker clears.`,
+      occurredAt:new Date().toISOString(),receivedAt:new Date().toISOString(),evidence:'OFFICE_LOCAL'}]);}
+    }else if(type==='request.pipeline.note'){
+     const minted=await mintPipelineRefine(ctx,request,String((value as {text?:string}).text??''));
+     if(!minted.minted)throw new Error(`The note is recorded but its refine hop could not be minted: ${minted.detail}`);
+     await controller.reconcileLocalChain();
+    }else if(type==='request.pipeline.confirm'){
+     await mintPipelineRound(ctx,request);
+     await controller.reconcileLocalChain();
+    }
+    state=store.snapshot({history:false});
+   }
+   changed();return state;
+  });
+ });
  // Evidence access is deliberately read-only and grant-checked inside the service, which is the only
  // place that resolves an object hash to bytes. The renderer never receives an object path.
  // Read-only research status, and the one write that gives a stage its people. Assignment is
@@ -383,7 +491,38 @@ function buildController():AssignmentController{
  const workspace=()=>workspaceDirectory(app.getPath('userData'));
  const outputs=new OutputService(store,workspace());
  const handoff=new TerminalHandoffAdapter({executable:()=>subscriptions.toolPath('claude')});
- const mailbox=new LocalMailboxAdapter(()=>path.join(workspace(),'local-sessions'));
+ const flat=new LocalMailboxAdapter(()=>path.join(workspace(),'local-sessions'));
+ const tree=new LocalWorktreeMailboxAdapter(()=>path.join(workspace(),'local-repos'));
+ // LOCAL_MAILBOX resolves through the persisted binding router: the layout each job's record
+ // declares decides which adapter owns it, and pre-binding jobs take the named legacy rule —
+ // never registration-order luck (QO-LOCAL-REV §5.3).
+ const mailbox=new LocalSessionRouter(jobId=>store.localSessionForJob(jobId),{FLAT_PACKET:flat,PROJECT_WORKTREE:tree});
+ // LOCAL_CLI_EXEC resolves through the same persisted binding, to the office-spawned adapter.
+ // Both layout slots hold the exec adapter: a record misbound to the worktree layout lands on it
+ // anyway and fails closed on its own flat-packet check instead of silently changing transport.
+ // The child's environment is the adapter's own subscriptionEnvironment() default — the scrub
+ // that removes ACP_* and billing overrides before the CLI sees them.
+ exec=new LocalCliExecAdapter(()=>path.join(workspace(),'local-sessions'),provider=>subscriptions.toolPath(provider),undefined,undefined,undefined,undefined,undefined,undefined,
+  agentId=>store.snapshot().agents.find(a=>a.id===agentId)?.provider,
+  // A spawned child's exit or a receipt write fires this — the office observes the job through the
+  // same validated reader a manual Observe uses, then advances any dependent the completion
+  // unlocked. It runs outside the request-action mutex; a refused or racing pass leaves the job
+  // for the next trigger or startup reconciliation, never a silently claimed outcome.
+  jobId=>{void (async()=>{
+   if(workspaceLocked)return;
+   try{
+    const job=store.snapshot({history:false}).jobs?.find(item=>item.id===jobId);
+    if(!job)return;
+    await controller.observe(job.assignmentId);
+    await controller.advanceLocalChain(job.assignmentId);
+    win?.webContents.send('office:changed');
+   }catch(error){console.warn('automatic local observation failed:',error);}
+  })();},
+  undefined,undefined,
+  // The evidence drop-box edge: caller identity is bound from the assignment record inside the
+  // adapter — an agent's query file can never choose whose grants are checked.
+  (caller,line)=>handleEvidenceFrame(evidence,caller,line));
+ const execRoute=new LocalSessionRouter(jobId=>store.localSessionForJob(jobId),{FLAT_PACKET:exec,PROJECT_WORKTREE:exec},'LOCAL_CLI_EXEC');
  return new AssignmentController(store,handoff,undefined,
   // Verification is scoped to the staging root this office owns, so a snapshot pointing anywhere
   // else is refused rather than verified in place.
@@ -402,10 +541,16 @@ function buildController():AssignmentController{
   // and agents resolve only to the adapter that actually owns them — a miss fails closed, never a
   // silent fallback across environments.
   ref=>{
-   if(ref.route)return ref.route===handoff.route?handoff:ref.route===mailbox.route?mailbox:undefined;
-   if(ref.agent)return ref.agent.execution==='HOSTED_SETUP_REQUIRED'?handoff:ref.agent.execution==='LOCAL'?mailbox:undefined;
+   if(ref.route)return ref.route===handoff.route?handoff:ref.route===mailbox.route?mailbox:ref.route===execRoute.route?execRoute:undefined;
+   if(ref.agent)return ref.agent.execution==='HOSTED_SETUP_REQUIRED'?handoff:ref.agent.execution==='LOCAL'?(ref.agent.localRoute==='LOCAL_CLI_EXEC'?execRoute:mailbox):undefined;
    return undefined;
-  });
+  },
+  // Provider-side archive for retired packets — exact record identity, bounded output, and an
+  // honest UNSUPPORTED where the provider ships no archive verb (claude/codex keep their history).
+  createLocalProviderLifecycle(),
+  // Dependent packets inherit predecessor outputs only as hash-verified bytes read back from the
+  // content-addressed store — never a filename or a claim.
+  outputs.readBytes);
 }
 async function transfer<T>(fn:()=>Promise<T>):Promise<T>{if(transferBusy)throw new Error('Another file dialog or transfer is already active.');transferBusy=true;try{return await fn();}finally{transferBusy=false;}}
 /**
