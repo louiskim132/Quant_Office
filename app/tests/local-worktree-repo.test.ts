@@ -11,9 +11,9 @@ import { createWorktree, ensureRepo, listWorktrees, removeWorktreeRegistration, 
 const git = (args: string[], cwd: string) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
 
 function fixture(t: test.TestContext) {
- // realpathSync: TMP may resolve to an 8.3 short name (RUNNER~1) while git worktree
- // porcelain output reports the canonical long path — compare canonical to canonical.
- const root = realpathSync(mkdtempSync(path.join(tmpdir(), 'qro-worktree-repo-')));
+ // realpathSync.native expands an 8.3 TMP alias (RUNNER~1) to the long spelling git
+ // worktree porcelain output reports — the plain variant preserves the alias.
+ const root = realpathSync.native(mkdtempSync(path.join(tmpdir(), 'qro-worktree-repo-')));
  t.after(() => removeTreeSync(root));
  // These tests run real git against real repositories; the assumption is asserted, not skipped.
  assert.match(execFileSync('git', ['--version'], { encoding: 'utf8' }), /git version/, 'git must be on PATH for the worktree lane tests');

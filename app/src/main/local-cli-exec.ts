@@ -252,9 +252,10 @@ export class LocalCliExecAdapter implements ProviderAdapter {
       const caller: EvidenceCaller = { agentId: context.assignment.agentId, projectId: context.assignment.projectId, requestId: context.assignment.requestId };
       const frames = this.evidenceFrames;
       try {
-        // realpath first: a short-name (8.3) or aliased watch target trips libuv's fs-event
-        // prefix assertion on Windows, and the crash would take down the whole office process.
-        queryWatcher = watch(realpathSync(path.join(dir, QUERIES_DIR)), (_event, name) => {
+        // realpathSync.native resolves 8.3 short-name aliases (RUNNER~1) that the plain variant
+        // preserves — a short-name watch target trips libuv's fs-event prefix assertion on
+        // Windows, and that crash would take down the whole office process.
+        queryWatcher = watch(realpathSync.native(path.join(dir, QUERIES_DIR)), (_event, name) => {
           if (!isQueryFile(name)) return;
           // A just-created query file gets a beat to flush before the office reads it.
           const settle = setTimeout(() => {
@@ -299,7 +300,7 @@ export class LocalCliExecAdapter implements ProviderAdapter {
     // the office never polls. A failed watch degrades to the exit trigger and manual observe,
     // which read the same files.
     try {
-      record.watcher = watch(realpathSync(dir), (_event, name) => {
+      record.watcher = watch(realpathSync.native(dir), (_event, name) => {
         if (name === RESULT_FILE || name === CANCEL_ACK_FILE) this.notify(record.jobId);
       });
       record.watcher.unref?.();
