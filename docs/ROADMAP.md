@@ -4008,3 +4008,58 @@ request-scoping fix, the seal barrier, reviewer
 verification fields and the user-gate UI are the
 workers' packets; no memory engine installed,
 no live-provider run, no Colab claim.
+
+2026-09-23 — round comm-pipe-3 integrated at
+42beb9f + 7901b8a (workers 1-3 + organizer
+wiring and reconciliation) — the pipeline seal
+and user decision land. Worker-1 (22943b0,
+merge cd91396): user-gate leaves both
+builders and the CommRoundPhase union — the
+gate is the AWAITING_DECISION wait state,
+not a hop; sealTerminal() gives each
+terminal entry (verify for planning,
+analysis-report for result-analysis) the
+full emitted key list as inputKeys while
+ordinary entries stage exactly
+dependsOnKeys; assertDag refuses disclosed
+inputs naming un-emitted keys. Worker-2
+(8d44175, merge 516cb2f): the cross-request
+defect is closed — every pipelineKey lookup
+(planCommRoundMint, mintEntriesFor which
+now takes the request, the brief re-bind,
+refine's prior-brief and mintPipelineRound's
+key map) filters by requestId, proven by
+two simultaneous pipeline requests minting
+independent hop sets; new
+settlePipelineDecision requires every
+minted hop COMPLETED, settles on a minted
+user-gate head else verify/analysis-report,
+binds pendingDecision to the terminal hop's
+verified lastReceipt.hash and reports
+{settled:false,reason} never a throw.
+Worker-3 (7ee3f56, merge f01e806): the
+PipelineCard covers all four phases —
+AWAITING_DECISION shows the sealed state,
+the terminal hop's job state and outputs,
+and posts request.pipeline.decide through
+the existing command path with the exact
+pendingDecision hashes (REVISE needs a
+bounded note); DECIDED renders the recorded
+decision read-only; dispatch.tsx names the
+new phases. Organizer wiring (42beb9f):
+advanceLocalChain offers every completed
+pipeline hop to the settle — the terminal
+hop has no dependents, so the seal is its
+own step — and reconcileLocalChain sweeps
+LAUNCHED pipelines so a round sealed while
+the office was down still opens the wait.
+Reconciliation (7901b8a): executor/mint
+test assertions updated to the sealed spec
+(7 remaining mints, 8 hops, no gate). Full
+suite at this head: 788 tests, 787 passed,
+1 pre-existing skip; tsc and build clean.
+Honest remainder: REVISE records intent
+only — a bounded note, no automatic
+re-mint; P3 live acceptance (a real user
+decision on a live round) is unverified;
+memory workstream unstarted.
