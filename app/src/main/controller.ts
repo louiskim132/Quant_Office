@@ -14,6 +14,7 @@ import { localRequirementFor } from './local-lane.js';
 import { safeEntry, MAX_FILE } from './artifacts.js';
 import { pipelineStageBlocker, type FrozenResearchSpec } from '../shared/research.js';
 import { stageContextHash } from '../shared/pipeline.js';
+import { settlePipelineDecision } from './pipeline-runner.js';
 import type { ToolProfile } from '../shared/tool-profile.js';
 
 /**
@@ -710,6 +711,7 @@ export class AssignmentController {
     if (!settled || settled.state !== 'COMPLETED') return state;
     for (const dependent of (state.assignments ?? []).filter(item => (item.dependsOn ?? []).includes(assignmentId)))
       await this.launchChainDependent(state, dependent, assignmentId);
+    this.settlePipelineForAssignment(assignmentId);
     return this.store.snapshot({history:false});
   }
 
@@ -723,7 +725,23 @@ export class AssignmentController {
     const state = this.store.snapshot({history:false});
     for (const dependent of (state.assignments ?? []).filter(item => item.dependsOn?.length))
       await this.launchChainDependent(state, dependent);
+    // Startup reconciliation also seals a launched round whose last hop completed while the
+    // office was down — the settle reports a non-terminal round instead of throwing, so a
+    // mid-round request passes through untouched.
+    const current = this.store.snapshot({history:false});
+    for (const request of (current.requests ?? []).filter(item => item.pipeline?.phase === 'LAUNCHED'))
+      try { settlePipelineDecision({ store: this.store }, request); } catch {}
     return this.store.snapshot({history:false});
+  }
+
+  /** A completed hop may seal its round — the office settle is a no-op until every minted hop verifies. */
+  private settlePipelineForAssignment(assignmentId: string): void {
+    const state = this.store.snapshot({history:false});
+    const assignment = state.assignments?.find(item => item.id === assignmentId);
+    if (!assignment?.pipelineKey) return;
+    const request = state.requests?.find(item => item.id === assignment.requestId);
+    if (request?.pipeline?.phase !== 'LAUNCHED') return;
+    try { settlePipelineDecision({ store: this.store }, request); } catch {}
   }
 
   /** Serializes chain launches — two predecessors settling together must not race one dependent. */

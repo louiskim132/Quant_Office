@@ -3939,3 +3939,127 @@ pipeline run still needs the full role roster bound
 are minted through the same path but only local
 CLI routes were exercised; the user-gate hop is a
 director-run step, not a UI control.
+
+2026-09-23 — batch integration PR #6 merged to main
+(merge commit 63556fd) through the authenticated
+protected route after every gate held: the round
+was closed, origin/main was merged into the branch
+first so the exact PR head contained it, the
+required verify check reported SUCCESS on that
+head (02c1cdc, two runs), and no review
+conversations existed. Two CI-only Windows
+failures surfaced on the first PR run — the
+runner's TMP resolves to an 8.3 alias (RUNNER~1):
+fs.watch on a short-name target trips libuv's
+fs-event prefix assertion and aborts the test
+subprocess, and git worktree porcelain reports the
+long path the suite compared literally. Fixed on
+the branch by realpathSync.native at both watch
+targets and the fixture root (bd65053, 02c1cdc) —
+verified empirically that plain realpathSync
+preserves 8.3 aliases while the native variant
+expands them, and reproduced under a short-name
+TMP locally before re-push.
+
+2026-09-23 — memory-and-roadmap review proposal
+incorporated; next round prepared. The reviewer's
+23 September proposal is a design/review artifact,
+not a worker packet; the organizer accepted its
+ordering after source review. Accepted: finish the
+local communication pipeline before any memory
+workstream — P0 organizer baseline, P1
+request-scoped minting plus the sealed barrier, P2
+a genuine user decision bound to the sealed
+report's verified receipt plus reviewer
+verification, P3 live acceptance; then the
+M-memory workstream with the Office's own
+append-only finding ledger as the authoritative
+store, a required interactive graph rendered from
+Office records, bounded authorized retrieval at
+synthesis only, and external engines (Graphiti,
+Hindsight, Basic Memory, LightRAG, Mem0) held as
+optional separately evaluated projections or
+retrieval backends — never prerequisites, never
+silent context injectors into independent
+research-review assignments. Review found one
+concrete defect in the landed pipeline: the
+key→assignment maps in round-executor and
+pipeline-runner scan all assignments without a
+requestId filter, so a second pipeline request
+can bind or skip against the first request's
+deterministic keys — P1 must scope lookups by
+request. Contract freeze landed at 444f0a7 on
+this branch: RequestPipeline gains
+AWAITING_DECISION/DECIDED phases, a
+pendingDecision bound to the terminal hop's
+verified receipt hash and an append-only decision
+record; the request.pipeline.decide command
+refuses stale spec/receipt hashes and replays
+idempotently; CommRoundEntry gains inputKeys for
+the sealed-barrier input contract; the
+markPipelineAwaitingDecision office method
+settles LAUNCHED→AWAITING_DECISION without a
+revision bump. Verified at the freeze:
+typecheck clean, pipeline-decision.test.ts (3)
+drives mint→launch→receipt→settle→decide on the
+real guarded path, pipeline-mint/pipeline/
+local-chain suites green (51). Not landed: the
+request-scoping fix, the seal barrier, reviewer
+verification fields and the user-gate UI are the
+workers' packets; no memory engine installed,
+no live-provider run, no Colab claim.
+
+2026-09-23 — round comm-pipe-3 integrated at
+42beb9f + 7901b8a (workers 1-3 + organizer
+wiring and reconciliation) — the pipeline seal
+and user decision land. Worker-1 (22943b0,
+merge cd91396): user-gate leaves both
+builders and the CommRoundPhase union — the
+gate is the AWAITING_DECISION wait state,
+not a hop; sealTerminal() gives each
+terminal entry (verify for planning,
+analysis-report for result-analysis) the
+full emitted key list as inputKeys while
+ordinary entries stage exactly
+dependsOnKeys; assertDag refuses disclosed
+inputs naming un-emitted keys. Worker-2
+(8d44175, merge 516cb2f): the cross-request
+defect is closed — every pipelineKey lookup
+(planCommRoundMint, mintEntriesFor which
+now takes the request, the brief re-bind,
+refine's prior-brief and mintPipelineRound's
+key map) filters by requestId, proven by
+two simultaneous pipeline requests minting
+independent hop sets; new
+settlePipelineDecision requires every
+minted hop COMPLETED, settles on a minted
+user-gate head else verify/analysis-report,
+binds pendingDecision to the terminal hop's
+verified lastReceipt.hash and reports
+{settled:false,reason} never a throw.
+Worker-3 (7ee3f56, merge f01e806): the
+PipelineCard covers all four phases —
+AWAITING_DECISION shows the sealed state,
+the terminal hop's job state and outputs,
+and posts request.pipeline.decide through
+the existing command path with the exact
+pendingDecision hashes (REVISE needs a
+bounded note); DECIDED renders the recorded
+decision read-only; dispatch.tsx names the
+new phases. Organizer wiring (42beb9f):
+advanceLocalChain offers every completed
+pipeline hop to the settle — the terminal
+hop has no dependents, so the seal is its
+own step — and reconcileLocalChain sweeps
+LAUNCHED pipelines so a round sealed while
+the office was down still opens the wait.
+Reconciliation (7901b8a): executor/mint
+test assertions updated to the sealed spec
+(7 remaining mints, 8 hops, no gate). Full
+suite at this head: 788 tests, 787 passed,
+1 pre-existing skip; tsc and build clean.
+Honest remainder: REVISE records intent
+only — a bounded note, no automatic
+re-mint; P3 live acceptance (a real user
+decision on a live round) is unverified;
+memory workstream unstarted.

@@ -8,8 +8,10 @@ import { EVIDENCE_SURFACE_ID, type ToolProfile } from '../shared/tool-profile.js
  * planner drafts on identical inputs, one bounded cross-critique round answering the opposite
  * draft's named artifact, and a director synthesis — optionally mirrored by an analyst
  * interpret/falsify pair with bounded cross-responses and a director finalize — then the
- * implement, verify and user-gate hops. The standalone analysis round for RESULT_ANALYSIS
- * requests runs brief → digest → interpret ∥ falsify → responses → finalize → report → gate.
+ * implement hops and the terminal verify. The standalone analysis round for RESULT_ANALYSIS
+ * requests runs brief → digest → interpret ∥ falsify → responses → finalize → report.
+ * Neither spec ends in a user-gate hop: the seal is a wait state the office holds after the
+ * terminal assignment verifies, not a hop any agent runs.
  * Predecessors pass artifact references only: no field anywhere in the spec carries a transcript,
  * prompt prose or free-text carryover, so a hop can only ever point at the named items it was
  * declared against.
@@ -19,8 +21,8 @@ import { EVIDENCE_SURFACE_ID, type ToolProfile } from '../shared/tool-profile.js
  * byte-identical specs (canonical ordering, positional keys).
  */
 
-/** The hop roles a round can carry, in the order the spec emits them. */
-export type CommRoundPhase = 'BRIEF' | 'PLAN_DRAFT' | 'PLAN_CRITIQUE' | 'PLAN_SYNTHESIS' | 'DIGEST' | 'IMPLEMENT' | 'VERIFY' | 'REPORT' | 'USER_GATE';
+/** The hop roles a round can carry, in the order the spec emits them. The seal is a wait state, not a hop — no phase names it. */
+export type CommRoundPhase = 'BRIEF' | 'PLAN_DRAFT' | 'PLAN_CRITIQUE' | 'PLAN_SYNTHESIS' | 'DIGEST' | 'IMPLEMENT' | 'VERIFY' | 'REPORT';
 
 /**
  * The roster role filling a hop. The executor resolves agents by role against the declaration's
@@ -62,8 +64,21 @@ export interface CommRoundEntry {
  /** The roster role this hop is filled by — the executor binds agents by role, not position. */
  armRole: CommRoundArmRole;
  agentId: string;
- /** Artifact refs this hop may read — keys of earlier entries only. Never transcripts. */
+ /**
+  * Scheduling prerequisites — keys of earlier entries that must verify COMPLETED before this
+  * hop may launch. This is the barrier set: a hop waits on every key here whether or not it
+  * is allowed to read that artifact. Never transcripts.
+  */
  dependsOnKeys: string[];
+ /**
+  * Disclosed inputs — the artifact refs this hop may actually stage and read. An ordinary hop
+  * stages exactly its declared predecessors' verified outputs; the terminal hop is the seal and
+  * reads the whole round, so its list names every other entry in declaration order. Waiting and
+  * disclosure are deliberately different fields so a barrier never silently widens what a hop
+  * receives. Absent on pre-@2 specs: treat as dependsOnKeys — earlier semantics disclosed
+  * everything the hop waited on.
+  */
+ inputKeys?: string[];
  toolProfile: ToolProfile;
  /** The declared input manifest: the packet version, the brief, and named artifact refs. */
  inputManifestNote: string;
@@ -103,7 +118,8 @@ function manifestNote(declaration: { packetVersion: number }, dependsOnKeys: str
 }
 
 function entry(declaration: { packetVersion: number }, key: string, phase: CommRoundPhase, armRole: CommRoundArmRole, agentId: string, toolProfile: ToolProfile, dependsOnKeys: string[]): CommRoundEntry {
- return { key, phase, armRole, agentId, dependsOnKeys, toolProfile, inputManifestNote: manifestNote(declaration, dependsOnKeys) };
+ // An ordinary hop stages exactly the predecessors it was declared against — nothing more.
+ return { key, phase, armRole, agentId, dependsOnKeys, inputKeys: [...dependsOnKeys], toolProfile, inputManifestNote: manifestNote(declaration, dependsOnKeys) };
 }
 
 /** A diverge pair is exactly two distinct agents — a critique of oneself is not a second opinion. */
@@ -151,12 +167,25 @@ function validateAnalysis(declaration: AnalysisRoundDeclaration): void {
  * construction: keys are unique, and every dependency names an entry that was already emitted,
  * which is what makes the ordering a DAG a reader can trust without re-checking.
  */
+/**
+ * The terminal hop is the seal: it reads every verified artifact the round produced before the
+ * user sees the report, so its disclosed inputs are the whole round in declaration order — wider
+ * than its scheduling barrier by design.
+ */
+function sealTerminal(entries: CommRoundEntry[]): void {
+ const terminal = entries[entries.length - 1];
+ terminal.inputKeys = entries.slice(0, -1).map(item => item.key);
+}
+
 function assertDag(entries: CommRoundEntry[]): void {
  const seen = new Set<string>();
  for (const item of entries) {
   if (seen.has(item.key)) throw new Error(`Duplicate spec key ${item.key}.`);
   for (const dep of item.dependsOnKeys) {
    if (!seen.has(dep)) throw new Error(`Entry ${item.key} depends on ${dep}, which no earlier entry produced — forward or unknown dependencies are refused.`);
+  }
+  for (const input of item.inputKeys ?? []) {
+   if (!seen.has(input)) throw new Error(`Entry ${item.key} stages ${input}, which no earlier entry produced — disclosed inputs must already exist.`);
   }
   seen.add(item.key);
  }
@@ -195,8 +224,8 @@ export function buildCommRound(declaration: CommRoundDeclaration): CommRoundSpec
  const implements_ = declaration.workerAgentIds.map((agentId, index) =>
   entry(declaration, `implement-${index + 1}`, 'IMPLEMENT', 'WORKER', agentId, WORKER_TOOL_PROFILE, [head.key]));
  const verify = entry(declaration, 'verify', 'VERIFY', 'DIRECTOR', declaration.directorAgentId, DIRECTOR_TOOL_PROFILE, implements_.map(item => item.key));
- const gate = entry(declaration, 'user-gate', 'USER_GATE', 'DIRECTOR', declaration.directorAgentId, DIRECTOR_TOOL_PROFILE, [verify.key]);
- entries.push(...implements_, verify, gate);
+ entries.push(...implements_, verify);
+ sealTerminal(entries);
  assertDag(entries);
  return { schema: 'office-comm-round@1', projectId: declaration.projectId, packetVersion: declaration.packetVersion, entries };
 }
@@ -219,8 +248,8 @@ export function buildAnalysisRound(declaration: AnalysisRoundDeclaration): CommR
  const finalize = entry(declaration, 'analysis-finalize', 'PLAN_SYNTHESIS', 'DIRECTOR', declaration.directorAgentId, DIRECTOR_TOOL_PROFILE,
   [interpret.key, falsify.key, responseC.key, responseD.key]);
  const report = entry(declaration, 'analysis-report', 'REPORT', 'WORKER', declaration.workerAgentId, WORKER_TOOL_PROFILE, [finalize.key]);
- const gate = entry(declaration, 'user-gate', 'USER_GATE', 'DIRECTOR', declaration.directorAgentId, DIRECTOR_TOOL_PROFILE, [report.key]);
- const entries = [brief, digest, interpret, falsify, responseC, responseD, finalize, report, gate];
+ const entries = [brief, digest, interpret, falsify, responseC, responseD, finalize, report];
+ sealTerminal(entries);
  assertDag(entries);
  return { schema: 'office-comm-round@1', projectId: declaration.projectId, packetVersion: declaration.packetVersion, entries };
 }

@@ -69,6 +69,7 @@ export const commandSchema = z.discriminatedUnion('type', [
   z.object({...common,type:z.literal('request.update'),requestId:id,expectedRevision:z.number().int().nonnegative(),objective:z.string().trim().min(1).max(12000),leadAgentId:id.nullable(),participantIds:z.array(id),acceptanceCriteria:text(12000)}).strict(),
   ...(['request.start','request.cancel','request.duplicate','request.pipeline.confirm'] as const).map(type=>z.object({...common,type:z.literal(type),requestId:id,expectedRevision:z.number().int().nonnegative()}).strict()),
   z.object({...common,type:z.literal('request.pipeline.note'),requestId:id,expectedRevision:z.number().int().nonnegative(),text:z.string().trim().min(1).max(4000)}).strict(),
+  z.object({...common,type:z.literal('request.pipeline.decide'),requestId:id,expectedRevision:z.number().int().nonnegative(),decision:z.enum(['APPROVE','REVISE','REJECT']),note:z.string().trim().max(4000).optional(),expectedSpecHash:hash,expectedReceiptHash:hash}).strict(),
   z.object({...common,type:z.literal('agent.remove'),agentId:id,removed:z.boolean()}).strict(),
   z.object({...common,type:z.literal('agent.delete'),agentId:id}).strict(),
   z.object({...common,type:z.literal('agent.update'),agentId:id,expectedRevision:z.number().int().nonnegative().optional(),name:title,team:title,role,instructions:text(12000)}).strict(),
@@ -118,7 +119,9 @@ export const agentDraftSchema = z.object({ name: title, provider: z.enum(['opena
 const agentSchema = agentDraftSchema.extend({revision:z.number().int().nonnegative().optional(),removedAt:timestamp.optional(),deletedAt:timestamp.optional(),id, account: title, setupAccount: title.optional(), createdAt: timestamp, connectionVerifiedAt: timestamp, connectionId:id.optional(), bindingVerifiedAt:timestamp.optional(), execution: z.enum(['HOSTED_SETUP_REQUIRED','LOCAL']).default('HOSTED_SETUP_REQUIRED')}).strict();
 const logSchema=z.object({id,conversationId:z.string().min(1).max(200),from:z.string().min(1).max(100),to:z.string().min(1).max(100),kind:z.enum(['MESSAGE','TOOL','STATUS']),text:text(64000),timestamp,sourceHash:hash,externalId:z.string().min(1).max(200),provenance:z.literal('USER_IMPORTED')}).strict();
 const requestSchema=z.object({migratedFromTaskId:id.optional(),teamId:id.optional(),roleSlots:z.array(z.object({role,count:z.number().int().min(1).max(64)}).strict()).max(16).optional(),id,projectId:id,experimentId:id.nullable(),name:title,objective:text(12000),workType:z.enum(['QUESTION','ANALYSIS','IMPLEMENTATION','CODE_REVIEW','EXPERIMENT','PLANNING','RESULT_ANALYSIS','OTHER']),mode:z.enum(['SINGLE','GROUP','TEAM']),leadAgentId:id.nullable(),participantIds:z.array(id),acceptanceCriteria:text(12000),revision:z.number().int().nonnegative(),status:z.enum(['DRAFT','READY','CANCELED']),removedAt:timestamp.optional(),blockers:z.array(z.object({code:text(100),message:text(1000),action:text(200)}).strict()),delegation:z.boolean(),createdAt:timestamp,updatedAt:timestamp,sourceRequestId:id.optional(),
-  pipeline:z.object({kind:z.enum(['PLANNING','RESULT_ANALYSIS']),specHash:hash.nullable(),phase:z.enum(['BRIEFING','LAUNCHED']),briefAssignmentId:id.nullable()}).strict().optional(),
+  pipeline:z.object({kind:z.enum(['PLANNING','RESULT_ANALYSIS']),specHash:hash.nullable(),phase:z.enum(['BRIEFING','LAUNCHED','AWAITING_DECISION','DECIDED']),briefAssignmentId:id.nullable(),
+    pendingDecision:z.object({specHash:hash,headAssignmentId:id,headReceiptHash:hash}).strict().optional(),
+    decision:z.object({decision:z.enum(['APPROVE','REVISE','REJECT']),note:text(4000).nullable(),specHash:hash,headReceiptHash:hash,decidedAt:timestamp}).strict().optional()}).strict().optional(),
   pipelineNotes:z.array(z.object({id,text:text(4000),createdAt:timestamp}).strict()).max(64).optional()}).strict();
 const providerEnum=z.enum(['openai','claude','devin']);
 /** Defence in depth: durable records must never carry provider secrets, even in free-text fields. */
@@ -1544,6 +1547,30 @@ export class OfficeStore {
           changes.push({collection:'requests',value:{...request,pipeline:{...request.pipeline,phase:'LAUNCHED'},revision:request.revision+1,updatedAt:now}});
           break;
         }
+        case 'request.pipeline.decide': {
+          const request=state.requests?.find(r=>r.id===command.requestId);if(!request)throw new Error('Request not found');
+          this.activeProject(state,request.projectId);projectId=request.projectId;experimentId=request.experimentId;
+          if(request.revision!==command.expectedRevision)throw new Error('Stale request revision; reload before continuing');
+          if(request.status==='CANCELED')throw new Error('Canceled requests are read-only.');
+          const pipeline=request.pipeline;if(!pipeline)throw new Error('Only planning or result-analysis requests carry a pipeline.');
+          const pending=pipeline.pendingDecision;
+          const note=command.note?.trim()||null;
+          // Idempotent replay: the identical recorded decision acknowledges again without
+          // writing a second record. A different decision after DECIDED is a refusal.
+          if(pipeline.phase==='DECIDED'&&pipeline.decision){
+            const prior=pipeline.decision;
+            if(prior.decision===command.decision&&prior.note===note&&prior.specHash===command.expectedSpecHash&&prior.headReceiptHash===command.expectedReceiptHash)break;
+            throw new Error(`A ${prior.decision.toLowerCase()} decision is already recorded against this round — the record is append-only.`);
+          }
+          if(pipeline.phase!=='AWAITING_DECISION'||!pending)throw new Error('This pipeline is not awaiting a decision — the terminal hop must verify first.');
+          // Staleness gate: the decision must name the exact spec and verified report receipt
+          // the UI displayed. Anything else approved nothing.
+          if(command.expectedSpecHash!==pending.specHash||command.expectedReceiptHash!==pending.headReceiptHash)
+            throw new Error('The decision is stale — the displayed report or round changed since it was viewed. Reload and review the current artifacts.');
+          changes.push({collection:'requests',value:{...request,pipeline:{...pipeline,phase:'DECIDED' as const,decision:{decision:command.decision,note,specHash:pending.specHash,headReceiptHash:pending.headReceiptHash,decidedAt:now}},revision:request.revision+1,updatedAt:now}});
+          reason=`Round decision recorded: ${command.decision.toLowerCase()}, bound to the verified report receipt`;
+          break;
+        }
         case 'request.update':
         case 'request.start':
         case 'request.cancel':
@@ -1570,7 +1597,7 @@ export class OfficeStore {
             // seat, and coverage of the arm roles — not a participant list — is the gate.
             if(!request.leadAgentId)blockers.push({code:'LEAD_REQUIRED',message:'Choose the director agent when creating the request.',action:'Edit the request'});
             else{const a=state.agents?.find(item=>item.id===request.leadAgentId);if(!a||a.removedAt)blockers.push({code:'AGENT_UNAVAILABLE',message:'The chosen director agent is archived or unavailable.',action:'Restore the agent or pick another director'});}
-            for(const role of (request.pipeline.kind==='PLANNING'?['PM_A','PM_B','WORKER']:['PM_C','PM_D','WORKER']))
+            for(const role of (request.pipeline.kind==='PLANNING'?['PM_A','PM_B','PM_C','WORKER']:['PM_C','PM_D','WORKER']))
               if(!state.agents?.some(item=>!item.removedAt&&item.role===role))blockers.push({code:'PIPELINE_ROLE_MISSING',message:`The ${request.pipeline.kind==='PLANNING'?'planning':'result analysis'} pipeline needs a live ${role} agent on the roster.`,action:'Add or restore an agent with that role'});
           }else if(command.type==='request.start'){
             const selected=[...new Set([request.leadAgentId,...request.participantIds].filter((id):id is string=>!!id))];
@@ -2351,6 +2378,39 @@ export class OfficeStore {
       this.append(state,[{collection:'requests',value:{...request,pipeline:{...request.pipeline,briefAssignmentId:input.briefAssignmentId,...(input.specHash?{specHash:input.specHash}:{})},updatedAt:now}}],
         {kind:'PIPELINE_BRIEF_BOUND',projectId:request.projectId,experimentId:null,
          reason:`Bound the minted ${assignment.pipelineKey} hop to the briefing phase.`},null);
+    });
+  }
+  /**
+   * Marks a launched pipeline awaiting the user's decision once its terminal hop verifies.
+   * Office-only bookkeeping, like bindPipelineBrief: called from the chain-observe path when
+   * the terminal assignment's job records a verified COMPLETED receipt. The pending record
+   * binds the later user decision to the exact spec hash and verified receipt hash displayed —
+   * no hop output can mint user approval. Idempotent on an identical pending record; a
+   * different terminal identity on an already-waiting or decided pipeline is refused.
+   */
+  markPipelineAwaitingDecision(input:{requestId:string;specHash:string;headAssignmentId:string;headReceiptHash:string}):AppState {
+    id.parse(input.requestId);id.parse(input.headAssignmentId);
+    hash.parse(input.specHash);hash.parse(input.headReceiptHash);
+    return this.transaction(()=>{
+      const state=this.readProjection();
+      const request=state.requests?.find(r=>r.id===input.requestId);
+      if(!request)throw new Error('Request not found');
+      const pipeline=request.pipeline;if(!pipeline)throw new Error('Only planning or result-analysis requests carry a pipeline.');
+      if(pipeline.phase==='AWAITING_DECISION'&&pipeline.pendingDecision
+        &&pipeline.pendingDecision.specHash===input.specHash
+        &&pipeline.pendingDecision.headAssignmentId===input.headAssignmentId
+        &&pipeline.pendingDecision.headReceiptHash===input.headReceiptHash)return state;
+      if(pipeline.phase!=='LAUNCHED')throw new Error('The decision wait begins only after the round launches.');
+      if(pipeline.specHash!==input.specHash)throw new Error('The named spec is not the spec this pipeline launched.');
+      const assignment=state.assignments?.find(a=>a.id===input.headAssignmentId);
+      if(!assignment||assignment.requestId!==request.id||!assignment.pipelineKey)
+        throw new Error('The decision binds only to a minted pipeline hop on this request.');
+      const job=state.jobs?.find(item=>item.assignmentId===assignment.id);
+      if(!job||job.state!=='COMPLETED')throw new Error('The terminal hop has not verified COMPLETED — nothing is ready to decide.');
+      const now=new Date().toISOString();
+      this.append(state,[{collection:'requests',value:{...request,pipeline:{...pipeline,phase:'AWAITING_DECISION' as const,pendingDecision:{specHash:input.specHash,headAssignmentId:input.headAssignmentId,headReceiptHash:input.headReceiptHash}},updatedAt:now}}],
+        {kind:'PIPELINE_AWAITING_DECISION',projectId:request.projectId,experimentId:null,
+         reason:`Terminal hop verified; the round awaits the user's decision on receipt ${input.headReceiptHash.slice(0,12)}.`},null);
     });
   }
   /** Applies one job transition through the shared reducer. The renderer can never call this. */

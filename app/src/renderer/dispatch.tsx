@@ -98,8 +98,8 @@ export function RequestDispatch({request,state,onState}:{request:Request;state:A
   const hops=(state.assignments??[]).filter(item=>item.requestId===request.id&&item.pipelineKey);
   const briefJob=request.pipeline.briefAssignmentId?(state.jobs??[]).find(item=>item.assignmentId===request.pipeline!.briefAssignmentId):undefined;
   return <section className="dispatch-card"><h3>Pipeline work</h3>
-   <p className="muted">{request.pipeline.kind==='PLANNING'?'Planning':'Result analysis'} pipeline — {request.pipeline.phase==='BRIEFING'?`the director brief hop is briefing${briefJob?` (${briefJob.state.toLowerCase().replaceAll('_',' ')})`:''}; confirm the shaped brief on the request card to launch the remaining arms.`:'launched.'}</p>
-   {request.pipeline.phase==='LAUNCHED'&&<p className="muted">{hops.length?`${hops.length} minted hop${hops.length===1?'':'s'}: ${hops.map(item=>item.pipelineKey).join(', ')}`:'No minted hops on record yet.'}</p>}
+   <p className="muted">{request.pipeline.kind==='PLANNING'?'Planning':'Result analysis'} pipeline — {request.pipeline.phase==='BRIEFING'?`the director brief hop is briefing${briefJob?` (${briefJob.state.toLowerCase().replaceAll('_',' ')})`:''}; confirm the shaped brief on the request card to launch the remaining arms.`:request.pipeline.phase==='LAUNCHED'?'launched.':request.pipeline.phase==='AWAITING_DECISION'?'the round is sealed and awaits the user decision on the request card.':request.pipeline.decision?`decision recorded: ${request.pipeline.decision.decision.toLowerCase()}, bound to the verified report receipt.`:'a decision is recorded.'}</p>
+   {(request.pipeline.phase==='LAUNCHED'||request.pipeline.phase==='AWAITING_DECISION')&&<p className="muted">{hops.length?`${hops.length} minted hop${hops.length===1?'':'s'}: ${hops.map(item=>item.pipelineKey).join(', ')}`:'No minted hops on record yet.'}</p>}
    <p className="muted">Manual preparation is not offered on pipeline requests — the office mints the hops.</p>
   </section>;
  }

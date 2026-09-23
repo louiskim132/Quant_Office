@@ -4,15 +4,44 @@ export type TaskStatus = 'BLOCKED' | 'QUEUED' | 'RUNNING' | 'ACCEPTED' | 'CANCEL
 export type WorkType = 'QUESTION' | 'ANALYSIS' | 'IMPLEMENTATION' | 'CODE_REVIEW' | 'EXPERIMENT'
  | 'PLANNING' | 'RESULT_ANALYSIS' | 'OTHER';
 /**
+ * What the pending user decision is bound to — recorded by the office when the round's terminal
+ * hop verifies COMPLETED. `headReceiptHash` is the terminal hop's verified v2 receipt hash: the
+ * immutable identity of the exact report bytes the user is shown. A decision naming any other
+ * spec or receipt is stale and refused.
+ */
+export interface PipelinePendingDecision {
+  specHash: string;
+  /** The round's terminal assignment (verify for planning, analysis-report for analysis). */
+  headAssignmentId: string;
+  headReceiptHash: string;
+}
+/**
+ * The recorded user decision on a finished round — bound to the exact spec hash and report
+ * receipt the UI displayed. Only the trusted desktop bridge can issue the command, so the
+ * record honestly means "a user action in the office UI," never a model-authored verdict.
+ * REVISE is a recorded intent with a bounded note; what it spawns next is a separate action.
+ */
+export interface PipelineDecision {
+  decision: 'APPROVE' | 'REVISE' | 'REJECT';
+  note: string | null;
+  specHash: string;
+  headReceiptHash: string;
+  decidedAt: string;
+}
+/**
  * A pipeline request's durable orchestration state (inter-agent pipeline). `briefAssignmentId`
  * names the assignment that carries the current director brief — the first hop, and the target
- * each user note refines. `phase` flips to LAUNCHED only through an explicit confirm command.
+ * each user note refines. `phase` flips to LAUNCHED only through an explicit confirm command,
+ * to AWAITING_DECISION when the terminal hop verifies, and to DECIDED on a recorded user
+ * decision. No hop mints user approval — the gate is a waiting state, not a director task.
  */
 export interface RequestPipeline {
   kind: 'PLANNING' | 'RESULT_ANALYSIS';
   specHash: string | null;
-  phase: 'BRIEFING' | 'LAUNCHED';
+  phase: 'BRIEFING' | 'LAUNCHED' | 'AWAITING_DECISION' | 'DECIDED';
   briefAssignmentId: string | null;
+  pendingDecision?: PipelinePendingDecision;
+  decision?: PipelineDecision;
 }
 /** A bounded user note to the director while a pipeline request is still briefing. */
 export interface PipelineNote { id: string; text: string; createdAt: string }
@@ -228,6 +257,8 @@ export type Command =
  | { type:'request.update';idempotencyKey:string;requestId:string;expectedRevision:number;objective:string;leadAgentId:string|null;participantIds:string[];acceptanceCriteria:string }
  | { type: 'request.start' | 'request.cancel' | 'request.duplicate' | 'request.pipeline.confirm'; idempotencyKey:string; requestId:string; expectedRevision:number }
  | { type: 'request.pipeline.note'; idempotencyKey:string; requestId:string; expectedRevision:number; text:string }
+ /** The user's decision on a finished round — carries the hashes the UI displayed so a stale approval is refused. */
+ | { type: 'request.pipeline.decide'; idempotencyKey:string; requestId:string; expectedRevision:number; decision:'APPROVE'|'REVISE'|'REJECT'; note?:string; expectedSpecHash:string; expectedReceiptHash:string }
  | { type: 'agent.remove'; idempotencyKey: string; agentId: string; removed: boolean }
  | { type: 'agent.delete'; idempotencyKey: string; agentId: string }
  | { type: 'agent.update'; idempotencyKey: string; agentId: string; expectedRevision?: number; name: string; team: string; role: Role; instructions: string }

@@ -65,7 +65,7 @@ export async function mintPipelineBrief(ctx: PipelineMintContext, request: Reque
   const entry = mint.entries.find(item => item.key === briefKey(request));
   if (!entry) return { minted: false, detail: `The ${request.pipeline?.kind} spec carries no brief entry.` };
   if (entry.assignmentId) {
-    const existing = (state.assignments ?? []).find(item => item.id === entry.assignmentId)!;
+    const existing = (state.assignments ?? []).find(item => item.id === entry.assignmentId && item.requestId === request.id)!;
     const fresh = freshRequest(ctx.store, request.id);
     ctx.store.bindPipelineBrief({ requestId: request.id, expectedRevision: fresh.revision, briefAssignmentId: existing.id, specHash: mint.specHash });
     return { minted: true, assignment: existing };
@@ -88,7 +88,7 @@ export async function mintPipelineBrief(ctx: PipelineMintContext, request: Reque
 export async function mintPipelineRefine(ctx: PipelineMintContext, request: Request, noteText: string): Promise<{ minted: true; assignment: Assignment } | { minted: false; detail: string }> {
   const state = ctx.store.snapshot({ history: false });
   const prior = request.pipeline?.briefAssignmentId
-    ? (state.assignments ?? []).find(item => item.id === request.pipeline!.briefAssignmentId)
+    ? (state.assignments ?? []).find(item => item.id === request.pipeline!.briefAssignmentId && item.requestId === request.id)
     : undefined;
   if (!prior?.pipelineKey) return { minted: false, detail: 'No minted brief hop exists to refine — start the request first.' };
   const entry = planRefineHop(request, noteText, prior.pipelineKey);
@@ -112,8 +112,10 @@ export async function mintPipelineRound(ctx: PipelineMintContext, request: Reque
   const state = ctx.store.snapshot({ history: false });
   const mint = planCommRoundMint({ request, agents: liveAgents(state), existingAssignments: state.assignments ?? [] });
   if (!mint.ok) throw new Error(mint.detail);
+  // Request-scoped: spec keys are deterministic, so every simultaneous pipeline mints the same
+  // keys — an unscoped map would resolve this round's edges onto another request's hops.
   const keyToAssignment = new Map<string, string>();
-  for (const item of state.assignments ?? []) if (item.pipelineKey) keyToAssignment.set(item.pipelineKey, item.id);
+  for (const item of state.assignments ?? []) if (item.requestId === request.id && item.pipelineKey) keyToAssignment.set(item.pipelineKey, item.id);
   let minted = 0;
   for (const entry of mint.entries) {
     if (entry.assignmentId || keyToAssignment.has(entry.key)) continue;
@@ -129,4 +131,41 @@ export async function mintPipelineRound(ctx: PipelineMintContext, request: Reque
     minted++;
   }
   return { minted };
+}
+
+/**
+ * The office settle: once every minted hop of a LAUNCHED round has a verified COMPLETED job,
+ * the pipeline's decision wait opens, bound to the terminal hop's own verified receipt hash.
+ * The seal barrier is a report, never a throw — one still-open or failed hop means the round
+ * has not settled, and nothing mutates. The terminal hop is 'verify' for PLANNING and
+ * 'analysis-report' for RESULT_ANALYSIS; an in-flight spec that still minted 'user-gate' as a
+ * hop settles on it instead. Every lookup is request-scoped — spec keys are deterministic, so
+ * another request's hops carry identical keys.
+ */
+export function settlePipelineDecision(ctx: { store: OfficeStore }, request: Request): { settled: true } | { settled: false; reason: string } {
+  const pipeline = request.pipeline;
+  if (!pipeline) return { settled: false, reason: 'Only a pipeline request carries a round to settle.' };
+  if (pipeline.phase !== 'LAUNCHED')
+    return { settled: false, reason: `The pipeline is ${pipeline.phase}, not LAUNCHED — the decision wait opens only after the round launches.` };
+  if (!pipeline.specHash) return { settled: false, reason: 'The pipeline has no recorded spec hash — there is no spec to settle against.' };
+  const state = ctx.store.snapshot({ history: false });
+  const hops = (state.assignments ?? []).filter(item => item.requestId === request.id && item.pipelineKey);
+  if (!hops.length) return { settled: false, reason: 'No pipeline hops are minted for this request.' };
+  const jobs = state.jobs ?? [];
+  const open = hops.filter(hop => jobs.find(item => item.assignmentId === hop.id)?.state !== 'COMPLETED');
+  if (open.length)
+    return { settled: false, reason: `${open.length} minted ${open.length === 1 ? 'hop is' : 'hops are'} not COMPLETED (${open.map(hop => hop.pipelineKey).join(', ')}) — the seal barrier holds until every hop verifies.` };
+  const headKey = hops.some(hop => hop.pipelineKey === 'user-gate') ? 'user-gate' : pipeline.kind === 'RESULT_ANALYSIS' ? 'analysis-report' : 'verify';
+  const head = hops.find(hop => hop.pipelineKey === headKey);
+  if (!head) return { settled: false, reason: `No terminal hop '${headKey}' is minted for this request — the round has no head to settle on.` };
+  const headJob = jobs.find(item => item.assignmentId === head.id)!;
+  const headReceiptHash = ctx.store.localSessionForJob(headJob.id)?.lastReceipt?.hash;
+  if (!headReceiptHash)
+    return { settled: false, reason: `The terminal hop '${headKey}' has no verified receipt on record — nothing binds the decision.` };
+  try {
+    ctx.store.markPipelineAwaitingDecision({ requestId: request.id, specHash: pipeline.specHash, headAssignmentId: head.id, headReceiptHash });
+  } catch (error) {
+    return { settled: false, reason: `markPipelineAwaitingDecision refused: ${error instanceof Error ? error.message : 'unknown error'}` };
+  }
+  return { settled: true };
 }
