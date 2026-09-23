@@ -62,8 +62,20 @@ export interface CommRoundEntry {
  /** The roster role this hop is filled by — the executor binds agents by role, not position. */
  armRole: CommRoundArmRole;
  agentId: string;
- /** Artifact refs this hop may read — keys of earlier entries only. Never transcripts. */
+ /**
+  * Scheduling prerequisites — keys of earlier entries that must verify COMPLETED before this
+  * hop may launch. This is the barrier set: a hop waits on every key here whether or not it
+  * is allowed to read that artifact. Never transcripts.
+  */
  dependsOnKeys: string[];
+ /**
+  * Disclosed inputs — the artifact refs this hop may actually read, always a subset of
+  * dependsOnKeys. A cross-response hop waits on BOTH diverged firsts (the sealed barrier) but
+  * reads only the named opposite artifact; waiting and disclosure are deliberately different
+  * fields so a barrier never silently widens what a hop receives. Absent on pre-@2 specs:
+  * treat as dependsOnKeys — earlier semantics disclosed everything the hop waited on.
+  */
+ inputKeys?: string[];
  toolProfile: ToolProfile;
  /** The declared input manifest: the packet version, the brief, and named artifact refs. */
  inputManifestNote: string;
