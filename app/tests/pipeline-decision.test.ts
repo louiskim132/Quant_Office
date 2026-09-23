@@ -170,7 +170,7 @@ async function launchedRound(f: Fixture): Promise<{ request: Request; specHash: 
 test('markPipelineAwaitingDecision binds the decision to the terminal hop’s verified receipt', async t => {
   const f = await fixture(t);
   const { request, specHash } = await launchedRound(f);
-  const gate = f.store.snapshot({ history: false }).assignments!.find(item => item.requestId === request.id && item.pipelineKey === 'user-gate')!;
+  const gate = f.store.snapshot({ history: false }).assignments!.find(item => item.requestId === request.id && item.pipelineKey === 'verify')!;
   // A still-INTENT terminal hop cannot open the decision wait.
   assert.throws(() => f.store.markPipelineAwaitingDecision({ requestId: request.id, specHash, headAssignmentId: gate.id, headReceiptHash: sha('x') }), /has not verified COMPLETED/);
   await completeRound(f, request.id);
@@ -189,7 +189,7 @@ test('markPipelineAwaitingDecision binds the decision to the terminal hop’s ve
 test('decide refuses stale hashes, records APPROVE bound to the viewed report, and replays idempotently', async t => {
   const f = await fixture(t);
   const { request, specHash } = await launchedRound(f);
-  const gate = f.store.snapshot({ history: false }).assignments!.find(item => item.requestId === request.id && item.pipelineKey === 'user-gate')!;
+  const gate = f.store.snapshot({ history: false }).assignments!.find(item => item.requestId === request.id && item.pipelineKey === 'verify')!;
   await completeRound(f, request.id);
   const receiptHash = f.store.localSessionForJob(jobFor(f, gate.id).id)!.lastReceipt!.hash;
   f.store.markPipelineAwaitingDecision({ requestId: request.id, specHash, headAssignmentId: gate.id, headReceiptHash: receiptHash });
@@ -219,6 +219,6 @@ test('decide and the decision wait refuse outside their honest phases', async t 
   // BRIEFING cannot mark awaiting, and the settle refuses a foreign-request assignment.
   f.store.execute({ type: 'request.create', idempotencyKey: key(), projectId: f.project.id, name: 'P2', hypothesis: 'Plan two.', workType: 'PLANNING', mode: 'SINGLE', leadAgentId: f.agents.DIRECTOR.id, participantIds: [] });
   const briefing = byName(f, 'P2');
-  const foreign = f.store.snapshot({ history: false }).assignments!.find(item => item.requestId === request.id && item.pipelineKey === 'user-gate')!;
+  const foreign = f.store.snapshot({ history: false }).assignments!.find(item => item.requestId === request.id && item.pipelineKey === 'verify')!;
   assert.throws(() => f.store.markPipelineAwaitingDecision({ requestId: briefing.id, specHash, headAssignmentId: foreign.id, headReceiptHash: sha('z') }), /after the round launches/);
 });
