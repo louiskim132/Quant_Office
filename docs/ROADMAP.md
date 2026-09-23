@@ -3960,3 +3960,51 @@ verified empirically that plain realpathSync
 preserves 8.3 aliases while the native variant
 expands them, and reproduced under a short-name
 TMP locally before re-push.
+
+2026-09-23 — memory-and-roadmap review proposal
+incorporated; next round prepared. The reviewer's
+23 September proposal is a design/review artifact,
+not a worker packet; the organizer accepted its
+ordering after source review. Accepted: finish the
+local communication pipeline before any memory
+workstream — P0 organizer baseline, P1
+request-scoped minting plus the sealed barrier, P2
+a genuine user decision bound to the sealed
+report's verified receipt plus reviewer
+verification, P3 live acceptance; then the
+M-memory workstream with the Office's own
+append-only finding ledger as the authoritative
+store, a required interactive graph rendered from
+Office records, bounded authorized retrieval at
+synthesis only, and external engines (Graphiti,
+Hindsight, Basic Memory, LightRAG, Mem0) held as
+optional separately evaluated projections or
+retrieval backends — never prerequisites, never
+silent context injectors into independent
+research-review assignments. Review found one
+concrete defect in the landed pipeline: the
+key→assignment maps in round-executor and
+pipeline-runner scan all assignments without a
+requestId filter, so a second pipeline request
+can bind or skip against the first request's
+deterministic keys — P1 must scope lookups by
+request. Contract freeze landed at 444f0a7 on
+this branch: RequestPipeline gains
+AWAITING_DECISION/DECIDED phases, a
+pendingDecision bound to the terminal hop's
+verified receipt hash and an append-only decision
+record; the request.pipeline.decide command
+refuses stale spec/receipt hashes and replays
+idempotently; CommRoundEntry gains inputKeys for
+the sealed-barrier input contract; the
+markPipelineAwaitingDecision office method
+settles LAUNCHED→AWAITING_DECISION without a
+revision bump. Verified at the freeze:
+typecheck clean, pipeline-decision.test.ts (3)
+drives mint→launch→receipt→settle→decide on the
+real guarded path, pipeline-mint/pipeline/
+local-chain suites green (51). Not landed: the
+request-scoping fix, the seal barrier, reviewer
+verification fields and the user-gate UI are the
+workers' packets; no memory engine installed,
+no live-provider run, no Colab claim.
