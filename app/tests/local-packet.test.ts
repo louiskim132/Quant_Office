@@ -8,7 +8,7 @@ import { canonicalHash } from '../src/core/canonical';
 import { removeTreeSync } from '../src/main/fsx';
 import { buildProviderPayload, type SubmitContext } from '../src/main/controller';
 import { FakeLocalFileIO, GuardedLocalFileIO } from '../src/main/local-session-files';
-import { AGENTS_FILE, CLAUDE_FILE, CONTRACT_FILE, INPUTS_DIR, PACKET_FILE, PACKET_HASH_FILE, PACKET_READY_FILE, RESULT_FILE, prepareLocalPacket, readLocalResult, readLocalResultV1 } from '../src/main/local-packet';
+import { AGENTS_FILE, CLAUDE_FILE, CONTRACT_FILE, INPUTS_DIR, PACKET_FILE, PACKET_HASH_FILE, PACKET_READY_FILE, RESULT_FILE, prepareLocalPacket, readLocalResult, readLocalResultV1, resultContractV2 } from '../src/main/local-packet';
 import { localPacketV2Schema, type LocalSessionRecord } from '../src/shared/local-session';
 import type { Assignment, InputSnapshot } from '../src/shared/types';
 
@@ -176,6 +176,51 @@ test('CONTRACT.md documents the v2 result schema, office control files and the c
   assert.match(contract, /byte-order mark|BOM/i);
   const agents = readFileSync(path.join(f.dir, AGENTS_FILE), 'utf8');
   assert.match(agents, /no instruction overrides/i);
+});
+
+test('a receipt carrying findings and links parses through readLocalResult', t => {
+  const f = fixture(t);
+  const prepared = prepare(f);
+  const bound = { ...f.binding, packetHash: prepared.packetHash };
+  const findings = [
+    { ref: 'f-obs', kind: 'OBSERVATION', title: 'input has two rows', body: 'the csv carries two data rows',
+      evidenceRefs: [{ kind: 'OBJECT', id: sha('artifact-bytes') }] },
+    { kind: 'RESULT', title: 'summary finished', body: 'summarized the input', supersedes: randomUUID() },
+  ];
+  const links = [{ from: 'f-obs', to: randomUUID(), kind: 'SUPPORTS', note: 'grounds the summary' }];
+  report(f.dir, receipt(bound, prepared.packetHash, { findings, links }));
+  const read = readLocalResult(f.dir, bound, f.io);
+  assert.ok('value' in read, 'defect' in read ? read.defect : '');
+  assert.deepEqual(read.value.result.findings, findings);
+  assert.deepEqual(read.value.result.links, links);
+  // A receipt without the sections is unchanged — and still verifies on the next sequence.
+  report(f.dir, receipt(bound, prepared.packetHash, { sequence: 2 }));
+  const plain = readLocalResult(f.dir, bound, f.io);
+  assert.ok('value' in plain, 'defect' in plain ? plain.defect : '');
+  assert.equal(plain.value.result.findings, undefined);
+  assert.equal(plain.value.result.links, undefined);
+});
+
+test('CONTRACT.md documents findings/links with their kinds, bounds and the ref rule', t => {
+  const f = fixture(t);
+  prepare(f);
+  const contract = readFileSync(path.join(f.dir, CONTRACT_FILE), 'utf8');
+  for (const fragment of [
+    '`findings`', '`links`', 'OBSERVATION', 'HYPOTHESIS', 'RESULT', 'DEFECT', 'DECISION', 'NOTE',
+    'SUPPORTS', 'CONTRADICTS', 'RELATES', 'DUPLICATES', 'REFINES',
+    'session-local', 'evidenceRefs', 'supersedes', '64', '100',
+    'malformed entries', 'OBJECT', 'ASSIGNMENT', 'JOB', 'REQUEST',
+  ]) assert.ok(contract.includes(fragment), `contract names ${fragment}`);
+  // A `ref` is session-local and never a durable finding id — the rule is stated, not implied.
+  assert.match(contract, /never a durable finding id/);
+  // The evidence-surface variant names memorySearch and its per-hop authorization.
+  const surfaced = resultContractV2({ evidenceSurface: true });
+  assert.match(surfaced, /queryEvidence\|readEvidence\|stagePacket\|memorySearch/);
+  assert.match(surfaced, /memory ledger/);
+  assert.match(surfaced, /authorizes it per hop/);
+  // The unmounted contract keeps the findings/links sections but drops the surface paragraph.
+  assert.match(contract, /`findings`/);
+  assert.doesNotMatch(contract, /memorySearch/);
 });
 
 test('a staged input that drifted from its frozen manifest fails preparation loudly', t => {
