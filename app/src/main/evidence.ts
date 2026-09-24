@@ -52,6 +52,24 @@ export class EvidenceService {
     }
   }
 
+  /**
+   * Office-authorized memory retrieval — bounded full-text search over the project's finding
+   * ledger. The caller must carry its assignment identity, and only the director's synthesis
+   * seats (plan-synthesis, analysis-finalize) are authorized: memory never silently enters an
+   * independent research-review arm's context. Throws on an unauthorized caller — the tool
+   * layer records the denial.
+   */
+  async memorySearch(caller: { agentId: string; projectId: string; assignmentId?: string }, args: { text: string; limit?: number }): Promise<{ returned: number; total: number; findings: { id: string; kind: string; title: string; body: string; evidenceRefs: unknown[]; createdAt: string; superseded: boolean }[] }> {
+    if (!caller.assignmentId) throw new Error('Memory search requires an assignment-scoped caller — the office authorizes retrieval per hop, not per agent.');
+    const auth = this.store.authorizeMemorySearch(caller.assignmentId);
+    if (!auth.ok) throw new Error(auth.reason);
+    const findings = this.store.searchMemoryFindings(caller.projectId, args.text, Math.min(25, args.limit ?? 10));
+    return {
+      returned: findings.length, total: findings.length,
+      findings: findings.map(item => ({ id: item.id, kind: item.kind, title: item.title, body: item.body, evidenceRefs: item.evidenceRefs, createdAt: item.createdAt, superseded: !!item.supersededById })),
+    };
+  }
+
   private researchScope(agentId: string, state = this.store.snapshot({history:false})) {
     const assignments = (state.assignments ?? []).filter(a => a.agentId === agentId && a.research);
     if (!assignments.length) return null; // Legacy grants are not verified blinded access.

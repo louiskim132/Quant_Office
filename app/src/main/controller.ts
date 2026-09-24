@@ -15,6 +15,7 @@ import { safeEntry, MAX_FILE } from './artifacts.js';
 import { pipelineStageBlocker, type FrozenResearchSpec } from '../shared/research.js';
 import { stageContextHash } from '../shared/pipeline.js';
 import { settlePipelineDecision } from './pipeline-runner.js';
+import { ingestReceiptMemory } from './memory-ingest.js';
 import type { ToolProfile } from '../shared/tool-profile.js';
 
 /**
@@ -102,6 +103,12 @@ export interface ObserveResult {
    * replayed or rewound receipt is refused next time. Hosted adapters never set it.
    */
   receipt?: { sequence: number; hash: string };
+  /**
+   * The verified receipt's optional self-reported memory sections — `findings`/`links` exactly
+   * as the receipt declared them. The caller ingests them through the office ledger's own
+   * validation; they are session self-report, never office-verified facts.
+   */
+  memory?: Pick<import('../shared/local-session.js').LocalResultV2, 'findings' | 'links'>;
   /**
    * An office-observed provider-side record for this session's directory — the record's own
    * identity (session id, project key, rollout name), found by read-only discovery. Present only
@@ -1020,6 +1027,29 @@ export class AssignmentController {
     // A verified observation of a local session is itself office evidence — recorded only when the
     // observation changed something, so repeated polls do not churn capability snapshots.
     this.noteLocalEvidence(job, adapter.observeEvidence?.(job, result) ?? []);
+    // The receipt's self-reported memory ingests only after the verified COMPLETED transition —
+    // every cited output already exists as a stored artifact by then. Malformed entries are
+    // skipped by ingest, never thrown; the report lands as a dedup-keyed job event.
+    if (result.state === 'COMPLETED' && result.receipt && result.memory && (result.memory.findings?.length || result.memory.links?.length)) {
+      const assignment = this.store.snapshot({ history: false }).assignments?.find(item => item.id === job.assignmentId);
+      try {
+        if (!assignment) throw new Error('the job names an assignment the office does not hold');
+        const report = ingestReceiptMemory(this.store, {
+          projectId: assignment.projectId, requestId: assignment.requestId, assignmentId: assignment.id,
+          agentId: assignment.agentId, receiptHash: result.receipt.hash,
+        }, result.memory);
+        const summary = `Receipt memory ingested: ${report.findings.length} finding${report.findings.length === 1 ? '' : 's'} recorded, ${report.links.length} link${report.links.length === 1 ? '' : 's'} proposed` +
+          (report.findingsSkipped.length || report.linksSkipped.length
+            ? `; ${report.findingsSkipped.length + report.linksSkipped.length} malformed entr${report.findingsSkipped.length + report.linksSkipped.length === 1 ? 'y' : 'ies'} skipped`
+            : '') + '.';
+        this.store.recordJobEvents(job.id, [{ externalId: `memory:${result.receipt.hash}`, cursor: '', kind: 'STATUS', text: summary,
+          occurredAt: this.now(), receivedAt: this.now(), evidence: 'OFFICE_LOCAL' }]);
+      } catch (error) {
+        this.store.recordJobEvents(job.id, [{ externalId: `memory-failed:${result.receipt.hash}`, cursor: '', kind: 'STATUS',
+          text: `Receipt memory could not be ingested: ${error instanceof Error ? error.message : 'unknown error'}`,
+          occurredAt: this.now(), receivedAt: this.now(), evidence: 'OFFICE_LOCAL' }]);
+      }
+    }
     return transitioned;
   }
 

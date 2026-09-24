@@ -249,7 +249,7 @@ export class LocalCliExecAdapter implements ProviderAdapter {
     // start refuses the launch cleanly instead of leaving a declared surface silently deaf.
     let queryWatcher: FSWatcher | null = null;
     if (mountsEvidenceSurface(binding.toolProfile) && this.evidenceFrames) {
-      const caller: EvidenceCaller = { agentId: context.assignment.agentId, projectId: context.assignment.projectId, requestId: context.assignment.requestId };
+      const caller: EvidenceCaller = { agentId: context.assignment.agentId, projectId: context.assignment.projectId, requestId: context.assignment.requestId, assignmentId: context.assignment.id };
       const frames = this.evidenceFrames;
       try {
         // realpathSync.native resolves 8.3 short-name aliases (RUNNER~1) that the plain variant
@@ -500,6 +500,9 @@ export class LocalCliExecAdapter implements ProviderAdapter {
       if (applied.model !== undefined || applied.effort !== undefined || applied.delegation !== undefined) observed.applied = applied;
     }
     if (ack.ack) observed.cancelAck = ack.ack;
+    // The receipt's self-reported memory sections ride the same verified-observation channel —
+    // ingest validates each entry against the ledger before anything lands.
+    if (result.findings?.length || result.links?.length) observed.memory = { ...(result.findings ? { findings: result.findings } : {}), ...(result.links ? { links: result.links } : {}) };
     // The verified receipt's identity rides to the caller — the binding persists it as lastReceipt
     // so a replayed or rewound receipt is refused on the next observation.
     observed.receipt = { sequence: result.sequence, hash: read.value.receiptHash };

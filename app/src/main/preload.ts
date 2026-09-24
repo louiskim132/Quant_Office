@@ -30,6 +30,7 @@ const api:OfficeAPI={
  assignResearchFunction:input=>request('office:research-assign-function',input),
  migrateResearchFunctions:input=>request('office:research-migrate-functions',input),
  pipelineAction:input=>request('office:pipeline',input),
+ searchMemory:input=>request('office:memory-search',input),memoryGraph:projectId=>request('office:memory-graph',projectId),
  onChanged(callback){const handler=()=>callback();ipcRenderer.on('office:changed',handler);return()=>ipcRenderer.removeListener('office:changed',handler);},
 };
 contextBridge.exposeInMainWorld('office',api);

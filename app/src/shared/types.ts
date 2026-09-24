@@ -251,7 +251,68 @@ export interface JobEvent {
   applied?: import('./local-session.js').AppliedReportPayload;
 }
 export type { FunctionAssignment, StageFunction };
-export interface AppState { pipeline?: import("./pipeline").PipelineRecord[]; schemaVersion: 1; requests?:Request[]; grants?:RequestGrant[]; probes?:ProbeAttempt[]; branches?:ResearchBranch[]; specs?:FrozenResearchSpec[]; predictions?:PredictionRecord[]; trials?:TrialLedgerEntry[]; attempts?:StageAttempt[]; receipts?:GateReceipt[]; functions?:FunctionAssignment[]; sealed?:SealedReviewReport[]; teams?:Team[]; memberships?:TeamMembership[]; messages?:Message[]; decisions?:ReviewDecision[]; locations?:ProjectLocation[]; snapshots?:InputSnapshot[]; assignments?:Assignment[]; jobs?:ProviderJob[]; jobEvents?:JobEvent[]; connections?:AccountConnection[]; capabilities?:ProviderCapabilitySnapshot[]; localSessions?: import('./local-session.js').LocalSessionRecord[]; localOps?: import('./local-session.js').LocalSessionJournal[]; projects: Project[]; experiments: Experiment[]; tasks: ResearchTask[]; artifacts: Artifact[]; reviews: ReviewReport[]; events: LineageEvent[]; agents: Agent[]; settings: Settings; spend: Spend; }
+// --- Office-controlled memory (M-memory workstream) -------------------------------------
+/** What a finding asserts. The office stores the claim and its provenance — never a truth verdict. */
+export type FindingKind = 'OBSERVATION' | 'HYPOTHESIS' | 'RESULT' | 'DEFECT' | 'DECISION' | 'NOTE';
+/** How one finding bears on another. Relationships are validated links, not endorsed truth. */
+export type RelationshipKind = 'SUPPORTS' | 'CONTRADICTS' | 'RELATES' | 'DUPLICATES' | 'REFINES';
+/** A reference anchoring a finding to durable evidence the office already holds. */
+export interface FindingEvidenceRef {
+  kind: 'OBJECT' | 'ASSIGNMENT' | 'JOB' | 'REQUEST';
+  /** The object sha256 for OBJECT; the record id for the other kinds. */
+  id: string;
+}
+/** Who recorded the entry — the surface honestly distinguishes session self-report from office/user authorship. */
+export interface MemoryAuthor {
+  surface: 'AGENT_SESSION' | 'OFFICE' | 'USER';
+  agentId?: string;
+  /** For AGENT_SESSION entries: the verified v2 receipt hash the finding rode in on. */
+  receiptHash?: string;
+}
+/**
+ * One append-only memory finding. Findings are never edited or deleted — a correction is a new
+ * finding that supersedes the old, and the old record keeps its provenance. The Office store is
+ * the authoritative ledger; external memory engines, if ever attached, are derived projections.
+ */
+export interface MemoryFinding {
+  id: string;
+  projectId: string;
+  requestId: string | null;
+  assignmentId: string | null;
+  kind: FindingKind;
+  /** One-line claim — the graph label. */
+  title: string;
+  /** Bounded body — the finding itself, never a transcript dump. */
+  body: string;
+  evidenceRefs: FindingEvidenceRef[];
+  createdBy: MemoryAuthor;
+  createdAt: string;
+  /** Set when a later finding corrects or replaces this one; the record itself is never rewritten. */
+  supersededById?: string | null;
+}
+export type RelationshipStatus = 'PROPOSED' | 'CONFIRMED' | 'REFUTED';
+/**
+ * A proposed link between two findings in the same project. Sessions propose; the office
+ * validates endpoints mechanically; a user (or office review) settles the status. PROPOSED
+ * links render as unconfirmed — they are never silently treated as established structure.
+ */
+export interface MemoryRelationship {
+  id: string;
+  projectId: string;
+  fromFindingId: string;
+  toFindingId: string;
+  kind: RelationshipKind;
+  note: string | null;
+  status: RelationshipStatus;
+  createdBy: MemoryAuthor;
+  createdAt: string;
+  decidedAt?: string;
+}
+/** Bounded read model for the interactive graph — nodes and edges only; bodies come via detail lookups. */
+export interface MemoryGraphNode { findingId: string; kind: FindingKind; title: string; superseded: boolean }
+export interface MemoryGraphEdge { relationshipId: string; from: string; to: string; kind: RelationshipKind; status: RelationshipStatus }
+export interface MemoryGraph { projectId: string; nodes: MemoryGraphNode[]; edges: MemoryGraphEdge[] }
+export interface AppState { pipeline?: import("./pipeline").PipelineRecord[]; schemaVersion: 1; requests?:Request[]; findings?: MemoryFinding[]; relationships?: MemoryRelationship[]; grants?:RequestGrant[]; probes?:ProbeAttempt[]; branches?:ResearchBranch[]; specs?:FrozenResearchSpec[]; predictions?:PredictionRecord[]; trials?:TrialLedgerEntry[]; attempts?:StageAttempt[]; receipts?:GateReceipt[]; functions?:FunctionAssignment[]; sealed?:SealedReviewReport[]; teams?:Team[]; memberships?:TeamMembership[]; messages?:Message[]; decisions?:ReviewDecision[]; locations?:ProjectLocation[]; snapshots?:InputSnapshot[]; assignments?:Assignment[]; jobs?:ProviderJob[]; jobEvents?:JobEvent[]; connections?:AccountConnection[]; capabilities?:ProviderCapabilitySnapshot[]; localSessions?: import('./local-session.js').LocalSessionRecord[]; localOps?: import('./local-session.js').LocalSessionJournal[]; projects: Project[]; experiments: Experiment[]; tasks: ResearchTask[]; artifacts: Artifact[]; reviews: ReviewReport[]; events: LineageEvent[]; agents: Agent[]; settings: Settings; spend: Spend; }
 export type Command =
  | { type: 'request.create'; idempotencyKey: string; projectId: string; name: string; hypothesis: string; workType?:WorkType; mode?:WorkMode; leadAgentId?:string|null; participantIds?:string[]; acceptanceCriteria?:string }
  | { type:'request.update';idempotencyKey:string;requestId:string;expectedRevision:number;objective:string;leadAgentId:string|null;participantIds:string[];acceptanceCriteria:string }
@@ -259,6 +320,9 @@ export type Command =
  | { type: 'request.pipeline.note'; idempotencyKey:string; requestId:string; expectedRevision:number; text:string }
  /** The user's decision on a finished round — carries the hashes the UI displayed so a stale approval is refused. */
  | { type: 'request.pipeline.decide'; idempotencyKey:string; requestId:string; expectedRevision:number; decision:'APPROVE'|'REVISE'|'REJECT'; note?:string; expectedSpecHash:string; expectedReceiptHash:string }
+ /** A user-authored finding in the office memory ledger — bounded, evidence-referenced, append-only. */
+ | { type: 'memory.finding.note'; idempotencyKey:string; projectId:string; requestId?:string|null; kind:FindingKind; title:string; body:string; evidenceRefs?:FindingEvidenceRef[]; supersedesFindingId?:string }
+ | { type: 'memory.relationship.settle'; idempotencyKey:string; relationshipId:string; status:'CONFIRMED'|'REFUTED' }
  | { type: 'agent.remove'; idempotencyKey: string; agentId: string; removed: boolean }
  | { type: 'agent.delete'; idempotencyKey: string; agentId: string }
  | { type: 'agent.update'; idempotencyKey: string; agentId: string; expectedRevision?: number; name: string; team: string; role: Role; instructions: string }
@@ -363,6 +427,8 @@ export interface OfficeAPI {
   * holdout. The renderer names the action; every check is re-made inside the store writes it feeds.
   */
  pipelineAction(input: import('./pipeline').PipelineAction): Promise<{ state: AppState; detail: string; assignments?: Assignment[]; reservation?: import('./holdout').HoldoutReservation }>;
+ searchMemory(input: { projectId: string; text: string; limit?: number }): Promise<{ findings: MemoryFinding[] }>;
+ memoryGraph(projectId: string): Promise<MemoryGraph>;
  onChanged(callback: () => void): () => void;
 }
 /** Reported, never acted on by the renderer: promotion is decided in main, from gate receipts. */

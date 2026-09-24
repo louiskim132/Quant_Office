@@ -132,6 +132,44 @@ test('v2 receipts bind job, assignment, attempt, and packet hash — outputs liv
   assert.equal(localPacketV2Schema.safeParse({ ...packet, packetHash: sha('9') }).success, false, 'packetHash must never be part of the hashed object');
 });
 
+test('v2 receipt findings and links are optional, bounded and strict', () => {
+  const receipt = { schema: 'office-local-result@2', jobId: randomUUID(), assignmentId: randomUUID(), attemptId: randomUUID(), packetHash: sha(),
+    sequence: 1, state: 'COMPLETED', detail: 'done', outputs: [] };
+  // A receipt with neither section is unchanged.
+  const plain = localResultV2Schema.parse(receipt);
+  assert.equal(plain.findings, undefined);
+  assert.equal(plain.links, undefined);
+  const findings = [
+    { ref: 'f-obs', kind: 'OBSERVATION', title: 't', body: 'b',
+      evidenceRefs: [{ kind: 'OBJECT', id: sha('c') }, { kind: 'JOB', id: randomUUID() }] },
+    { kind: 'NOTE', title: 'n', body: 'b', supersedes: randomUUID() },
+  ];
+  const links = [
+    { from: 'f-obs', to: 'existing-finding-id', kind: 'RELATES' },
+    { from: 'f-obs', to: 'f-obs', kind: 'DUPLICATES', note: 'x'.repeat(1000) },
+  ];
+  const parsed = localResultV2Schema.parse({ ...receipt, findings, links });
+  assert.equal(parsed.findings!.length, 2);
+  assert.equal(parsed.links!.length, 2);
+  // Strict sub-schemas — an unknown key inside a finding, an evidenceRef or a link rejects the receipt.
+  assert.equal(localResultV2Schema.safeParse({ ...receipt, findings: [{ ...findings[0], extra: 1 }] }).success, false);
+  assert.equal(localResultV2Schema.safeParse({ ...receipt, findings: [{ ...findings[0], evidenceRefs: [{ kind: 'OBJECT', id: 'x', extra: 1 }] }] }).success, false);
+  assert.equal(localResultV2Schema.safeParse({ ...receipt, links: [{ ...links[0], extra: 1 }] }).success, false);
+  // Bounds and enums are enforced exactly.
+  assert.equal(localResultV2Schema.safeParse({ ...receipt, findings: Array(65).fill(findings[0]) }).success, false, 'more than 64 findings is refused');
+  assert.equal(localResultV2Schema.safeParse({ ...receipt, links: Array(65).fill(links[0]) }).success, false, 'more than 64 links is refused');
+  assert.equal(localResultV2Schema.safeParse({ ...receipt, findings: [{ ...findings[0], ref: 'r'.repeat(101) }] }).success, false, 'a ref over 100 characters is refused');
+  assert.equal(localResultV2Schema.safeParse({ ...receipt, findings: [{ ...findings[0], kind: 'GUESS' }] }).success, false);
+  assert.equal(localResultV2Schema.safeParse({ ...receipt, findings: [{ ...findings[0], title: '' }] }).success, false);
+  assert.equal(localResultV2Schema.safeParse({ ...receipt, findings: [{ ...findings[0], body: 'x'.repeat(4001) }] }).success, false);
+  assert.equal(localResultV2Schema.safeParse({ ...receipt, findings: [{ ...findings[0], evidenceRefs: Array(33).fill({ kind: 'JOB', id: 'x' }) }] }).success, false, 'more than 32 evidenceRefs is refused');
+  assert.equal(localResultV2Schema.safeParse({ ...receipt, findings: [{ ...findings[0], evidenceRefs: [{ kind: 'FILE', id: 'x' }] }] }).success, false);
+  assert.equal(localResultV2Schema.safeParse({ ...receipt, findings: [{ ...findings[0], supersedes: 'f-obs' }] }).success, false, 'supersedes names a durable finding id — a session-local ref is refused');
+  assert.equal(localResultV2Schema.safeParse({ ...receipt, links: [{ ...links[0], kind: 'CAUSES' }] }).success, false);
+  assert.equal(localResultV2Schema.safeParse({ ...receipt, links: [{ ...links[0], from: '' }] }).success, false);
+  assert.equal(localResultV2Schema.safeParse({ ...receipt, links: [{ ...links[0], note: 'x'.repeat(1001) }] }).success, false);
+});
+
 test('cancel request and acknowledgement are strictly bound to one attempt', () => {
   const request = { schema: 'office-local-cancel-request@1', requestId: randomUUID(), jobId: randomUUID(), assignmentId: randomUUID(), attemptId: randomUUID(), packetHash: sha(), requestedAt: at(0) };
   assert.equal(cancelRequestV1Schema.safeParse(request).success, true);

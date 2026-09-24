@@ -20,6 +20,8 @@ import { STAGES } from '../shared/research.js';
 const MAX_LIMIT = 100;
 const callerSchema = z.object({
   agentId: z.string().uuid(), projectId: z.string().uuid(), requestId: z.string().uuid(),
+  /** The minted hop the query rides on — memory.search authorization resolves it to a seat. */
+  assignmentId: z.string().uuid().optional(),
 }).strict();
 export type EvidenceCaller = z.infer<typeof callerSchema>;
 
@@ -40,16 +42,20 @@ const stagePacketArgs = z.object({
   stage: z.enum(STAGES),
   maxObjects: z.number().int().min(1).optional(),
 }).strict();
+const memorySearchArgs = z.object({
+  text: z.string().trim().min(1).max(400),
+  limit: z.number().int().min(1).max(25).optional(),
+}).strict();
 
 const callSchema = z.object({
-  op: z.enum(['queryEvidence', 'readEvidence', 'stagePacket']),
+  op: z.enum(['queryEvidence', 'readEvidence', 'stagePacket', 'memorySearch']),
   args: z.unknown(),
 }).strict();
 export type EvidenceOp = z.infer<typeof callSchema>['op'];
 export interface EvidenceCall { op: EvidenceOp; args: unknown }
 
 const RECEIPT_KIND: Record<EvidenceOp, QueryReceipt['kind']> = {
-  queryEvidence: 'SEARCH', readEvidence: 'READ', stagePacket: 'PACKET',
+  queryEvidence: 'SEARCH', readEvidence: 'READ', stagePacket: 'PACKET', memorySearch: 'SEARCH',
 };
 
 export interface EvidenceQueryResult extends Omit<SearchResult, 'nextCursor'> {
@@ -59,7 +65,8 @@ export interface EvidenceReadResult extends Omit<ReadResult, 'total' | 'nextCurs
   total: number | 'UNKNOWN_TOTAL'; nextCursor: string | null;
 }
 export interface EvidencePacketResult extends StagePacket { returned: number; total: number; nextCursor: null }
-export type EvidenceToolResult = EvidenceQueryResult | EvidenceReadResult | EvidencePacketResult;
+export interface MemorySearchResult { returned: number; total: number; findings: { id: string; kind: string; title: string; body: string; evidenceRefs: unknown[]; createdAt: string; superseded: boolean }[]; nextCursor: null }
+export type EvidenceToolResult = EvidenceQueryResult | EvidenceReadResult | EvidencePacketResult | MemorySearchResult;
 
 export interface EvidenceRefusal {
   reason: 'MALFORMED' | 'OUT_OF_SCOPE' | 'CURSOR_MISMATCH' | 'FAILED';
@@ -137,7 +144,7 @@ export async function handleEvidenceCall(service: EvidenceService, caller: unkno
   const me = who.data;
   const parsedCall = callSchema.safeParse(call);
   if (!parsedCall.success)
-    return deny(service, me, null, call, 'MALFORMED', 'The call is not a known evidence operation (queryEvidence, readEvidence, stagePacket).');
+    return deny(service, me, null, call, 'MALFORMED', 'The call is not a known evidence operation (queryEvidence, readEvidence, stagePacket, memorySearch).');
   const { op, args } = parsedCall.data;
 
   if (op === 'queryEvidence') {
@@ -182,6 +189,17 @@ export async function handleEvidenceCall(service: EvidenceService, caller: unkno
         nextCursor: nextCursor ? encodeCursor(scope, nextCursor, declared) : null } };
     } catch (error) {
       return deny(service, me, op, parsed.data, classify(error), error instanceof Error ? error.message : 'The read failed.');
+    }
+  }
+
+  if (op === 'memorySearch') {
+    const parsed = memorySearchArgs.safeParse(args);
+    if (!parsed.success) return deny(service, me, op, args, 'MALFORMED', 'memorySearch arguments are malformed.');
+    try {
+      const result = await service.memorySearch(me, parsed.data);
+      return { result: { ...result, nextCursor: null } };
+    } catch (error) {
+      return deny(service, me, op, parsed.data, classify(error), error instanceof Error ? error.message : 'The memory search failed.');
     }
   }
 

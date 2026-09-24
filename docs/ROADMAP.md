@@ -4063,3 +4063,56 @@ only — a bounded note, no automatic
 re-mint; P3 live acceptance (a real user
 decision on a live round) is unverified;
 memory workstream unstarted.
+
+2026-09-23 — batch integration PR #7 merged to
+main (merge commit 5317f4e) through the
+authenticated protected route: the round was
+closed, origin/main was merged into the branch
+first (4272c24) so the exact PR head contained
+it, both required verify runs reported SUCCESS
+on that same head (35920345758 and
+35920353331), mergeStateStatus read CLEAN and
+no review conversations existed. The packaged
+app release and the mirrored taskbar install
+carry this revision — byte-identical app.asar
+(6a53a13e…) on both sides, decision machinery
+confirmed present in the bundle.
+
+2026-09-24 — round office-mem-1 integrated: the
+Office-authoritative memory layer's first slice.
+Organizer freeze f4ac5de established the
+contract: MemoryFinding/MemoryRelationship
+append-only ledgers (supersede forward, settle
+once), memory.finding.note and
+memory.relationship.settle commands, bounded
+project-scoped searchMemoryFindings, the
+memoryGraph read model, authorizeMemorySearch
+seated to the director's plan-synthesis/
+analysis-finalize hops only, caller.assignmentId
+on the evidence drop-box so each query rides its
+minted hop, optional findings[]/links[] sections
+on receipt v2 with session-local ref handles,
+and read-only office:memory-search /
+office:memory-graph IPC. worker-1 (0eb7df4)
+built memory-ingest.ts — per-entry validated
+receipt ingest with same-receipt ref resolution,
+dedup-safe replay and a JSON-safe report.
+worker-2 (a5c77c3) documented the sections and
+the memorySearch op in the packet CONTRACT.md
+with strictness/bounds coverage. worker-3
+(3e7b072) shipped the Memory page: deterministic
+interactive SVG graph, bounded search with
+provenance, PROPOSED-edge Confirm/Refute and a
+finding-note composer, honesty line verbatim.
+Organizer wiring (e9158cd): the verified receipt
+carries its memory sections on ObserveResult and
+observe() ingests them after the COMPLETED
+transition, journaling the report as a
+dedup-keyed job event. Full suite at the
+integrated head: 802 tests, 801 passed, 1
+pre-existing skip; tsc and build clean. Honest
+remainder: memory is office-recorded self-report,
+not verified fact; retrieval is per-hop
+authorized and never silently injected; no
+external memory engine is attached; REVISE still
+records intent only.

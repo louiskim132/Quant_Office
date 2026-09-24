@@ -203,6 +203,30 @@ export const localResultV2Schema = z.object({
   detail: z.string().max(4000),
   outputs: z.array(packetFileSchema).max(256),
   applied: z.object({ model: z.string().min(1).max(200).optional(), effort: effortEnum.optional(), delegation: z.boolean().optional() }).strict().optional(),
+  /**
+   * Structured memory report — optional and self-reported. Each entry is independently
+   * validated at ingest: malformed entries are skipped and counted, never silently stored
+   * and never allowed to invalidate the real outputs the receipt verifies. `ref` is a
+   * session-local handle a same-receipt link may name; it is not a durable finding id.
+   */
+  findings: z.array(z.object({
+    ref: z.string().min(1).max(100).optional(),
+    kind: z.enum(['OBSERVATION', 'HYPOTHESIS', 'RESULT', 'DEFECT', 'DECISION', 'NOTE']),
+    title: z.string().trim().min(1).max(200),
+    body: z.string().trim().min(1).max(4000),
+    evidenceRefs: z.array(z.object({
+      kind: z.enum(['OBJECT', 'ASSIGNMENT', 'JOB', 'REQUEST']),
+      id: z.string().min(1).max(200),
+    }).strict()).max(32).optional(),
+    supersedes: id.optional(),
+  }).strict()).max(64).optional(),
+  /** Link proposals — `from`/`to` name a `ref` in this receipt or an existing finding id. */
+  links: z.array(z.object({
+    from: z.string().min(1).max(100),
+    to: z.string().min(1).max(100),
+    kind: z.enum(['SUPPORTS', 'CONTRADICTS', 'RELATES', 'DUPLICATES', 'REFINES']),
+    note: z.string().trim().max(1000).optional(),
+  }).strict()).max(64).optional(),
 }).strict().superRefine((result, ctx) => {
   const seen = new Set<string>();
   for (const output of result.outputs) {
