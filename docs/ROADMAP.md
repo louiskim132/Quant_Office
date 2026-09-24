@@ -4116,3 +4116,16 @@ not verified fact; retrieval is per-hop
 authorized and never silently injected; no
 external memory engine is attached; REVISE still
 records intent only.
+
+2026-09-24 — batch integration PR #8 merged to
+main (merge commit 8bd98c4) through the
+authenticated protected route: the round was
+closed, origin/main was merged into the branch
+first so the exact PR head dd88fef contained it,
+both required verify runs reported SUCCESS on
+that same head (36019071160 and 36019133922),
+mergeStateStatus read CLEAN and no review
+conversations existed. The packaged app release
+and the mirrored taskbar install carry this
+revision — byte-identical app.asar (59e5151c…)
+on both sides.
