@@ -30,7 +30,7 @@ import { DatabaseSync, backup as sqliteBackup } from 'node:sqlite';
 import { z } from 'zod';
 import { independenceClaimBlocker } from '../shared/cooperation.js';
 import { requestJobs, UNRESOLVED } from '../shared/queue.js';
-import type { AccountConnection, ProviderCapabilitySnapshot, ProjectLocation, InputSnapshot, Assignment, ProviderJob, JobEvent, JobEvidence, JobState, Team, TeamMembership, Message, ReviewDecision, RequestGrant, ProbeAttempt, ResearchBranch, FrozenResearchSpec, PredictionRecord, TrialLedgerEntry, StageAttempt, GateReceipt, FunctionAssignment, SealedReviewReport, Agent, AgentLog, WorkLog, Effort, AppState, Artifact, Command, Experiment, LineageEvent, Project, ResearchContract, ResearchTask, Request, Settings } from '../shared/types.js';
+import type { AccountConnection, ProviderCapabilitySnapshot, ProjectLocation, InputSnapshot, Assignment, ProviderJob, JobEvent, JobEvidence, JobState, Team, TeamMembership, Message, ReviewDecision, RequestGrant, ProbeAttempt, ResearchBranch, FrozenResearchSpec, PredictionRecord, TrialLedgerEntry, StageAttempt, GateReceipt, FunctionAssignment, SealedReviewReport, Agent, AgentLog, WorkLog, Effort, AppState, Artifact, Command, Experiment, LineageEvent, Project, ResearchContract, ResearchTask, Request, Settings, MemoryFinding, MemoryRelationship, MemoryGraph, FindingEvidenceRef, FindingKind, RelationshipStatus } from '../shared/types.js';
 import { canonical, canonicalHash, sha256 } from './canonical.js';
 import { officeChatPage, type OfficeChatQuery } from '../shared/office-chat.js';
 import { parseStrictJson } from './strict-json.js';
@@ -64,12 +64,17 @@ const stageEnum=z.enum(['S0','S1','S2','S3','S4','S5','S6','S7','S8','S9','S10']
 const gateEnum=z.enum(['G-SPEC','G-CORRECT','G-TIME','G-SPLIT','G-FIT','G-TARGET','G-SELECT','G-TRADETIME','G-ARTIFACT','G-COST','G-PORTFOLIO','G-ECON','G-INTEGRITY','G-SHADOW']);
 const outcomeEnum=z.enum(['IN_PROGRESS','VALID_NEGATIVE','INCONCLUSIVE','RETIRED','SHADOW_QUALIFIED','SUSPENDED']);
 const common = { idempotencyKey: z.string().min(8).max(128).regex(/^[a-zA-Z0-9_-]+$/) };
+const findingKindSchema=z.enum(['OBSERVATION','HYPOTHESIS','RESULT','DEFECT','DECISION','NOTE']);
+const relationshipKindSchema=z.enum(['SUPPORTS','CONTRADICTS','RELATES','DUPLICATES','REFINES']);
+const findingRefSchema=z.object({kind:z.enum(['OBJECT','ASSIGNMENT','JOB','REQUEST']),id:z.string().min(1).max(200)}).strict();
 export const commandSchema = z.discriminatedUnion('type', [
   z.object({...common,type:z.literal('request.create'),projectId:id,name:title,hypothesis:z.string().trim().min(1).max(12000),workType:z.enum(['QUESTION','ANALYSIS','IMPLEMENTATION','CODE_REVIEW','EXPERIMENT','PLANNING','RESULT_ANALYSIS','OTHER']).optional(),mode:z.enum(['SINGLE','GROUP','TEAM']).optional(),leadAgentId:id.nullable().optional(),participantIds:z.array(id).optional(),acceptanceCriteria:text(12000).optional()}).strict(),
   z.object({...common,type:z.literal('request.update'),requestId:id,expectedRevision:z.number().int().nonnegative(),objective:z.string().trim().min(1).max(12000),leadAgentId:id.nullable(),participantIds:z.array(id),acceptanceCriteria:text(12000)}).strict(),
   ...(['request.start','request.cancel','request.duplicate','request.pipeline.confirm'] as const).map(type=>z.object({...common,type:z.literal(type),requestId:id,expectedRevision:z.number().int().nonnegative()}).strict()),
   z.object({...common,type:z.literal('request.pipeline.note'),requestId:id,expectedRevision:z.number().int().nonnegative(),text:z.string().trim().min(1).max(4000)}).strict(),
   z.object({...common,type:z.literal('request.pipeline.decide'),requestId:id,expectedRevision:z.number().int().nonnegative(),decision:z.enum(['APPROVE','REVISE','REJECT']),note:z.string().trim().max(4000).optional(),expectedSpecHash:hash,expectedReceiptHash:hash}).strict(),
+  z.object({...common,type:z.literal('memory.finding.note'),projectId:id,requestId:id.nullable().optional(),kind:findingKindSchema,title:title,body:text(4000),evidenceRefs:z.array(findingRefSchema).max(32).optional(),supersedesFindingId:id.optional()}).strict(),
+  z.object({...common,type:z.literal('memory.relationship.settle'),relationshipId:id,status:z.enum(['CONFIRMED','REFUTED'])}).strict(),
   z.object({...common,type:z.literal('agent.remove'),agentId:id,removed:z.boolean()}).strict(),
   z.object({...common,type:z.literal('agent.delete'),agentId:id}).strict(),
   z.object({...common,type:z.literal('agent.update'),agentId:id,expectedRevision:z.number().int().nonnegative().optional(),name:title,team:title,role,instructions:text(12000)}).strict(),
@@ -123,9 +128,12 @@ const requestSchema=z.object({migratedFromTaskId:id.optional(),teamId:id.optiona
     pendingDecision:z.object({specHash:hash,headAssignmentId:id,headReceiptHash:hash}).strict().optional(),
     decision:z.object({decision:z.enum(['APPROVE','REVISE','REJECT']),note:text(4000).nullable(),specHash:hash,headReceiptHash:hash,decidedAt:timestamp}).strict().optional()}).strict().optional(),
   pipelineNotes:z.array(z.object({id,text:text(4000),createdAt:timestamp}).strict()).max(64).optional()}).strict();
+const memoryAuthorSchema=z.object({surface:z.enum(['AGENT_SESSION','OFFICE','USER']),agentId:id.optional(),receiptHash:hash.optional()}).strict();
 const providerEnum=z.enum(['openai','claude','devin']);
 /** Defence in depth: durable records must never carry provider secrets, even in free-text fields. */
 const secretFree=(maximum:number)=>text(maximum).refine(value=>!/\b(sk-[A-Za-z0-9_-]{8,}|Bearer\s+[A-Za-z0-9._-]{12,}|eyJ[A-Za-z0-9._-]{16,})/.test(value),'Durable records must not contain credentials');
+const findingSchema=z.object({id,projectId:id,requestId:id.nullable(),assignmentId:id.nullable(),kind:findingKindSchema,title:title,body:secretFree(4000),evidenceRefs:z.array(findingRefSchema).max(32),createdBy:memoryAuthorSchema,createdAt:timestamp,supersededById:id.nullable().optional()}).strict();
+const relationshipSchema=z.object({id,projectId:id,fromFindingId:id,toFindingId:id,kind:relationshipKindSchema,note:secretFree(1000).nullable(),status:z.enum(['PROPOSED','CONFIRMED','REFUTED']),createdBy:memoryAuthorSchema,createdAt:timestamp,decidedAt:timestamp.optional()}).strict();
 const usageWindowSchema=z.object({label:secretFree(200),remainingPercent:z.number().min(0).max(100),resetsAt:z.number().int().nonnegative()}).strict();
 const connectionSchema=z.object({id,provider:providerEnum,identity:secretFree(320),credentialContext:secretFree(200),state:z.enum(['SIGNED_IN','SIGNED_OUT','UNKNOWN']),allowance:z.array(usageWindowSchema).max(32),note:secretFree(2000),revision:z.number().int().nonnegative(),firstSeenAt:timestamp,lastCheckedAt:timestamp,sequence:z.number().int().positive().optional()}).strict();
 const capabilityModelSchema=z.object({id:secretFree(160),name:secretFree(200),efforts:z.array(effortSchema).max(16).optional(),defaultEffort:effortSchema.optional(),effortDescriptions:z.array(z.object({effort:effortSchema,description:secretFree(2000)}).strict()).max(16).optional(),family:secretFree(160).optional(),effort:effortSchema.optional(),source:secretFree(2000).optional()}).strict();
@@ -270,12 +278,14 @@ const changeSchema = z.discriminatedUnion('collection', [
   z.object({ collection: z.literal('experiments'), value: experimentSchema }).strict(),
   z.object({ collection: z.literal('tasks'), value: taskSchema }).strict(),
   z.object({ collection: z.literal('artifacts'), value: artifactSchema }).strict(),
+  z.object({ collection: z.literal('findings'), value: findingSchema }).strict(),
+  z.object({ collection: z.literal('relationships'), value: relationshipSchema }).strict(),
   z.object({ collection: z.literal('settings'), value: settingsSchema }).strict(),
 ]);
 type Change = z.infer<typeof changeSchema>;
 const eventSchema = z.object({ sequence: z.number().int().positive(), id, kind: text(100), projectId: id.nullable(), experimentId: id.nullable(), actor: z.literal('USER'), reason: text(4000), createdAt: timestamp, previousHash: hash, hash, payload: z.object({ command: commandSchema.nullable(), changes: z.array(changeSchema) }).strict() }).strict();
 type StoredEvent = z.infer<typeof eventSchema>;
-type Projection = Pick<AppState, 'projects' | 'experiments' | 'tasks' | 'artifacts' | 'settings'> & { pipeline?: PipelineRecord[]; evidence?: EvidenceRecord[]; requests?: Request[]; teams?: Team[]; memberships?: TeamMembership[]; messages?: Message[]; decisions?: ReviewDecision[]; grants?: RequestGrant[]; probes?: ProbeAttempt[]; branches?: ResearchBranch[]; specs?: FrozenResearchSpec[]; predictions?: PredictionRecord[]; trials?: TrialLedgerEntry[]; attempts?: StageAttempt[]; receipts?: GateReceipt[]; functions?: FunctionAssignment[]; sealed?: SealedReviewReport[]; locations?: ProjectLocation[]; snapshots?: InputSnapshot[]; assignments?: Assignment[]; jobs?: ProviderJob[]; jobEvents?: JobEvent[]; localSessions?: LocalSessionRecord[]; localOps?: LocalSessionJournal[]; connections?: AccountConnection[]; capabilities?: ProviderCapabilitySnapshot[]; agents?: Agent[]; workLogs?: WorkLog[] };
+type Projection = Pick<AppState, 'projects' | 'experiments' | 'tasks' | 'artifacts' | 'settings'> & { pipeline?: PipelineRecord[]; evidence?: EvidenceRecord[]; requests?: Request[]; teams?: Team[]; memberships?: TeamMembership[]; messages?: Message[]; decisions?: ReviewDecision[]; grants?: RequestGrant[]; probes?: ProbeAttempt[]; branches?: ResearchBranch[]; specs?: FrozenResearchSpec[]; predictions?: PredictionRecord[]; trials?: TrialLedgerEntry[]; attempts?: StageAttempt[]; receipts?: GateReceipt[]; functions?: FunctionAssignment[]; sealed?: SealedReviewReport[]; locations?: ProjectLocation[]; snapshots?: InputSnapshot[]; assignments?: Assignment[]; jobs?: ProviderJob[]; jobEvents?: JobEvent[]; localSessions?: LocalSessionRecord[]; localOps?: LocalSessionJournal[]; connections?: AccountConnection[]; capabilities?: ProviderCapabilitySnapshot[]; agents?: Agent[]; workLogs?: WorkLog[]; findings?: MemoryFinding[]; relationships?: MemoryRelationship[] };
 function blank(): Projection { return { projects: [], experiments: [], tasks: [], artifacts: [], settings: { theme: 'dark', reducedMotion: false, globalBudgetCents: 0 } }; }
 function emptyContract(): ResearchContract { return { objective: '', dataPolicy: '', modelFamilies: '', evaluation: '', economics: '', protectedRegions: '', requiredChecks: '', limitations: '' }; }
 function applyChanges(current: Projection, changes: Change[]): Projection {
@@ -311,8 +321,10 @@ function applyChanges(current: Projection, changes: Change[]): Projection {
       if (change.collection === 'connections' && !next.connections) next.connections = [];
       if (change.collection === 'capabilities' && !next.capabilities) next.capabilities = [];
       if (change.collection === 'workLogs' && !next.workLogs) next.workLogs = [];
+      if (change.collection === 'findings' && !next.findings) next.findings = [];
+      if (change.collection === 'relationships' && !next.relationships) next.relationships = [];
       if (change.collection === 'agents' && !next.agents) next.agents = [];
-      const items = next[change.collection] as Array<Project | Experiment | ResearchTask | Artifact | Agent | WorkLog | Request | AccountConnection | ProviderCapabilitySnapshot | ProjectLocation | InputSnapshot | Assignment | ProviderJob | JobEvent | LocalSessionRecord | LocalSessionJournal | Team | TeamMembership | Message | ReviewDecision | RequestGrant | ProbeAttempt | ResearchBranch | FrozenResearchSpec | PredictionRecord | TrialLedgerEntry | StageAttempt | GateReceipt | FunctionAssignment | SealedReviewReport | PipelineRecord | EvidenceRecord>;
+      const items = next[change.collection] as Array<Project | Experiment | ResearchTask | Artifact | Agent | WorkLog | Request | AccountConnection | ProviderCapabilitySnapshot | ProjectLocation | InputSnapshot | Assignment | ProviderJob | JobEvent | LocalSessionRecord | LocalSessionJournal | Team | TeamMembership | Message | ReviewDecision | RequestGrant | ProbeAttempt | ResearchBranch | FrozenResearchSpec | PredictionRecord | TrialLedgerEntry | StageAttempt | GateReceipt | FunctionAssignment | SealedReviewReport | PipelineRecord | EvidenceRecord | MemoryFinding | MemoryRelationship>;
       let lookup=indexes.get(change.collection);if(!lookup){lookup=new Map(items.map((item,i)=>[item.id,i]));indexes.set(change.collection,lookup);}
       const index = lookup.get(change.value.id) ?? -1;
       if (['pipeline','evidence','artifacts','workLogs','capabilities','snapshots','assignments','jobEvents','localOps','decisions','predictions','trials','receipts'].includes(change.collection) && index >= 0) {
@@ -333,7 +345,7 @@ function applyChanges(current: Projection, changes: Change[]): Projection {
       if (index === -1) {lookup.set(change.value.id,items.length);items.push(structuredClone(change.value));} else items[index] = structuredClone(change.value);
     }
   }
-  for (const item of [...next.experiments, ...next.tasks, ...next.artifacts, ...(next.requests??[]), ...(next.locations??[]), ...(next.snapshots??[]), ...(next.assignments??[]), ...(next.jobs??[])]) {
+  for (const item of [...next.experiments, ...next.tasks, ...next.artifacts, ...(next.requests??[]), ...(next.locations??[]), ...(next.snapshots??[]), ...(next.assignments??[]), ...(next.jobs??[]), ...(next.findings??[]), ...(next.relationships??[])]) {
     if (!next.projects.some(project => project.id === item.projectId)) throw new Error('Broken project ownership in projection');
     if ('experimentId' in item && item.experimentId !== null && !next.experiments.some(experiment => experiment.id === item.experimentId && experiment.projectId === item.projectId)) throw new Error('Broken experiment ownership in projection');
   }
@@ -342,6 +354,41 @@ function applyChanges(current: Projection, changes: Change[]): Projection {
   return next;
 }
 function publicEvent(event: StoredEvent): LineageEvent { const { payload: _payload, ...publicFields } = event; return publicFields; }
+
+/** Every cited ref must resolve to a record the office already holds in the same project — memory anchors to stored evidence, never to outside claims. */
+function assertFindingRefs(state: Projection, projectId: string, refs: FindingEvidenceRef[]): void {
+  for (const ref of refs) {
+    if (ref.kind === 'OBJECT') {
+      if (!state.artifacts.some(item => item.projectId === projectId && item.sha256 === ref.id))
+        throw new Error(`A finding cites object ${ref.id.slice(0, 12)}… which this project does not hold — evidence must already be office-stored.`);
+    } else if (ref.kind === 'ASSIGNMENT') {
+      if (!state.assignments?.some(item => item.id === ref.id && item.projectId === projectId))
+        throw new Error('A finding cites an assignment that does not exist in this project.');
+    } else if (ref.kind === 'JOB') {
+      const job = state.jobs?.find(item => item.id === ref.id);
+      const assignment = job && state.assignments?.find(item => item.id === job.assignmentId);
+      if (!job || assignment?.projectId !== projectId)
+        throw new Error('A finding cites a job that does not exist in this project.');
+    } else if (!state.requests?.some(item => item.id === ref.id && item.projectId === projectId))
+      throw new Error('A finding cites a request that does not exist in this project.');
+  }
+}
+
+/**
+ * Appends a finding and, when it supersedes an earlier one, marks the old record — append-only:
+ * the superseded record stays, stamped with its replacement's id.
+ */
+function appendFinding(state: Projection, finding: MemoryFinding, supersedesFindingId?: string): Change[] {
+  const changes: Change[] = [];
+  if (supersedesFindingId) {
+    const prior = state.findings?.find(item => item.id === supersedesFindingId && item.projectId === finding.projectId);
+    if (!prior) throw new Error('The superseded finding does not exist in this project.');
+    if (prior.supersededById) throw new Error('That finding is already superseded — chain corrections forward, never sideways.');
+    changes.push({ collection: 'findings', value: { ...prior, supersededById: finding.id } });
+  }
+  changes.push({ collection: 'findings', value: finding });
+  return changes;
+}
 
 /** Deterministic local bookkeeping only. There are deliberately no network or code-execution methods. */
 export class OfficeStore {
@@ -1571,6 +1618,26 @@ export class OfficeStore {
           reason=`Round decision recorded: ${command.decision.toLowerCase()}, bound to the verified report receipt`;
           break;
         }
+        case 'memory.finding.note': {
+          const project=this.activeProject(state,command.projectId);projectId=project.id;experimentId=null;
+          if(command.requestId){const request=state.requests?.find(r=>r.id===command.requestId);if(!request||request.projectId!==project.id)throw new Error('The note names a request outside this project.');}
+          const refs=command.evidenceRefs??[];assertFindingRefs(state,project.id,refs);
+          const finding:MemoryFinding={id:randomUUID(),projectId:project.id,requestId:command.requestId??null,assignmentId:null,
+            kind:command.kind,title:command.title.trim(),body:command.body.trim(),evidenceRefs:refs,
+            createdBy:{surface:'USER'},createdAt:now};
+          changes.push(...appendFinding(state,finding,command.supersedesFindingId));
+          reason='Recorded a memory finding.';
+          break;
+        }
+        case 'memory.relationship.settle': {
+          const relationship=state.relationships?.find(item=>item.id===command.relationshipId);
+          if(!relationship)throw new Error('Relationship not found.');
+          this.activeProject(state,relationship.projectId);projectId=relationship.projectId;experimentId=null;
+          if(relationship.status!=='PROPOSED')throw new Error(`That link is already ${relationship.status.toLowerCase()} — the record is append-only.`);
+          changes.push({collection:'relationships',value:{...relationship,status:command.status,decidedAt:now}});
+          reason=`A proposed ${relationship.kind.toLowerCase()} link was ${command.status.toLowerCase()} by the user.`;
+          break;
+        }
         case 'request.update':
         case 'request.start':
         case 'request.cancel':
@@ -2412,6 +2479,126 @@ export class OfficeStore {
         {kind:'PIPELINE_AWAITING_DECISION',projectId:request.projectId,experimentId:null,
          reason:`Terminal hop verified; the round awaits the user's decision on receipt ${input.headReceiptHash.slice(0,12)}.`},null);
     });
+  }
+  /**
+   * Records a memory finding — office bookkeeping for every surface (a user note's reducer,
+   * a session's verified-receipt report, an office observation). The ledger is append-only:
+   * supersession marks the old record, never rewrites it. Identical re-ingest (same project,
+   * title, surface and receipt hash) returns the existing record — receipt replays cannot
+   * duplicate a finding.
+   */
+  recordMemoryFinding(input:{projectId:string;requestId:string|null;assignmentId:string|null;kind:FindingKind;title:string;body:string;evidenceRefs:FindingEvidenceRef[];createdBy:MemoryFinding['createdBy'];supersedesFindingId?:string}):{finding:MemoryFinding;created:boolean} {
+    id.parse(input.projectId);findingKindSchema.parse(input.kind);
+    let result:{finding:MemoryFinding;created:boolean}|undefined;
+    this.transaction(()=>{
+      const state=this.readProjection();
+      this.activeProject(state,input.projectId);
+      if(input.requestId){const request=state.requests?.find(r=>r.id===input.requestId);if(!request||request.projectId!==input.projectId)throw new Error('The finding names a request outside this project.');}
+      if(input.assignmentId){const assignment=state.assignments?.find(a=>a.id===input.assignmentId);if(!assignment||assignment.projectId!==input.projectId)throw new Error('The finding names an assignment outside this project.');}
+      assertFindingRefs(state,input.projectId,input.evidenceRefs);
+      const duplicate=state.findings?.find(item=>item.projectId===input.projectId&&item.title===input.title
+        &&item.createdBy.surface===input.createdBy.surface
+        &&(item.createdBy.receiptHash??null)===(input.createdBy.receiptHash??null));
+      if(duplicate){result={finding:duplicate,created:false};return;}
+      const finding:MemoryFinding={id:randomUUID(),projectId:input.projectId,requestId:input.requestId,assignmentId:input.assignmentId,
+        kind:input.kind,title:input.title.trim(),body:input.body.trim(),evidenceRefs:input.evidenceRefs,
+        createdBy:input.createdBy,createdAt:new Date().toISOString()};
+      this.append(state,appendFinding(state,finding,input.supersedesFindingId),
+        {kind:'MEMORY_FINDING',projectId:input.projectId,experimentId:null,
+         reason:`Recorded a ${input.createdBy.surface.toLowerCase().replaceAll('_',' ')} finding: ${finding.title.slice(0,80)}`},null);
+      result={finding,created:true};
+    });
+    return result!;
+  }
+  /**
+   * Records a PROPOSED relationship between two findings in the same project. Endpoint
+   * validation is mechanical — both findings must exist in the project, be distinct, and
+   * a live link of the same kind between the same pair may not duplicate. PROPOSED links are
+   * visible but unconfirmed until settled.
+   */
+  proposeMemoryRelationship(input:{projectId:string;fromFindingId:string;toFindingId:string;kind:MemoryRelationship['kind'];note?:string;createdBy:MemoryRelationship['createdBy']}):{relationship:MemoryRelationship;created:boolean} {
+    id.parse(input.projectId);relationshipKindSchema.parse(input.kind);
+    let result:{relationship:MemoryRelationship;created:boolean}|undefined;
+    this.transaction(()=>{
+      const state=this.readProjection();
+      this.activeProject(state,input.projectId);
+      if(input.fromFindingId===input.toFindingId)throw new Error('A finding cannot relate to itself.');
+      const from=state.findings?.find(item=>item.id===input.fromFindingId&&item.projectId===input.projectId);
+      const to=state.findings?.find(item=>item.id===input.toFindingId&&item.projectId===input.projectId);
+      if(!from||!to)throw new Error('A relationship can only link findings that exist in this project.');
+      const duplicate=state.relationships?.find(item=>item.projectId===input.projectId
+        &&item.fromFindingId===input.fromFindingId&&item.toFindingId===input.toFindingId
+        &&item.kind===input.kind&&item.status!=='REFUTED');
+      if(duplicate){result={relationship:duplicate,created:false};return;}
+      const relationship:MemoryRelationship={id:randomUUID(),projectId:input.projectId,fromFindingId:from.id,toFindingId:to.id,
+        kind:input.kind,note:input.note?.trim()||null,status:'PROPOSED',createdBy:input.createdBy,createdAt:new Date().toISOString()};
+      this.append(state,[{collection:'relationships',value:relationship}],
+        {kind:'MEMORY_RELATIONSHIP',projectId:input.projectId,experimentId:null,
+         reason:`Proposed a ${input.kind.toLowerCase()} link between findings (${input.createdBy.surface.toLowerCase().replaceAll('_',' ')}).`},null);
+      result={relationship,created:true};
+    });
+    return result!;
+  }
+  /** Settles a proposed link CONFIRMED or REFUTED — a decided link is append-only too. */
+  settleMemoryRelationship(input:{relationshipId:string;status:Exclude<RelationshipStatus,'PROPOSED'>;decidedBy?:MemoryRelationship['createdBy']}):AppState {
+    id.parse(input.relationshipId);
+    if((input.status as string)==='PROPOSED')throw new Error('A relationship can only be settled confirmed or refuted.');
+    return this.transaction(()=>{
+      const state=this.readProjection();
+      const relationship=state.relationships?.find(item=>item.id===input.relationshipId);
+      if(!relationship)throw new Error('Relationship not found.');
+      if(relationship.status!=='PROPOSED')throw new Error(`That link is already ${relationship.status.toLowerCase()} — the record is append-only.`);
+      this.append(state,[{collection:'relationships',value:{...relationship,status:input.status,decidedAt:new Date().toISOString()}}],
+        {kind:'MEMORY_RELATIONSHIP_SETTLED',projectId:relationship.projectId,experimentId:null,
+         reason:`A proposed ${relationship.kind.toLowerCase()} link was ${input.status.toLowerCase()}.`},null);
+    });
+  }
+  /**
+   * Bounded full-text search over a project's findings. Office-authorized retrieval only —
+   * callers reach this through authorizeMemorySearch or the user-facing UI, never through a
+   * silent context injection. Non-superseded findings rank above superseded ones; results
+   * cap at `limit` (default 10, hard ceiling 25).
+   */
+  searchMemoryFindings(projectId:string,query:string,limit=10):MemoryFinding[] {
+    id.parse(projectId);
+    const capped=Math.max(1,Math.min(25,Math.floor(limit)));
+    const terms=[...new Set(query.toLowerCase().split(/[^a-z0-9]+/).filter(t=>t.length>=2))];
+    if(!terms.length)return[];
+    const state=this.readProjection();
+    const scored=(state.findings??[]).filter(item=>item.projectId===projectId).map(item=>{
+      const hay=`${item.title}\n${item.body}`.toLowerCase();
+      const score=terms.reduce((acc,term)=>acc+(hay.includes(term)?(item.title.toLowerCase().includes(term)?2:1):0),0);
+      return{item,score};
+    }).filter(entry=>entry.score>0)
+      .sort((a,b)=>b.score-a.score||Number(!!a.item.supersededById)-Number(!!b.item.supersededById)||b.item.createdAt.localeCompare(a.item.createdAt));
+    return scored.slice(0,capped).map(entry=>entry.item);
+  }
+  /** The bounded graph read model — every finding node and relationship edge in the project. */
+  memoryGraph(projectId:string):MemoryGraph {
+    id.parse(projectId);
+    const state=this.readProjection();
+    const nodes=(state.findings??[]).filter(item=>item.projectId===projectId)
+      .map(item=>({findingId:item.id,kind:item.kind,title:item.title,superseded:!!item.supersededById}));
+    const edges=(state.relationships??[]).filter(item=>item.projectId===projectId)
+      .map(item=>({relationshipId:item.id,from:item.fromFindingId,to:item.toFindingId,kind:item.kind,status:item.status}));
+    return{projectId,nodes,edges};
+  }
+  /**
+   * Whether the given assignment's caller may run memory.search — retrieval is director-only
+   * and only at the synthesis/finalize hop of a pipeline round. Every other seat, every other
+   * phase and every non-pipeline assignment is refused: memory never silently enters an
+   * independent research-review arm's context.
+   */
+  authorizeMemorySearch(assignmentId:string):{ok:true}|{ok:false;reason:string} {
+    const state=this.readProjection();
+    const assignment=state.assignments?.find(item=>item.id===assignmentId);
+    if(!assignment)return{ok:false,reason:'The caller names no known assignment.'};
+    const key=assignment.pipelineKey;
+    if(!key)return{ok:false,reason:'Memory retrieval is reserved for pipeline synthesis hops — a manual assignment carries no search authorization.'};
+    const authorized=key==='plan-synthesis'||key==='analysis-finalize';
+    return authorized
+      ?{ok:true}
+      :{ok:false,reason:`The '${key}' hop is not the director's synthesis seat — memory retrieval is bounded to plan-synthesis and analysis-finalize.`};
   }
   /** Applies one job transition through the shared reducer. The renderer can never call this. */
   recordJobTransition(input:{jobId:string;expectedRevision:number;to:JobState;evidence:JobEvidence;detail:string;externalId?:string;externalUrl?:string;outputs?:{path:string;sha256:string;bytes:number}[];at?:string}):AppState {

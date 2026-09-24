@@ -424,6 +424,10 @@ const changed=()=>win?.webContents.send('office:changed');
  handle('office:evidence-read',value=>evidence.read(value));
  handle('office:evidence-query',value=>evidence.query(value));
  handle('office:evidence-packet',value=>evidence.stagePacket(value));
+ // Read-only memory surfaces: bounded search over the project's finding ledger and the
+ // derived graph. Mutations go through office:command (memory.finding.note) or receipt ingest.
+ handle('office:memory-search',value=>{const input=z.object({projectId:id,text:z.string().trim().min(1).max(400),limit:z.number().int().min(1).max(25).optional()}).strict().parse(value);return{findings:store.searchMemoryFindings(input.projectId,input.text,input.limit)};});
+ handle('office:memory-graph',value=>store.memoryGraph(id.parse(value)));
  handle('office:preview',value=>artifacts.preview(id.parse(value)));
  handle('office:import',async value=>{
   const input=importSchema.parse(value);const state=store.snapshot({history:false});

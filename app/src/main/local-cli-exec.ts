@@ -249,7 +249,7 @@ export class LocalCliExecAdapter implements ProviderAdapter {
     // start refuses the launch cleanly instead of leaving a declared surface silently deaf.
     let queryWatcher: FSWatcher | null = null;
     if (mountsEvidenceSurface(binding.toolProfile) && this.evidenceFrames) {
-      const caller: EvidenceCaller = { agentId: context.assignment.agentId, projectId: context.assignment.projectId, requestId: context.assignment.requestId };
+      const caller: EvidenceCaller = { agentId: context.assignment.agentId, projectId: context.assignment.projectId, requestId: context.assignment.requestId, assignmentId: context.assignment.id };
       const frames = this.evidenceFrames;
       try {
         // realpathSync.native resolves 8.3 short-name aliases (RUNNER~1) that the plain variant
