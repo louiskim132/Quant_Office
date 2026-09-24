@@ -231,6 +231,53 @@ test('search is bounded, project-scoped, and ranks live findings above supersede
   assert.equal(store.searchMemoryFindings(project.id, 'overflow', 99).length, 25);
 });
 
+test('a COMPLETED receipt’s findings/links ingest into the ledger through the observe path', async t => {
+  const f = await heavy(t);
+  const { request, hops } = await mintedRound(f);
+  // The brief hop already ran inside mintedRound — pick the first minted hop whose
+  // declared predecessors are all COMPLETED (the same Kahn rule completeRound uses).
+  const done = new Set(hops.filter(item => jobFor(f, item.id).state === 'COMPLETED').map(item => item.id));
+  const hop = hops.find(item => !done.has(item.id) && (item.dependsOn ?? []).every(dep => done.has(dep)))!;
+  assert.ok(hop, 'a minted round always has a dependency-ready hop after the brief');
+  // Complete the hop with a receipt carrying the memory sections — one good finding citing its
+  // own output artifact, one malformed entry, and a link chaining through the receipt ref.
+  await f.controller.handoff(hop.id);
+  const job = jobFor(f, hop.id);
+  const bound = f.store.localSessionForJob(job.id)!;
+  const dir = path.join(f.sessionsRoot, bound.storageRelativePath);
+  const output = { path: 'outputs/brief.txt', sha256: sha('brief bytes'), bytes: Buffer.byteLength('brief bytes') };
+  mkdirSync(path.join(dir, 'outputs'), { recursive: true });
+  writeFileSync(path.join(dir, 'outputs/brief.txt'), 'brief bytes');
+  writeFileSync(path.join(dir, RESULT_FILE), JSON.stringify({
+    schema: 'office-local-result@2', jobId: job.id, assignmentId: hop.id, attemptId: bound.attemptId,
+    packetHash: bound.packetHash, sequence: 1, state: 'COMPLETED', detail: 'Done.', outputs: [output],
+    findings: [
+      { ref: 'f1', kind: 'OBSERVATION', title: 'brief noted a constraint', body: 'the packet bound the scope', evidenceRefs: [{ kind: 'ASSIGNMENT', id: hop.id }] },
+      { ref: 'f2', kind: 'RESULT', title: 'brief kept it bounded', body: 'scope held' },
+      { kind: 'RESULT', title: 'ghost evidence', body: 'x', evidenceRefs: [{ kind: 'REQUEST', id: randomUUID() }] },
+    ],
+    links: [{ from: 'f2', to: 'f1', kind: 'SUPPORTS' }],
+  }));
+  await f.controller.observe(hop.id);
+  assert.equal(jobFor(f, hop.id).state, 'COMPLETED', jobFor(f, hop.id).detail);
+  const findings = f.store.snapshot({ history: false }).findings ?? [];
+  const recorded = findings.filter(item => item.assignmentId === hop.id);
+  assert.equal(recorded.length, 2);
+  const f1 = recorded.find(item => item.title === 'brief noted a constraint')!;
+  const f2 = recorded.find(item => item.title === 'brief kept it bounded')!;
+  assert.equal(f1.createdBy.surface, 'AGENT_SESSION');
+  assert.equal(f1.createdBy.receiptHash, f.store.localSessionForJob(job.id)!.lastReceipt!.hash);
+  // The link proposal resolved both refs to the minted findings and landed PROPOSED;
+  // the ghost-evidence entry was skipped, not stored.
+  const links = (f.store.snapshot({ history: false }).relationships ?? []).filter(item => item.createdBy.surface === 'AGENT_SESSION');
+  assert.equal(links.length, 1);
+  assert.equal(links[0].fromFindingId, f2.id);
+  assert.equal(links[0].toFindingId, f1.id);
+  assert.equal(links[0].status, 'PROPOSED');
+  const journal = f.store.snapshot({ history: false }).jobEvents!.filter(item => item.jobId === job.id);
+  assert.ok(journal.some(item => item.text.includes('2 findings recorded') && item.text.includes('1 malformed')));
+});
+
 test('memoryGraph derives nodes and edges from durable records only', async t => {
   const { store, project } = light(t);
   const author = { surface: 'OFFICE' as const };

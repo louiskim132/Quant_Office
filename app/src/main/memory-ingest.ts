@@ -30,7 +30,7 @@ const reason = (error: unknown) => error instanceof Error ? error.message : 'unk
 export function ingestReceiptMemory(
   store: OfficeStore,
   ctx: { projectId: string; requestId: string | null; assignmentId: string | null; agentId: string; receiptHash: string },
-  result: LocalResultV2,
+  result: Pick<LocalResultV2, 'findings' | 'links'>,
 ): MemoryIngestReport {
   const report: MemoryIngestReport = { findings: [], findingsSkipped: [], links: [], linksSkipped: [] };
   // Session self-report is labeled for what it is: the agent that ran, riding the verified
