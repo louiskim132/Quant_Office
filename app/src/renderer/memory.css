@@ -1,0 +1,64 @@
+/* memory.css — interactive memory graph surface. */
+.memory-page{display:grid;gap:18px}
+.memory-page>*{margin:0}
+.memory-search{justify-content:flex-start;margin-bottom:0}
+.memory-search .search-field{min-width:280px}
+
+/* Search hits: compact finding cards carrying the provenance line. */
+.memory-hits .memory-hit{padding:16px 18px}
+.memory-hit .card-heading h3{font-size:13px;margin:0}
+.memory-hit .task-prompt{font-size:12px;background:none;border:0;padding:0}
+.memory-hit .card-heading span{display:inline-flex;gap:6px}
+.superseded-badge{color:var(--subtle);border-style:dashed}
+
+/* Graph layout: pan/zoom canvas beside the detail column. */
+.memory-layout{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:16px;align-items:start}
+.memory-graph{border:1px solid var(--border);border-radius:9px;background:var(--panel);overflow:hidden}
+.memory-graph svg{display:block;width:100%;height:auto;touch-action:none;cursor:grab;user-select:none}
+.memory-graph svg:active{cursor:grabbing}
+.memory-hint{padding:9px 14px;border-top:1px solid var(--border)}
+
+/* Edges: CONFIRMED solid, PROPOSED dashed — a proposed link is never drawn as established. */
+.mem-edge-line{stroke:var(--subtle);stroke-width:1.6;fill:none}
+.mem-edge-hit{stroke:transparent;stroke-width:14;fill:none;pointer-events:stroke}
+.mem-edge.status-proposed .mem-edge-line{stroke-dasharray:7 5;stroke:var(--subtle);opacity:.75}
+.mem-edge.status-confirmed .mem-edge-line{stroke:var(--teal);stroke-width:2}
+.mem-edge.selected .mem-edge-line{stroke:var(--accent);stroke-width:2.4}
+.mem-edge-label{fill:var(--subtle);font-size:9px;text-transform:lowercase;pointer-events:none}
+.mem-edge.selected .mem-edge-label{fill:var(--accent)}
+
+/* Nodes: one hue per finding kind; superseded nodes dim and carry a strike marker. */
+.mem-node{cursor:move}
+.mem-node circle{fill:var(--panel-2);stroke:var(--subtle);stroke-width:1.6}
+.mem-node.kind-observation circle{stroke:#7fa8c9}
+.mem-node.kind-hypothesis circle{stroke:#b58fc9}
+.mem-node.kind-result circle{stroke:var(--teal)}
+.mem-node.kind-defect circle{stroke:#c97f7f}
+.mem-node.kind-decision circle{stroke:var(--accent)}
+.mem-node.kind-note circle{stroke:var(--muted)}
+.mem-node.selected circle{stroke:var(--accent);stroke-width:3}
+.mem-node.superseded{opacity:.42}
+.mem-node .mem-supersede{stroke:var(--text);stroke-width:2.4;pointer-events:none}
+.mem-node-title{fill:var(--text);font-size:10px;pointer-events:none;paint-order:stroke;stroke:var(--panel);stroke-width:3;stroke-linejoin:round}
+.mem-node.superseded .mem-node-title{text-decoration:line-through}
+
+/* Detail column: a fixed card that mirrors the record, never an endorsement. */
+.memory-detail-card{border:1px solid var(--border);border-radius:9px;background:var(--panel);padding:16px 18px;display:grid;gap:11px}
+.memory-detail-card>*{margin:0}
+.memory-detail-card h3{font-size:13px;margin:0}
+.memory-detail-card .card-heading{align-items:flex-start}
+.memory-detail-card .card-heading>span{display:inline-flex;gap:6px;flex-shrink:0}
+.memory-body{font-size:12px;line-height:1.65;white-space:pre-wrap;overflow-wrap:anywhere}
+.memory-detail-card .button-row{justify-content:flex-start}
+.memory-detail-empty{border-style:dashed}
+.memory-detail-card .text-button{padding:0;display:inline}
+
+/* Composer: bounded fields on the frozen command contract. */
+.memory-composer{border:1px solid var(--border);border-radius:9px;background:var(--panel);padding:14px 18px}
+.memory-composer summary{cursor:pointer;font-size:11px;color:var(--muted)}
+.memory-composer form{display:grid;gap:4px;margin-top:14px}
+.memory-composer .field{margin-bottom:12px}
+.memory-composer select[multiple]{min-height:110px;max-width:100%}
+.memory-composer button{justify-self:start}
+
+@media(max-width:1150px){.memory-layout{grid-template-columns:minmax(0,1fr)}}
