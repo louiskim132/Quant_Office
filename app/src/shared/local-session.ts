@@ -188,6 +188,12 @@ export const localPacketV2Schema = z.object({
    * contract the launch flags enforce. Declared scope is not a sandbox — see CONTRACT.md.
    */
   toolProfile: toolProfileSchema.optional(),
+  /**
+   * Declared when the office mounted a bounded memory digest for an authorized synthesis seat
+   * (`plan-synthesis` / `analysis-finalize`). The digest file sits beside this packet and is
+   * hashed like every input — office-recorded context, never verified facts.
+   */
+  memoryDigest: z.object({ path: z.literal('memory-digest.json'), findings: z.number().int().nonnegative(), relationships: z.number().int().nonnegative(), sha256: hash }).strict().optional(),
   contract: z.literal('CONTRACT.md'),
 }).strict();
 export type LocalPacketV2 = z.infer<typeof localPacketV2Schema>;
@@ -237,6 +243,33 @@ export const localResultV2Schema = z.object({
   }
 });
 export type LocalResultV2 = z.infer<typeof localResultV2Schema>;
+
+// --- Bounded memory digest (mounted for authorized synthesis seats only) ---
+
+export const MEMORY_DIGEST_FILE = 'memory-digest.json';
+export const MAX_DIGEST_FINDINGS = 64;
+export const MAX_DIGEST_LINKS = 128;
+/**
+ * The office-generated digest a synthesis packet may carry. A projection of the ledger at
+ * packet-prep time — point-in-time, canonically hashed, declared on the packet. It is
+ * self-report context the office recorded, never verified fact, and it is mounted only where
+ * authorizeMemorySearch already seats retrieval.
+ */
+export const memoryDigestSchema = z.object({
+  schema: z.literal('office-memory-digest@1'),
+  generatedAt: timestamp,
+  findings: z.array(z.object({
+    id, kind: z.enum(['OBSERVATION', 'HYPOTHESIS', 'RESULT', 'DEFECT', 'DECISION', 'NOTE']),
+    title: z.string().min(1).max(200), body: z.string().max(4000),
+    evidenceRefs: z.array(z.object({ kind: z.enum(['OBJECT', 'ASSIGNMENT', 'JOB', 'REQUEST', 'FINDING']), id: z.string().min(1).max(200) }).strict()).max(32),
+    superseded: z.boolean(), createdAt: timestamp,
+  }).strict()).max(MAX_DIGEST_FINDINGS),
+  links: z.array(z.object({
+    from: id, to: id, kind: z.enum(['SUPPORTS', 'CONTRADICTS', 'RELATES', 'DUPLICATES', 'REFINES']),
+    status: z.enum(['PROPOSED', 'CONFIRMED', 'REFUTED']),
+  }).strict()).max(MAX_DIGEST_LINKS),
+}).strict();
+export type MemoryDigest = z.infer<typeof memoryDigestSchema>;
 
 // --- Cooperative cancellation (QO-LOCAL-REV §8) ---
 

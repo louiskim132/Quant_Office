@@ -292,6 +292,31 @@ test('memoryGraph derives nodes and edges from durable records only', async t =>
   assert.equal(graph.nodes.every(node => !node.superseded), true);
 });
 
+test('user-proposed links, FINDING refs and the bounded digest projection', async t => {
+  const { store, project, request } = light(t);
+  store.execute(note(project.id, 'anchor finding', { requestId: request.id }));
+  const anchor = store.snapshot({ history: false }).findings![0];
+  // A finding may cite another finding — FINDING refs resolve against the same project.
+  store.execute(note(project.id, 'cites the anchor', { evidenceRefs: [{ kind: 'FINDING', id: anchor.id }] }));
+  assert.throws(() => store.execute(note(project.id, 'foreign finding ref', { evidenceRefs: [{ kind: 'FINDING', id: randomUUID() }] })), /finding that does not exist in this project/);
+  const citer = store.snapshot({ history: false }).findings!.find(item => item.title === 'cites the anchor')!;
+  // The user proposes a link through the command surface — PROPOSED, USER provenance.
+  store.execute({ type: 'memory.relationship.propose', idempotencyKey: key(), projectId: project.id, fromFindingId: citer.id, toFindingId: anchor.id, kind: 'REFINES', note: 'sharpens it' });
+  const link = store.snapshot({ history: false }).relationships![0];
+  assert.equal(link.status, 'PROPOSED');
+  assert.equal(link.createdBy.surface, 'USER');
+  assert.throws(() => store.execute({ type: 'memory.relationship.propose', idempotencyKey: key(), projectId: project.id, fromFindingId: citer.id, toFindingId: anchor.id, kind: 'REFINES' }), /already exists/);
+  assert.throws(() => store.execute({ type: 'memory.relationship.propose', idempotencyKey: key(), projectId: project.id, fromFindingId: citer.id, toFindingId: citer.id, kind: 'RELATES' }), /relate to itself/);
+  // The digest projects the ledger deterministically — superseded marked, counts bounded.
+  const digest = store.memoryDigest(project.id);
+  assert.equal(digest.findings.length, 2);
+  assert.equal(digest.links.length, 1);
+  assert.equal(digest.links[0].from, citer.id);
+  assert.equal(digest.findings.every(f => !f.superseded), true);
+  store.execute(note(project.id, 'anchor corrected', { supersedesFindingId: anchor.id }));
+  assert.equal(store.memoryDigest(project.id).findings.find(f => f.id === anchor.id)!.superseded, true);
+});
+
 test('memorySearch is authorized only at the director’s synthesis seats', async t => {
   const f = await heavy(t);
   const { request, hops } = await mintedRound(f);

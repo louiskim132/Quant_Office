@@ -258,7 +258,7 @@ export type FindingKind = 'OBSERVATION' | 'HYPOTHESIS' | 'RESULT' | 'DEFECT' | '
 export type RelationshipKind = 'SUPPORTS' | 'CONTRADICTS' | 'RELATES' | 'DUPLICATES' | 'REFINES';
 /** A reference anchoring a finding to durable evidence the office already holds. */
 export interface FindingEvidenceRef {
-  kind: 'OBJECT' | 'ASSIGNMENT' | 'JOB' | 'REQUEST';
+  kind: 'OBJECT' | 'ASSIGNMENT' | 'JOB' | 'REQUEST' | 'FINDING';
   /** The object sha256 for OBJECT; the record id for the other kinds. */
   id: string;
 }
@@ -323,6 +323,7 @@ export type Command =
  /** A user-authored finding in the office memory ledger — bounded, evidence-referenced, append-only. */
  | { type: 'memory.finding.note'; idempotencyKey:string; projectId:string; requestId?:string|null; kind:FindingKind; title:string; body:string; evidenceRefs?:FindingEvidenceRef[]; supersedesFindingId?:string }
  | { type: 'memory.relationship.settle'; idempotencyKey:string; relationshipId:string; status:'CONFIRMED'|'REFUTED' }
+ | { type: 'memory.relationship.propose'; idempotencyKey:string; projectId:string; fromFindingId:string; toFindingId:string; kind:RelationshipKind; note?:string }
  | { type: 'agent.remove'; idempotencyKey: string; agentId: string; removed: boolean }
  | { type: 'agent.delete'; idempotencyKey: string; agentId: string }
  | { type: 'agent.update'; idempotencyKey: string; agentId: string; expectedRevision?: number; name: string; team: string; role: Role; instructions: string }
