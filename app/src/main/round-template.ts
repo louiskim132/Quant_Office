@@ -79,6 +79,9 @@ export interface CommRoundEntry {
   * everything the hop waited on.
   */
  inputKeys?: string[];
+ /** BLIND stages the packet without the project's withheld paths (hash-only manifest entries);
+  *  absent means FULL — the staged snapshot is disclosed as staged. */
+ inputScope?: 'BLIND' | 'FULL';
  toolProfile: ToolProfile;
  /** The declared input manifest: the packet version, the brief, and named artifact refs. */
  inputManifestNote: string;

@@ -4,6 +4,7 @@ import type {AppState,Experiment,Command,Request} from '../shared/types';
 import {queueScope,type QueueFilter} from '../shared/queue';
 import {Empty} from './components';
 import {RequestDispatch} from './dispatch';
+import {PipelineCard} from './pipeline-card';
 import './queue.css';
 import './office.css';
 
@@ -40,53 +41,6 @@ export function WorkQueue({state,busy,onNew,onOpen,onCancel,onAction,onState}:{s
  const reviewRecords=(state.decisions??[]).filter(item=>item.requestId===root.id).length+(row.request?.experimentId?state.reviews.filter(item=>item.experimentId===row.request!.experimentId).length:0)+(state.sealed??[]).filter(item=>item.subjectAssignmentId&&assignmentIds.has(item.subjectAssignmentId)).length;
  const reviewText=reviewRecords?`Independent review: ${reviewRecords} record${reviewRecords===1?'':'s'} on file`:'No independent review';
  return <article className="task-card" key={root.id}><div className="card-heading"><div className="card-title-block"><h3>{row.request?.name??exp?.name??'Research request'}</h3>{row.request&&<span className="task-meta-inline">{row.request.pipeline?(row.request.pipeline.kind==='PLANNING'?'planning pipeline':'result analysis pipeline'):`${row.request.workType.toLowerCase().replaceAll('_',' ')} · ${row.request.mode.toLowerCase()} · Lead: ${state.agents.find(a=>a.id===row.request?.leadAgentId)?.name??'Not selected'}`}</span>}</div><span className={canceled?'status-badge canceled':'status-badge'}>{canceled?'Canceled':row.status==='ACCEPTED'||row.settled?'Completed':row.status.toLowerCase()}</span></div><p className="task-prompt">{root.prompt}</p>{row.request?.pipeline&&<PipelineCard request={row.request} state={state} busy={busy} onAction={onAction}/>}<p className="muted">{project?.name} · {exp?.stage.replaceAll('_',' ').toLowerCase()??'Project request'}</p>{!canceled&&root.blocker&&<p className="blocker">{root.blocker}</p>}{row.request&&<>{row.request.blockers.map(b=><p className="blocker" key={b.code+b.message}>{b.message} {b.action}.</p>)}<details><summary>Participants and acceptance criteria</summary><p>{[...new Set([row.request.leadAgentId,...row.request.participantIds])].filter(Boolean).map(id=>state.agents.find(a=>a.id===id)?.name??id).join(', ')||'None selected'}</p><p>{row.request.acceptanceCriteria||'No criteria recorded.'}</p>{row.canCancel&&<><RequestEditor key={row.id+':'+row.request.revision} request={row.request} state={state} busy={busy} onAction={onAction}/><RequestDispatch key={row.id+":dispatch"} request={row.request} state={state} onState={onState}/></>}<p>{row.request.delegation?'Collaboration requested':'Automatic delegation disabled'} · {jobText} · {reviewText}</p></details></>}{row.request&&!row.canCancel&&row.actions?.awaitingReconciliation&&<RequestDispatch key={row.id+':dispatch'} request={row.request} state={state} onState={onState}/>}{row.request&&canceled&&!row.deletable&&<p className="muted remove-note">Remove stays unavailable while a provider job outcome is unresolved — reconcile the provider outcome first. The record and its history are retained either way.</p>}<div className="button-row task-actions">{row.request&&<><button className="primary" disabled={busy||!row.canCancel} onClick={()=>onAction({type:'request.start',requestId:row.id,expectedRevision:row.request!.revision,idempotencyKey:crypto.randomUUID()})}>Start request</button><button className="secondary" disabled={busy||project?.archived} onClick={()=>onAction({type:'request.duplicate',requestId:row.id,expectedRevision:row.request!.revision,idempotencyKey:crypto.randomUUID()})}>Use as new request</button></>}{exp&&<button className="secondary" onClick={()=>onOpen(exp)}>{canceled?'View research details':'Open research details'}</button>}{row.canCancel&&<button className="cancel-request" disabled={busy||project?.archived} onClick={()=>row.request?onAction({type:'request.cancel',requestId:row.id,expectedRevision:row.request.revision,idempotencyKey:crypto.randomUUID()}):onCancel(row.id)}>Cancel request</button>}{row.deletable&&<button className="cancel-request" disabled={busy} onClick={()=>onAction({type:'task.delete',idempotencyKey:crypto.randomUUID(),taskId:root.id,...(row.request?{expectedRevision:row.request.revision}:{})})}>Remove</button>}</div></article>;})}</div></section>;
-}
-
-function PipelineCard({request,state,busy,onAction}:{request:Request;state:AppState;busy:boolean;onAction:(c:Command)=>void}){
- const pipeline=request.pipeline!;
- const briefJob=pipeline.briefAssignmentId?(state.jobs??[]).find(item=>item.assignmentId===pipeline.briefAssignmentId):undefined;
- const ready=request.status==='READY';
- const hops=(state.assignments??[]).filter(item=>item.requestId===request.id&&item.pipelineKey);
- const notes=request.pipelineNotes??[];
- const pending=pipeline.pendingDecision;
- const headJob=pending?(state.jobs??[]).find(item=>item.assignmentId===pending.headAssignmentId):undefined;
- const [decisionNote,setDecisionNote]=useState('');
- const decide=(decision:'APPROVE'|'REVISE'|'REJECT')=>{
-  if(!pending)return;
-  const note=decisionNote.trim();
-  if(decision==='REVISE'&&!note)return;
-  onAction({type:'request.pipeline.decide',idempotencyKey:crypto.randomUUID(),requestId:request.id,expectedRevision:request.revision,decision,...(note?{note}:{}),expectedSpecHash:pending.specHash,expectedReceiptHash:pending.headReceiptHash});
- };
- const hopsLine=`Launched${hops.length?` — ${hops.length} minted hop${hops.length===1?'':'s'}: ${hops.map(item=>item.pipelineKey).join(', ')}`:' — no minted hops on record yet'}`;
- return <div className="pipeline-card">
-  {pipeline.phase==='BRIEFING'&&<>
-   <p className="muted">Director brief{pipeline.briefAssignmentId?`: ${briefJob?briefJob.state.toLowerCase().replaceAll('_',' '):'hop recorded; no job on record yet'}`:' — not minted yet; start the request to brief the director'}</p>
-   {!!notes.length&&<ul className="evidence-list">{notes.map(item=><li key={item.id}>{item.text} <span className="muted">— {new Date(item.createdAt).toLocaleString()}</span></li>)}</ul>}
-   <form onSubmit={e=>{e.preventDefault();const form=e.currentTarget;const text=String(new FormData(form).get('note')).trim();if(!text)return;onAction({type:'request.pipeline.note',idempotencyKey:crypto.randomUUID(),requestId:request.id,expectedRevision:request.revision,text});form.reset();}}>
-    <label className="field">Brief note<input name="note" maxLength={4000} placeholder="Refine the director brief" disabled={busy||!ready}/></label>
-    <button className="secondary" disabled={busy||!ready}>Add note</button>
-   </form>
-   {!ready&&<p className="muted">Notes are recorded once the request is started.</p>}
-   <button className="primary" disabled={busy||!ready||briefJob?.state!=='COMPLETED'} title={briefJob?.state==='COMPLETED'?'':'Available once the director brief completes'} onClick={()=>onAction({type:'request.pipeline.confirm',idempotencyKey:crypto.randomUUID(),requestId:request.id,expectedRevision:request.revision})}>Launch pipeline</button>
-  </>}
-  {(pipeline.phase==='LAUNCHED'||pipeline.phase==='AWAITING_DECISION')&&<p className="muted">{hopsLine}</p>}
-  {pipeline.phase==='AWAITING_DECISION'&&<>
-   <p className="muted">The round is sealed — the decision binds to the verified report receipt.</p>
-   {pending?<>
-    <p className="muted">Terminal hop{headJob?`: job ${headJob.state.toLowerCase().replaceAll('_',' ')}`:' recorded; its job is not on record'}{headJob?.outputs.length?` — ${headJob.outputs.length} recorded output${headJob.outputs.length===1?'':'s'}`:''}</p>
-    {!!headJob?.outputs.length&&<ul className="evidence-list">{headJob.outputs.map(output=>{const artifact=state.artifacts.find(item=>item.sha256===output.sha256);return <li key={output.path+output.sha256}>{output.path} · {output.bytes} bytes · sha256 {output.sha256.slice(0,16)}…{artifact?` · stored as ${artifact.name}`:output.stored?' · stored':''}</li>;})}</ul>}
-    <label className="field">Decision note<textarea value={decisionNote} onChange={e=>setDecisionNote(e.target.value)} maxLength={4000} placeholder="Required to request a revision; optional otherwise" disabled={busy||!ready}/></label>
-    <div className="button-row">
-     <button className="primary" disabled={busy||!ready} onClick={()=>decide('APPROVE')}>Approve</button>
-     <button className="secondary" disabled={busy||!ready||!decisionNote.trim()} onClick={()=>decide('REVISE')}>Request revision</button>
-     <button className="cancel-request" disabled={busy||!ready} onClick={()=>decide('REJECT')}>Reject</button>
-    </div>
-   </>:<p className="muted">Awaiting the sealed decision record — no pending decision is on record yet.</p>}
-  </>}
-  {pipeline.phase==='DECIDED'&&(pipeline.decision
-   ?<p className="muted">Decision recorded: {pipeline.decision.decision.toLowerCase()} · bound to report receipt {pipeline.decision.headReceiptHash.slice(0,16)}… · {new Date(pipeline.decision.decidedAt).toLocaleString()}{pipeline.decision.note?` — “${pipeline.decision.note}”`:''}</p>
-   :<p className="muted">Decision phase reached; no decision record is attached.</p>)}
- </div>;
 }
 
 function RequestEditor({request,state,busy,onAction}:{request:Request;state:AppState;busy:boolean;onAction:(c:Command)=>void}){

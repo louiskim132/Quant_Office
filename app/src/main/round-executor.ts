@@ -29,6 +29,8 @@ export interface MintEntry {
   armRole: Role;
   agentId: string;
   toolProfile: ToolProfile;
+  /** Spec-declared staging scope — BLIND hops receive withheld paths as hash-only entries. */
+  inputScope?: 'BLIND' | 'FULL';
   /** Key-level DAG edges — the caller maps keys to assignment ids via Assignment.pipelineKey. */
   dependsOnKeys: string[];
   /** The bounded per-phase instruction this hop carries. */
@@ -178,6 +180,7 @@ export function planCommRoundMint(input: CommRoundMintInput): CommRoundMint {
   const entries: MintEntry[] = spec.entries.map(specEntry => ({
     key: specEntry.key, phase: specEntry.phase, armRole: armRoleFor(specEntry), agentId: specEntry.agentId,
     toolProfile: specEntry.toolProfile, dependsOnKeys: [...specEntry.dependsOnKeys],
+    ...(specEntry.inputScope ? { inputScope: specEntry.inputScope } : {}),
     objectiveText: objectiveText(specEntry, request.objective),
     ...(minted.has(specEntry.key) ? { assignmentId: minted.get(specEntry.key)! } : {}),
   }));

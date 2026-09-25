@@ -450,7 +450,7 @@ export class LocalCliExecAdapter implements ProviderAdapter {
     }
   }
 
-  async observe(job: ProviderJob, local?: LocalSessionRecord | null): Promise<ObserveResult> {
+  async observe(job: ProviderJob, local?: LocalSessionRecord | null, replay?: { receiptHash: string }): Promise<ObserveResult> {
     const unknown = (detail: string): ObserveResult => ({ state: 'UNKNOWN', detail, provenance: 'OFFICE_LOCAL' });
     if (!local)
       return unknown('A LOCAL_CLI_EXEC observation requires the persisted local-session binding; without it the office cannot name the packet directory.');
@@ -485,7 +485,7 @@ export class LocalCliExecAdapter implements ProviderAdapter {
     if ('defect' in ack) return attach(unknown(ack.defect));
     // The v2 reader proves the ready marker, the attempt binding, the sequence and every declared
     // output byte before anything is reported — the same reader the mailbox runs.
-    const read = readLocalResult(dir, local, this.io);
+    const read = readLocalResult(dir, local, this.io, replay ? { allowReceiptHash: replay.receiptHash } : undefined);
     if ('defect' in read) {
       const selfExit = record?.exit && !record.officeKill
         ? ` The spawned process exited on its own (code ${record.exit.code}${record.exit.signal ? `, signal ${record.exit.signal}` : ''}) without a trusted receipt — a self-exit is not a failure claim.`

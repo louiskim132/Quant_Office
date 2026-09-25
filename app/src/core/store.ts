@@ -15,6 +15,7 @@ function upsertLocationScope(state: Projection, changes: Change[], project: Proj
   if ((existing?.localFolder ?? '') === root) return false;
   const location: ProjectLocation = {
     id: existing?.id ?? randomUUID(), projectId: project.id, localFolder: root, inputPaths: existing?.inputPaths ?? [],
+    withheldPaths: existing?.withheldPaths ?? [],
     outputFolder: existing?.outputFolder ?? '',
     sourceRepository: root && existsSync(resolve(root, '.git')) ? resolve(root, '.git') : '',
     snapshotRoute: 'PROJECT_FOLDER_SNAPSHOT',
@@ -40,7 +41,7 @@ import type {ResearchTrustPin,SignedResearchClaim} from '../shared/research-admi
 import type {HoldoutReservation,EvaluatorResult} from '../shared/holdout';
 import {shadowBatchSchema} from '../shared/shadow';
 import {replayShadow} from './shadow-ledger';
-import { nextJob } from './jobs.js';
+import { latestJobFor, nextJob } from './jobs.js';
 import { appliedReportPayloadSchema, localLaunchPlanSchema, localSessionJournalSchema, localSessionRecordSchema, localSessionSummarySchema, transitionLocalLifecycle, type LocalLaunchPlan, type LocalSessionJournal, type LocalSessionRecord, type LocalSessionSummary } from '../shared/local-session.js';
 import { toolProfileSchema } from '../shared/tool-profile.js';
 import { MAX_BUDGET_CENTS } from './guards.js';
@@ -73,6 +74,7 @@ export const commandSchema = z.discriminatedUnion('type', [
   ...(['request.start','request.cancel','request.duplicate','request.pipeline.confirm'] as const).map(type=>z.object({...common,type:z.literal(type),requestId:id,expectedRevision:z.number().int().nonnegative()}).strict()),
   z.object({...common,type:z.literal('request.pipeline.note'),requestId:id,expectedRevision:z.number().int().nonnegative(),text:z.string().trim().min(1).max(4000)}).strict(),
   z.object({...common,type:z.literal('request.pipeline.decide'),requestId:id,expectedRevision:z.number().int().nonnegative(),decision:z.enum(['APPROVE','REVISE','REJECT']),note:z.string().trim().max(4000).optional(),expectedSpecHash:hash,expectedReceiptHash:hash}).strict(),
+  z.object({...common,type:z.literal('request.pipeline.retryHop'),requestId:id,expectedRevision:z.number().int().nonnegative(),pipelineKey:z.string().trim().min(1).max(80)}).strict(),
   z.object({...common,type:z.literal('memory.finding.note'),projectId:id,requestId:id.nullable().optional(),kind:findingKindSchema,title:title,body:text(4000),evidenceRefs:z.array(findingRefSchema).max(32).optional(),supersedesFindingId:id.optional()}).strict(),
   z.object({...common,type:z.literal('memory.relationship.settle'),relationshipId:id,status:z.enum(['CONFIRMED','REFUTED'])}).strict(),
   z.object({...common,type:z.literal('memory.relationship.propose'),projectId:id,fromFindingId:id,toFindingId:id,kind:relationshipKindSchema,note:text(1000).optional()}).strict(),
@@ -105,7 +107,7 @@ export const commandSchema = z.discriminatedUnion('type', [
     outcome: outcomeEnum, reason: text(2000) }).strict(),
   z.object({ ...common, type: z.literal('request.grant'), requestId: id, agentId: id, capacity: z.enum(['REVIEW','WORKER','DIRECTOR','DELEGATE']), granted: z.boolean() }).strict(),
   z.object({ ...common, type: z.literal('request.slots'), requestId: id, expectedRevision: z.number().int().nonnegative(), teamId: id.nullable(), slots: z.array(z.object({role,count:z.number().int().min(1).max(64)}).strict()).max(16) }).strict(),
-  z.object({ ...common, type: z.literal('location.save'), projectId: id, expectedRevision: z.number().int().nonnegative(), localFolder: text(32000), inputPaths: z.array(z.string().min(1).max(1000)).max(2000).optional(), outputFolder: text(32000) }).strict(),
+  z.object({ ...common, type: z.literal('location.save'), projectId: id, expectedRevision: z.number().int().nonnegative(), localFolder: text(32000), inputPaths: z.array(z.string().min(1).max(1000)).max(2000).optional(), outputFolder: text(32000), withheldPaths: z.array(z.string().trim().min(1).max(1000)).max(256).optional() }).strict(),
   z.object({ ...common, type: z.literal('experiment.create'), projectId: id, name: title, hypothesis: text(12000) }).strict(),
   z.object({ ...common, type: z.literal('contract.save'), experimentId: id, expectedRevision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER - 1), contract: contractSchema }).strict(),
   z.object({ ...common, type: z.literal('contract.submit'), experimentId: id, expectedRevision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER - 1) }).strict(),
@@ -128,7 +130,8 @@ const requestSchema=z.object({migratedFromTaskId:id.optional(),teamId:id.optiona
   pipeline:z.object({kind:z.enum(['PLANNING','RESULT_ANALYSIS']),specHash:hash.nullable(),phase:z.enum(['BRIEFING','LAUNCHED','AWAITING_DECISION','DECIDED']),briefAssignmentId:id.nullable(),
     pendingDecision:z.object({specHash:hash,headAssignmentId:id,headReceiptHash:hash}).strict().optional(),
     decision:z.object({decision:z.enum(['APPROVE','REVISE','REJECT']),note:text(4000).nullable(),specHash:hash,headReceiptHash:hash,decidedAt:timestamp}).strict().optional()}).strict().optional(),
-  pipelineNotes:z.array(z.object({id,text:text(4000),createdAt:timestamp}).strict()).max(64).optional()}).strict();
+  pipelineNotes:z.array(z.object({id,text:text(4000),createdAt:timestamp}).strict()).max(64).optional(),
+  revisionOf:z.object({requestId:id,decisionAt:timestamp,round:z.number().int().min(1)}).strict().optional()}).strict();
 const memoryAuthorSchema=z.object({surface:z.enum(['AGENT_SESSION','OFFICE','USER']),agentId:id.optional(),receiptHash:hash.optional()}).strict();
 const providerEnum=z.enum(['openai','claude','devin']);
 /** Defence in depth: durable records must never carry provider secrets, even in free-text fields. */
@@ -158,7 +161,7 @@ const relativePath=z.string().min(1).max(1000)
   .refine(value=>!/^([a-zA-Z]:|[\\/])/.test(value),'Selected files are recorded relative to the project folder')
   .refine(value=>!value.split(/[\\/]/).some(part=>part==='..'||part==='.'||part===''),'Selected file paths cannot traverse directories')
   .refine(value=>!/[\x00-\x1f]/.test(value),'Selected file paths cannot contain control characters');
-const locationSchema=z.object({id,projectId:id,localFolder:text(32000),inputPaths:z.array(relativePath).max(2000),outputFolder:text(32000),
+const locationSchema=z.object({id,projectId:id,localFolder:text(32000),inputPaths:z.array(relativePath).max(2000),outputFolder:text(32000),withheldPaths:z.array(relativePath).max(256).default([]),
   sourceRepository:text(32000),snapshotRoute:z.enum(['SELECTED_FILES_GIT_SNAPSHOT','PROJECT_FOLDER_SNAPSHOT']),
   providerTarget:z.object({provider:providerEnum,host:z.enum(['ANTHROPIC_MANAGED','LOCAL_MACHINE']),selection:z.literal('PROVIDER_DEFAULT'),environmentId:secretFree(200),resolved:z.boolean()}).strict(),
   legacyNote:text(1000),revision:z.number().int().nonnegative(),createdAt:timestamp,updatedAt:timestamp}).strict();
@@ -170,7 +173,7 @@ const snapshotSchema=z.object({objectsStored:z.literal(true).optional(),id,proje
   warnings:z.array(text(1000)).max(64),provenance:z.literal('OFFICE_STAGED'),createdAt:timestamp}).strict();
 const jobStateEnum=z.enum(['INTENT','SUBMITTING','ACCEPTED','RUNNING','COMPLETED','FAILED','UNKNOWN','CANCEL_REQUESTED','CANCEL_ACKNOWLEDGED']);
 const evidenceKindEnum=z.enum(['OFFICE_LOCAL','PROVIDER_REPORTED','USER_REPORTED']);
-const assignmentSchema=z.object({research:stageContextSchema.optional(),dependsOn:z.array(id).max(64).optional(),toolProfile:toolProfileSchema.optional(),pipelineKey:z.string().trim().min(1).max(80).optional(),id,projectId:id,requestId:id,requestRevision:z.number().int().nonnegative(),agentId:id,agentRevision:z.number().int().nonnegative(),
+const assignmentSchema=z.object({research:stageContextSchema.optional(),dependsOn:z.array(id).max(64).optional(),toolProfile:toolProfileSchema.optional(),pipelineKey:z.string().trim().min(1).max(80).optional(),inputScope:z.enum(['BLIND','FULL']).optional(),id,projectId:id,requestId:id,requestRevision:z.number().int().nonnegative(),agentId:id,agentRevision:z.number().int().nonnegative(),
   connectionId:id,capabilitySnapshotId:id,capabilitySnapshotIds:z.array(id).max(64).optional(),snapshotId:id,route:routeEnum,requestedModel:secretFree(160),resolvedModel:secretFree(160),
   requestedEffort:effortSchema,appliedEffort:z.union([effortSchema,z.literal('UNVERIFIED')]),delegation:z.boolean(),objectiveHash:hash,
   frozen:z.object({requestName:title,objective:text(12000),acceptanceCriteria:text(12000),instructions:text(12000),
@@ -180,7 +183,8 @@ const assignmentSchema=z.object({research:stageContextSchema.optional(),dependsO
 const jobOutputSchema=z.object({path:text(1000),sha256:hash,bytes:z.number().int().min(0),stored:z.literal(true).optional()}).strict();
 const jobSchema=z.object({id,assignmentId:id,projectId:id,requestId:id,provider:providerEnum,route:routeEnum,state:jobStateEnum,evidence:evidenceKindEnum,
   detail:secretFree(2000),externalId:secretFree(200),externalUrl:secretFree(2000),outputs:z.array(jobOutputSchema).max(256),
-  revision:z.number().int().nonnegative(),createdAt:timestamp,updatedAt:timestamp,dispatchedAt:z.union([timestamp,z.literal('')]),settledAt:z.union([timestamp,z.literal('')])}).strict();
+  revision:z.number().int().nonnegative(),createdAt:timestamp,updatedAt:timestamp,dispatchedAt:z.union([timestamp,z.literal('')]),settledAt:z.union([timestamp,z.literal('')]),
+  attempt:z.number().int().min(1).optional(),lastObservation:secretFree(2000).optional()}).strict();
 const jobEventSchema=z.object({id,jobId:id,externalId:z.string().min(1).max(200),cursor:z.string().max(200),kind:z.enum(['STATUS','MESSAGE','TOOL','OUTPUT']),
   text:secretFree(64000),occurredAt:timestamp,receivedAt:timestamp,evidence:evidenceKindEnum,applied:appliedReportPayloadSchema.optional()}).strict();
 const roleSlotSchema=z.object({role,count:z.number().int().min(1).max(64)}).strict();
@@ -741,7 +745,7 @@ export class OfficeStore {
         const verified=this.researchAdmission.verify(input.proof),claim=verified.signed.claim;
         this.assertResearchClaimScope(state,claim);
         const intent=state.pipeline?.find(r=>r.kind==='REBUTTAL_INTENT'&&r.id===('operationId' in claim?claim.operationId:''));
-        const job=state.jobs?.find(j=>j.assignmentId===assignment.id);
+        const job=latestJobFor(state.jobs,assignment.id);
         if(claim.kind!=='REBUTTAL'||!intent||intent.kind!=='REBUTTAL_INTENT'||intent.assignmentId!==assignment.id||claim.assignmentId!==assignment.id
           ||claim.roundId!==assignment.research.reviewRoundId||claim.contextId!==assignment.research.isolatedContextId||verified.route!==job?.route
           ||canonical(claim.firstReportHashes)!==canonical(intent.firstReportHashes)||claim.reportHash!==input.reportHash)throw new Error('Rebuttal must bind the exact post-disclosure operation, first reports and isolated context.');
@@ -897,7 +901,7 @@ export class OfficeStore {
         const request=state.requests?.find(r=>r.id===record.requestId&&r.projectId===record.projectId);
         if(!request||request.status==='CANCELED'||request.revision!==record.requestRevision)throw new Error('Request link is stale or belongs to another project.');
         if(branch.revision!==record.branchRevision)throw new Error('Branch changed before linking.');
-        if((state.assignments??[]).some(a=>a.research?.branchId===branch.id&&(state.jobs??[]).some(j=>j.assignmentId===a.id&&!['COMPLETED','FAILED','CANCEL_ACKNOWLEDGED'].includes(j.state))))throw new Error('Settle prepared research work before relinking.');
+        if((state.assignments??[]).some(a=>a.research?.branchId===branch.id&&!['COMPLETED','FAILED','CANCEL_ACKNOWLEDGED'].includes(latestJobFor(state.jobs,a.id)?.state??'')))throw new Error('Settle prepared research work before relinking.');
         if(branch.stage!=='S0')throw new Error('Amend the branch before changing a candidate or request after S0.');
         // The subject is a ledger trial, not an opaque hash: linking an identity nobody registered
         // would let receipts accumulate for a candidate the lineage never admitted it tried.
@@ -938,7 +942,7 @@ export class OfficeStore {
       const blocker=this.researchStageBlocker(branch.stage);
       if(blocker)throw new Error(blocker);
       const assignment=state.assignments?.find(a=>a.id===input.assignmentId);
-      const job=state.jobs?.find(j=>j.assignmentId===assignment?.id);
+      const job=assignment?latestJobFor(state.jobs,assignment.id):undefined;
       if(input.assignmentId){
         const research=assignment?.research;
         if(!assignment||!research||research.branchId!==branch.id||research.branchRevision!==branch.revision||research.specId!==branch.specId
@@ -1457,7 +1461,7 @@ export class OfficeStore {
     let result={operationId:'',existing:false};
     this.transaction(()=>{
       const state=this.readProjection(),assignment=state.assignments?.find(a=>a.id===assignmentId),context=assignment?.research;
-      const branch=state.branches?.find(b=>b.id===context?.branchId),job=state.jobs?.find(j=>j.assignmentId===assignmentId);
+      const branch=state.branches?.find(b=>b.id===context?.branchId),job=latestJobFor(state.jobs,assignmentId);
       if(!assignment||!context||!branch||branch.revision!==context.branchRevision||branch.stage!==context.stage||branch.outcome!=='IN_PROGRESS'
         ||job?.state!=='COMPLETED'||job.evidence!=='PROVIDER_REPORTED'||!job.outputs.some(o=>o.stored&&o.sha256===reportHash))throw new Error('Harness intent requires a current completed exact-report assignment.');
       this.activeProject(state,branch.projectId);
@@ -1560,7 +1564,7 @@ export class OfficeStore {
             if(agent.deletedAt)throw new Error('This agent is already removed from the list');
             if(!agent.removedAt)throw new Error('Archive the agent before removing it from the list');
             const assigned=new Set((state.assignments??[]).filter(item=>item.agentId===agent.id).map(item=>item.id));
-            if((state.jobs??[]).some(job=>assigned.has(job.assignmentId)&&UNRESOLVED.includes(job.state)))throw new Error('A provider job outcome is still unresolved; reconcile it before removing this agent');
+            if([...assigned].some(assignmentId=>UNRESOLVED.includes(latestJobFor(state.jobs,assignmentId)?.state??''as never)))throw new Error('A provider job outcome is still unresolved; reconcile it before removing this agent');
             changes.push({collection:'agents',value:{...agent,deletedAt:now}});reason=`Removed archived agent "${agent.name}" from lists; records and history retained`;
           }
           else {
@@ -1588,7 +1592,7 @@ export class OfficeStore {
           if(request.status!=='READY')throw new Error('This pipeline is not running.');
           if(request.pipeline.phase==='BRIEFING'){
             if(!request.pipeline.briefAssignmentId)throw new Error('No director brief hop exists yet — start the request first.');
-            const briefJob=state.jobs?.find(item=>item.assignmentId===request.pipeline!.briefAssignmentId);
+            const briefJob=latestJobFor(state.jobs,request.pipeline!.briefAssignmentId);
             if(!briefJob||briefJob.state!=='COMPLETED')throw new Error('The director brief has not completed — the shaped brief must exist before the pipeline launches.');
             reason='Pipeline confirmed; the office mints the remaining hops';
           }else reason='Pipeline re-confirmed; the office retries any unminted hops';
@@ -1620,6 +1624,56 @@ export class OfficeStore {
             throw new Error('The decision is stale — the displayed report or round changed since it was viewed. Reload and review the current artifacts.');
           changes.push({collection:'requests',value:{...request,pipeline:{...pipeline,phase:'DECIDED' as const,decision:{decision:command.decision,note,specHash:pending.specHash,headReceiptHash:pending.headReceiptHash,decidedAt:now}},revision:request.revision+1,updatedAt:now}});
           reason=`Round decision recorded: ${command.decision.toLowerCase()}, bound to the verified report receipt`;
+          if(command.decision==='REVISE'){
+            // The linked revision request mints in the same transaction as the decision — a
+            // recorded intent that never starts is exactly the gap this closes. The office's
+            // post-command pipeline path starts it and mints its brief; the mint reads
+            // `revisionOf` to inherit the prior round's outputs.
+            const round=(request.revisionOf?.round??0)+1;
+            // Naming bases on the original request's name — a revision-of-revision reads
+            // "name — revision 2", never "name — revision 1 — revision 2".
+            const baseName=(request.revisionOf?(state.requests??[]).find(r=>r.id===request.revisionOf!.requestId)?.name:request.name)??request.name;
+            const revision:Request={id:randomUUID(),projectId:request.projectId,experimentId:null,
+              name:`${baseName} — revision ${round}`,objective:request.objective,workType:request.workType,
+              mode:request.mode,leadAgentId:request.leadAgentId,participantIds:request.participantIds,
+              acceptanceCriteria:request.acceptanceCriteria,revision:0,status:'DRAFT',blockers:[],
+              delegation:request.delegation,createdAt:now,updatedAt:now,
+              pipeline:{kind:pipeline.kind,specHash:null,phase:'BRIEFING' as const,briefAssignmentId:null},
+              revisionOf:{requestId:request.id,decisionAt:now,round}};
+            changes.push({collection:'requests',value:revision});
+            reason=`Revision ${round} request minted for "${request.name}", linked to the verified report receipt`;
+          }
+          break;
+        }
+        case 'request.pipeline.retryHop': {
+          const request=state.requests?.find(r=>r.id===command.requestId);if(!request)throw new Error('Request not found');
+          this.activeProject(state,request.projectId);projectId=request.projectId;experimentId=request.experimentId;
+          if(request.revision!==command.expectedRevision)throw new Error('Stale request revision; reload before continuing');
+          if(request.status==='CANCELED')throw new Error('Canceled requests are read-only.');
+          if(!request.pipeline)throw new Error('Only planning or result-analysis requests carry a pipeline.');
+          if(request.pipeline.phase==='DECIDED'||request.pipeline.phase==='AWAITING_DECISION')
+            throw new Error('This round already reached its decision point — its hops no longer retry. Record a decision, or revise the round.');
+          const assignment=(state.assignments??[]).find(a=>a.requestId===request.id&&a.pipelineKey===command.pipelineKey);
+          if(!assignment)throw new Error(`No minted hop '${command.pipelineKey}' exists on this request.`);
+          const latest=latestJobFor(state.jobs,assignment.id);
+          if(!latest)throw new Error('That hop has no job record to retry.');
+          if(latest.state==='UNKNOWN'){
+            // An unresolved attempt may be retried only while nothing verified was ever consumed:
+            // a recorded receipt means an outcome exists somewhere and must be observed, not rerun.
+            const binding=(state.localSessions??[]).find(item=>item.jobId===latest.id);
+            if(binding?.lastReceipt)
+              throw new Error('This hop\'s attempt has a verified receipt on record — reconcile or observe it, never rerun past it.');
+          } else if(latest.state!=='FAILED'){
+            throw new Error(`Only a failed or verified-unresolved hop retries — this one is ${latest.state.toLowerCase().replaceAll('_',' ')}.`);
+          }
+          const attempt=(latest.attempt??1)+1;
+          const job:ProviderJob=jobSchema.parse({id:randomUUID(),assignmentId:assignment.id,projectId:assignment.projectId,requestId:assignment.requestId,
+            provider:latest.provider,route:latest.route,state:'INTENT',evidence:'OFFICE_LOCAL',
+            detail:`Attempt ${attempt} minted — the office retries after attempt ${latest.attempt??1} settled ${latest.state.toLowerCase().replaceAll('_',' ')}.`,
+            externalId:'',externalUrl:'',outputs:[],revision:0,createdAt:now,updatedAt:now,dispatchedAt:'',settledAt:'',attempt});
+          changes.push({collection:'jobs',value:job});
+          changes.push({collection:'requests',value:{...request,revision:request.revision+1,updatedAt:now}});
+          reason=`Hop '${command.pipelineKey}' re-armed as attempt ${attempt}; the office launches it when its dependencies stand`;
           break;
         }
         case 'memory.finding.note': {
@@ -1666,8 +1720,8 @@ export class OfficeStore {
           if(command.type==='request.duplicate'){
             // A copy starts its own pipeline: the source's phase, spec, brief hop and decision belong
             // to the source's minted hops, and a copied LAUNCHED phase would skip the brief confirmation.
-            const {pipelineNotes:_notes,...rest}=request;
-            const copy:Request={...rest,id:randomUUID(),sourceRequestId:request.id,status:'DRAFT',blockers:[],revision:0,createdAt:now,updatedAt:now,experimentId:null,
+            const {pipelineNotes:_notes,revisionOf:_revisionOf,...rest}=request;
+            const copy:Request={...rest,id:randomUUID(),name:`${request.name} (copy)`,sourceRequestId:request.id,status:'DRAFT',blockers:[],revision:0,createdAt:now,updatedAt:now,experimentId:null,
               ...(request.pipeline?{pipeline:{kind:request.pipeline.kind,specHash:null,phase:'BRIEFING' as const,briefAssignmentId:null}}:{})};
             if(request.experimentId){const original=state.experiments.find(e=>e.id===request.experimentId)!;experimentId=randomUUID();copy.experimentId=experimentId;changes.push({collection:'experiments',value:{...original,id:experimentId,stage:'DRAFT',revision:0,createdAt:now,updatedAt:now}});}
             changes.push({collection:'requests',value:copy});reason='Copied objective into a new draft request';break;
@@ -1904,12 +1958,24 @@ export class OfficeStore {
           const output=command.outputFolder.trim();
           const outputStats=output&&isAbsolute(output)?safeStat(output):undefined;
           if(output&&!outputStats?.isDirectory())throw new Error('Choose an existing output folder, or leave it empty to use the managed output directory.');
+          // Withheld paths are relative prefixes (usually directories like `results/`). Normalize to
+          // the stored form — forward slashes, no leading ./, no trailing / — then validate each as
+          // an in-project relative path. Unlike a file selection they may name paths that do not
+          // exist yet; the refusal set is traversal, absolute paths and reserved namespaces, not
+          // existence.
+          const withheld: string[] = [];
+          for (const raw of command.withheldPaths ?? []) {
+            const normalized = raw.replace(/\\/g, '/').replace(/^\.(?:\/)+/, '').replace(/\/+$/, '');
+            const parsed = relativePath.safeParse(normalized);
+            if (!parsed.success) throw new Error(`Withheld path "${raw}" must be a relative path inside the project folder — no drive letters, leading slashes, or directory traversal.`);
+            if (!withheld.includes(parsed.data)) withheld.push(parsed.data);
+          }
           const root=folder?realpathSync(folder):'';
           // The project folder itself is the input scope: every regular file inside it is walked,
           // hashed and inventoried when a request snapshot is prepared. Per-file selection is gone;
           // the field stays on the record so history written under the old model still reads.
           const location:ProjectLocation={
-            id:existing?.id??randomUUID(),projectId:project.id,localFolder:root,inputPaths:[],
+            id:existing?.id??randomUUID(),projectId:project.id,localFolder:root,inputPaths:[],withheldPaths:withheld,
             outputFolder:output?realpathSync(output):'',
             // The source repository is recorded for provenance only. Its history is never uploaded.
             sourceRepository:root&&existsSync(resolve(root,'.git'))?resolve(root,'.git'):'',
@@ -2422,12 +2488,12 @@ export class OfficeStore {
       // be widened from the renderer.
       if(!assignment.pipelineKey){
         const open=(state.assignments??[]).filter(item=>item.requestId===assignment.requestId&&item.agentId===assignment.agentId)
-          .filter(item=>(state.jobs??[]).some(job=>job.assignmentId===item.id&&!['COMPLETED','FAILED','CANCEL_ACKNOWLEDGED'].includes(job.state)));
+          .filter(item=>!['COMPLETED','FAILED','CANCEL_ACKNOWLEDGED'].includes(latestJobFor(state.jobs,item.id)?.state??''));
         if(open.length)throw new Error('This agent already has work in flight for this request. Reconcile or cancel it first.');
       }
       const now=new Date().toISOString();
       const job=jobSchema.parse({...input.job,state:'INTENT',evidence:'OFFICE_LOCAL',detail:'Submission intent recorded before contacting the provider.',
-        externalId:'',externalUrl:'',outputs:[],revision:0,createdAt:now,updatedAt:now,dispatchedAt:'',settledAt:''});
+        externalId:'',externalUrl:'',outputs:[],revision:0,createdAt:now,updatedAt:now,dispatchedAt:'',settledAt:'',attempt:1});
       if(job.assignmentId!==assignment.id||job.requestId!==assignment.requestId||job.projectId!==assignment.projectId)throw new Error('Job does not match its assignment');
       const changes:Change[]=[{collection:'assignments',value:assignment},{collection:'jobs',value:job}];
       if(assignment.research)changes.push({collection:'attempts',value:{id:randomUUID(),branchId:assignment.research.branchId,
@@ -2494,7 +2560,7 @@ export class OfficeStore {
       const assignment=state.assignments?.find(a=>a.id===input.headAssignmentId);
       if(!assignment||assignment.requestId!==request.id||!assignment.pipelineKey)
         throw new Error('The decision binds only to a minted pipeline hop on this request.');
-      const job=state.jobs?.find(item=>item.assignmentId===assignment.id);
+      const job=latestJobFor(state.jobs,assignment.id);
       if(!job||job.state!=='COMPLETED')throw new Error('The terminal hop has not verified COMPLETED — nothing is ready to decide.');
       const now=new Date().toISOString();
       this.append(state,[{collection:'requests',value:{...request,pipeline:{...pipeline,phase:'AWAITING_DECISION' as const,pendingDecision:{specHash:input.specHash,headAssignmentId:input.headAssignmentId,headReceiptHash:input.headReceiptHash}},updatedAt:now}}],
@@ -2668,6 +2734,23 @@ export class OfficeStore {
       }
       this.append(state,changes,{kind:'PROVIDER_JOB_'+next.state,projectId:job.projectId,experimentId:null,
         reason:`${job.state} → ${next.state} (${input.evidence.toLowerCase().replaceAll('_',' ')}): ${input.detail}`},null);
+    });
+  }
+  /**
+   * Persists the latest verified observation note on a job — a bounded projection of the most
+   * recent observe, never a state change. The transition record stays the only claim of outcome;
+   * this field is what the interface reads for "what did the office last see here".
+   */
+  recordJobObservation(input:{jobId:string;expectedRevision:number;detail:string;at?:string}):AppState {
+    id.parse(input.jobId);
+    return this.transaction(()=>{
+      const state=this.readProjection();
+      const job=state.jobs?.find(item=>item.id===input.jobId);
+      if(!job)throw new Error('Job not found');
+      if(job.revision!==input.expectedRevision)throw new Error('This job changed since it was read. Reconcile before acting again.');
+      if(job.lastObservation===input.detail)return;
+      this.append(state,[{collection:'jobs',value:jobSchema.parse({...job,lastObservation:input.detail.slice(0,2000),revision:job.revision+1,updatedAt:input.at??new Date().toISOString()})}],
+        {kind:'JOB_OBSERVATION',projectId:job.projectId,experimentId:null,reason:`Observation recorded: ${input.detail.slice(0,400)}`},null);
     });
   }
   /**
@@ -2985,11 +3068,11 @@ export class OfficeStore {
       if(subject.agentId!==decision.subjectAgentId||reviewer.agentId!==decision.reviewerAgentId)throw new Error('Review agents do not match their assignments');
       if(decision.reviewerAgentId===decision.subjectAgentId)throw new Error('An agent cannot review its own work');
       if(subject.snapshotId!==decision.inputSnapshotId)throw new Error('A review must cite the exact input snapshot the work used');
-      const job=(state.jobs??[]).find(item=>item.assignmentId===subject.id);
+      const job=latestJobFor(state.jobs,subject.id);
       if(!job||job.state!=='COMPLETED')throw new Error('There is no completed provider outcome to review yet');
       const outputs=new Set(job.outputs.map(output=>output.sha256));
       if(!decision.outputHashes.length||decision.outputHashes.some(value=>!outputs.has(value)))throw new Error('A review must cite output hashes the provider actually returned');
-      const reviewerJob=state.jobs?.find(item=>item.assignmentId===reviewer.id);
+      const reviewerJob=latestJobFor(state.jobs,reviewer.id);
       if(!reviewerJob||reviewerJob.state!=='COMPLETED'||reviewerJob.evidence!=='PROVIDER_REPORTED'||!reviewerJob.externalId
         ||!reviewerJob.outputs.length||reviewerJob.outputs.some(output=>!output.stored))
         throw new Error('A review needs its own completed provider outcome and durably retrieved report.');
@@ -3124,10 +3207,15 @@ export class OfficeStore {
     this.verifyIntegrity();
     return {migrated:candidates.length,skipped:groups.size-candidates.length};
   }
-  /** Open jobs a restarted office must reconcile before it may act on their requests again. */
+  /** Open jobs a restarted office must reconcile before it may act on their requests again.
+   *  Only the latest attempt per assignment is open work — a superseded attempt was already
+   *  resolved by the retry that replaced it. */
   openJobs():ProviderJob[]{
     this.assertOpen();
-    return (this.readProjection().jobs??[]).filter(job=>!['COMPLETED','FAILED','CANCEL_ACKNOWLEDGED'].includes(job.state));
+    const jobs=this.readProjection().jobs??[];
+    const assignmentIds=[...new Set(jobs.map(job=>job.assignmentId))];
+    return assignmentIds.map(assignmentId=>latestJobFor(jobs,assignmentId))
+      .filter((job):job is ProviderJob=>job!==undefined&&!['COMPLETED','FAILED','CANCEL_ACKNOWLEDGED'].includes(job.state));
   }
   importWorkLogs(input:WorkLog[]):number {
     const entries=z.array(logSchema).max(20000).parse(input);let count=0;

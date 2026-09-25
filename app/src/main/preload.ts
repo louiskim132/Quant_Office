@@ -31,6 +31,7 @@ const api:OfficeAPI={
  migrateResearchFunctions:input=>request('office:research-migrate-functions',input),
  pipelineAction:input=>request('office:pipeline',input),
  searchMemory:input=>request('office:memory-search',input),memoryGraph:projectId=>request('office:memory-graph',projectId),
+ jobOutputPreview:input=>request('office:job-output-preview',input),retryPipelineHop:input=>request('office:pipeline-retry-hop',input),
  onChanged(callback){const handler=()=>callback();ipcRenderer.on('office:changed',handler);return()=>ipcRenderer.removeListener('office:changed',handler);},
 };
 contextBridge.exposeInMainWorld('office',api);

@@ -20,6 +20,7 @@ import { workspaceDirectory, recoverInterruptedRestore, prepareRestore, discardC
 import { resolveSelection, prepareInputSnapshot, reconstructSnapshot, verifySnapshotForTransfer } from './locations.js';
 import { AssignmentController } from './controller.js';
 import { mintPipelineBrief, mintPipelineRefine, mintPipelineRound, pipelineConfirmGate, type PipelineMintContext } from './pipeline-runner.js';
+import { latestJobFor } from '../core/jobs.js';
 import { PipelineService } from './pipeline.js';
 import { HoldoutCustody } from './holdout.js';
 import { OutputService } from './outputs.js';
@@ -241,6 +242,38 @@ const changed=()=>win?.webContents.send('office:changed');
  // automatic path uses runs here, so manual and automatic observation settle identically.
  await controller.observe(input.assignmentId);const state=await controller.advanceLocalChain(input.assignmentId);changed();return state;});});
  handle('office:request-cancel-job',async value=>{const input=assignmentInput.parse(value);return dispatch(async()=>{const state=await controller.cancel(input.assignmentId);changed();return state;});});
+ // Re-arm one failed or verified-unresolved pipeline hop: the command mints the next attempt on
+ // the same assignment, then the normal launch path dispatches it — same guards, same evidence.
+ handle('office:pipeline-retry-hop',async value=>{
+  const input=z.object({requestId:id,pipelineKey:z.string().trim().min(1).max(80),expectedRevision:z.number().int().nonnegative()}).strict().parse(value);
+  return dispatch(async()=>{
+   store.execute({type:'request.pipeline.retryHop',idempotencyKey:randomUUID(),requestId:input.requestId,pipelineKey:input.pipelineKey,expectedRevision:input.expectedRevision});
+   const snapshot=store.snapshot({history:false});
+   const assignment=(snapshot.assignments??[]).find(item=>item.requestId===input.requestId&&item.pipelineKey===input.pipelineKey);
+   const job=assignment?latestJobFor(snapshot.jobs,assignment.id):undefined;
+   if(assignment&&job?.state==='INTENT')
+   try{await controller.handoff(assignment.id);}
+   catch(error){store.recordJobEvents(job.id,[{externalId:`pipeline-retry-launch:${randomUUID()}`,cursor:'',kind:'STATUS',
+    text:`The hop was re-armed but its launch could not run: ${error instanceof Error?error.message:'unknown error'} The work stays prepared; launch it manually when the blocker clears.`,
+    occurredAt:new Date().toISOString(),receivedAt:new Date().toISOString(),evidence:'OFFICE_LOCAL'}]);}
+   changed();return store.snapshot({history:false});
+  });
+ });
+ // A bounded, read-only preview of one recorded job output — the brief/report text a decision
+ // binds to, fetched through the content-addressed object store and re-hashed before serving.
+ handle('office:job-output-preview',async value=>{
+  const input=z.object({jobId:id,path:z.string().min(1).max(1000)}).strict().parse(value);
+  const job=(store.snapshot({history:false}).jobs??[]).find(item=>item.id===input.jobId);
+  if(!job)throw new Error('Job not found.');
+  const output=job.outputs.find(item=>item.path===input.path);
+  if(!output)throw new Error('That output is not recorded on this job.');
+  if(!output.stored)throw new Error('The output was reported but its bytes were never durably stored — nothing to preview.');
+  const workspace=workspaceDirectory(app.getPath('userData'));
+  const bytes=await readFile(path.join(workspace,'objects',output.sha256.slice(0,2),output.sha256));
+  if(createHash('sha256').update(bytes).digest('hex')!==output.sha256)throw new Error('Stored output object integrity failure — the bytes do not match the recorded identity.');
+  const PREVIEW_BYTES=64*1024;
+  return {path:output.path,sha256:output.sha256,bytes:output.bytes,text:bytes.subarray(0,PREVIEW_BYTES).toString('utf8'),truncated:bytes.byteLength>PREVIEW_BYTES};
+ });
  handle('office:request-discard-preparation',async value=>{const input=assignmentInput.parse(value);return dispatch(async()=>{const state=controller.discardPreparation(input.assignmentId);changed();return state;});});
  handle('office:request-link',value=>{
   const input=z.object({assignmentId:id,externalId:z.string().trim().min(1).max(200),externalUrl:z.string().trim().max(2000)}).strict().parse(value);
@@ -282,7 +315,7 @@ const changed=()=>win?.webContents.send('office:changed');
  // schema-validated at the boundary with a fresh summary of the post-retire record.
  handle('office:local-session-archive',value=>{const assignmentId=id.parse(value);return dispatch(async()=>{
   const {state,archive}=await controller.retireLocal(assignmentId);changed();
-  const job=state.jobs?.find(item=>item.assignmentId===assignmentId);
+  const job=latestJobFor(state.jobs,assignmentId);
   const workspace=workspaceDirectory(app.getPath('userData'));
   const summary=job?store.localSessionSummary(job.id,record=>path.join(workspace,record.layout==='PROJECT_WORKTREE'?path.join('local-repos',record.projectId,WORKTREES_DIR):'local-sessions',record.archiveRelativePath??record.storageRelativePath)):null;
   return {state,archive:localArchiveResultSchema.parse({...archive,summary})};});});
@@ -318,8 +351,11 @@ const changed=()=>win?.webContents.send('office:changed');
   // serializer like every other request action; every other command keeps the plain sync path.
   const type=(value as {type?:string}|null|undefined)?.type;
   const requestId=(value as {requestId?:string}|null|undefined)?.requestId;
-  const isPipeline=type==='request.pipeline.note'||type==='request.pipeline.confirm'
-    ||(type==='request.start'&&!!requestId&&!!store.snapshot({history:false}).requests?.find(r=>r.id===requestId)?.pipeline);
+  const hasPipeline=!!requestId&&!!store.snapshot({history:false}).requests?.find(r=>r.id===requestId)?.pipeline;
+  const isPipeline=type==='request.pipeline.note'||type==='request.pipeline.confirm'||type==='request.pipeline.decide'||type==='request.pipeline.retryHop'
+    ||(type==='request.start'&&hasPipeline)
+    // A pipeline cancel cascades to every open hop before the request row flips.
+    ||(type==='request.cancel'&&hasPipeline);
   if(!isPipeline){const state=store.execute(value);changed();return state;}
   return dispatch(async()=>{
    if(type==='request.pipeline.confirm'){
@@ -335,10 +371,14 @@ const changed=()=>win?.webContents.send('office:changed');
      snapshotFor:req=>prepareInputSnapshot({store,stagingRoot:path.join(workspace,'snapshots'),objectRoot:workspace,
       projectId:req.projectId,requestId:req.id,requestRevision:req.revision,objective:req.objective}),
      prepare:input=>controller.prepare(input)};
-    if(type==='request.start'&&request.status==='READY'&&!request.blockers.length){
+    if(type==='request.cancel'){
+     // The durable cancel is already recorded; now every open hop gets its own recorded outcome —
+     // cooperative sentinel and office-side kill where the office owns the process.
+     await controller.cancelPipelineJobs(requestId!);
+    }else if(type==='request.start'&&request.status==='READY'&&!request.blockers.length){
      const minted=await mintPipelineBrief(ctx,request);
      if(!minted.minted)throw new Error(`The request is ready but its director brief could not be minted: ${minted.detail}`);
-     const briefJob=(store.snapshot({history:false}).jobs??[]).find(j=>j.assignmentId===minted.assignment!.id);
+     const briefJob=latestJobFor(store.snapshot({history:false}).jobs,minted.assignment!.id);
      // A re-start with the hop already launched is a no-op — only an INTENT job can hand off.
      if(briefJob?.state==='INTENT')
      try{await controller.handoff(minted.assignment.id);}
@@ -352,6 +392,34 @@ const changed=()=>win?.webContents.send('office:changed');
     }else if(type==='request.pipeline.confirm'){
      await mintPipelineRound(ctx,request);
      await controller.reconcileLocalChain();
+    }else if(type==='request.pipeline.retryHop'){
+     // The command minted the next attempt on the same assignment; launch it like any INTENT hop.
+     const retried=(state.assignments??[]).find(item=>item.requestId===request.id&&item.pipelineKey===(value as {pipelineKey?:string}).pipelineKey);
+     const retriedJob=retried?latestJobFor(store.snapshot({history:false}).jobs,retried.id):undefined;
+     if(retried&&retriedJob?.state==='INTENT')
+     try{await controller.handoff(retried.id);}
+     catch(error){store.recordJobEvents(retriedJob.id,[{externalId:`pipeline-retry-launch:${randomUUID()}`,cursor:'',kind:'STATUS',
+      text:`The hop was re-armed but its launch could not run: ${error instanceof Error?error.message:'unknown error'} The work stays prepared; launch it manually when the blocker clears.`,
+      occurredAt:new Date().toISOString(),receivedAt:new Date().toISOString(),evidence:'OFFICE_LOCAL'}]);}
+    }else if(type==='request.pipeline.decide'&&(value as {decision?:string}).decision==='REVISE'){
+     // The decision transaction minted the linked revision request; starting it runs the same
+     // brief-mint path a user-initiated start would, so a REVISE always ends in a live round.
+     const revision=(state.requests??[]).filter(r=>r.revisionOf?.requestId===request.id)
+       .sort((a,b)=>(b.revisionOf?.round??0)-(a.revisionOf?.round??0))[0];
+     if(revision&&revision.status==='DRAFT'){
+      const started=store.execute({type:'request.start',idempotencyKey:randomUUID(),requestId:revision.id,expectedRevision:revision.revision});
+      const fresh=started.requests?.find(r=>r.id===revision.id);
+      if(fresh?.status==='READY'&&!fresh.blockers.length){
+       const minted=await mintPipelineBrief(ctx,fresh);
+       if(!minted.minted)throw new Error(`The revision request was recorded but its director brief could not be minted: ${minted.detail}`);
+       const briefJob=latestJobFor(store.snapshot({history:false}).jobs,minted.assignment!.id);
+       if(briefJob?.state==='INTENT')
+       try{await controller.handoff(minted.assignment.id);}
+       catch(error){if(briefJob)store.recordJobEvents(briefJob.id,[{externalId:`pipeline-brief-launch:${randomUUID()}`,cursor:'',kind:'STATUS',
+        text:`The revision's director brief hop was minted but its automatic launch could not run: ${error instanceof Error?error.message:'unknown error'} The work stays prepared; launch it manually when the blocker clears.`,
+        occurredAt:new Date().toISOString(),receivedAt:new Date().toISOString(),evidence:'OFFICE_LOCAL'}]);}
+      }
+     }
     }
     state=store.snapshot({history:false});
    }

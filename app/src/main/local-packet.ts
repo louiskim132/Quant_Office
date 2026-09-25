@@ -370,7 +370,7 @@ export function prepareLocalPacket(input: PrepareLocalPacketInput): PreparedLoca
  * and re-hashed under a per-file and aggregate byte cap. Verified output bytes are returned beside
  * the parsed result so the caller stores them without reopening the file.
  */
-export function readLocalResult(dir: string, binding: LocalSessionRecord, io: LocalFileIO): ReaderResult<VerifiedLocalResult> {
+export function readLocalResult(dir: string, binding: LocalSessionRecord, io: LocalFileIO, opts?: { allowReceiptHash?: string }): ReaderResult<VerifiedLocalResult> {
   let readyFile: VerifiedLocalFile;
   try {
     readyFile = io.read(dir, PACKET_READY_FILE, MAX_READY_BYTES);
@@ -405,8 +405,11 @@ export function readLocalResult(dir: string, binding: LocalSessionRecord, io: Lo
   const mismatches = (['jobId', 'assignmentId', 'attemptId', 'packetHash'] as const).filter(key => result[key] !== binding[key]);
   if (mismatches.length)
     return defect(`${RESULT_FILE} cannot be trusted: it is bound to ${mismatches.map(key => `${key} ${JSON.stringify(result[key])}`).join(', ')} — this attempt expects ${mismatches.map(key => `${key} ${JSON.stringify(binding[key])}`).join(', ')}; a receipt for another attempt is refused even when its output hashes match.`);
+  // The replay gate opens only for the exact recorded receipt hash — the stranded-transition
+  // repair re-reads the receipt it already verified; every other repeat or rewind is refused.
+  const receiptHash = createHash('sha256').update(resultFile.bytes).digest('hex');
   const priorSequence = binding.lastReceipt?.sequence ?? 0;
-  if (result.sequence <= priorSequence)
+  if (result.sequence <= priorSequence && opts?.allowReceiptHash !== receiptHash)
     return defect(`${RESULT_FILE} cannot be trusted: it repeats or rewinds sequence ${result.sequence} — the last verified receipt for this attempt was sequence ${priorSequence} (hash ${binding.lastReceipt!.hash}); a receipt must advance.`);
   const outputs: VerifiedLocalResult['outputs'] = [];
   let total = 0;
@@ -426,7 +429,7 @@ export function readLocalResult(dir: string, binding: LocalSessionRecord, io: Lo
       return defect(`${RESULT_FILE} declares outputs totalling more than the ${MAX_TOTAL}-byte aggregate limit.`);
     outputs.push({ path: output.path, sha256: output.sha256, bytes: output.bytes, data: file.bytes });
   }
-  return { value: { result, receiptHash: createHash('sha256').update(resultFile.bytes).digest('hex'), outputs } };
+  return { value: { result, receiptHash, outputs } };
 }
 
 /**

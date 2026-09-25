@@ -178,7 +178,7 @@ export class LocalMailboxAdapter implements ProviderAdapter {
     };
   }
 
-  async observe(job: ProviderJob, local?: LocalSessionRecord | null): Promise<ObserveResult> {
+  async observe(job: ProviderJob, local?: LocalSessionRecord | null, replay?: { receiptHash: string }): Promise<ObserveResult> {
     const unknown = (detail: string): ObserveResult => ({ state: 'UNKNOWN', detail, provenance: 'OFFICE_LOCAL' });
     // A persisted binding names the packet directory by its storage path; a legacy job only has
     // the recorded directory name. Neither is trusted as anything but a location.
@@ -202,7 +202,7 @@ export class LocalMailboxAdapter implements ProviderAdapter {
       if ('defect' in ack) return attach(unknown(ack.defect));
       // The v2 reader proves the ready marker, the attempt binding, the sequence and every
       // declared output byte before anything is reported. A v1-shaped receipt here is a defect.
-      const read = readLocalResult(dir, local, this.io);
+      const read = readLocalResult(dir, local, this.io, replay ? { allowReceiptHash: replay.receiptHash } : undefined);
       if ('defect' in read) return attach(unknown(read.defect));
       const result = read.value.result;
       const observed: ObserveResult & { applied?: AppliedReport } = {

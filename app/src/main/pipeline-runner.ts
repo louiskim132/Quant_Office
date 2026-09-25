@@ -1,6 +1,7 @@
 import type { Agent, AppState, Assignment, InputSnapshot, Request } from '../shared/types.js';
 import type { OfficeStore } from '../core/store.js';
 import { planCommRoundMint, planRefineHop, type MintEntry } from './round-executor.js';
+import { latestJobFor } from '../core/jobs.js';
 
 /**
  * The pipeline mint (inter-agent pipeline): the office-side orchestration that turns a pipeline
@@ -27,7 +28,7 @@ export interface PipelineMintContext {
   prepare: (input: {
     requestId: string; agentId: string; snapshotId: string;
     dependsOn?: string[]; toolProfile?: MintEntry['toolProfile'];
-    pipelineKey?: string; objective?: string;
+    pipelineKey?: string; inputScope?: MintEntry['inputScope']; objective?: string;
   }) => { state: AppState; assignment: Assignment };
 }
 
@@ -73,7 +74,7 @@ export async function mintPipelineBrief(ctx: PipelineMintContext, request: Reque
   const snapshot = await ctx.snapshotFor(request, entry);
   const { assignment } = ctx.prepare({
     requestId: request.id, agentId: entry.agentId, snapshotId: snapshot.id,
-    toolProfile: entry.toolProfile, pipelineKey: entry.key, objective: entry.objectiveText,
+    toolProfile: entry.toolProfile, pipelineKey: entry.key, inputScope: entry.inputScope, objective: entry.objectiveText,
   });
   const fresh = freshRequest(ctx.store, request.id);
   ctx.store.bindPipelineBrief({ requestId: request.id, expectedRevision: fresh.revision, briefAssignmentId: assignment.id, specHash: mint.specHash });
@@ -95,7 +96,7 @@ export async function mintPipelineRefine(ctx: PipelineMintContext, request: Requ
   const snapshot = await ctx.snapshotFor(request, entry);
   const { assignment } = ctx.prepare({
     requestId: request.id, agentId: entry.agentId, snapshotId: snapshot.id,
-    dependsOn: [prior.id], toolProfile: entry.toolProfile, pipelineKey: entry.key, objective: entry.objectiveText,
+    dependsOn: [prior.id], toolProfile: entry.toolProfile, pipelineKey: entry.key, inputScope: entry.inputScope, objective: entry.objectiveText,
   });
   const fresh = freshRequest(ctx.store, request.id);
   ctx.store.bindPipelineBrief({ requestId: request.id, expectedRevision: fresh.revision, briefAssignmentId: assignment.id });
@@ -125,7 +126,7 @@ export async function mintPipelineRound(ctx: PipelineMintContext, request: Reque
     const { assignment } = ctx.prepare({
       requestId: request.id, agentId: entry.agentId, snapshotId: snapshot.id,
       dependsOn: entry.dependsOnKeys.map(key => keyToAssignment.get(key)!),
-      toolProfile: entry.toolProfile, pipelineKey: entry.key, objective: entry.objectiveText,
+      toolProfile: entry.toolProfile, pipelineKey: entry.key, inputScope: entry.inputScope, objective: entry.objectiveText,
     });
     keyToAssignment.set(entry.key, assignment.id);
     minted++;
@@ -152,13 +153,13 @@ export function settlePipelineDecision(ctx: { store: OfficeStore }, request: Req
   const hops = (state.assignments ?? []).filter(item => item.requestId === request.id && item.pipelineKey);
   if (!hops.length) return { settled: false, reason: 'No pipeline hops are minted for this request.' };
   const jobs = state.jobs ?? [];
-  const open = hops.filter(hop => jobs.find(item => item.assignmentId === hop.id)?.state !== 'COMPLETED');
+  const open = hops.filter(hop => latestJobFor(jobs, hop.id)?.state !== 'COMPLETED');
   if (open.length)
     return { settled: false, reason: `${open.length} minted ${open.length === 1 ? 'hop is' : 'hops are'} not COMPLETED (${open.map(hop => hop.pipelineKey).join(', ')}) — the seal barrier holds until every hop verifies.` };
   const headKey = hops.some(hop => hop.pipelineKey === 'user-gate') ? 'user-gate' : pipeline.kind === 'RESULT_ANALYSIS' ? 'analysis-report' : 'verify';
   const head = hops.find(hop => hop.pipelineKey === headKey);
   if (!head) return { settled: false, reason: `No terminal hop '${headKey}' is minted for this request — the round has no head to settle on.` };
-  const headJob = jobs.find(item => item.assignmentId === head.id)!;
+  const headJob = latestJobFor(jobs, head.id)!;
   const headReceiptHash = ctx.store.localSessionForJob(headJob.id)?.lastReceipt?.hash;
   if (!headReceiptHash)
     return { settled: false, reason: `The terminal hop '${headKey}' has no verified receipt on record — nothing binds the decision.` };
