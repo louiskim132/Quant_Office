@@ -40,6 +40,9 @@ export interface RequestPipeline {
   specHash: string | null;
   phase: 'BRIEFING' | 'LAUNCHED' | 'AWAITING_DECISION' | 'DECIDED';
   briefAssignmentId: string | null;
+  /** A soft, non-blocking heads-up recorded at start (for example outcome-looking files visible to
+   *  a planning round with no withheld set). It never gates the request — the user decides. */
+  notice?: string;
   pendingDecision?: PipelinePendingDecision;
   decision?: PipelineDecision;
 }
@@ -49,7 +52,9 @@ export type WorkMode = 'SINGLE' | 'GROUP' | 'TEAM';
 export interface Request { migratedFromTaskId?:string; teamId?:string; roleSlots?:RoleSlot[]; id:string; projectId:string; experimentId:string|null; name:string; objective:string; workType:WorkType; mode:WorkMode; leadAgentId:string|null; participantIds:string[]; acceptanceCriteria:string; revision:number; status:'DRAFT'|'READY'|'CANCELED'; removedAt?:string; blockers:{code:string;message:string;action:string}[]; delegation:boolean; createdAt:string; updatedAt:string; sourceRequestId?:string;
  /** Present on PLANNING/RESULT_ANALYSIS requests — the comm-round orchestration record. */
  pipeline?:RequestPipeline; /** Bounded user→director notes recorded while briefing. */
- pipelineNotes?:PipelineNote[]; }
+ pipelineNotes?:PipelineNote[];
+ /** Set on a request minted by a REVISE decision: which request it revises, when, and its ordinal. */
+ revisionOf?: { requestId: string; decisionAt: string; round: number }; }
 export interface Project { localFolder?:string; cloudWorkspace?:string; id: string; name: string; mandate: string; createdAt: string; updatedAt: string; archived: boolean; removedAt?: string; budgetCents: number; }
 export interface Experiment { id: string; projectId: string; name: string; hypothesis: string; stage: Stage; revision: number; createdAt: string; updatedAt: string; contract: ResearchContract; }
 export interface ResearchContract { objective: string; dataPolicy: string; modelFamilies: string; evaluation: string; economics: string; protectedRegions: string; requiredChecks: string; limitations: string; }
@@ -120,6 +125,9 @@ export interface ProviderReadiness { provider: Provider; connectionId: string; i
 /** Where a project's inputs come from and where its outputs go. Versioned; edits carry an expected revision. */
 export interface ProjectLocation {
   id: string; projectId: string; localFolder: string; inputPaths: string[]; outputFolder: string;
+  /** Project-relative path prefixes withheld from BLIND-scope planning packets (e.g. `results/`).
+   *  Hash-only entries in the packet manifest keep the withholding itself on the record. */
+  withheldPaths: string[];
   sourceRepository: string; snapshotRoute: 'SELECTED_FILES_GIT_SNAPSHOT' | 'PROJECT_FOLDER_SNAPSHOT';
   providerTarget: { provider: Provider; host: 'ANTHROPIC_MANAGED' | 'LOCAL_MACHINE'; selection: 'PROVIDER_DEFAULT'; environmentId: string; resolved: boolean };
   legacyNote: string; revision: number; createdAt: string; updatedAt: string;
@@ -218,6 +226,9 @@ export interface Assignment {
   toolProfile?: import('./tool-profile').ToolProfile;
   /** The comm-round spec entry this assignment was minted for — idempotent mints key on it. */
   pipelineKey?: string;
+  /** BLIND packets receive the project's withheld paths as hash-only manifest entries; FULL (the
+   *  default, and every record frozen before this field existed) receives the staged files. */
+  inputScope?: 'BLIND' | 'FULL';
   id: string; projectId: string; requestId: string; requestRevision: number; agentId: string; agentRevision: number;
   connectionId: string; capabilitySnapshotId: string; snapshotId: string; route: DispatchRoute;
   requestedModel: string; resolvedModel: string; requestedEffort: Effort; appliedEffort: Effort | 'UNVERIFIED';
@@ -242,6 +253,12 @@ export interface ProviderJob {
   id: string; assignmentId: string; projectId: string; requestId: string; provider: Provider; route: DispatchRoute;
   state: JobState; evidence: JobEvidence; detail: string; externalId: string; externalUrl: string;
   outputs: JobOutput[]; revision: number; createdAt: string; updatedAt: string; dispatchedAt: string; settledAt: string;
+  /** Which run of this assignment this job record is — absent on records written before retries
+   *  existed; treat absent as attempt 1. One assignment may carry several attempts. */
+  attempt?: number;
+  /** The last thing an observation verified about this job, bounded. Never used to claim a state
+   *  the transition record did not settle. */
+  lastObservation?: string;
 }
 /** One visible provider event. Hidden reasoning is never imported. */
 export interface JobEvent {
@@ -318,6 +335,8 @@ export type Command =
  | { type:'request.update';idempotencyKey:string;requestId:string;expectedRevision:number;objective:string;leadAgentId:string|null;participantIds:string[];acceptanceCriteria:string }
  | { type: 'request.start' | 'request.cancel' | 'request.duplicate' | 'request.pipeline.confirm'; idempotencyKey:string; requestId:string; expectedRevision:number }
  | { type: 'request.pipeline.note'; idempotencyKey:string; requestId:string; expectedRevision:number; text:string }
+ /** Re-arm one pipeline hop after a settled or verified-unresolved attempt: mints the next attempt job on the same assignment. */
+ | { type: 'request.pipeline.retryHop'; idempotencyKey:string; requestId:string; expectedRevision:number; pipelineKey:string }
  /** The user's decision on a finished round — carries the hashes the UI displayed so a stale approval is refused. */
  | { type: 'request.pipeline.decide'; idempotencyKey:string; requestId:string; expectedRevision:number; decision:'APPROVE'|'REVISE'|'REJECT'; note?:string; expectedSpecHash:string; expectedReceiptHash:string }
  /** A user-authored finding in the office memory ledger — bounded, evidence-referenced, append-only. */
@@ -341,7 +360,7 @@ export type Command =
  | { type: 'research.createStageAttempt'; idempotencyKey: string; branchId: string; stage: ResearchStage; assignmentId: string | null; trialId: string | null; summary: string }
  | { type: 'research.amendBranch'; idempotencyKey: string; branchId: string; expectedRevision: number; name: string; reason: string }
  | { type: 'research.settleBranch'; idempotencyKey: string; branchId: string; expectedRevision: number; outcome: ScientificOutcome; reason: string }
- | { type: 'location.save'; idempotencyKey: string; projectId: string; expectedRevision: number; localFolder: string; inputPaths: string[]; outputFolder: string }
+ | { type: 'location.save'; idempotencyKey: string; projectId: string; expectedRevision: number; localFolder: string; inputPaths: string[]; outputFolder: string; withheldPaths?: string[] }
  | { type: 'experiment.create'; idempotencyKey: string; projectId: string; name: string; hypothesis: string }
  | { type: 'contract.save'; idempotencyKey: string; experimentId: string; expectedRevision: number; contract: ResearchContract }
  | { type: 'contract.submit'; idempotencyKey: string; experimentId: string; expectedRevision: number }
@@ -428,6 +447,10 @@ export interface OfficeAPI {
   * holdout. The renderer names the action; every check is re-made inside the store writes it feeds.
   */
  pipelineAction(input: import('./pipeline').PipelineAction): Promise<{ state: AppState; detail: string; assignments?: Assignment[]; reservation?: import('./holdout').HoldoutReservation }>;
+ /** Read a bounded, read-only preview of one recorded job output (e.g. a brief or report before deciding). */
+ jobOutputPreview(input: { jobId: string; path: string }): Promise<{ path: string; sha256: string; bytes: number; text: string; truncated: boolean }>;
+ /** Re-arm one failed or verified-unresolved pipeline hop and dispatch its next attempt. */
+ retryPipelineHop(input: { requestId: string; pipelineKey: string; expectedRevision: number }): Promise<AppState>;
  searchMemory(input: { projectId: string; text: string; limit?: number }): Promise<{ findings: MemoryFinding[] }>;
  memoryGraph(projectId: string): Promise<MemoryGraph>;
  onChanged(callback: () => void): () => void;

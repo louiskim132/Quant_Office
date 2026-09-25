@@ -15,6 +15,7 @@ import { CANCEL_ACK_FILE, PACKET_FILE, RESULT_FILE, RESULT_STATES, prepareLocalP
 import { discover, type Discovery } from './local-provider-records.js';
 import { mapToolFlags, providerAttachesMcp, type ToolFlagResult } from './tool-flags.js';
 import { subscriptionEnvironment } from './subscriptions.js';
+import { NotLaunchedError } from './controller.js';
 import type { ObserveResult, ProviderAdapter, SubmitContext, SubmitResult } from './controller.js';
 
 /** The recorded source of every observation this adapter produces. */
@@ -245,12 +246,25 @@ export class LocalCliExecAdapter implements ProviderAdapter {
   async submit(context: SubmitContext): Promise<SubmitResult> {
     const binding = context.localSession;
     if (!binding)
-      throw new Error('A LOCAL_CLI_EXEC submission requires a persisted local-session binding — the exec route never writes unbound packets.');
+      throw new NotLaunchedError('A LOCAL_CLI_EXEC submission requires a persisted local-session binding — the exec route never writes unbound packets.');
     if (binding.packetVersion !== 2 || binding.layout !== 'FLAT_PACKET')
-      throw new Error(`A LOCAL_CLI_EXEC submission requires a flat office-local-session@2 binding; this record describes ${binding.layout} packetVersion ${binding.packetVersion}.`);
+      throw new NotLaunchedError(`A LOCAL_CLI_EXEC submission requires a flat office-local-session@2 binding; this record describes ${binding.layout} packetVersion ${binding.packetVersion}.`);
     const dir = path.resolve(this.sessionsRoot(), binding.storageRelativePath);
-    const prepared = prepareLocalPacket({ dir, context, binding, io: this.io, now: this.now(), memoryDigest: context.memoryDigest });
-    const { note: surfaceNote, profile: launchProfile } = await this.prepareToolSurface(binding, dir);
+    // Everything before the spawn is a NotLaunchedError: a packet that was never written or a
+    // probe that refused means no child could have come into existence — there is no provider
+    // ambiguity to report, and the controller records that honestly rather than UNKNOWN.
+    let prepared: ReturnType<typeof prepareLocalPacket>;
+    try {
+      prepared = prepareLocalPacket({ dir, context, binding, io: this.io, now: this.now(), memoryDigest: context.memoryDigest });
+    } catch (error) {
+      throw new NotLaunchedError(error instanceof Error ? error.message : 'The session packet could not be written.');
+    }
+    let surfaceNote: string, launchProfile: ToolProfile | undefined;
+    try {
+      ({ note: surfaceNote, profile: launchProfile } = await this.prepareToolSurface(binding, dir));
+    } catch (error) {
+      throw new NotLaunchedError(error instanceof Error ? error.message : 'The tool-surface probe refused the launch.');
+    }
     // The evidence drop-box watcher attaches before the provider spawn so a watch that cannot
     // start refuses the launch cleanly instead of leaving a declared surface silently deaf.
     let queryWatcher: FSWatcher | null = null;
@@ -271,12 +285,18 @@ export class LocalCliExecAdapter implements ProviderAdapter {
         });
         queryWatcher.unref?.();
       } catch (error) {
-        throw new Error(`The declared evidence surface drop-box could not be watched: ${error instanceof Error ? error.message : String(error)}. The session was not launched.`);
+        throw new NotLaunchedError(`The declared evidence surface drop-box could not be watched: ${error instanceof Error ? error.message : String(error)}. The session was not launched.`);
       }
     }
     const prompt = `${context.payload.text}\n\n${PROMPT_SUFFIX}`;
     const command = this.providerCommand(binding.provider, prompt, context.payload.model, context.payload.effort, launchProfile);
-    const executable = this.executable(binding.provider);
+    let executable: string;
+    try {
+      executable = this.executable(binding.provider);
+    } catch (error) {
+      try { queryWatcher?.close(); } catch { /* the launch refusal is the record that matters */ }
+      throw new NotLaunchedError(error instanceof Error ? error.message : `The ${binding.provider} CLI executable could not be resolved.`);
+    }
     let child: CliChild;
     try {
       child = this.spawnChild(executable, command.args, {
@@ -450,7 +470,7 @@ export class LocalCliExecAdapter implements ProviderAdapter {
     }
   }
 
-  async observe(job: ProviderJob, local?: LocalSessionRecord | null): Promise<ObserveResult> {
+  async observe(job: ProviderJob, local?: LocalSessionRecord | null, replay?: { receiptHash: string }): Promise<ObserveResult> {
     const unknown = (detail: string): ObserveResult => ({ state: 'UNKNOWN', detail, provenance: 'OFFICE_LOCAL' });
     if (!local)
       return unknown('A LOCAL_CLI_EXEC observation requires the persisted local-session binding; without it the office cannot name the packet directory.');
@@ -463,9 +483,13 @@ export class LocalCliExecAdapter implements ProviderAdapter {
     // provider-side grouping, independent of receipt state. OBSERVED pins; nothing is inferred
     // from absence and a discovery failure is not a defect.
     const grouping = local.groupingStatus !== 'OBSERVED' ? this.discoverGrouping(dir, local) : undefined;
-    const attach = (result: ObserveResult): ObserveResult => ({
+    // A terminal observation never carries the liveness bracket — 'still running' beside a
+    // COMPLETED or FAILED outcome is a stale claim. The dropped-lines note still rides alone.
+    const attach = (result: ObserveResult, terminal = false): ObserveResult => ({
       ...result,
-      detail: `${result.detail} [${this.liveness(job, record)}${record?.dropped ? `; ${record.dropped} earlier output lines were dropped to bound memory` : ''}]`,
+      detail: terminal
+        ? `${result.detail}${record?.dropped ? ` [${record.dropped} earlier output lines were dropped to bound memory]` : ''}`
+        : `${result.detail} [${this.liveness(job, record)}${record?.dropped ? `; ${record.dropped} earlier output lines were dropped to bound memory` : ''}]`,
       ...(events?.length ? { events } : {}),
       ...(grouping ? { providerGrouping: grouping } : {}),
     });
@@ -476,7 +500,7 @@ export class LocalCliExecAdapter implements ProviderAdapter {
     // The outcome is terminal here, so the spawn's watcher and timers are released with it.
     if (record?.officeKill) {
       this.dispose(job.id);
-      return attach({ state: 'FAILED', detail: `office terminated the spawned process (${record.officeKill}); a killed run cannot be trusted to write a receipt`, provenance: 'OFFICE_LOCAL' });
+      return attach({ state: 'FAILED', detail: `office terminated the spawned process (${record.officeKill}); a killed run cannot be trusted to write a receipt`, provenance: 'OFFICE_LOCAL' }, true);
     }
     // A cancel acknowledgement is a control file: it is validated before the receipt is read, and
     // a malformed or misbound one makes the whole observation UNKNOWN — a bad control file is
@@ -485,12 +509,20 @@ export class LocalCliExecAdapter implements ProviderAdapter {
     if ('defect' in ack) return attach(unknown(ack.defect));
     // The v2 reader proves the ready marker, the attempt binding, the sequence and every declared
     // output byte before anything is reported — the same reader the mailbox runs.
-    const read = readLocalResult(dir, local, this.io);
+    const read = readLocalResult(dir, local, this.io, replay ? { allowReceiptHash: replay.receiptHash } : undefined);
     if ('defect' in read) {
-      const selfExit = record?.exit && !record.officeKill
-        ? ` The spawned process exited on its own (code ${record.exit.code}${record.exit.signal ? `, signal ${record.exit.signal}` : ''}) without a trusted receipt — a self-exit is not a failure claim.`
-        : '';
-      return attach(unknown(`${read.defect}${selfExit}`));
+      if (record?.exit && !record.officeKill) {
+        // A self-exited process is not a failure claim — but the provider's own terminal record
+        // in its output is. When the CLI reported is_error, that is what the job is.
+        const terminalError = this.providerTerminalError(record);
+        if (terminalError) {
+          this.dispose(job.id);
+          return attach({ state: 'FAILED', detail: terminalError.detail, provenance: 'PROVIDER_REPORTED',
+            ...(terminalError.transient ? { transientProviderError: true } : {}) }, true);
+        }
+        return attach(unknown(`${read.defect} The spawned process exited on its own (code ${record.exit.code}${record.exit.signal ? `, signal ${record.exit.signal}` : ''}) without a trusted receipt — no receipt, no provider error record; a self-exit is not a failure claim.`));
+      }
+      return attach(unknown(read.defect));
     }
     const result = read.value.result;
     const observed: ObserveResult = {
@@ -515,7 +547,36 @@ export class LocalCliExecAdapter implements ProviderAdapter {
     // A verified terminal receipt or a cooperative cancel acknowledgement ends the spawn's watch:
     // nothing this watcher could still report would change the recorded outcome.
     if (result.state === 'COMPLETED' || result.state === 'FAILED' || ack.ack) this.dispose(job.id);
-    return attach(observed);
+    return attach(observed, result.state === 'COMPLETED' || result.state === 'FAILED');
+  }
+
+  /**
+   * The provider's own terminal record in the drained output. Only claude's `--output-format
+   * json` stream documents one — the last `{"type":"result"}` line — so codex/devin output is
+   * never classified here. `is_error: true` is a provider-reported failure the office reports
+   * verbatim; a success record or no record is not a failure claim. The single documented
+   * transient signature — `terminal_reason` 'api_error' over an OAuth-refresh failure text —
+   * flags transientProviderError for the office's one-shot retry; nothing else qualifies.
+   */
+  private providerTerminalError(record: SpawnRecord): { detail: string; transient: boolean } | undefined {
+    if (record.launch.provider !== 'claude') return undefined;
+    for (let index = record.lines.length - 1; index >= 0; index--) {
+      const line = record.lines[index];
+      if (line.stream !== 'stdout') continue;
+      let parsed: unknown;
+      try { parsed = JSON.parse(line.text); } catch { continue; }
+      if (!parsed || typeof parsed !== 'object' || (parsed as { type?: unknown }).type !== 'result') continue;
+      const terminal = parsed as { is_error?: unknown; result?: unknown; errors?: unknown; terminal_reason?: unknown };
+      if (terminal.is_error !== true) return undefined;
+      const text = typeof terminal.result === 'string' && terminal.result
+        ? terminal.result
+        : Array.isArray(terminal.errors) ? terminal.errors.filter(item => typeof item === 'string').join(' ') : '';
+      return {
+        detail: `the provider reported a terminal error${text ? `: ${text.slice(0, 3900)}` : ''}`,
+        transient: terminal.terminal_reason === 'api_error' && /failed to refresh oauth token/i.test(text),
+      };
+    }
+    return undefined;
   }
 
   /** The same read-only provider-record discovery the mailbox runs. */

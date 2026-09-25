@@ -26,3 +26,8 @@
 .project-row-panel .path-text{color:var(--muted);margin-top:4px}
 .project-row-panel .field{margin:0}
 .project-row-panel .notice{margin:0}
+.withheld-editor{display:grid;gap:8px}
+.withheld-editor>p{margin:0}
+.withheld-row{display:flex;align-items:center;gap:12px;padding:7px 10px;border:1px solid var(--border);border-radius:6px}
+.withheld-row .path-text{flex:1;min-width:0;margin:0;overflow-wrap:anywhere}
+.withheld-row .text-button{flex-shrink:0;padding:0}

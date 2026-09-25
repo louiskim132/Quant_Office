@@ -194,6 +194,12 @@ export const localPacketV2Schema = z.object({
    * hashed like every input — office-recorded context, never verified facts.
    */
   memoryDigest: z.object({ path: z.literal('memory-digest.json'), findings: z.number().int().nonnegative(), relationships: z.number().int().nonnegative(), sha256: hash }).strict().optional(),
+  /**
+   * Declared on BLIND-scope packets: project-relative paths the office deliberately did not stage.
+   * Hashes ride along so a later FULL hop can prove it saw the same bytes — content is never
+   * delivered, and the contract text forbids computing or requesting what is withheld.
+   */
+  withheld: z.array(packetFileSchema).max(256).optional(),
   contract: z.literal('CONTRACT.md'),
 }).strict();
 export type LocalPacketV2 = z.infer<typeof localPacketV2Schema>;

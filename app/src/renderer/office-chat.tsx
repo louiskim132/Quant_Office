@@ -115,9 +115,12 @@ export function OfficeChat({ state }: { state: AppState }) {
         const author = agent(entry.agentId), system = entry.kind === 'STATUS', role = author?.role.replaceAll('_', ' ');
         const requestName = state.requests?.find(r => r.id === entry.requestId)?.name;
         const color = author?.role === 'DIRECTOR' ? '#9c641b' : author?.role.startsWith('PM') ? '#7a5bad' : '#167d78';
+        // Status updates show their first line; anything further stays behind the expander.
+        const firstLine = entry.text.split('\n', 1)[0];
+        const preview = firstLine.length > 220 ? `${firstLine.slice(0, 220)}…` : firstLine;
         return <React.Fragment key={entry.id}>
           {(index === 0 || day(entries[index - 1].timestamp) !== day(entry.timestamp)) && <div className="office-chat-day"><span>{day(entry.timestamp)}</span></div>}
-          {system ? <article className="office-chat-system" data-chat-source={entry.source}><strong>{name(entry.agentId)} · {entry.label}</strong><p>{entry.text.length > 220 ? `${entry.text.slice(0, 220)}…` : entry.text}</p>{entry.text.length > 220 && <details><summary>Full update</summary><p>{entry.text}</p></details>}<time dateTime={entry.timestamp}>{time(entry.timestamp)}</time></article>
+          {system ? <article className="office-chat-system" data-chat-source={entry.source}><strong>{name(entry.agentId)} · {entry.label}</strong><p>{preview}</p>{preview !== entry.text && <details><summary>Details</summary><p>{entry.text}</p></details>}<time dateTime={entry.timestamp}>{time(entry.timestamp)}</time></article>
             : <article className={`office-chat-message ${author?.role === 'DIRECTOR' ? 'director-message' : ''}`} data-chat-source={entry.source}>
               <span className="office-chat-avatar" style={{ color }} aria-hidden="true">{initials(name(entry.agentId))}</span>
               <div className="office-chat-bubble"><div className="office-chat-author"><strong style={{ color }}>{name(entry.agentId)}</strong>{role && <span>{role}</span>}</div>

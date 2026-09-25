@@ -1,4 +1,5 @@
 import type {AppState, ProviderJob, ResearchTask, Request} from './types.js';
+import { latestJobFor } from '../core/jobs.js';
 
 export interface QueueEntry {
  id: string;
@@ -19,11 +20,12 @@ export interface QueueEntry {
  actions?: RequestActions;
 }
 
-/** One job's canonical standing on a request, independent of any other job's outcome. */
+/** One assignment's canonical standing on a request — the latest attempt's job, not any attempt's. */
 export interface RequestJobSummary {
  jobId: string; assignmentId: string; agentId: string;
  state: ProviderJob['state']; evidence: ProviderJob['evidence'];
  externalId: string; settled: boolean; unresolved: boolean;
+ attempt: number; lastObservation?: string;
 }
 
 /**
@@ -45,18 +47,25 @@ const SETTLED: ProviderJob['state'][] = ['COMPLETED', 'FAILED', 'CANCEL_ACKNOWLE
 export const UNRESOLVED: ProviderJob['state'][] = ['SUBMITTING', 'ACCEPTED', 'RUNNING', 'UNKNOWN', 'CANCEL_REQUESTED'];
 
 /**
- * Aggregates every job on a request rather than reporting the latest assignment.
+ * Aggregates the latest job of every assignment on a request rather than reporting the latest
+ * assignment or every attempt.
  *
  * The latest assignment is not the request's state: a completed job recorded after an unknown one
  * would otherwise hide it, and an unresolved attempt is exactly what must not disappear from view.
+ * A superseded attempt is resolved by the retry that replaced it, so only the newest attempt
+ * counts toward the request's standing.
  */
 export function requestJobs(state: Pick<AppState, 'assignments' | 'jobs'>, requestId: string): RequestJobSummary[] {
- const assignments = new Map((state.assignments ?? []).filter(item => item.requestId === requestId).map(item => [item.id, item]));
- return (state.jobs ?? []).filter(job => assignments.has(job.assignmentId)).map(job => ({
-  jobId: job.id, assignmentId: job.assignmentId, agentId: assignments.get(job.assignmentId)!.agentId,
-  state: job.state, evidence: job.evidence, externalId: job.externalId,
-  settled: SETTLED.includes(job.state), unresolved: UNRESOLVED.includes(job.state),
- }));
+ return (state.assignments ?? []).filter(item => item.requestId === requestId).map((item): RequestJobSummary | undefined => {
+  const job = latestJobFor(state.jobs, item.id);
+  if (!job) return undefined;
+  return {
+   jobId: job.id, assignmentId: job.assignmentId, agentId: item.agentId,
+   state: job.state, evidence: job.evidence, externalId: job.externalId,
+   settled: SETTLED.includes(job.state), unresolved: UNRESOLVED.includes(job.state),
+   attempt: job.attempt ?? 1, lastObservation: job.lastObservation,
+  };
+ }).filter((job): job is RequestJobSummary => job !== undefined);
 }
 
 function requestActions(request: Request | undefined, jobs: RequestJobSummary[], archived: boolean): RequestActions {

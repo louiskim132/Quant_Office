@@ -1,4 +1,5 @@
 import type { Agent, AppState, Assignment, ProviderCapabilitySnapshot, ProviderJob, ReviewDecision, Role, RoleSlot } from './types.js';
+import { latestJobFor } from '../core/jobs.js';
 
 type Records = Pick<AppState, 'agents' | 'teams' | 'memberships' | 'assignments' | 'jobs' | 'messages' | 'decisions' | 'requests'>;
 
@@ -43,7 +44,7 @@ export function dependencyStatus(state: Records, assignment: Assignment): { read
   for (const dependency of assignment.dependsOn ?? []) {
     const other = (state.assignments ?? []).find(item => item.id === dependency);
     if (!other) { blockers.push('A dependency of this work is not recorded in this workspace.'); continue; }
-    const job = (state.jobs ?? []).find(item => item.assignmentId === other.id);
+    const job = latestJobFor(state.jobs, other.id);
     if (!job) { blockers.push('A dependency has no provider job yet.'); continue; }
     if (job.state === 'COMPLETED') continue;
     blockers.push(SETTLED.includes(job.state)
@@ -70,10 +71,10 @@ export function reviewStatus(state: Records, requestId: string, options: { requi
   const decisions = (state.decisions ?? []).filter(item => item.requestId === requestId
     && (!options.subjectAssignmentId || item.subjectAssignmentId===options.subjectAssignmentId)
     && (!options.bundleHash || item.bundleHash===options.bundleHash)).map(decision => {
-    const job: ProviderJob | undefined = (state.jobs ?? []).find(item => item.assignmentId === decision.subjectAssignmentId);
+    const job: ProviderJob | undefined = latestJobFor(state.jobs, decision.subjectAssignmentId);
     const outputs = new Set((job?.outputs ?? []).map(output => output.sha256));
     const missing = decision.outputHashes.filter(value => !outputs.has(value));
-    const reviewer = state.jobs?.find(item=>item.assignmentId===decision.reviewerAssignmentId);
+    const reviewer = latestJobFor(state.jobs, decision.reviewerAssignmentId);
     const staleReason = !request ? 'The request no longer exists.'
       : request.revision !== decision.requestRevision ? `The request moved to revision ${request.revision} after this review of revision ${decision.requestRevision}.`
       : missing.length ? 'The provider outputs this review cited are no longer the ones on record.'

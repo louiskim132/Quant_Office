@@ -22,6 +22,26 @@ export const isTerminalJob = (state: JobState): boolean => TERMINAL_JOB_STATES.i
 /** States where the office believes provider-side work may still exist and must be reconciled. */
 export const isOpenJob = (state: JobState): boolean => !isTerminalJob(state);
 
+/**
+ * One assignment may carry several job records — every retry mints the next attempt rather than
+ * editing the attempt that failed. `latestJobFor` is the only lookup: the newest attempt is the
+ * job every read, transition and dispatch acts on. `attempt` is absent on records written before
+ * retries existed; they are attempt 1. `createdAt`+`id` tie-break keeps the order total even if
+ * two rows were written with the same attempt number.
+ */
+export function latestJobFor(jobs: readonly ProviderJob[] | undefined, assignmentId: string): ProviderJob | undefined {
+  let latest: ProviderJob | undefined;
+  for (const job of jobs ?? []) {
+    if (job.assignmentId !== assignmentId) continue;
+    if (!latest
+      || (job.attempt ?? 1) > (latest.attempt ?? 1)
+      || ((job.attempt ?? 1) === (latest.attempt ?? 1) && (job.createdAt > latest.createdAt || (job.createdAt === latest.createdAt && job.id > latest.id)))) {
+      latest = job;
+    }
+  }
+  return latest;
+}
+
 export interface Transition { to: JobState; at: string; evidence: JobEvidence; externalId?: string; externalUrl?: string; detail: string; outputs?: { path: string; sha256: string; bytes: number }[] }
 
 /**

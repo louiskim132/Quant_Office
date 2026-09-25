@@ -1,8 +1,87 @@
 import React,{useCallback,useEffect,useState} from 'react';
-import type {Agent,ResearchStatus,WorkMode} from '../shared/types';
+import {ShieldCheck} from 'lucide-react';
+import type {Agent,AppState,Experiment,ResearchStatus,WorkMode} from '../shared/types';
+import type {BranchLink,PipelineRecord} from '../shared/pipeline';
+import {Empty,label} from './components';
+import {pipelineReviewHops} from './job-outputs';
 
 /** Stage functions whose work is an independent review rather than production. */
 const REVIEW_FUNCTIONS=new Set<string>(['CORRECTNESS_REVIEWER','ADVOCATE','SKEPTIC']);
+
+type PreviewResult={name:string;text:string;truncated:boolean;binary:boolean};
+
+/**
+ * The critique, falsification, response and verification hops recorded on this project's pipeline
+ * requests — the review work a round actually performed, with each hop's latest recorded job state
+ * and previews of its stored outputs. A minted hop that was never dispatched shows as recorded
+ * without a job; nothing about its state is invented.
+ */
+export function PipelineReviews({state,projectId,experiment,busy,setPreview,onError}:{
+ state:AppState; projectId:string; experiment?:Experiment; busy:boolean;
+ setPreview:(preview:PreviewResult)=>void; onError:(e:unknown)=>void;
+}){
+ const experimentOf=(requestId:string)=>state.requests?.find(r=>r.id===requestId)?.experimentId;
+ const groups=pipelineReviewHops(state,projectId).filter(g=>!experiment||experimentOf(g.requestId)===experiment.id);
+ const preview=(jobId:string,path:string)=>{window.office.jobOutputPreview({jobId,path}).then(r=>setPreview({name:path,text:r.text,truncated:r.truncated,binary:false})).catch(onError);};
+ return <section>
+  <h2>Pipeline reviews</h2>
+  {!groups.length?<p className="muted">No pipeline reviews on record for this scope. A request's critique, falsification, response and verification hops appear here once a launched pipeline mints them.</p>
+   :groups.map(group=><article key={group.requestId} className="task-card">
+    <div className="card-heading"><h3>{group.requestName}</h3></div>
+    <ul className="functions">{group.hops.map(hop=><li key={hop.assignmentId}>
+     <b>{label(hop.pipelineKey.replaceAll('-',' '))}</b>
+     <span>{hop.agentName}{hop.state?` · ${label(hop.state)}`:' · recorded — no job dispatched yet'}</span>
+     {!!hop.outputs.length&&<span className="button-row">{hop.outputs.map(output=><button key={output.path+output.sha256} className="secondary" disabled={busy} onClick={()=>preview(output.jobId,output.path)} title={`${output.path} · ${output.bytes} bytes · sha256 ${output.sha256.slice(0,12)}…`}>Preview {output.path}</button>)}</span>}
+    </li>)}</ul>
+   </article>)}
+ </section>;
+}
+
+/** The research-stage review sequence each S2/S7 gate step's recorded state is derived from. */
+const STAGE_GATE:{label:string;done:(records:PipelineRecord[])=>boolean}[]=[
+ {label:'Independent evidence',done:r=>r.some(item=>item.kind==='REVIEW_REPORT'||item.kind==='REVIEW_ROUND'||item.kind==='SEPARATED_REVIEW')},
+ {label:'One rebuttal round',done:r=>r.some(item=>item.kind==='REBUTTAL')},
+ {label:'Director decision',done:r=>r.some(item=>item.kind==='ADJUDICATION')},
+];
+
+/**
+ * The research-stage (S2/S7) review record for this project, retitled so it is not misread as the
+ * pipeline reviews above. Each gate step's badge is derived from the branch pipeline records —
+ * reports actually sealed, rebuttals actually recorded, an adjudication actually decided — never
+ * a static placeholder.
+ */
+export function ResearchStageReviews({state,projectId,experiment}:{state:AppState;projectId:string;experiment?:Experiment}){
+ const links=(state.pipeline??[]).filter((r):r is BranchLink=>r.kind==='LINK'&&r.projectId===projectId);
+ const experimentOf=(branchId:string)=>{const requestId=links.find(l=>l.branchId===branchId)?.requestId;return state.requests?.find(r=>r.id===requestId)?.experimentId;};
+ const inScope=(r:PipelineRecord)=>r.projectId===projectId&&(!experiment||experimentOf(r.branchId)===experiment.id);
+ const reports=(state.pipeline??[]).filter(r=>r.kind==='REVIEW_REPORT'&&inScope(r));
+ const records=(state.pipeline??[]).filter(inScope);
+ const flatReports=state.reviews.filter(r=>r.projectId===projectId&&(!experiment||r.experimentId===experiment.id));
+ return <section>
+  <h2>Research-stage reviews (S2/S7)</h2>
+  <div className="review-gates">{STAGE_GATE.map((s,i)=><div key={s.label}><span className="gate-number">0{i+1}</span><strong>{s.label}</strong><span className="quiet-badge small">{s.done(records)?'Recorded':'Pending'}</span></div>)}</div>
+  {(!reports.length&&!flatReports.length)
+   ?<Empty icon={ShieldCheck} title="No research-stage reviews recorded" description="S2 correctness review and S7 advocate/skeptic reports belong to a research branch's stage sequence, recorded under the project's research workspace. 'Pending' describes that sequence — pipeline critiques and verifications are a separate record, listed in the section above."/>
+   :<div className="task-list">
+    {reports.map(r=>r.kind==='REVIEW_REPORT'&&<article className="task-card" key={r.id}><div className="card-heading"><h3>{r.stage} · {r.opened?label(r.verdict):'First report sealed'}</h3><span className="quiet-badge">{label(r.independence)}</span></div><p>{r.opened?r.detail:'Independent report remains sealed until the disclosure gate is satisfied.'}</p><code className="hash">Report {r.reportHash}</code></article>)}
+    {flatReports.map(r=><article className="task-card" key={r.id}><div className="card-heading"><h3>{label(r.role)}</h3><span className="quiet-badge">{r.disclosed?r.verdict:'Awaiting disclosure'}</span></div><p>{r.disclosed?r.content:'Independent report remains sealed until the disclosure gate is satisfied.'}</p><code className="hash">Bundle {r.bundleHash}</code></article>)}
+   </div>}
+ </section>;
+}
+
+/**
+ * The Reviews page body: pipeline review work first, then the research-stage sequence — kept in
+ * separate sections so 'pending' on one is never read as the other never happening.
+ */
+export function ReviewsView({state,projectId,experiment,busy,setPreview,onError}:{
+ state:AppState; projectId:string; experiment?:Experiment; busy:boolean;
+ setPreview:(preview:PreviewResult)=>void; onError:(e:unknown)=>void;
+}){
+ return <>
+  <PipelineReviews state={state} projectId={projectId} experiment={experiment} busy={busy} setPreview={setPreview} onError={onError}/>
+  <ResearchStageReviews state={state} projectId={projectId} experiment={experiment}/>
+ </>;
+}
 
 /**
  * Where a research branch actually stands, stated as what is stopping it rather than as a status.

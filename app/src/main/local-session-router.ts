@@ -62,11 +62,11 @@ export class LocalSessionRouter implements ProviderAdapter {
     return this.adapters[context.localSession.layout].submit(context);
   }
 
-  async observe(job: ProviderJob): Promise<ObserveResult> {
+  async observe(job: ProviderJob, _local?: LocalSessionRecord | null, replay?: { receiptHash: string }): Promise<ObserveResult> {
     const { adapter, binding } = this.resolve(job);
     // The resolved binding goes with the job: the bound packet version, attempt identity and
     // storage path are what the receipt is validated against — never the receipt's own claims.
-    const result = await adapter.observe(job, binding);
+    const result = await adapter.observe(job, binding, replay);
     if (!binding) return { ...result, detail: `[legacy binding: no local-session record — resolved as flat packet by rule, reconcile to bind] ${result.detail}` };
     return result;
   }

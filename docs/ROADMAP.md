@@ -1121,7 +1121,7 @@ Latest C9 qualification (2026-09-21) supersedes the historical C9 row's statemen
 | Current acceptance item | Status | Evidence / next item |
 | --- | --- | --- |
 | C9 automated Director → PM → Worker | VERIFIED_LOCAL for bounded live Claude CLI relay | Three distinct role profiles and real processes; one Director start, two event-driven dependent starts; exact inherited manifests, agent-consumed predecessor hashes, verified durable outputs and replay non-duplication. Two product defects repaired; 689/690 unit tests pass (one existing skip), typecheck/build and three development desktop suites pass. [Acceptance record](../records/reviews/three-agent-acceptance-2026-09-21.md). Next: reproduce output-storage failure recovery and retain process/watch bookkeeping until durable terminal admission. Mixed-provider chains, packaged acceptance and the C8 user-run Colab pilot are not established by this test. |
-| Communication pipeline (comm-pipe-1..3) | VERIFIED_LOCAL including live P3 on a dev build (2026-09-24); packaged live run NOT_STARTED | Planning and result-analysis pipelines mint request-scoped hop sets; the terminal hop seals, AWAITING_DECISION binds the decision to the verified receipt, and `request.pipeline.decide` is idempotent and refuses stale hashes. 2026-09-24: both pipelines ran live end to end with a mixed Claude/Devin roster, and real Approve and Request-revision decisions were bound to verified receipts, after nine defects were fixed ([acceptance record](../records/reviews/office-live-acceptance-2026-09-24.md)). Open: REVISE records intent only; planning packets expose `results/` (blinding); pipeline cards have no observe/retry path. |
+| Communication pipeline (comm-pipe-1..3) | VERIFIED_LOCAL including live P3 on a dev build (2026-09-24); packaged live run NOT_STARTED | Planning and result-analysis pipelines mint request-scoped hop sets; the terminal hop seals, AWAITING_DECISION binds the decision to the verified receipt, and `request.pipeline.decide` is idempotent and refuses stale hashes. 2026-09-24: both pipelines ran live end to end with a mixed Claude/Devin roster, and real Approve and Request-revision decisions were bound to verified receipts, after nine defects were fixed ([acceptance record](../records/reviews/office-live-acceptance-2026-09-24.md)). 2026-09-25 round `findings-rev-2` (head `7a4153c`): planning packets now blind `withheldPaths`; REVISE auto-mints a linked revision request whose brief inherits verified prior-round outputs and the decision note; pipeline cards carry a per-hop Observe/Retry/Cancel table with verified output previews and a named cancel confirmation; pre-launch failures settle FAILED with `lastObservation`; stored agent outputs and pipeline reviews are visible in Artifacts/Reviews. Open: user-level packaged re-run of the revision set (acceptance round 3); hosted-provider execution remains gated; provider effort/tool claims remain unverified beyond what the session result reports. |
 | M-memory workstream (office-mem-1/2) | VERIFIED_LOCAL; external engines NOT_STARTED | Append-only finding/relationship ledgers, per-hop authorized memorySearch and digest mount (plan-synthesis/analysis-finalize only), Memory page graph/search/links, archive export and an evaluation harness with the Office baseline. Merged via PR #8/#9. Memory is office-recorded self-report, not verified fact. 2026-09-24 packaged-app audit: graph overlap, hidden search focus, stale notice and the missing Opus 5.5 option fixed on `fix/memory-page-bugs-20260924`. |
 
 Status vocabulary: NOT_STARTED, IMPLEMENTED_FOUNDATION, IN_PROGRESS, PARTIALLY_VERIFIED_LOCAL, BLOCKED_EXTERNAL, VERIFIED_LOCAL, VERIFIED_HOSTED. PARTIALLY_VERIFIED_LOCAL means some tested code exists but parent acceptance is not met; list exact open subitems. PARTIALLY_IMPLEMENTED means the larger program still has unimplemented contracts/UI/tests. The latter requires actual provider evidence for the exact scope. A local test cannot advance a hosted gate. Keep this table in the same file.
@@ -4313,3 +4313,110 @@ Open (in the acceptance record):
 - Artifacts omits pipeline outputs.
 - Cancel has no confirmation.
 - The brief is not shown before Launch.
+
+2026-09-25 — batch integration PR #11 merged to
+main (merge commit 2846510) through the
+authenticated protected route after the required
+verify check passed on its exact head. It carries
+the live-acceptance pipeline fixes (receipt-
+binding, transport-evidence, serena gating,
+pipeline copy/queue defects, graph bounds).
+Plan item J of the open-findings revision is
+done: the merge commit was packaged from a clean
+detached worktree and mirrored over the taskbar
+install — byte-identical app.asar
+(80b375c30cbb05041e602e536e6899685e806ac78580ed19ece605d2ee3de183)
+on both sides.
+
+2026-09-25 — round findings-rev-2 published:
+organizer rev-1 freeze for the open-findings
+revision plan
+(Quant Office/Docs/Reviews/revision-plan-open-findings-2026-09-24.md)
+landed on the batch organizer branch at base
+6f15a12, on top of merged PR #11. Freeze scope:
+ProviderJob.attempt + latestJobFor shared helper
+(all 14 first-job lookups migrated;
+requestJobs aggregates latest-per-assignment),
+lastObservation + dedup-keyed observe: STATUS
+events, Assignment.inputScope BLIND/FULL
+threaded through pipeline mint entries,
+ProjectLocation.withheldPaths with relative-
+prefix validation, packet schema withheld[]
+declaration, SubmitContext.withheldPaths,
+Request.revisionOf with the decide transaction
+minting the linked revision request
+('name - revision N' rooted at the original),
+request.pipeline.retryHop minting a next attempt
+on the same assignment (FAILED or pre-dispatch
+UNKNOWN only), NotLaunchedError -> FAILED in
+dispatch and handoff, ObserveResult.
+transientProviderError with the durable
+auto-retry latch (one 60 s retry, journaled),
+pipeline request.cancel cascading to open jobs
+(cancel best-effort, INTENT hops discarded,
+local sessions killed), reconcile() repairing
+stranded verified receipts through the replay
+gate, pipeline.notice for the A5 start heads-up,
+IPC office:pipeline-retry-hop +
+office:job-output-preview, F3/F4 shared rules
+(cancelled-dead seats IDLE-not-UNKNOWN;
+diagnostic prefixes leave the chat feed), and
+the renderer splits pipeline-card.tsx /
+artifacts.tsx for worker isolation. Combined
+verification before publish: 825 tests, 824
+passed, 1 pre-existing skip; tsc clean.
+Seven worker packets are published (W1 blinding
+writer, W2 failure classification, W3 pipeline
+card, W4 artifacts/reviews, W5 renderer hygiene,
+W6 revision-brief inheritance, W7 withheld UI).
+Open before the round integrates: worker
+reviews, exact-SHA accepts, combined
+verification, roadmap close, protected merge,
+then repackage and re-mirror App\.
+
+2026-09-25 — round findings-rev-2 reviewed, integrated, and closed at `7a4153c`. All seven
+worker submissions were independently reviewed against exact SHAs on base `6f15a12`, scope-checked,
+rerun in their own checkouts, and accepted with compatibility assessments; each was merged one at a
+time and the combined suite ran green on the integrated head: **851 tests, 850 pass, 1 pre-existing
+skip, 0 fail; `tsc --noEmit` clean; `node scripts/build.mjs` clean.**
+
+Accepted commits and merges:
+
+- worker-1 `4670066` → merge `670c94f` — BLIND/FULL input scoping in round-template, withheld
+  bytes excluded from staged planning packets with hash-only `packet.withheld` declarations and
+  the fixed blinding contract text; result-analysis stays FULL; 46/46 scoped tests.
+- worker-2 `96c7fa8` → merge `5ac89d6` — Claude terminal `is_error` records settle FAILED/
+  PROVIDER_REPORTED with the provider's own text; the one documented transient signature
+  (api_error + OAuth refresh failure) sets `transientProviderError`; silent self-exits stay
+  UNKNOWN/OFFICE_LOCAL; pre-spawn failures throw `NotLaunchedError` → FAILED; terminal
+  observations drop the "still running" suffix; 33/33 scoped tests.
+- worker-6 `2e37997` → merge `e54d25e` — revision briefs mint cross-request dependsOn edges to
+  the source round's terminal and synthesis hops, qualifying on COMPLETED + verified receipt;
+  dropped edges name their reason in the objective and the decision note rides verbatim under
+  "## Revision note from the office"; 67/68 scoped tests (one documented reproducer).
+- worker-3 `3399365` → merge `3ec0030` — per-hop table (latest job, attempt, elapsed, last
+  reason), Observe/Retry/Cancel through the frozen bridges with Retry mirroring the store gate,
+  brief/report previews via `office:job-output-preview` labeled "office-verified bytes",
+  revision links both directions, cancel dialog naming running/queued hops.
+- worker-4 `5302be1` → merge `0c684d2` — Artifacts "Agent outputs" (stored-only, sha256+path
+  deduped, request → hop grouping) with `N imported · M agent outputs` header; Reviews gains
+  "Pipeline reviews" and the retitled "Research-stage reviews (S2/S7)" with record-derived
+  gates; 5/5 selector tests.
+- worker-5 `2650aa0` → merge `8da75b5` — office-chat STATUS first line + Details expander,
+  claude effort picker pinned to the installed CLI session-level axis (catalog applies to
+  OpenAI only), cancel-request metrics aligned to secondary neighbours; 23/23 tests pinning
+  the frozen F3/F4 shared rules.
+- worker-7 `3c1d42e` → merge `1bbb9ac` — "Withheld from planning" editor with dedup/removal,
+  baseline-pinned stale-save refusal, the exact withheld copy, and `pipeline.notice` rendered
+  as a neutral project-scoped status notice.
+
+Organizer-side work during the round: `baace68` fixed a real defect worker-6's reproducer
+exposed — `request.pipeline.retryHop` bumped `request.revision`, staling the re-armed hop's
+frozen `requestRevision` against `launchGuard`; retry is now bookkeeping and pipeline hops are
+exempt from the request-revision staleness check. `2241387` mounted worker-4's `ReviewsView` in
+`main.tsx`; `7a4153c` activated the reproducer as a live test — the re-armed hop now provably
+launches and releases its dependent on attempt 2.
+
+Verification basis remains local unit/typecheck/build; no hosted-provider, scientific,
+brokerage, or live-research capability is claimed. Memory remains office-recorded self-report.
+The packaged mirror and user-level acceptance follow under the release protocol.

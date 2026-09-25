@@ -192,6 +192,18 @@ test('the bounded memory digest and its packet declaration are strict, capped an
   assert.equal(localPacketV2Schema.safeParse({ ...packet, memoryDigest: { ...packet.memoryDigest, sha256: 'deadbeef' } }).success, false);
 });
 
+test('the withheld declaration is strict and hash-only — path, sha256, bytes, nothing else', () => {
+  const packet = { schema: 'office-local-session@2', jobId: randomUUID(), assignmentId: randomUUID(), attemptId: randomUUID(), projectId: randomUUID(),
+    createdAt: at(0), requestName: 'r', objective: 'o', requested: { model: 'opus', effort: 'default', delegation: false },
+    payload: 'p', snapshotManifestHash: sha('e'), files: [], instructions: [], contract: 'CONTRACT.md',
+    withheld: [{ path: 'results/out.csv', sha256: sha('a'), bytes: 3 }] };
+  assert.equal(localPacketV2Schema.safeParse(packet).success, true);
+  // Strict — a withheld entry may carry no more than the manifest triple; no content, no note.
+  assert.equal(localPacketV2Schema.safeParse({ ...packet, withheld: [{ ...packet.withheld[0], note: 'outcomes' }] }).success, false);
+  assert.equal(localPacketV2Schema.safeParse({ ...packet, withheld: [{ path: 'results/out.csv', sha256: 'dead', bytes: 3 }] }).success, false, 'a withheld hash must be a real sha256');
+  assert.equal(localPacketV2Schema.safeParse({ ...packet, withheld: [{ path: 'results/out.csv' }] }).success, false, 'hash-only still means the full triple');
+});
+
 test('cancel request and acknowledgement are strictly bound to one attempt', () => {
   const request = { schema: 'office-local-cancel-request@1', requestId: randomUUID(), jobId: randomUUID(), assignmentId: randomUUID(), attemptId: randomUUID(), packetHash: sha(), requestedAt: at(0) };
   assert.equal(cancelRequestV1Schema.safeParse(request).success, true);

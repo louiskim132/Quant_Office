@@ -56,6 +56,27 @@
 .pipeline .capability-list li[data-state='BLOCKED']{border-left-color:#ab5042}
 .pipeline .capability-list li[data-state='NOT_CONFIGURED']{opacity:.7}
 
+/* Request pipeline card: per-hop table, verified-output previews, and the sealed-decision surface. */
+.pipeline-card{display:grid;gap:11px;border:1px solid var(--border);border-radius:9px;background:var(--panel);padding:14px 16px;margin:4px 0}
+.pipeline-card .pipeline-hops{width:100%;border-collapse:collapse;font-size:11px}
+.pipeline-card .pipeline-hops th{font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--subtle);text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)}
+.pipeline-card .pipeline-hops td{padding:6px 8px;border-bottom:1px solid var(--border);vertical-align:top;color:var(--muted)}
+.pipeline-card .pipeline-hops td:first-child{color:var(--text);font-weight:600}
+.pipeline-card .pipeline-reason{max-width:220px;overflow-wrap:anywhere}
+.pipeline-card .pipeline-hop-actions{display:flex;gap:6px;flex-wrap:wrap}
+.pipeline-card .pipeline-hop-actions button{font-size:10px;padding:3px 9px}
+.pipeline-card .pipeline-preview{max-height:220px;overflow:auto;font-size:10px;line-height:1.6;background:var(--input);border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin:0;white-space:pre-wrap;word-break:break-word}
+.pipeline-card .pipeline-card-actions{display:flex;justify-content:flex-end;border-top:1px dashed var(--border);padding-top:9px}
+.pipeline-confirm{position:fixed;inset:0;background:#0008;display:grid;place-items:center;z-index:40}
+.pipeline-confirm-panel{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:18px 20px;max-width:420px;display:grid;gap:11px}
+.pipeline-confirm-panel h3{font-size:13px;margin:0}
+.pipeline-confirm-panel p{font-size:12px;margin:0;color:var(--muted)}
+
+/* The card owns hop-aware cancellation; the row's bare cancel button stays only for non-pipeline
+   work, and 'Start request' is removed once a pipeline request has left READY. */
+.task-card:has(.pipeline-card[data-open])>.button-row.task-actions .cancel-request{display:none}
+.task-card:has(.pipeline-card[data-started])>.button-row.task-actions .primary{display:none}
+
 /* Evidence panel: readable hashes, aligned line numbers, same loud warning. */
 .evidence .section-toolbar{align-items:stretch}
 .evidence .evidence-search{flex:1;min-width:0}
