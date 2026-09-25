@@ -189,6 +189,16 @@ test('draft export isolates project data and carries independently checkable byt
   const reference = await service.importFile(file, project.id, experiment.id, 'REFERENCE');
   const secretFile = path.join(directory, 'other.txt'); await writeFile(secretFile, 'Other project confidential reference');
   const secret = await service.importFile(secretFile, other.id, null, 'REFERENCE');
+  // The project's memory ledger: an agent-session finding, a user note superseding it,
+  // and a settled relationship — the other project's records must not export.
+  const sessionAuthor = { surface: 'AGENT_SESSION' as const, receiptHash: sha256('receipt-1') };
+  const first = store.recordMemoryFinding({ projectId: project.id, requestId: null, assignmentId: null, kind: 'OBSERVATION', title: 'alpha holds', body: 'seen twice', evidenceRefs: [], createdBy: sessionAuthor }).finding;
+  const corrected = store.execute({ type: 'memory.finding.note', idempotencyKey: randomUUID(), projectId: project.id, kind: 'NOTE', title: 'alpha corrected', body: 'user correction', supersedesFindingId: first.id }).findings!.find(item => item.title === 'alpha corrected')!;
+  const link = store.proposeMemoryRelationship({ projectId: project.id, fromFindingId: corrected.id, toFindingId: first.id, kind: 'REFINES', createdBy: { surface: 'USER' } }).relationship;
+  store.settleMemoryRelationship({ relationshipId: link.id, status: 'CONFIRMED' });
+  const foreign = store.recordMemoryFinding({ projectId: other.id, requestId: null, assignmentId: null, kind: 'NOTE', title: 'other project note', body: 'must not export', evidenceRefs: [], createdBy: sessionAuthor }).finding;
+  const foreignTwo = store.recordMemoryFinding({ projectId: other.id, requestId: null, assignmentId: null, kind: 'RESULT', title: 'other result', body: 'must not export either', evidenceRefs: [], createdBy: sessionAuthor }).finding;
+  const foreignLink = store.proposeMemoryRelationship({ projectId: other.id, fromFindingId: foreignTwo.id, toFindingId: foreign.id, kind: 'SUPPORTS', createdBy: { surface: 'USER' } }).relationship;
   const destination = path.join(directory, 'export.qro.zip'); await service.exportProject(project.id, destination);
   const files = unzipSync(await readFile(destination));
   const exported = JSON.parse(strFromU8(files['project.json']));
@@ -200,6 +210,23 @@ test('draft export isolates project data and carries independently checkable byt
   assert.deepEqual(exported.agents, []);
   assert.match(exported.warning, /Not an approved/);
   assert.equal(files[`objects/${secret.sha256}`], undefined);
+  // The exported ledger carries exactly this project's records, provenance intact.
+  assert.equal(exported.findings.length, 2);
+  const exportedFirst = exported.findings.find((item: { id: string }) => item.id === first.id)!;
+  assert.deepEqual(exportedFirst.createdBy, sessionAuthor);
+  assert.equal(exportedFirst.supersededById, corrected.id);
+  const exportedCorrected = exported.findings.find((item: { id: string }) => item.id === corrected.id)!;
+  assert.equal(exportedCorrected.createdBy.surface, 'USER');
+  const exportedLink = exported.relationships.find((item: { id: string }) => item.id === link.id)!;
+  assert.equal(exportedLink.status, 'CONFIRMED');
+  assert.ok(exportedLink.decidedAt, 'the settled relationship carries its decidedAt');
+  assert.equal(exported.findings.every((item: { projectId: string }) => item.projectId === project.id), true);
+  assert.equal(exported.relationships.every((item: { projectId: string }) => item.projectId === project.id), true);
+  assert.equal(exported.findings.some((item: { id: string }) => item.id === foreign.id || item.id === foreignTwo.id), false, 'the other project\'s findings must not export');
+  assert.equal(exported.relationships.some((item: { id: string }) => item.id === foreignLink.id), false, 'the other project\'s relationship must not export');
+  assert.ok(exported.provenance.includes.includes('memory findings'));
+  assert.ok(exported.provenance.includes.includes('memory relationships'));
+  assert.match(exported.reviewMeaning, /self-reports recorded by the office, not verified facts/);
   assert.equal(sha256(files[`objects/${reference.sha256}`]), reference.sha256);
   const inventory = JSON.parse(strFromU8(files['inventory.json']));
   assert.equal(inventory.inventoryHash, canonicalHash(inventory.entries));
@@ -209,6 +236,18 @@ test('draft export isolates project data and carries independently checkable byt
     assert.equal(sha256(files[entry.path]), entry.sha256);
   }
   assert.equal(store.snapshot().events.at(-1)?.kind, 'PROJECT_EXPORTED');
+});
+
+test('a draft export of a project with no memory records stays well-formed', async t => {
+  const { directory, store, service, project } = fixture(t);
+  const destination = path.join(directory, 'export-empty.qro.zip');
+  await service.exportProject(project.id, destination);
+  const exported = JSON.parse(strFromU8(unzipSync(await readFile(destination))['project.json']));
+  assert.equal(exported.kind, 'PROJECT_DRAFT_EXPORT');
+  assert.deepEqual(exported.findings, []);
+  assert.deepEqual(exported.relationships, []);
+  assert.ok(exported.provenance.includes.includes('memory findings'));
+  assert.ok(exported.provenance.includes.includes('memory relationships'));
 });
 
 test('workspace backup verifies every object and reopens the exact recorded state', async t => {
