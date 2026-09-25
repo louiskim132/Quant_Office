@@ -4447,3 +4447,15 @@ chain-launched dependents mint jobs without a local-session binding (observe fal
 back to flat-packet rule); observing an INTENT job throws a raw IPC error. These feed
 the next round. REVISE, cancel cascade/dialog, withheld-paths blinding, and the Codex
 local route remain unexercised live; hosted execution stays BLOCKED_EXTERNAL.
+
+Same-day update: the live gaps above were then exercised on the packaged app —
+withheld `internal/` prefix minted a BLIND packet carrying hash-only
+`packet.withheld` (bytes absent from `inputs/`); cancel through the confirmation
+dialog killed the spawned pid, marked the job FAILED with the honest office-termination
+detail and retained the CANCELED record; an ema5 REVISE round minted `revisionOf`
+with verbatim note inheritance, pulled cross-request inputs from the decided ema3
+round, ran all nine hops and reached DECIDED/APPROVE. The freeze at `ffc40c7`
+fixed the preview `verified` flag, made INTENT/SUBMITTING observe a no-op, and taught
+startup reconcile to relaunch stranded dependency-free pipeline hops (the stranded
+brief observed live is now self-healing). Only the Codex local route from that list
+stays open — assigned separately outside this batch.
