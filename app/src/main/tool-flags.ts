@@ -111,8 +111,13 @@ function claudeFlags(input: ToolFlagInput): ToolFlagResult {
   const servers = partitionServers(profile);
   if (servers.surface.length) applied.push(surfaceMounted);
   if (servers.cli.length) {
-    const config = Object.fromEntries(servers.cli.map(server =>
-      [server.id, server.args?.length ? { command: server.command, args: server.args } : { command: server.command }]));
+    // Claude launches each server without a shell, so a command carrying its sub-command
+    // ("serena start-mcp-server") is split into the executable and leading arguments.
+    const config = Object.fromEntries(servers.cli.map(server => {
+      const [command, ...leading] = server.command.trim().split(/\s+/).filter(Boolean);
+      const args = [...leading, ...(server.args ?? [])];
+      return [server.id, args.length ? { command, args } : { command }];
+    }));
     args.push('--mcp-config', JSON.stringify({ mcpServers: config }));
     applied.push(`mcpServers [${servers.cli.map(server => server.id).join(', ')}] attached via --mcp-config (verified in claude --help; each server's readOnly intent is packet-declared metadata, not a CLI flag)`);
   }

@@ -132,7 +132,7 @@ class FakeChild {
   on() { return this; }
 }
 
-function fixture(t: test.TestContext, options: { profile?: ToolProfile; serenaAnswers?: boolean; frames?: (caller: EvidenceCaller, line: string) => Promise<string> } = {}): ExecFixture {
+function fixture(t: test.TestContext, options: { profile?: ToolProfile; serenaAnswers?: boolean; serenaMissing?: boolean; frames?: (caller: EvidenceCaller, line: string) => Promise<string> } = {}): ExecFixture {
   const root = mkdtempSync(path.join(tmpdir(), 'qro-surface-'));
   const staging = path.join(root, 'staging');
   mkdirSync(path.join(staging, 'data'), { recursive: true });
@@ -155,6 +155,7 @@ function fixture(t: test.TestContext, options: { profile?: ToolProfile; serenaAn
   const serenaCalls: { executable: string; args: string[] }[] = [];
   const serenaSpawn: SerenaSpawn = (executable, args) => {
     serenaCalls.push({ executable, args });
+    if (options.serenaMissing) throw Object.assign(new Error(`spawn ${executable} ENOENT`), { code: 'ENOENT' });
     return new FakeSerenaChild(7777, options.serenaAnswers ?? true) as never;
   };
   const adapter = new LocalCliExecAdapter(
@@ -200,7 +201,8 @@ test('a declared serena profile is gated on an observed initialize handshake bef
   const f = fixture(t, { profile: { mcpServers: [{ id: 'serena', command: 'serena start-mcp-server', readOnly: true }] } });
   const result = await f.adapter.submit(f.context);
   assert.equal(f.serenaCalls.length, 1);
-  assert.equal(f.serenaCalls[0].executable, 'serena start-mcp-server');
+  assert.equal(f.serenaCalls[0].executable, 'serena', 'spawn runs without a shell, so the sub-command is an argument');
+  assert.equal(f.serenaCalls[0].args[0], 'start-mcp-server');
   assert.ok(f.serenaCalls[0].args.includes('--project'));
   assert.ok(f.serenaCalls[0].args.includes('--read-only'));
   assert.ok(existsSync(path.join(f.dir, '.serena', 'project.yml')));
@@ -213,6 +215,14 @@ test('a serena probe that never answers refuses the launch — no provider spawn
   const f = fixture(t, { profile: { mcpServers: [{ id: 'serena', command: 'serena start-mcp-server', readOnly: true }] }, serenaAnswers: false });
   await assert.rejects(f.adapter.submit(f.context), /readiness probe/);
   assert.equal(f.spawnCalls.length, 0);
+});
+
+test('an uninstalled serena is optional — the arm launches without it and the record says so', async t => {
+  const f = fixture(t, { profile: { canWrite: false, mcpServers: [{ id: 'serena', command: 'serena start-mcp-server', readOnly: true }] }, serenaMissing: true });
+  const result = await f.adapter.submit(f.context);
+  assert.equal(f.spawnCalls.length, 1, 'the provider CLI still launched');
+  assert.ok(!f.spawnCalls[0].args.includes('--mcp-config'), 'no --mcp-config names a server that is not installed');
+  assert.match(result.detail, /serena is not installed on this machine/);
 });
 
 test('a declared evidence surface mounts the drop-box and serves a written query', async t => {

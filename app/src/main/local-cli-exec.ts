@@ -7,7 +7,7 @@ import type { LocalSessionRecord } from '../shared/local-session.js';
 import { mountsEvidenceSurface, type ToolProfile } from '../shared/tool-profile.js';
 import type { EvidenceCaller } from './evidence-tool.js';
 import { QUERIES_DIR, QUERY_SETTLE_MS, isQueryFile, prepareEvidenceDropbox, serveEvidenceQuery, type EvidenceFrameHandler } from './evidence-dropbox.js';
-import { spawnSerenaSession, type SerenaSpawn } from './serena-session.js';
+import { serenaNotInstalled, spawnSerenaSession, type SerenaSpawn } from './serena-session.js';
 import { MAX_FILE } from './artifacts.js';
 import type { LaunchRequest } from './handoff.js';
 import { GuardedLocalFileIO, type LocalFileIO } from './local-session-files.js';
@@ -200,8 +200,8 @@ export class LocalCliExecAdapter implements ProviderAdapter {
    * entry mounts the queries/answers drop-box in the packet. Returns the honest detail text
    * for the launch record; every failure path throws before the provider spawn.
    */
-  private async prepareToolSurface(binding: LocalSessionRecord, dir: string): Promise<string> {
-    const profile = binding.toolProfile;
+  private async prepareToolSurface(binding: LocalSessionRecord, dir: string): Promise<{ note: string; profile: ToolProfile | undefined }> {
+    let profile = binding.toolProfile;
     const notes: string[] = [];
     // The office probes a declared serena only when the provider can actually attach it —
     // a provider whose CLI cannot reach MCP servers already records the entry as unmapped;
@@ -223,9 +223,15 @@ export class LocalCliExecAdapter implements ProviderAdapter {
       const probe = spawnSerenaSession({ binding, profile: profile!, packetDir: dir }, { spawn: this.serenaSpawn, readyTimeoutMs: this.serenaReadyTimeoutMs });
       const ready = await probe.ready;
       probe.dispose();
-      if (!ready.ok)
+      // An absent executable is an optional tool that is not installed here, not a dead server: the
+      // arm runs without code navigation and the launch record says so. External tools are never a
+      // prerequisite; a serena that is installed but fails its handshake still refuses the launch.
+      if (!ready.ok && serenaNotInstalled(ready.reason)) {
+        profile = { ...profile!, mcpServers: profile!.mcpServers!.filter(server => server.id !== 'serena') };
+        notes.push(`serena is not installed on this machine (${ready.reason}) — the arm launched without code navigation; install serena-agent to attach it`);
+      } else if (!ready.ok)
         throw new Error(`The declared serena MCP server failed its office readiness probe — ${ready.reason}. The session was not launched.`);
-      notes.push('serena readiness probe passed (initialize handshake observed)');
+      else notes.push('serena readiness probe passed (initialize handshake observed)');
     }
     if (mountsEvidenceSurface(profile)) {
       if (!this.evidenceFrames)
@@ -233,7 +239,7 @@ export class LocalCliExecAdapter implements ProviderAdapter {
       prepareEvidenceDropbox(dir, this.io);
       notes.push('office evidence surface mounted at queries/ + answers/');
     }
-    return notes.length ? ` ${notes.join('; ')}.` : '';
+    return { note: notes.length ? ` ${notes.join('; ')}.` : '', profile };
   }
 
   async submit(context: SubmitContext): Promise<SubmitResult> {
@@ -244,7 +250,7 @@ export class LocalCliExecAdapter implements ProviderAdapter {
       throw new Error(`A LOCAL_CLI_EXEC submission requires a flat office-local-session@2 binding; this record describes ${binding.layout} packetVersion ${binding.packetVersion}.`);
     const dir = path.resolve(this.sessionsRoot(), binding.storageRelativePath);
     const prepared = prepareLocalPacket({ dir, context, binding, io: this.io, now: this.now(), memoryDigest: context.memoryDigest });
-    const surfaceNote = await this.prepareToolSurface(binding, dir);
+    const { note: surfaceNote, profile: launchProfile } = await this.prepareToolSurface(binding, dir);
     // The evidence drop-box watcher attaches before the provider spawn so a watch that cannot
     // start refuses the launch cleanly instead of leaving a declared surface silently deaf.
     let queryWatcher: FSWatcher | null = null;
@@ -269,7 +275,7 @@ export class LocalCliExecAdapter implements ProviderAdapter {
       }
     }
     const prompt = `${context.payload.text}\n\n${PROMPT_SUFFIX}`;
-    const command = this.providerCommand(binding.provider, prompt, context.payload.model, context.payload.effort, binding.toolProfile);
+    const command = this.providerCommand(binding.provider, prompt, context.payload.model, context.payload.effort, launchProfile);
     const executable = this.executable(binding.provider);
     let child: CliChild;
     try {
