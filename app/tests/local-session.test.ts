@@ -8,7 +8,7 @@ import { removeTreeSync } from '../src/main/fsx';
 import { buildProviderPayload, type SubmitContext } from '../src/main/controller';
 import { AGENTS_FILE, CANCEL_FILE, CONTRACT_FILE, INPUTS_DIR, LocalMailboxAdapter, PACKET_FILE, RESULT_FILE, RESULT_OPTIONAL_KEYS, RESULT_REQUIRED_KEYS, RESULT_STATES } from '../src/main/local-session';
 import { CLAUDE_FILE, PACKET_HASH_FILE, PACKET_READY_FILE } from '../src/main/local-packet';
-import { cancelRequestV1Schema, localPacketV2Schema, type LocalSessionRecord } from '../src/shared/local-session';
+import { MEMORY_DIGEST_FILE, cancelRequestV1Schema, localPacketV2Schema, memoryDigestSchema, type LocalSessionRecord } from '../src/shared/local-session';
 import type { Assignment, InputSnapshot, ProviderJob } from '../src/shared/types';
 
 const at = (minutes: number) => new Date(Date.UTC(2026, 8, 8, 10, 0, 0) + minutes * 60000).toISOString();
@@ -604,6 +604,41 @@ test('a bound submit writes a v2 packet under the binding storage path and repor
   assert.deepEqual(ready, { attemptId: f.binding.attemptId, packetHash: result.localPacket.packetHash });
   assert.ok(existsSync(path.join(f.dir, CLAUDE_FILE)));
   assert.match(result.detail, /awaits a local session/);
+});
+
+test('a bound submit mounts the memory digest only for the authorized synthesis seats', async t => {
+  const f = boundFixture(t);
+  const digest = {
+    findings: [{ id: randomUUID(), kind: 'RESULT' as const, title: 'alpha holds', body: 'seen twice', evidenceRefs: [], superseded: false, createdAt: at(0) }],
+    links: [],
+  };
+  // An authorized seat: the controller supplies the projection and the packet mounts it.
+  const synthesis: SubmitContext = {
+    ...f.context,
+    assignment: { ...f.assignment, pipelineKey: 'plan-synthesis' },
+    memoryDigest: digest,
+  };
+  const mounted = await f.adapter.submit(synthesis);
+  const dir = path.join(f.sessions, mounted.externalId);
+  const onDisk = memoryDigestSchema.parse(JSON.parse(readFileSync(path.join(dir, MEMORY_DIGEST_FILE), 'utf8')));
+  assert.equal(onDisk.schema, 'office-memory-digest@1');
+  assert.deepEqual(onDisk.findings, digest.findings);
+  const packet = localPacketV2Schema.parse(JSON.parse(readFileSync(path.join(dir, PACKET_FILE), 'utf8')));
+  assert.equal(packet.memoryDigest?.path, MEMORY_DIGEST_FILE);
+  assert.equal(packet.memoryDigest?.findings, 1);
+  assert.equal(packet.memoryDigest?.sha256, sha(readFileSync(path.join(dir, MEMORY_DIGEST_FILE), 'utf8')));
+  // A non-synthesis seat: even with the projection supplied, no file and no declaration.
+  const f2 = boundFixture(t, 'bound-session-2');
+  const review: SubmitContext = {
+    ...f2.context,
+    assignment: { ...f2.assignment, pipelineKey: 'research-review' },
+    memoryDigest: digest,
+  };
+  const plain = await f2.adapter.submit(review);
+  const dir2 = path.join(f2.sessions, plain.externalId);
+  assert.equal(existsSync(path.join(dir2, MEMORY_DIGEST_FILE)), false, 'an unauthorized seat never receives the digest file');
+  const packet2 = localPacketV2Schema.parse(JSON.parse(readFileSync(path.join(dir2, PACKET_FILE), 'utf8')));
+  assert.equal(packet2.memoryDigest, undefined, 'an unauthorized seat never carries the declaration');
 });
 
 test('a nested binding storage path lands exactly where the record names it', async t => {

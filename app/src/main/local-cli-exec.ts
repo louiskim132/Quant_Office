@@ -243,7 +243,7 @@ export class LocalCliExecAdapter implements ProviderAdapter {
     if (binding.packetVersion !== 2 || binding.layout !== 'FLAT_PACKET')
       throw new Error(`A LOCAL_CLI_EXEC submission requires a flat office-local-session@2 binding; this record describes ${binding.layout} packetVersion ${binding.packetVersion}.`);
     const dir = path.resolve(this.sessionsRoot(), binding.storageRelativePath);
-    const prepared = prepareLocalPacket({ dir, context, binding, io: this.io, now: this.now() });
+    const prepared = prepareLocalPacket({ dir, context, binding, io: this.io, now: this.now(), memoryDigest: context.memoryDigest });
     const surfaceNote = await this.prepareToolSurface(binding, dir);
     // The evidence drop-box watcher attaches before the provider spawn so a watch that cannot
     // start refuses the launch cleanly instead of leaving a declared surface silently deaf.

@@ -128,7 +128,7 @@ export class LocalMailboxAdapter implements ProviderAdapter {
       // the binding; this adapter only reports what it verified it wrote.
       const binding = context.localSession;
       const dir = path.resolve(this.sessionsRoot(), binding.storageRelativePath);
-      const prepared = prepareLocalPacket({ dir, context, binding, io: this.io, now: this.now() });
+      const prepared = prepareLocalPacket({ dir, context, binding, io: this.io, now: this.now(), memoryDigest: context.memoryDigest });
       return {
         externalId: path.basename(binding.storageRelativePath),
         externalUrl: '',

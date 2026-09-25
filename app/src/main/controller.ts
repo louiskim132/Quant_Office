@@ -5,7 +5,7 @@ import { canonicalHash } from '../core/canonical.js';
 import { isTerminalJob, reconciliationPlan } from '../core/jobs.js';
 import { assertHostedExecution, assertLocalExecution, assertWorkerCapacity } from '../core/guards.js';
 import type { OfficeStore } from '../core/store.js';
-import { appliedReportPayloadSchema, type LocalSessionRecord } from '../shared/local-session.js';
+import { appliedReportPayloadSchema, type LocalSessionRecord, type MemoryDigest } from '../shared/local-session.js';
 import { agentDispatchReadiness, currentConnection, effectiveEvidence, latestCapability, scopeMismatches, supplyingSnapshotIds, type RequestedScope } from '../shared/readiness.js';
 import { dependencyStatus } from '../shared/cooperation.js';
 import { recordChainHandoff } from './chain-messages.js';
@@ -64,6 +64,13 @@ export interface SubmitContext {
    * the exact {sourceJobId, objectHash} provenance in its manifest; hosted adapters ignore this.
    */
   inherited?: { name: string; bytes: Uint8Array; sourceJobId: string; objectHash: string }[];
+  /**
+   * The project's bounded memory-ledger projection, populated by the controller for bound local
+   * submits. The packet writer alone decides whether it mounts — only the seats
+   * authorizeMemorySearch authorizes receive memory-digest.json; everywhere else the value is
+   * ignored and no file or declaration is written.
+   */
+  memoryDigest?: Pick<MemoryDigest, 'findings' | 'links'>;
 }
 export interface SubmitResult {
   externalId: string; externalUrl: string; detail: string; resolvedModel?: string; appliedEffort?: Effort | 'UNVERIFIED';
@@ -553,7 +560,7 @@ export class AssignmentController {
     this.store.recordJobTransition({ jobId: job.id, expectedRevision: job.revision, to: 'SUBMITTING', evidence: 'OFFICE_LOCAL', detail: `Submitting through ${assignment.route}.`, at: this.now() });
     job = this.job(assignmentId);
     const submitContext: SubmitContext = { assignment, snapshot: staged, objective: frozen.objective, requestName: frozen.requestName, payload: this.providerPayload(assignment), jobId: job.id };
-    if (attempt) submitContext.localSession = attempt.binding;
+    if (attempt) { submitContext.localSession = attempt.binding; submitContext.memoryDigest = this.store.memoryDigest(assignment.projectId); }
     if (inherited?.length) submitContext.inherited = inherited;
     try {
       const result = await adapter.submit(submitContext);
@@ -646,7 +653,7 @@ export class AssignmentController {
     this.store.recordJobTransition({ jobId: job.id, expectedRevision: job.revision, to: 'SUBMITTING', evidence: 'OFFICE_LOCAL', detail: 'Opening the official terminal for a manual submission.', at: this.now() });
     job = this.job(assignmentId);
     const submitContext: SubmitContext = { assignment, snapshot: staged, objective: frozen.objective, requestName: frozen.requestName, payload: this.providerPayload(assignment), jobId: job.id };
-    if (attempt) submitContext.localSession = attempt.binding;
+    if (attempt) { submitContext.localSession = attempt.binding; submitContext.memoryDigest = this.store.memoryDigest(assignment.projectId); }
     if (inherited?.length) submitContext.inherited = inherited;
     try {
       const result = await adapter.submit(submitContext);
