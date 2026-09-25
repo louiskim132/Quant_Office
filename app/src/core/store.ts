@@ -1673,7 +1673,9 @@ export class OfficeStore {
             detail:`Attempt ${attempt} minted — the office retries after attempt ${latest.attempt??1} settled ${latest.state.toLowerCase().replaceAll('_',' ')}.`,
             externalId:'',externalUrl:'',outputs:[],revision:0,createdAt:now,updatedAt:now,dispatchedAt:'',settledAt:'',attempt});
           changes.push({collection:'jobs',value:job});
-          changes.push({collection:'requests',value:{...request,revision:request.revision+1,updatedAt:now}});
+          // No request write: re-arming is office bookkeeping on an already-minted assignment —
+          // the same precedent as markPipelineAwaitingDecision. Bumping revision would stale the
+          // hop's frozen requestRevision against launchGuard and strand the retry permanently.
           reason=`Hop '${command.pipelineKey}' re-armed as attempt ${attempt}; the office launches it when its dependencies stand`;
           break;
         }

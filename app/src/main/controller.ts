@@ -450,7 +450,11 @@ export class AssignmentController {
       throw new Error(`${agent.name} is no longer bound to the account this work was frozen against. Prepare the work again.`);
     if ((agent.revision ?? 0) !== assignment.agentRevision)
       throw new Error(`${agent.name} changed since this work was frozen. Prepare the work again.`);
-    if (request.revision !== assignment.requestRevision)
+    // The request-revision pin protects user-authored dispatches from silent edits. Pipeline hops
+    // are the exception — their payload is the minted spec entry, bound by specHash, which a
+    // request edit can never change. Staling them on revision would strand mid-round hops and
+    // every retry, the same reason the roster check already exempts them above.
+    if (!assignment.pipelineKey && request.revision !== assignment.requestRevision)
       throw new Error('The request changed since this work was frozen. Prepare it again.');
     // Stage work is frozen against one exact branch revision. A branch that advanced, amended or was
     // settled since makes this context a description of work nobody is waiting for anymore.
