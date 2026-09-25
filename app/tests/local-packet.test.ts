@@ -5,11 +5,12 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { canonicalHash } from '../src/core/canonical';
+import { OfficeStore } from '../src/core/store';
 import { removeTreeSync } from '../src/main/fsx';
 import { buildProviderPayload, type SubmitContext } from '../src/main/controller';
 import { FakeLocalFileIO, GuardedLocalFileIO } from '../src/main/local-session-files';
 import { AGENTS_FILE, CLAUDE_FILE, CONTRACT_FILE, INPUTS_DIR, PACKET_FILE, PACKET_HASH_FILE, PACKET_READY_FILE, RESULT_FILE, prepareLocalPacket, readLocalResult, readLocalResultV1, resultContractV2 } from '../src/main/local-packet';
-import { localPacketV2Schema, type LocalSessionRecord } from '../src/shared/local-session';
+import { MEMORY_DIGEST_FILE, localPacketV2Schema, memoryDigestSchema, type LocalSessionRecord } from '../src/shared/local-session';
 import type { Assignment, InputSnapshot } from '../src/shared/types';
 
 const at = (minutes: number) => new Date(Date.UTC(2026, 8, 19, 10, 0, 0) + minutes * 60000).toISOString();
@@ -386,6 +387,79 @@ test('the same contract holds end-to-end through FakeLocalFileIO', t => {
   assert.ok('value' in read, 'defect' in read ? read.defect : '');
   assert.equal(Buffer.from(read.value.outputs[0].data).toString(), 'fake out');
   assert.ok(io.calls.some(call => call.method === 'inspectRoot'), 'the root was inspected through the io boundary');
+});
+
+/** A real store carrying a small memory ledger — the same data the caller passes as memoryDigest. */
+function digestLedger(t: test.TestContext) {
+  const root = mkdtempSync(path.join(tmpdir(), 'qro-digest-ledger-'));
+  const store = new OfficeStore(path.join(root, 'workspace.sqlite'));
+  t.after(() => { try { store.close(); } catch {} removeTreeSync(root); });
+  const project = store.execute({ type: 'project.create', idempotencyKey: randomUUID(), name: 'Alpha', mandate: 'm', budgetCents: 0 }).projects[0];
+  const request = store.execute({ type: 'request.create', idempotencyKey: randomUUID(), projectId: project.id, name: 'R', hypothesis: 'h', workType: 'OTHER', mode: 'SINGLE', leadAgentId: null, participantIds: [] }).requests![0];
+  return { store, project, request };
+}
+
+test('an authorized synthesis seat mounts the bounded memory digest and declares it on the packet', t => {
+  const ledger = digestLedger(t);
+  // One superseded finding, its live correction and a proposed link — the digest marks corrections.
+  const prior = ledger.store.recordMemoryFinding({ projectId: ledger.project.id, requestId: ledger.request.id, assignmentId: null, kind: 'HYPOTHESIS', title: 'early guess', body: 'before the run', evidenceRefs: [], createdBy: { surface: 'USER' } }).finding;
+  const correction = ledger.store.recordMemoryFinding({ projectId: ledger.project.id, requestId: ledger.request.id, assignmentId: null, kind: 'OBSERVATION', title: 'settled read', body: 'after the run', evidenceRefs: [{ kind: 'REQUEST', id: ledger.request.id }], createdBy: { surface: 'AGENT_SESSION', agentId: randomUUID(), receiptHash: sha('receipt') }, supersedesFindingId: prior.id }).finding;
+  ledger.store.proposeMemoryRelationship({ projectId: ledger.project.id, fromFindingId: correction.id, toFindingId: prior.id, kind: 'REFINES', createdBy: { surface: 'OFFICE' } });
+  const digest = ledger.store.memoryDigest(ledger.project.id);
+  let priorBytes: Buffer | undefined;
+  for (const seat of ['plan-synthesis', 'analysis-finalize']) {
+    const f = fixture(t);
+    f.assignment.pipelineKey = seat;
+    // The digest names this packet's project — bind every id to the ledger's project.
+    f.assignment.projectId = ledger.project.id; f.binding.projectId = ledger.project.id; f.snapshot.projectId = ledger.project.id;
+    const prepared = prepareLocalPacket({ dir: f.dir, context: f.context, binding: f.binding, io: f.io, now: at(1), memoryDigest: digest });
+    const onDisk = readFileSync(path.join(f.dir, MEMORY_DIGEST_FILE));
+    const parsed = memoryDigestSchema.parse(JSON.parse(onDisk.toString('utf8')));
+    assert.equal(parsed.schema, 'office-memory-digest@1');
+    assert.equal(parsed.generatedAt, at(1));
+    assert.deepEqual({ findings: parsed.findings, links: parsed.links }, digest, 'the file carries the store projection verbatim');
+    assert.equal(parsed.findings.find(item => item.id === prior.id)!.superseded, true, 'superseded findings are marked, not hidden');
+    // The written bytes are the schema-canonical serialization — key order is the schema's,
+    // so the same ledger state hashes identically regardless of the rows' literal layout.
+    assert.equal(onDisk.toString('utf8'), `${JSON.stringify(memoryDigestSchema.parse({ schema: 'office-memory-digest@1', generatedAt: at(1), ...digest }), null, 2)}\n`);
+    const packet = localPacketV2Schema.parse(JSON.parse(readFileSync(path.join(f.dir, PACKET_FILE), 'utf8')));
+    assert.deepEqual(packet.memoryDigest, { path: MEMORY_DIGEST_FILE, findings: 2, relationships: 1, sha256: sha(onDisk) });
+    assert.equal(prepared.packetHash, canonicalHash(JSON.parse(readFileSync(path.join(f.dir, PACKET_FILE), 'utf8'))), 'the declaration rides inside the hashed packet; the digest bytes do not');
+    const contract = readFileSync(path.join(f.dir, CONTRACT_FILE), 'utf8');
+    assert.match(contract, /memory-digest\.json` is a bounded, point-in-time projection/);
+    assert.match(contract, /self-report context for synthesis, not verified fact/);
+    assert.match(contract, /cite\s+evidenceRefs when your findings draw on it/);
+    if (priorBytes) assert.deepEqual(onDisk, priorBytes, 'the digest is deterministic for the same ledger state');
+    priorBytes = onDisk;
+  }
+});
+
+test('no other seat and no plain assignment carries the digest file or the declaration', t => {
+  const ledger = digestLedger(t);
+  const digest = ledger.store.memoryDigest(ledger.project.id);
+  for (const [label, pipelineKey] of [['a non-synthesis pipeline hop', 'plan-draft-a'], ['a plain assignment', undefined]] as const) {
+    const f = fixture(t);
+    if (pipelineKey) f.assignment.pipelineKey = pipelineKey;
+    prepareLocalPacket({ dir: f.dir, context: f.context, binding: f.binding, io: f.io, now: at(1), memoryDigest: digest });
+    assert.equal(existsSync(path.join(f.dir, MEMORY_DIGEST_FILE)), false, `${label} must not write the digest file`);
+    const packet = localPacketV2Schema.parse(JSON.parse(readFileSync(path.join(f.dir, PACKET_FILE), 'utf8')));
+    assert.equal(packet.memoryDigest, undefined, `${label} must not declare a digest`);
+    assert.doesNotMatch(readFileSync(path.join(f.dir, CONTRACT_FILE), 'utf8'), /memory-digest/, `${label} must not mention the digest`);
+  }
+});
+
+test('an empty ledger still produces a well-formed 0/0 digest for an authorized seat', t => {
+  const ledger = digestLedger(t);
+  const f = fixture(t);
+  f.assignment.pipelineKey = 'analysis-finalize';
+  f.assignment.projectId = ledger.project.id; f.binding.projectId = ledger.project.id; f.snapshot.projectId = ledger.project.id;
+  prepareLocalPacket({ dir: f.dir, context: f.context, binding: f.binding, io: f.io, now: at(1), memoryDigest: ledger.store.memoryDigest(ledger.project.id) });
+  const parsed = memoryDigestSchema.parse(JSON.parse(readFileSync(path.join(f.dir, MEMORY_DIGEST_FILE), 'utf8')));
+  assert.deepEqual(parsed.findings, []);
+  assert.deepEqual(parsed.links, []);
+  const packet = localPacketV2Schema.parse(JSON.parse(readFileSync(path.join(f.dir, PACKET_FILE), 'utf8')));
+  assert.equal(packet.memoryDigest!.findings, 0);
+  assert.equal(packet.memoryDigest!.relationships, 0);
 });
 
 test('readLocalResultV1 accepts a well-formed v1 receipt and defects a malformed one', t => {
