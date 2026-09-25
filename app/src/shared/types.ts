@@ -448,7 +448,7 @@ export interface OfficeAPI {
   */
  pipelineAction(input: import('./pipeline').PipelineAction): Promise<{ state: AppState; detail: string; assignments?: Assignment[]; reservation?: import('./holdout').HoldoutReservation }>;
  /** Read a bounded, read-only preview of one recorded job output (e.g. a brief or report before deciding). */
- jobOutputPreview(input: { jobId: string; path: string }): Promise<{ path: string; sha256: string; bytes: number; text: string; truncated: boolean }>;
+ jobOutputPreview(input: { jobId: string; path: string }): Promise<{ path: string; sha256: string; bytes: number; text: string; truncated: boolean; verified: true }>;
  /** Re-arm one failed or verified-unresolved pipeline hop and dispatch its next attempt. */
  retryPipelineHop(input: { requestId: string; pipelineKey: string; expectedRevision: number }): Promise<AppState>;
  searchMemory(input: { projectId: string; text: string; limit?: number }): Promise<{ findings: MemoryFinding[] }>;

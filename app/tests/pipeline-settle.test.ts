@@ -318,3 +318,55 @@ test('a re-armed hop is picked up by the chain exactly like a fresh mint — dep
   await f.controller.advanceLocalChain(draft.id);
   assert.notEqual(jobFor(f, dependent.id).state, 'INTENT', 'the dependent launches once the retried attempt completes');
 });
+
+// A brief minted INTENT and never dispatched (office died between start and handoff) stranded the
+// request in BRIEFING forever: the startup sweep only looked at hops with recorded predecessors.
+// The reconcile now also covers dependency-free pipeline hops on live requests.
+test('a stranded INTENT brief is launched by the startup reconcile', async t => {
+  const f = await fixture(t);
+  f.store.execute({ type: 'request.create', idempotencyKey: key(), projectId: f.project.id, name: 'Stranded brief', hypothesis: 'h', workType: 'PLANNING', mode: 'SINGLE', leadAgentId: f.agents.DIRECTOR.id, participantIds: [] });
+  let request = f.store.snapshot({ history: false }).requests!.find(item => item.name === 'Stranded brief')!;
+  request = f.store.execute({ type: 'request.start', idempotencyKey: key(), requestId: request.id, expectedRevision: request.revision }).requests!.find(item => item.id === request.id)!;
+  const briefed = await mintPipelineBrief(f.ctx, request);
+  assert.equal(briefed.minted, true);
+  const briefAssignment = f.store.snapshot({ history: false }).assignments!.find(item => item.id === requestOf(f, request.id).pipeline!.briefAssignmentId)!;
+  assert.equal(briefAssignment.pipelineKey, 'plan-brief');
+  assert.equal(jobFor(f, briefAssignment.id).state, 'INTENT', 'the minted brief starts undispatched');
+  assert.equal(briefAssignment.dependsOn?.length ?? 0, 0, 'the brief is the dependency-free root');
+
+  await f.controller.reconcileLocalChain();
+  assert.equal(jobFor(f, briefAssignment.id).state, 'UNKNOWN', 'reconcile launches the stranded brief through the guarded path');
+  assert.ok(f.store.localSessionForJob(jobFor(f, briefAssignment.id).id), 'the launch wrote the local-session binding');
+});
+
+// The same sweep must never relaunch a hop on a canceled request.
+test('a canceled request keeps its hops canceled through reconcile', async t => {
+  const f = await fixture(t);
+  f.store.execute({ type: 'request.create', idempotencyKey: key(), projectId: f.project.id, name: 'Cancel me', hypothesis: 'h', workType: 'PLANNING', mode: 'SINGLE', leadAgentId: f.agents.DIRECTOR.id, participantIds: [] });
+  let request = f.store.snapshot({ history: false }).requests!.find(item => item.name === 'Cancel me')!;
+  request = f.store.execute({ type: 'request.start', idempotencyKey: key(), requestId: request.id, expectedRevision: request.revision }).requests!.find(item => item.id === request.id)!;
+  const briefed = await mintPipelineBrief(f.ctx, request);
+  assert.equal(briefed.minted, true);
+  request = requestOf(f, request.id);
+  f.store.execute({ type: 'request.cancel', idempotencyKey: key(), requestId: request.id, expectedRevision: request.revision });
+  await f.controller.reconcileLocalChain();
+  const briefId = requestOf(f, request.id).pipeline!.briefAssignmentId!;
+  assert.notEqual(jobFor(f, briefId).state, 'UNKNOWN', 'a canceled request never relaunches');
+});
+
+// Observing an undispatched job used to reach the adapter, persist a meaningless
+// "[legacy binding]" lastObservation, then throw INTENT->UNKNOWN. It is a quiet no-op now.
+test('observing an INTENT job is a no-op that records nothing', async t => {
+  const f = await fixture(t);
+  f.store.execute({ type: 'request.create', idempotencyKey: key(), projectId: f.project.id, name: 'Observe intent', hypothesis: 'h', workType: 'PLANNING', mode: 'SINGLE', leadAgentId: f.agents.DIRECTOR.id, participantIds: [] });
+  let request = f.store.snapshot({ history: false }).requests!.find(item => item.name === 'Observe intent')!;
+  request = f.store.execute({ type: 'request.start', idempotencyKey: key(), requestId: request.id, expectedRevision: request.revision }).requests!.find(item => item.id === request.id)!;
+  await mintPipelineBrief(f.ctx, request);
+  const briefId = requestOf(f, request.id).pipeline!.briefAssignmentId!;
+  const before = jobFor(f, briefId);
+  assert.equal(before.state, 'INTENT');
+  await f.controller.observe(briefId);
+  const after = jobFor(f, briefId);
+  assert.equal(after.state, 'INTENT');
+  assert.equal(after.lastObservation, undefined, 'no observation is recorded for undispatched work');
+});

@@ -797,7 +797,15 @@ export class AssignmentController {
    */
   async reconcileLocalChain(): Promise<AppState> {
     const state = this.store.snapshot({history:false});
-    for (const dependent of (state.assignments ?? []).filter(item => item.dependsOn?.length))
+    // Dependency-free hops (a request's brief is the common one) mint INTENT at start and were
+    // stranded forever if the office died before dispatch — the filter used to require a
+    // recorded predecessor, so no reconcile could ever reach them.
+    const live = (item: Assignment) => {
+      const request = state.requests?.find(r => r.id === item.requestId);
+      return !!request && request.status !== 'CANCELED'
+        && (!request.pipeline || request.pipeline.phase === 'BRIEFING' || request.pipeline.phase === 'LAUNCHED');
+    };
+    for (const dependent of (state.assignments ?? []).filter(item => (item.dependsOn?.length || item.pipelineKey) && live(item)))
       await this.launchChainDependent(state, dependent);
     // Startup reconciliation also seals a launched round whose last hop completed while the
     // office was down — the settle reports a non-terminal round instead of throwing, so a
@@ -1040,6 +1048,11 @@ export class AssignmentController {
     let job = this.job(assignmentId);
     if (isTerminalJob(job.state)) return this.store.snapshot({history:false});
     const adapter = this.adapterFor({ route: job.route });
+    // Undispatched work has nothing to observe: the adapter would only report that no session
+    // exists yet, and writing that as lastObservation manufactures a diagnosis out of nothing —
+    // the exact residue the legacy-binding prefix produced on INTENT hops. The route still
+    // resolves above so an unconfigured route fails closed rather than silently no-oping.
+    if (job.state === 'INTENT' || job.state === 'SUBMITTING') return this.store.snapshot({history:false});
     const result = await adapter.observe(job, undefined, replayReceiptHash ? { receiptHash: replayReceiptHash } : undefined);
     if (result.events?.length) this.store.recordJobEvents(job.id, result.events);
     // The latest verified observation persists on the job itself — the interface reads
