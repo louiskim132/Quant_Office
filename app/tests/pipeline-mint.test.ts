@@ -227,3 +227,24 @@ test('the same-agent open-job rule still refuses a second manual hop on a non-pi
   const second = await f.ctx.snapshotFor(request, { key: 'y' } as never);
   assert.throws(() => f.controller.prepare({ requestId: request.id, agentId: f.agents.WORKER.id, snapshotId: second.id }), /already has work in flight/);
 });
+
+test('use-as-new on a launched pipeline starts a fresh pipeline, never the source\'s phase or brief', async t => {
+  const f = await fixture(t);
+  let request = started(f, makeRequest(f, 'PLANNING'));
+  const brief = (await mintPipelineBrief(f.ctx, request) as { minted: true; assignment: { id: string } }).assignment;
+  await f.controller.handoff(brief.id);
+  const bound = f.store.localSessionForJob(jobFor(f, brief.id).id)!;
+  const dir = path.join(f.sessionsRoot, bound.storageRelativePath);
+  const output = { path: 'outputs/brief.txt', sha256: sha('shaped brief'), bytes: Buffer.byteLength('shaped brief') };
+  mkdirSync(path.join(dir, 'outputs'), { recursive: true });
+  writeFileSync(path.join(dir, 'outputs', 'brief.txt'), 'shaped brief');
+  writeFileSync(path.join(dir, RESULT_FILE), JSON.stringify({ schema: 'office-local-result@2', jobId: jobFor(f, brief.id).id, assignmentId: brief.id, attemptId: bound.attemptId, packetHash: bound.packetHash, sequence: 1, state: 'COMPLETED', detail: 'Done.', outputs: [output] }));
+  await f.controller.observe(brief.id);
+  request = requestOf(f, request.id);
+  request = f.store.execute({ type: 'request.pipeline.confirm', idempotencyKey: key(), requestId: request.id, expectedRevision: request.revision }).requests!.find(item => item.id === request.id)!;
+  assert.equal(request.pipeline?.phase, 'LAUNCHED');
+  const state = f.store.execute({ type: 'request.duplicate', idempotencyKey: key(), requestId: request.id, expectedRevision: request.revision });
+  const copy = state.requests!.find(item => item.sourceRequestId === request.id)!;
+  assert.deepEqual(copy.pipeline, { kind: 'PLANNING', specHash: null, phase: 'BRIEFING', briefAssignmentId: null });
+  assert.equal(copy.status, 'DRAFT');
+});

@@ -1664,7 +1664,11 @@ export class OfficeStore {
           this.activeProject(state,request.projectId);projectId=request.projectId;experimentId=request.experimentId;
           if(request.revision!==command.expectedRevision)throw new Error('Stale request revision; reload before continuing');
           if(command.type==='request.duplicate'){
-            const copy:Request={...request,id:randomUUID(),sourceRequestId:request.id,status:'DRAFT',blockers:[],revision:0,createdAt:now,updatedAt:now,experimentId:null};
+            // A copy starts its own pipeline: the source's phase, spec, brief hop and decision belong
+            // to the source's minted hops, and a copied LAUNCHED phase would skip the brief confirmation.
+            const {pipelineNotes:_notes,...rest}=request;
+            const copy:Request={...rest,id:randomUUID(),sourceRequestId:request.id,status:'DRAFT',blockers:[],revision:0,createdAt:now,updatedAt:now,experimentId:null,
+              ...(request.pipeline?{pipeline:{kind:request.pipeline.kind,specHash:null,phase:'BRIEFING' as const,briefAssignmentId:null}}:{})};
             if(request.experimentId){const original=state.experiments.find(e=>e.id===request.experimentId)!;experimentId=randomUUID();copy.experimentId=experimentId;changes.push({collection:'experiments',value:{...original,id:experimentId,stage:'DRAFT',revision:0,createdAt:now,updatedAt:now}});}
             changes.push({collection:'requests',value:copy});reason='Copied objective into a new draft request';break;
           }
