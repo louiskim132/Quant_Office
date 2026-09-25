@@ -106,7 +106,7 @@ function App() {
  return <div className="app-shell">
   <aside className="sidebar">
    <div className="brand"><div className="brand-mark"><Box size={22}/></div><div>QUANT<span>RESEARCH OFFICE</span></div></div>
-   <nav aria-label="Main navigation">{navSections.map(([section, items]) => <React.Fragment key={section}><div className="sidebar-section-label">{section}</div>{items.map(([name, Icon]) => <button key={name} className={`nav-item ${page === name ? 'active' : ''}`} aria-current={page === name ? 'page' : undefined} onClick={() => { setPage(name); if (name === 'Projects') chooseProject(''); }}><Icon size={18}/><span>{name}</span>{name === 'Office' && blockedRequests > 0 && <b>{blockedRequests}</b>}</button>)}</React.Fragment>)}</nav>
+   <nav aria-label="Main navigation">{navSections.map(([section, items]) => <React.Fragment key={section}><div className="sidebar-section-label">{section}</div>{items.map(([name, Icon]) => <button key={name} className={`nav-item ${page === name ? 'active' : ''}`} aria-current={page === name ? 'page' : undefined} onClick={() => { setPage(name); setNotice(''); if (name === 'Projects') chooseProject(''); }}><Icon size={18}/><span>{name}</span>{name === 'Office' && blockedRequests > 0 && <b>{blockedRequests}</b>}</button>)}</React.Fragment>)}</nav>
    <div className="sidebar-footer"><button className={`sidebar-action ${page === 'Add Agent' ? 'active' : ''}`} onClick={() => setPage('Add Agent')}><Plus size={15}/>Add agent</button><div className="environment"><span className="status-dot"/>Local workspace</div><p>Research runs on provider infrastructure.</p><span className="version">DESKTOP · {info?.version || 'INITIAL RELEASE'}</span></div>
   </aside>
   <div className="workspace">

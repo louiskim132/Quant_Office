@@ -1,5 +1,7 @@
 # Quant Research Office — single implementation roadmap
 
+Current status update, 2026-09-24: `origin/main` carries the communication pipeline (comm-pipe-1..3, sealed round plus user decision) and the complete M-memory workstream (office-mem-1/2). A packaged-app audit found and fixed four user-visible defects on branch `fix/memory-page-bugs-20260924` (see the dated entry of that name at the end of this file). **Where status lives:** the section 11 tables, plus the dated progress log in section 17 at the end of this file. The newest entry is last. Open items: the C8 user-run Colab pilot, P3 live acceptance of a real user decision, REVISE re-mint, external memory-engine evaluation, C10 comparisons and every hosted gate.
+
 Current acceptance update, 2026-09-21: the live three-agent Director → PM → Worker local CLI chain passed after correcting the generated packet-hash instructions and a concurrent-trigger false-blocker race. Final regression: 690 tests, 689 passed, one existing privileged-symlink skip; typecheck, build and three development desktop suites passed. See the C9 automated-chain row and dated acceptance entry below. This establishes bounded local synthetic office orchestration, not hosted execution or the user-run Colab milestone.
 
 Current planning update, 2026-09-16: section 3.2 adds the four-plugin office evaluation (Serena, Ponytail, Graphify, LightRAG) and a runnable synthetic example. Based on fetched `origin/main` commit `6d27652846d18f8c8b7c5d588bc3a2923b154f4b` (C9 PR #5), C9 is PARTIALLY_VERIFIED_LOCAL, not a new unimplemented hybrid proposal. C10 below plans tool lifecycle and comparative trials; it installs nothing and claims no token savings. Earlier baseline paragraphs remain historical; use section 11 for current per-item status.
@@ -8,7 +10,7 @@ Updated 2026-09-13 after the fixed eight-session desktop coordination layer was 
 
 ## 1. Start here: scope, priority and execution rules
 
-Workspace: C:/Users/louis/Desktop/AI/Quant Office/repo. Application: C:/Users/louis/Desktop/AI/Quant Office/repo/app. Version observed: 0.5.0. At the last application audit the folder was not a Git repository; Git was subsequently initialized and connected to `https://github.com/louiskim132/Quant_Office.git` on the `main` branch on 2026-09-12. Check current files, Git state and applicable AGENTS.md before editing. Do not fabricate a branch, commit, test result, cloud receipt or missing configuration.
+Workspace (corrected 2026-09-24): the authoritative source is `origin/main` of `https://github.com/louiskim132/Quant_Office.git`. `C:/Users/louis/Desktop/AI/Quant Office/repo` is only the Git anchor that owns the worktrees; its own checkout is stale, so never implement or review there. Batch work happens in `Quant Office/repo-sessions/<batch>/{organizer,worker-N,reviewer}`. Ad-hoc work outside a batch goes in a new worktree under `Quant Office/Worktrees/`. The installed app is `Quant Office/App/` (the taskbar pin target). The folder map is `Quant Office/README.md`. Version observed: 0.5.0. Check current files, Git state and applicable AGENTS.md before editing. Do not fabricate a branch, commit, test result, cloud receipt or missing configuration.
 
 **Local C4–C7 implementation and acceptance are complete.** The accepted S0/S1 work was retained and extended through the independent-runtime S2–S10 workflow. The consolidated pass reported 370/382 with twelve failures; after the repairs a final full-suite run on the same unchanged source passed 382/382. Typecheck, build, three development desktop suites, a fresh package, three packaged desktop suites and actual packaged native PTY acceptance also passed. C4–C7 are VERIFIED_LOCAL within the synthetic and desktop acceptance scope; the subsequent desktop UI rounds kept the suite at 384/384. **Execution-contract correction, 2026-09-14:** an independent alignment review (records/reviews/roadmap-alignment-2026-09-14.md) established that earlier revisions had moved the main experiment from the user's manual Colab run to mandatory verified hosted execution and had made a provisioned independent runtime, signing harness and custodian prerequisites for ordinary review and scientific progression. Section 1.6 now fixes the controlling ownership contract: the user executes the approved experiment manually in Colab, and hosted runtime/harness/custodian capabilities are separately scoped options, not universal prerequisites. Automated hosted agent dispatch remains BLOCKED_EXTERNAL on the R5 transport evidence in section 5.3, and the shipping application still configures no independent runtime or custodian; current code also still enforces the superseded stronger contract in the places slice C8 names. Next item is the C8 manual-pilot realignment, then a user-run pilot. No local fixture installs hosted trust or enables real research; no repeated local baseline, new profile setup, paid API, real holdout, or brokerage action is authorized by these results.
 
@@ -1045,7 +1047,7 @@ Implementation:
 
 Exit: full fixture baseline green, migrations/restore preserve history/objects and exposure policy, bounded performance results recorded, no known critical omissions or scope leaks in acceptance fixtures, correct hosted-readiness labels, documented live capabilities/gaps. Update version only as part of a validated release, not a roadmap edit.
 
-### C8 — Manual-run contract restoration and pilot acceptance — NOT_STARTED 2026-09-14
+### C8 — Manual-run contract restoration and pilot acceptance — PARTIALLY_VERIFIED_LOCAL 2026-09-15 (user-run pilot pending)
 
 Established by the 2026-09-14 alignment review (`records/reviews/roadmap-alignment-2026-09-14.md`). This slice revises contract and implementation together; it does not delete gates, bypass admission or relabel imported evidence as independently verified. The C1–C7 implementation is retained: it satisfies a stronger contract than the corrected one.
 
@@ -1112,11 +1114,15 @@ Exact next local work: implement C10-A attempt preparation/ledger and C10-B cont
 
 ## 11. Execution checklist and progress record
 
+Navigation (2026-09-24): the dated progress log for 2026-09-15 onward is section 17 at the end of this file. It was previously appended under the section 16 historical appendix. Read these tables first, then the newest dated entries in section 17.
+
 Latest C9 qualification (2026-09-21) supersedes the historical C9 row's statement that CLI-exec is unimplemented: LOCAL_CLI_EXEC and automatic dependency relay are implemented and have passed the real three-agent acceptance below. The historical row retains its original evidence; it is not the current next-action list.
 
 | Current acceptance item | Status | Evidence / next item |
 | --- | --- | --- |
 | C9 automated Director → PM → Worker | VERIFIED_LOCAL for bounded live Claude CLI relay | Three distinct role profiles and real processes; one Director start, two event-driven dependent starts; exact inherited manifests, agent-consumed predecessor hashes, verified durable outputs and replay non-duplication. Two product defects repaired; 689/690 unit tests pass (one existing skip), typecheck/build and three development desktop suites pass. [Acceptance record](../records/reviews/three-agent-acceptance-2026-09-21.md). Next: reproduce output-storage failure recovery and retain process/watch bookkeeping until durable terminal admission. Mixed-provider chains, packaged acceptance and the C8 user-run Colab pilot are not established by this test. |
+| Communication pipeline (comm-pipe-1..3) | VERIFIED_LOCAL; P3 live user-decision acceptance NOT_STARTED | Planning and result-analysis pipelines mint request-scoped hop sets. The terminal hop seals with the full emitted key list, then AWAITING_DECISION binds the decision to the terminal hop's verified receipt; `request.pipeline.decide` is idempotent and refuses stale hashes. Merged via PR #6/#7. Open: REVISE records intent only (no automatic re-mint); a real user decision on a live round is unverified. |
+| M-memory workstream (office-mem-1/2) | VERIFIED_LOCAL; external engines NOT_STARTED | Append-only finding/relationship ledgers, per-hop authorized memorySearch and digest mount (plan-synthesis/analysis-finalize only), Memory page graph/search/links, archive export and an evaluation harness with the Office baseline. Merged via PR #8/#9. Memory is office-recorded self-report, not verified fact. 2026-09-24 packaged-app audit: graph overlap, hidden search focus, stale notice and the missing Opus 5.5 option fixed on `fix/memory-page-bugs-20260924`. |
 
 Status vocabulary: NOT_STARTED, IMPLEMENTED_FOUNDATION, IN_PROGRESS, PARTIALLY_VERIFIED_LOCAL, BLOCKED_EXTERNAL, VERIFIED_LOCAL, VERIFIED_HOSTED. PARTIALLY_VERIFIED_LOCAL means some tested code exists but parent acceptance is not met; list exact open subitems. PARTIALLY_IMPLEMENTED means the larger program still has unimplemented contracts/UI/tests. The latter requires actual provider evidence for the exact scope. A local test cannot advance a hosted gate. Keep this table in the same file.
 
@@ -2677,6 +2683,10 @@ Remaining defects and exact next item: product code still enforces the supersede
   section 1.5/D2 worker process.
 ~~~
 
+## 17. Dated progress log — 2026-09-15 onward
+
+Newest entries are last. Entries before 2026-09-15 remain in sections 11 and 16.
+
 2026-09-15 — C8 manual-run contract implemented in desktop round `c8-impl` on batch `next-batch-001`.
 Organizer prerequisites at `b57ee67`/`ef5d998` landed the shared package/return schemas, tiered gate
 provenance, store admission, pipeline seams, stage-delivery table and readiness split; worker packets
@@ -4130,7 +4140,7 @@ and the mirrored taskbar install carry this
 revision — byte-identical app.asar (59e5151c…)
 on both sides.
 
-2026-09-25 — round office-mem-2 integrated: the
+2026-09-24 (re-dated from UTC 09-25) — round office-mem-2 integrated: the
 M-memory workstream is complete. Organizer
 freeze e087ec2 added the packet-side digest
 contract (packet.json's optional memoryDigest
@@ -4195,3 +4205,56 @@ engines remain uninstalled optional adapters —
 no engine has been evaluated, and none may
 become a prerequisite or silent injector;
 REVISE still records intent only.
+
+2026-09-24 (re-dated from UTC 09-25) — batch integration PR #9 merged to
+main (merge commit 7b545d8) through the
+authenticated protected route: the round was
+closed, origin/main was merged into the branch
+first so the exact PR head 25c8d46 contained
+it, both required verify runs reported SUCCESS
+on that same head (36082815635 and
+36082836153), mergeStateStatus read CLEAN and
+no review conversations existed. The packaged
+app release and the mirrored taskbar install
+carry this revision — byte-identical app.asar
+(64c79aa9…) on both sides, digest-mount
+machinery confirmed present in the bundle.
+The M-memory workstream is complete.
+
+2026-09-24 — fix/memory-page-bugs-20260924: packaged-app
+audit, roadmap/rules audit (ad-hoc Claude Code session
+outside the batch, worktree
+`Quant Office/Worktrees/fix-memory-page` from origin/main
+7b545d8 plus organizer record 2620329). The installed
+App\ (app.asar 64c79aa9…) was driven as a user with an
+isolated QRO_USER_DATA_DIR. Defects found and fixed
+(7289788):
+- Memory graph: computed ellipse seats were kept as if
+  they had been dragged, so a newly recorded finding
+  could land on an existing node, and one drag persisted
+  every seat, making the overlap permanent. Seats are
+  now stored only for dragged nodes, under
+  qro.memory.seats.v2.<project>; the v1 key is discarded.
+- "Show on graph" re-enables a filtered-out kind.
+- Sidebar navigation clears the global notice banner.
+- The Claude model list lacked claude-opus-5-5 (pinned).
+After the fix, the same UI steps showed distinct seats at
+every step, only the dragged seat stored, the hidden kind
+restored and the notice cleared. The standard test roster
+(Director Opus 5.5 low / PM Sonnet 5 low / Worker Devin
+swe-2-max, all local) was registered through Add Agent.
+Rules: AGENTS.md and CLAUDE.md now name the
+authoritative checkout, a bounded roadmap reading path,
+the Session 9 refresh rule, user-data and backup rules,
+the packaged-app acceptance check and the test roster.
+Roadmap: section 17 heading added for the dated log
+(previously under the section 16 appendix), section 1
+workspace line corrected, C8 heading aligned with its
+section 11 row, comm-pipeline and M-memory rows added,
+two UTC-dated entries re-dated. Proposal:
+`Quant Office/Docs/Reviews/claude-agents-md-audit-2026-09-24.md`.
+Checks: typecheck and build clean locally; the full unit
+suite runs in the required verify check on the PR head.
+Open: an effort hint in Add Agent can read "No effort
+levels are published" while a Claude level is selected,
+until models are refreshed.

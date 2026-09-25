@@ -31,7 +31,7 @@ export const PROVIDER_MODEL_SUGGESTIONS:Record<Provider,{id:string;name:string}[
  ],
  claude:[
   {id:'best',name:'Best alias (latest Fable or Opus)'},
-  {id:'fable',name:'Fable alias (Claude Fable 5)'},
+  {id:'fable',name:'Fable alias (latest Fable)'},
   {id:'opus',name:'Opus alias (latest Opus)'},
   {id:'sonnet',name:'Sonnet alias (latest Sonnet)'},
   {id:'haiku',name:'Haiku alias (latest Haiku)'},
@@ -40,6 +40,7 @@ export const PROVIDER_MODEL_SUGGESTIONS:Record<Provider,{id:string;name:string}[
   {id:'opusplan',name:'Opus plan → Sonnet execution'},
   {id:'claude-fable-5-1',name:'Claude Fable 5.1 (pinned)'},
   {id:'claude-fable-5',name:'Claude Fable 5 (pinned)'},
+  {id:'claude-opus-5-5',name:'Claude Opus 5.5 (pinned)'},
   {id:'claude-opus-5',name:'Claude Opus 5 (pinned)'},
   {id:'claude-sonnet-5',name:'Claude Sonnet 5 (pinned)'},
   {id:'claude-haiku-4-5-20251001',name:'Claude Haiku 4.5 (pinned)'}
