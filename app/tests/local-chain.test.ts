@@ -428,3 +428,34 @@ test('visible stdout triggers an office update before any receipt or child exit'
   assert.ok(f.store.snapshot({ history: true }).jobEvents?.some(e => e.jobId === a.job.id && e.text === 'Reviewing the director handoff.'));
   assert.equal(f.store.snapshot({ history: true }).jobEvents?.filter(e => e.jobId === a.job.id && e.externalId.startsWith('spawn:')).length, 205, 'the whole bounded burst reaches the record even if output stops');
 });
+
+test('a verified COMPLETED receipt with no output lands as a visible FAILED, not a lost receipt', async t => {
+  const f = await fixture(t);
+  const a = await prepared(f);
+  const { bound, dir } = await launched(f, a.assignment.id, a.job.id);
+  // A decision hop that carried its answer only in detail: the store refuses completion without
+  // attributable output, and the receipt is already bound as lastReceipt by then.
+  writeFileSync(path.join(dir, RESULT_FILE), receipt(a.job, bound, { detail: 'plan carried in detail only' }));
+  await f.controller.observe(a.assignment.id);
+  const job = f.store.snapshot({ history: false }).jobs!.find(item => item.id === a.job.id)!;
+  assert.equal(job.state, 'FAILED', 'the refused completion is terminal and visible');
+  assert.match(job.detail, /refused completion: Completion needs attributable output/);
+  assert.match(job.detail, /plan carried in detail only/, 'the session detail is kept for the user');
+  await f.controller.observe(a.assignment.id);
+  assert.equal(jobState(f, a.job.id), 'FAILED', 're-observation leaves the recorded outcome in place');
+});
+
+test('a receipt detail longer than the job record holds is kept as a bounded prefix', async t => {
+  const f = await fixture(t);
+  const a = await prepared(f);
+  const { bound, dir } = await launched(f, a.assignment.id, a.job.id);
+  const text = 'report';
+  const output = { path: 'outputs/report.txt', sha256: sha(text), bytes: Buffer.byteLength(text) };
+  mkdirSync(path.join(dir, 'outputs'), { recursive: true });
+  writeFileSync(path.join(dir, 'outputs', 'report.txt'), text);
+  writeFileSync(path.join(dir, RESULT_FILE), receipt(a.job, bound, { detail: 'd'.repeat(3500), outputs: [output] }));
+  await f.controller.observe(a.assignment.id);
+  const job = f.store.snapshot({ history: false }).jobs!.find(item => item.id === a.job.id)!;
+  assert.equal(job.state, 'COMPLETED', 'a 3500-character detail (within the receipt contract) still completes');
+  assert.ok(job.detail.length <= 2000 && job.detail.endsWith('…'));
+});
