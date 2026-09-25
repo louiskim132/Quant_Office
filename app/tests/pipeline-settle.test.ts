@@ -292,12 +292,10 @@ test('a re-armed hop leaves dependents gated on the latest attempt', async t => 
   assert.equal(jobFor(f, dependent.id).state, 'INTENT', 'no dependent may launch while the re-armed attempt is unlaunched');
 });
 
-// The pickup half of the proof is committed as a reproducer, not run: a re-armed hop can never
-// reach launch today because request.pipeline.retryHop bumps request.revision (core/store.ts),
-// so the assignment's frozen requestRevision fails the launchGuard staleness check in
-// controller.ts — both organizer-owned. Delete `.todo` once either the retry stops counting as a
-// request change (markPipelineAwaitingDecision precedent) or pipeline hops are exempt.
-test.todo('a re-armed hop is picked up by the chain exactly like a fresh mint — dependents release on attempt 2', async t => {
+// The pickup half of the proof: a re-armed hop launches through the ordinary sweep. Originally
+// a reproducer — retryHop's request.revision bump used to fail launchGuard's staleness check;
+// organizer commit baace68 made retry bookkeeping and exempted pipeline hops.
+test('a re-armed hop is picked up by the chain exactly like a fresh mint — dependents release on attempt 2', async t => {
   const f = await fixture(t);
   const request = await launchedRound(f, 'Plan retry', 'PLANNING');
   const hops = hopsOf(f, request.id);
