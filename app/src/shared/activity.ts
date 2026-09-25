@@ -7,7 +7,10 @@ export type ActivityKind = 'WORKING' | 'MEETING' | 'IDLE' | 'UNKNOWN';
 export interface OfficeActivity {
   agentId: string; kind: ActivityKind; since: string; requestId: string; jobId: string; meetingId?: string; detail: string;
 }
-type Records = Pick<AppState, 'agents' | 'assignments' | 'jobs' | 'jobEvents' | 'messages'>;
+type Records = Pick<AppState, 'agents' | 'assignments' | 'jobs' | 'jobEvents' | 'messages' | 'requests' | 'localSessions'>;
+
+/** Stop statuses that durably record the office no longer observes a live process. */
+const DEAD_STOP_STATUSES = new Set(['PROCESS_EXIT_OBSERVED', 'SESSION_REPORTED_STOPPED', 'LEGACY_UNVERIFIED']);
 
 /**
  * Live office activity, derived only from confirmed provider evidence.
@@ -20,18 +23,34 @@ export function officeActivity(state: Records, options: { now?: number; freshnes
   const now = options.now ?? Date.now();
   const freshness = options.freshnessMs ?? ACTIVITY_FRESHNESS_MS;
   const agents = (state.agents ?? []).filter(agent => !agent.removedAt).sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+  const requests = new Map((state.requests ?? []).map(request => [request.id, request]));
+  const sessions = new Map((state.localSessions ?? []).map(session => [session.jobId, session]));
   const result: OfficeActivity[] = [];
   for (const agent of agents) {
     const assignments = (state.assignments ?? []).filter(item => item.agentId === agent.id);
     const jobs = (state.jobs ?? []).filter(job => assignments.some(item => item.id === job.assignmentId));
-    const open = jobs.filter(job => ['ACCEPTED', 'RUNNING', 'CANCEL_REQUESTED', 'UNKNOWN', 'SUBMITTING'].includes(job.state))
-      .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt)).at(-1);
-    if (!open) { result.push({ agentId: agent.id, kind: 'IDLE', since: '', requestId: '', jobId: '', detail: 'No provider work is open for this profile.' }); continue; }
-    const events = (state.jobEvents ?? []).filter(event => event.jobId === open.id && event.evidence === 'PROVIDER_REPORTED')
-      .sort((a, b) => a.receivedAt.localeCompare(b.receivedAt));
+    const openJobs = jobs.filter(job => ['ACCEPTED', 'RUNNING', 'CANCEL_REQUESTED', 'UNKNOWN', 'SUBMITTING'].includes(job.state))
+      .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
+    const open = openJobs.at(-1);
+    // A canceled request's leftover work only holds a seat while the office still observes live
+    // work on it. A durably dead process — or no fresh evidence at all — reads as IDLE with the
+    // honest 'outcome unresolved' note, never a misleading UNKNOWN that implies a provider gap.
+    const cancelled = open ? requests.get(open.requestId)?.status === 'CANCELED' : false;
+    // 'Not alive' must be proven: a durably recorded dead stop, or no office-owned process was ever
+    // recorded for the job. A binding that might still be running keeps the honest UNKNOWN.
+    const deadProcess = open ? (sessions.get(open.id) ? DEAD_STOP_STATUSES.has(sessions.get(open.id)!.stopStatus) : true) : false;
+    const events = open ? (state.jobEvents ?? []).filter(event => event.jobId === open.id && event.evidence === 'PROVIDER_REPORTED')
+      .sort((a, b) => a.receivedAt.localeCompare(b.receivedAt)) : [];
     const last = events.at(-1);
-    const heard = last ? Date.parse(last.receivedAt) : (open.evidence === 'PROVIDER_REPORTED' ? Date.parse(open.updatedAt) : Number.NaN);
-    if (!Number.isFinite(heard) || now - heard > freshness) {
+    const heard = open ? (last ? Date.parse(last.receivedAt) : (open.evidence === 'PROVIDER_REPORTED' ? Date.parse(open.updatedAt) : Number.NaN)) : Number.NaN;
+    const fresh = Number.isFinite(heard) && now - heard <= freshness;
+    if (!open || (cancelled && !fresh && deadProcess)) {
+      const dropped = !open;
+      result.push({ agentId: agent.id, kind: 'IDLE', since: '', requestId: '', jobId: '',
+        detail: dropped ? 'No provider work is open for this profile.' : 'Last job cancelled; outcome unresolved' });
+      continue;
+    }
+    if (!fresh) {
       result.push({ agentId: agent.id, kind: 'UNKNOWN', since: last?.receivedAt ?? open.updatedAt, requestId: open.requestId, jobId: open.id,
         detail: last ? 'No fresh provider event; this job\'s current state is unknown.' : 'No provider event has been received for this job.' });
       continue;

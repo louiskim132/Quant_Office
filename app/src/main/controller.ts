@@ -1051,6 +1051,11 @@ export class AssignmentController {
     // and it must not overwrite a receipt or a pending cancellation the office already holds. An
     // adapter that really did hear UNKNOWN from the provider says so through `provenance`.
     if (result.state === 'UNKNOWN' && (result.provenance ?? 'OFFICE_LOCAL') === 'OFFICE_LOCAL') {
+      // The latest diagnosis rides the job; a distinct detail also earns one dedup-keyed History
+      // entry so repeated polls stay quiet but a changed reason is never lost.
+      if (result.detail && result.detail !== job.lastObservation)
+        this.store.recordJobEvents(job.id, [{ externalId: `observe:${canonicalHash({ job: job.id, detail: result.detail })}`, cursor: '', kind: 'STATUS',
+          text: result.detail.slice(0, 2000), occurredAt: this.now(), receivedAt: this.now(), evidence: 'OFFICE_LOCAL' }]);
       if (job.externalId || job.state === 'CANCEL_REQUESTED' || job.state === 'UNKNOWN') return this.store.snapshot({history:false});
       return this.store.recordJobTransition({
         jobId: job.id, expectedRevision: job.revision, to: 'UNKNOWN', evidence: 'OFFICE_LOCAL',

@@ -48,6 +48,9 @@ export function officeChatPage(state: AppState, query: OfficeChatQuery = {}): Of
   for (const event of state.jobEvents ?? []) {
     const job = jobs.get(event.jobId);
     if (!job) continue;
+    // Office-internal diagnostics stay in History, not the conversation feed — they are the
+    // office's bookkeeping, not anything an agent said.
+    if (/^(transport-evidence|observe):/.test(event.externalId)) continue;
     const text = chatEventText(event.text);
     if (!text) continue;
     entries.push({ id: `event:${event.id}`, timestamp: event.receivedAt || event.occurredAt,
