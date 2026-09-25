@@ -18,6 +18,15 @@ import { settlePipelineDecision } from './pipeline-runner.js';
 import { ingestReceiptMemory } from './memory-ingest.js';
 import type { ToolProfile } from '../shared/tool-profile.js';
 
+const clip = (text: string, max: number) => text.length > max ? `${text.slice(0, max - 1)}…` : text;
+/** Bounds an evidence entry to the store's field limits (detail 1000, each confinement field 400). */
+export function boundEvidence(entry: CapabilityEvidence): CapabilityEvidence {
+  return {
+    ...entry, detail: clip(entry.detail, 1000),
+    ...(entry.confinement ? { confinement: { tools: clip(entry.confinement.tools, 400), filesystem: clip(entry.confinement.filesystem, 400), network: clip(entry.confinement.network, 400), environment: clip(entry.confinement.environment, 400) } } : {}),
+  };
+}
+
 /**
  * The complete text one external action would deliver, assembled once and reviewable before launch.
  *
@@ -258,8 +267,8 @@ export class AssignmentController {
       this.store.recordTransportEvidence({
         connectionId: connection.id, route: job.route, environment: 'LOCAL_MACHINE',
         // An office-spawned launch record (executable, cwd, argv, restrictions) routinely exceeds the
-        // 1000-character evidence detail; a bounded prefix is recorded rather than losing the entry.
-        model: assignment.requestedModel, operations: entries.map(entry => entry.detail.length > 1000 ? { ...entry, detail: `${entry.detail.slice(0, 999)}…` } : entry),
+        // evidence field limits; bounded prefixes are recorded rather than losing the whole entry.
+        model: assignment.requestedModel, operations: entries.map(boundEvidence),
         source: 'office-local-transport', observedAt: this.now(),
       });
     } catch (error) {
