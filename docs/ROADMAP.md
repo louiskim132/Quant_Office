@@ -1121,7 +1121,7 @@ Latest C9 qualification (2026-09-21) supersedes the historical C9 row's statemen
 | Current acceptance item | Status | Evidence / next item |
 | --- | --- | --- |
 | C9 automated Director → PM → Worker | VERIFIED_LOCAL for bounded live Claude CLI relay | Three distinct role profiles and real processes; one Director start, two event-driven dependent starts; exact inherited manifests, agent-consumed predecessor hashes, verified durable outputs and replay non-duplication. Two product defects repaired; 689/690 unit tests pass (one existing skip), typecheck/build and three development desktop suites pass. [Acceptance record](../records/reviews/three-agent-acceptance-2026-09-21.md). Next: reproduce output-storage failure recovery and retain process/watch bookkeeping until durable terminal admission. Mixed-provider chains, packaged acceptance and the C8 user-run Colab pilot are not established by this test. |
-| Communication pipeline (comm-pipe-1..3) | VERIFIED_LOCAL including live P3 on a dev build (2026-09-24); packaged live run NOT_STARTED | Planning and result-analysis pipelines mint request-scoped hop sets; the terminal hop seals, AWAITING_DECISION binds the decision to the verified receipt, and `request.pipeline.decide` is idempotent and refuses stale hashes. 2026-09-24: both pipelines ran live end to end with a mixed Claude/Devin roster, and real Approve and Request-revision decisions were bound to verified receipts, after nine defects were fixed ([acceptance record](../records/reviews/office-live-acceptance-2026-09-24.md)). 2026-09-25 round `findings-rev-2` (head `7a4153c`): planning packets now blind `withheldPaths`; REVISE auto-mints a linked revision request whose brief inherits verified prior-round outputs and the decision note; pipeline cards carry a per-hop Observe/Retry/Cancel table with verified output previews and a named cancel confirmation; pre-launch failures settle FAILED with `lastObservation`; stored agent outputs and pipeline reviews are visible in Artifacts/Reviews. Open: user-level packaged re-run of the revision set (acceptance round 3); hosted-provider execution remains gated; provider effort/tool claims remain unverified beyond what the session result reports. |
+| Communication pipeline (comm-pipe-1..3) | VERIFIED_LOCAL including live P3 on a dev build (2026-09-24); packaged live run NOT_STARTED | Planning and result-analysis pipelines mint request-scoped hop sets; the terminal hop seals, AWAITING_DECISION binds the decision to the verified receipt, and `request.pipeline.decide` is idempotent and refuses stale hashes. 2026-09-24: both pipelines ran live end to end with a mixed Claude/Devin roster, and real Approve and Request-revision decisions were bound to verified receipts, after nine defects were fixed ([acceptance record](../records/reviews/office-live-acceptance-2026-09-24.md)). 2026-09-25 round `findings-rev-2` (head `7a4153c`): planning packets now blind `withheldPaths`; REVISE auto-mints a linked revision request whose brief inherits verified prior-round outputs and the decision note; pipeline cards carry a per-hop Observe/Retry/Cancel table with verified output previews and a named cancel confirmation; pre-launch failures settle FAILED with `lastObservation`; stored agent outputs and pipeline reviews are visible in Artifacts/Reviews. 2026-09-25 packaged acceptance round 3 on the taskbar install: planning + result-analysis pipelines ran live on real userData with dead-spawn retry, transient auto-retry, stranded-receipt reconcile and hash-bound decisions all exercised ([acceptance record](../records/reviews/office-live-acceptance-2026-09-25.md)). Open: REVISE, cancel and withheld-paths live coverage; the formal C8 S3 run-package/return pilot; hosted-provider execution remains gated; provider effort/tool claims remain unverified beyond what the session result reports. |
 | M-memory workstream (office-mem-1/2) | VERIFIED_LOCAL; external engines NOT_STARTED | Append-only finding/relationship ledgers, per-hop authorized memorySearch and digest mount (plan-synthesis/analysis-finalize only), Memory page graph/search/links, archive export and an evaluation harness with the Office baseline. Merged via PR #8/#9. Memory is office-recorded self-report, not verified fact. 2026-09-24 packaged-app audit: graph overlap, hidden search focus, stale notice and the missing Opus 5.5 option fixed on `fix/memory-page-bugs-20260924`. |
 
 Status vocabulary: NOT_STARTED, IMPLEMENTED_FOUNDATION, IN_PROGRESS, PARTIALLY_VERIFIED_LOCAL, BLOCKED_EXTERNAL, VERIFIED_LOCAL, VERIFIED_HOSTED. PARTIALLY_VERIFIED_LOCAL means some tested code exists but parent acceptance is not met; list exact open subitems. PARTIALLY_IMPLEMENTED means the larger program still has unimplemented contracts/UI/tests. The latter requires actual provider evidence for the exact scope. A local test cannot advance a hosted gate. Keep this table in the same file.
@@ -4420,3 +4420,30 @@ launches and releases its dependent on attempt 2.
 Verification basis remains local unit/typecheck/build; no hosted-provider, scientific,
 brokerage, or live-research capability is claimed. Memory remains office-recorded self-report.
 The packaged mirror and user-level acceptance follow under the release protocol.
+
+### 2026-09-25 — packaged acceptance round 3 (findings-rev-2 live re-run)
+
+Status: VERIFIED_LOCAL on the packaged install; C8-stage-machine pilot still pending.
+
+The user-facing `App\` build at `cce6aee` (merged `4533d57`; identical `app.asar`
+`6D98FC8E…`) was driven end to end on real userData through the desktop UI. Three
+rounds ran with a mixed Claude/Devin LOCAL_CLI_EXEC roster on the user's real
+`XRPUSDT_Asia_Last_Day_Sample.csv` (98 rows): planning "Write 200ema code" (APPROVE
+`e9469207…`, superseded by the period fix), planning "Write ema3 code" (APPROVE
+`6ee27338…`), and result-analysis "Analyze ema3 results" on the user's Colab-run
+`ema3_result.csv` (APPROVE `31c2b22c…`, unanimous CORRECT verdict, byte-identical to
+local ground truth).
+
+Rev-2 machinery exercised live: orphaned-spawn pid-liveness reporting and bridge
+retry (plan-brief#1, implement-1/2#1), the transient OAuth-refresh one-shot
+auto-retry (ema3 plan-brief#1), stranded-receipt repair through `reconcile()` across
+an office restart (plan-synthesis), hash-checked output previews, and the sealed
+AWAITING_DECISION → hash-bound decision chain.
+
+New findings recorded in `records/reviews/office-live-acceptance-2026-09-25.md`:
+`jobOutputPreview` returns no positive `verified` flag; the card's Retry is gated to
+LAUNCHED while the store also allows BRIEFING (a dead brief has no UI retry);
+chain-launched dependents mint jobs without a local-session binding (observe falls
+back to flat-packet rule); observing an INTENT job throws a raw IPC error. These feed
+the next round. REVISE, cancel cascade/dialog, withheld-paths blinding, and the Codex
+local route remain unexercised live; hosted execution stays BLOCKED_EXTERNAL.
