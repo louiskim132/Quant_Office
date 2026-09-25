@@ -6,7 +6,7 @@ import { tmpdir } from 'os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import { removeTreeSync } from '../src/main/fsx';
-import { buildProviderPayload, type SubmitContext } from '../src/main/controller';
+import { buildProviderPayload, NotLaunchedError, type SubmitContext } from '../src/main/controller';
 import { LocalCliExecAdapter, type CliSpawn, type CliSpawnOptions } from '../src/main/local-cli-exec';
 import { CONTRACT_FILE, PACKET_FILE, RESULT_FILE } from '../src/main/local-packet';
 import { PACKET_HASH_FILE, PACKET_READY_FILE } from '../src/main/local-packet';
@@ -41,7 +41,7 @@ class FakeChild {
 
 interface SpawnCall { executable: string; args: string[]; options: CliSpawnOptions; child: FakeChild }
 
-function fixture(t: test.TestContext, options: { provider?: Provider; effort?: Effort; timeoutMs?: number; pid?: number | undefined } = {}) {
+function fixture(t: test.TestContext, options: { provider?: Provider; effort?: Effort; timeoutMs?: number; pid?: number | undefined; executableError?: boolean; spawnThrows?: boolean } = {}) {
   const root = mkdtempSync(path.join(tmpdir(), 'qro-cli-exec-'));
   t.after(() => { adapter.disposeAll(); removeTreeSync(root); });
   const staging = path.join(root, 'staging');
@@ -63,6 +63,7 @@ function fixture(t: test.TestContext, options: { provider?: Provider; effort?: E
   mkdirSync(sessions, { recursive: true });
   const calls: SpawnCall[] = [];
   const spawn: CliSpawn = (executable, args, spawnOptions) => {
+    if (options.spawnThrows) throw new Error('spawn failed synchronously');
     const child = new FakeChild(options.pid === undefined ? 4321 : options.pid);
     calls.push({ executable, args, options: spawnOptions, child });
     return child;
@@ -71,7 +72,10 @@ function fixture(t: test.TestContext, options: { provider?: Provider; effort?: E
   const executables: Record<Provider, string> = { devin: 'devin.exe', claude: 'claude.exe', openai: 'codex.exe' };
   const adapter = new LocalCliExecAdapter(
     () => sessions,
-    provider => executables[provider],
+    provider => {
+      if (options.executableError) throw new Error(`no ${provider} executable on PATH`);
+      return executables[provider];
+    },
     () => at(1),
     undefined,
     spawn,
@@ -225,6 +229,10 @@ test('submitEvidence carries the launch record — pid, arg marker, bypass flags
 test('observe validates a fabricated v2 receipt through the real reader and reports liveness', async t => {
   const f = fixture(t, { provider: 'claude' });
   const { bound } = await submitted(f);
+  // While nothing terminal has been reported the liveness bracket rides the detail.
+  const pending = await f.adapter.observe(f.job(), bound);
+  assert.equal(pending.state, 'UNKNOWN');
+  assert.match(pending.detail, /office-spawned process 4321 is still running/, 'liveness rides on a non-terminal detail');
   const output = { path: 'outputs/out.txt', sha256: sha('result bytes'), bytes: Buffer.byteLength('result bytes') };
   mkdirSync(path.join(f.dir, 'outputs'), { recursive: true });
   writeFileSync(path.join(f.dir, 'outputs', 'out.txt'), 'result bytes');
@@ -234,7 +242,7 @@ test('observe validates a fabricated v2 receipt through the real reader and repo
   assert.equal(observed.provenance, 'PROVIDER_REPORTED');
   assert.deepEqual(observed.outputs, [output]);
   assert.ok(observed.receipt && observed.receipt.sequence === 1 && /^[a-f0-9]{64}$/.test(observed.receipt.hash));
-  assert.match(observed.detail, /office-spawned process 4321 is still running/, 'liveness rides on the detail');
+  assert.doesNotMatch(observed.detail, /office-spawned process|still running/, 'a terminal receipt never carries the stale liveness suffix');
 });
 
 test('observe defects a malformed or misbound receipt as UNKNOWN, never success', async t => {
@@ -266,8 +274,81 @@ test('a self-exited process without a receipt stays UNKNOWN — dying is not a f
   const observed = await f.adapter.observe(f.job(), f.binding);
   assert.equal(observed.state, 'UNKNOWN');
   assert.equal(observed.provenance, 'OFFICE_LOCAL');
-  assert.match(observed.detail, /exited on its own \(code 2\) without a trusted receipt — a self-exit is not a failure claim/);
+  assert.match(observed.detail, /exited on its own \(code 2\) without a trusted receipt — no receipt, no provider error record; a self-exit is not a failure claim/);
   assert.match(observed.detail, /spawned process 4321 exited \(code 2\)/);
+});
+
+test('a self-exited claude CLI that reported its own error lands FAILED, provider-reported', async t => {
+  const f = fixture(t, { provider: 'claude' });
+  const { bound } = await submitted(f);
+  const child = f.calls[0].child;
+  child.stdout.write('{"type":"system","subtype":"init"}\n');
+  child.stdout.write('{"type":"result","subtype":"error_during_execution","is_error":true,"result":"Rate limit reached while streaming."}\n');
+  child.emitExit(1, null);
+  const observed = await f.adapter.observe(f.job(), bound);
+  assert.equal(observed.state, 'FAILED');
+  assert.equal(observed.provenance, 'PROVIDER_REPORTED');
+  assert.match(observed.detail, /Rate limit reached while streaming/);
+  assert.doesNotMatch(observed.detail, /office-spawned process|still running/, 'a terminal observation carries no liveness suffix');
+  assert.equal(observed.transientProviderError, undefined, 'no documented transient signature — no retry flag');
+});
+
+test('the documented transient OAuth-refresh signature flags transientProviderError', async t => {
+  const f = fixture(t, { provider: 'claude' });
+  const { bound } = await submitted(f);
+  const child = f.calls[0].child;
+  child.stdout.write('{"type":"result","is_error":true,"terminal_reason":"api_error","result":"Failed to refresh OAuth token (transient). Please try again."}\n');
+  child.emitExit(1, null);
+  const observed = await f.adapter.observe(f.job(), bound);
+  assert.equal(observed.state, 'FAILED');
+  assert.equal(observed.provenance, 'PROVIDER_REPORTED');
+  assert.equal(observed.transientProviderError, true, 'the office\'s one-shot retry flag rides the failure');
+});
+
+test('the transient flag needs the whole documented signature — partial matches stay plain failures', async t => {
+  // The OAuth text without terminal_reason 'api_error' is not the documented transient.
+  const a = fixture(t, { provider: 'claude' });
+  await submitted(a);
+  a.calls[0].child.stdout.write('{"type":"result","is_error":true,"terminal_reason":"execution_error","result":"Failed to refresh OAuth token"}\n');
+  a.calls[0].child.emitExit(1, null);
+  const first = await a.adapter.observe(a.job(), a.binding);
+  assert.equal(first.state, 'FAILED');
+  assert.equal(first.transientProviderError, undefined);
+  // api_error without the documented text is not either.
+  const b = fixture(t, { provider: 'claude' });
+  await submitted(b);
+  b.calls[0].child.stdout.write('{"type":"result","is_error":true,"terminal_reason":"api_error","result":"Request rejected: context length exceeded."}\n');
+  b.calls[0].child.emitExit(1, null);
+  const second = await b.adapter.observe(b.job(), b.binding);
+  assert.equal(second.state, 'FAILED');
+  assert.equal(second.transientProviderError, undefined);
+});
+
+test('a codex self-exit with a result-looking line stays UNKNOWN — no documented terminal record', async t => {
+  const f = fixture(t, { provider: 'openai' });
+  await submitted(f);
+  f.calls[0].child.stdout.write('{"type":"result","is_error":true,"result":"not a documented record"}\n');
+  f.calls[0].child.emitExit(1, null);
+  const observed = await f.adapter.observe(f.job(), f.binding);
+  assert.equal(observed.state, 'UNKNOWN');
+  assert.equal(observed.provenance, 'OFFICE_LOCAL');
+  assert.match(observed.detail, /no receipt, no provider error record/);
+});
+
+test('failures before any child could spawn throw NotLaunchedError; a spawn throw stays ordinary', async t => {
+  // A dirty packet destination — prepareLocalPacket refuses before anything could spawn.
+  const dirty = fixture(t);
+  mkdirSync(dirty.dir, { recursive: true });
+  writeFileSync(path.join(dirty.dir, RESULT_FILE), '{}');
+  await assert.rejects(dirty.adapter.submit(dirty.context), (error: unknown) => error instanceof NotLaunchedError);
+  assert.equal(dirty.calls.length, 0, 'no provider spawn happened');
+  // A missing CLI executable — resolved after the packet and probes, still pre-spawn.
+  const missing = fixture(t, { executableError: true });
+  await assert.rejects(missing.adapter.submit(missing.context), (error: unknown) => error instanceof NotLaunchedError);
+  assert.equal(missing.calls.length, 0);
+  // A synchronous spawn failure keeps an ordinary error — the child may exist.
+  const spawnFailed = fixture(t, { spawnThrows: true });
+  await assert.rejects(spawnFailed.adapter.submit(spawnFailed.context), (error: unknown) => !(error instanceof NotLaunchedError) && /spawn failed/.test((error as Error).message));
 });
 
 test('buffered child output drains into deduped PROVIDER_REPORTED job events', async t => {
