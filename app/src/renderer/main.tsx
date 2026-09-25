@@ -15,6 +15,7 @@ import { ProfileTabs } from './profile';
 import { AgentDetails, ModelEffortEditor } from './activity';
 import { MemoryView } from './memory';
 import { ArtifactsPage } from './artifacts';
+import { ReviewsView } from './review';
 import { Empty, label } from './components';
 
 type Page = 'Agents' | 'Office' | 'Projects' | 'Reviews' | 'Artifacts' | 'Memory' | 'History' | 'Usage' | 'Settings' | 'Add Agent';
@@ -59,7 +60,6 @@ function App() {
  const blockedRequests = state ? requestQueue(state).filter(r=>r.status==='BLOCKED').length : 0;
  const scopedArtifacts = state?.artifacts.filter(a => a.projectId === projectId && (!experiment || a.experimentId === experiment.id)) || [];
  const scopedEvents = state?.events.filter(e => !project || e.projectId === projectId || e.projectId === null) || [];
- const scopedReviews = state?.reviews.filter(r => r.projectId === projectId) || [];
  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
  const acceptState = (next: AppState) => setState(previous => previous && previous.events.length > next.events.length ? previous : next);
  async function refresh() {
@@ -119,7 +119,7 @@ function App() {
     {page === 'Office' && <><div className="office-live-layout"><OfficeScene agents={state.agents} state={state} onAgent={setAgentDetailId}/><OfficeChat state={state}/></div><WorkQueue onState={acceptState} onAction={c=>void command(c)} state={state} busy={busy} onNew={()=>state.projects.some(p=>!p.archived&&!p.removedAt)?setModal('experiment'):setModal('project')} onOpen={e=>{setProjectId(e.projectId);setExperimentId(e.id);setPage('Projects');}} onCancel={id=>void command({type:'task.cancel',taskId:id},'Request and linked research canceled.')}/></>}
     {page === 'Agents' && <AgentRoster state={state} busy={busy} onAgent={setAgentDetailId} onAdd={()=>setPage('Add Agent')} onRemove={(id,removed)=>void command({type:'agent.remove',agentId:id,removed})} onDelete={(id)=>void command({type:'agent.delete',agentId:id})}/>}
     {page === 'Projects' && (project ? <ResearchView state={state} project={project} projectId={projectId} experiments={experiments} experiment={experiment} experimentId={experimentId} busy={busy} command={command} onSelectExperiment={setExperimentId} onBack={() => chooseProject('')} onEditProject={() => setModal('edit-project')} onNewRequest={() => setModal('experiment')} onState={acceptState} onOpenQueue={() => setPage('Office')}/> : <ProjectsView state={state} project={project} projectId={projectId} onState={acceptState} onOpenProject={id=>chooseProject(id)} onNewProject={()=>setModal('project')} onError={fail}/>)}
-    {page === 'Reviews' && needProject(<><div className="review-gates">{['Independent evidence', 'One rebuttal round', 'Director decision'].map((s, i) => <div key={s}><span className="gate-number">0{i + 1}</span><strong>{s}</strong><span className="quiet-badge small">Pending</span></div>)}</div>{!scopedReviews.length ? <Empty icon={ShieldCheck} title="Evidence before approval" description="No review reports have been submitted. Independent provider agents must be configured before a research contract or code package can be reviewed."/> : <div className="task-list">{scopedReviews.filter(r => !experiment || r.experimentId === experiment.id).map(r => <article className="task-card" key={r.id}><div className="card-heading"><h3>{roles.find(role => role.role === r.role)?.label}</h3><span className="quiet-badge">{r.disclosed ? r.verdict : 'Awaiting disclosure'}</span></div><p>{r.disclosed ? r.content : 'Independent report remains sealed until the disclosure gate is satisfied.'}</p><code className="hash">Bundle {r.bundleHash}</code></article>)}</div>}</>)}
+    {page === 'Reviews' && needProject(<ReviewsView state={state} projectId={projectId} experiment={experiment} busy={busy} setPreview={setPreview} onError={fail}/>)}
     {page === 'Artifacts' && needProject(<ArtifactsPage state={state} project={project} projectId={projectId} experiment={experiment} busy={busy} files={files} setBusy={setBusy} setPreview={setPreview} onError={fail}/>)}
     {page === 'Memory' && needProject(<MemoryView state={state} projectId={projectId}/>)}
     {page === 'History' && <HistoryView state={state} projectId={projectId||null} label={label} date={date}/>}
