@@ -178,10 +178,12 @@ export const localPacketV2Schema = z.object({
   files: z.array(packetFileSchema).max(256),
   /**
    * Verified predecessor outputs a dependent packet carries, staged under
+   * `inputs/inherited/<sourceKey>/` when the producing hop has a pipeline key (so an instruction
+   * that names 'plan-draft-a' finds `inputs/inherited/plan-draft-a/`), else
    * `inputs/inherited/<sourceJobId>/`. Each entry pins the producing job and the content-addressed
    * object identity the office re-verified at injection — an output is never inherited by name alone.
    */
-  inherited: z.array(packetFileSchema.extend({ sourceJobId: id, objectHash: hash })).max(256).optional(),
+  inherited: z.array(packetFileSchema.extend({ sourceJobId: id, objectHash: hash, sourceKey: z.string().regex(/^[a-z0-9][a-z0-9-]{0,99}$/).optional() })).max(256).optional(),
   instructions: z.array(packetFileSchema).max(16),
   /**
    * The assignment's declared tool scope, copied from the binding so the agent reads the same

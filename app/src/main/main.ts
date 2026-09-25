@@ -360,8 +360,11 @@ const changed=()=>win?.webContents.send('office:changed');
   return dispatch(async()=>{
    if(type==='request.pipeline.confirm'){
     // The whole spec must resolve before the phase flips — a refusal leaves the request briefing.
-    const gate=pipelineConfirmGate(store,requestId!);
+    // The recorded spec hash is always the office's own mint of the confirmed shape.
+    const shape=(value as {shape?:'FULL'|'QUICK'}).shape;
+    const gate=pipelineConfirmGate(store,requestId!,shape);
     if(!gate.ok)throw new Error(gate.detail);
+    value={...(value as object),specHash:gate.specHash};
    }
    let state=store.execute(value);
    const request=state.requests?.find(r=>r.id===requestId);

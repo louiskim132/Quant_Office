@@ -1,4 +1,4 @@
-import type { Agent, AppState, Assignment, InputSnapshot, Request } from '../shared/types.js';
+import type { Agent, AppState, Assignment, InputSnapshot, PipelineShape, Request } from '../shared/types.js';
 import type { OfficeStore } from '../core/store.js';
 import { planCommRoundMint, planRefineHop, type MintEntry } from './round-executor.js';
 import { latestJobFor } from '../core/jobs.js';
@@ -32,6 +32,19 @@ export interface PipelineMintContext {
   }) => { state: AppState; assignment: Assignment };
 }
 
+/**
+ * The hop that settled a round's plan, by what the round minted: a restart revision's director
+ * brief (it amends the plan), the phase-2 mirror's finalize, the synthesis, or a quick round's
+ * single draft. RESULT_ANALYSIS rounds settle on their finalize.
+ */
+export function planHopKey(source: Request, hops: readonly Assignment[]): string {
+  const has = (key: string) => hops.some(hop => hop.pipelineKey === key);
+  if (source.pipeline?.kind === 'RESULT_ANALYSIS' || has('analysis-finalize')) return 'analysis-finalize';
+  if (source.revisionOf?.restartAt === 'IMPLEMENTATION') return 'plan-brief';
+  if (!has('plan-synthesis') && has('plan-draft-a') && !has('plan-draft-b')) return 'plan-draft-a';
+  return 'plan-synthesis';
+}
+
 const liveAgents = (state: AppState): Agent[] => (state.agents ?? []).filter(item => !item.removedAt);
 const briefKey = (request: Request): string => request.pipeline?.kind === 'RESULT_ANALYSIS' ? 'analysis-brief' : 'plan-brief';
 
@@ -53,7 +66,8 @@ export function revisionInheritance(state: AppState, request: Request, receiptFo
   const kind = source.pipeline?.kind ?? request.pipeline?.kind;
   const hops = (state.assignments ?? []).filter(item => item.requestId === source.id && item.pipelineKey);
   const terminalKey = hops.some(hop => hop.pipelineKey === 'user-gate') ? 'user-gate' : kind === 'RESULT_ANALYSIS' ? 'analysis-report' : 'verify';
-  const synthesisKey = kind === 'RESULT_ANALYSIS' ? 'analysis-finalize' : 'plan-synthesis';
+  // A quick planning round has no synthesis: its single planner's draft is the settled plan.
+  const synthesisKey = kind === 'RESULT_ANALYSIS' ? 'analysis-finalize' : planHopKey(source, hops);
   const dependsOn: string[] = [], settled: string[] = [], dropped: string[] = [];
   for (const key of [terminalKey, synthesisKey]) {
     const hop = hops.find(item => item.pipelineKey === key);
@@ -64,6 +78,25 @@ export function revisionInheritance(state: AppState, request: Request, receiptFo
     else { dependsOn.push(hop.id); settled.push(key); }
   }
   return { dependsOn, settled, dropped, note };
+}
+
+/**
+ * The pre-registered analysis plan an analysis brief inherits. A RESULT_ANALYSIS request that
+ * names `analysisOf` chains its brief off that planning round's plan hop — 'analysis-finalize'
+ * when the round ran the phase-2 mirror, else 'plan-synthesis' — whose verified outputs carry
+ * analysis-plan.md. Like revisionInheritance, only a hop settled COMPLETED with a verified receipt
+ * qualifies; anything else is named in `line` so the director knows why no plan arrived.
+ */
+export function analysisPlanInheritance(state: AppState, request: Request, receiptFor: (jobId: string) => boolean): { dependsOn: string[]; line: string } {
+  const source = (state.requests ?? []).find(item => item.id === request.analysisOf!.requestId);
+  if (!source) return { dependsOn: [], line: 'Pre-registered analysis plan: none — the planning request it names is not recorded in this workspace.' };
+  const hops = (state.assignments ?? []).filter(item => item.requestId === source.id && item.pipelineKey);
+  const hop = hops.find(item => item.pipelineKey === planHopKey(source, hops));
+  const job = hop ? latestJobFor(state.jobs, hop.id) : undefined;
+  if (!hop) return { dependsOn: [], line: `Pre-registered analysis plan: none — '${source.name}' minted no plan-synthesis hop.` };
+  if (job?.state !== 'COMPLETED' || !receiptFor(job.id))
+    return { dependsOn: [], line: `Pre-registered analysis plan: none — the '${hop.pipelineKey}' hop of '${source.name}' has no verified COMPLETED receipt.` };
+  return { dependsOn: [hop.id], line: `Pre-registered analysis plan: inputs/inherited/prior-${hop.pipelineKey}/analysis-plan.md, fixed when '${source.name}' was planned.` };
 }
 
 /**
@@ -93,12 +126,14 @@ function freshRequest(store: OfficeStore, requestId: string): Request {
  * BEFORE `request.pipeline.confirm` executes — a refusal here means the command never lands and
  * the request stays honestly in BRIEFING.
  */
-export function pipelineConfirmGate(store: OfficeStore, requestId: string): { ok: true } | { ok: false; detail: string } {
+export function pipelineConfirmGate(store: OfficeStore, requestId: string, shape?: PipelineShape): { ok: true; specHash: string } | { ok: false; detail: string } {
   const state = store.snapshot({ history: false });
   const request = state.requests?.find(item => item.id === requestId);
   if (!request?.pipeline) return { ok: false, detail: 'Only a pipeline request carries a round to mint.' };
-  const mint = planCommRoundMint({ request, agents: liveAgents(state), existingAssignments: state.assignments ?? [] });
-  return mint.ok ? { ok: true } : { ok: false, detail: mint.detail };
+  // A launched round keeps the shape it was confirmed with; a first confirm names its own.
+  const effective = request.pipeline.phase === 'BRIEFING' ? shape : request.pipeline.shape;
+  const mint = planCommRoundMint({ request, agents: liveAgents(state), existingAssignments: state.assignments ?? [], ...(effective ? { shape: effective } : {}) });
+  return mint.ok ? { ok: true, specHash: mint.specHash } : { ok: false, detail: mint.detail };
 }
 
 /**
@@ -123,14 +158,17 @@ export async function mintPipelineBrief(ctx: PipelineMintContext, request: Reque
   // source's terminal and synthesis hops — so the verified prior-round outputs land under
   // inputs/inherited/. Edges only ever name hops that can prove settled bytes; anything else
   // drops with its reason written into the objective, and the decision note rides verbatim.
-  const inherited = request.revisionOf
-    ? revisionInheritance(state, request, jobId => Boolean(ctx.store.localSessionForJob(jobId)?.lastReceipt))
-    : undefined;
+  const receiptFor = (jobId: string) => Boolean(ctx.store.localSessionForJob(jobId)?.lastReceipt);
+  const inherited = request.revisionOf ? revisionInheritance(state, request, receiptFor) : undefined;
+  // An analysis round that follows a planning round starts from the plan it pre-registered.
+  const planned = request.pipeline?.kind === 'RESULT_ANALYSIS' && request.analysisOf ? analysisPlanInheritance(state, request, receiptFor) : undefined;
+  const dependsOn = [...(inherited?.dependsOn ?? []), ...(planned?.dependsOn ?? [])];
+  const base = inherited ? revisionObjectiveText(entry.objectiveText, inherited) : entry.objectiveText;
   const { assignment } = ctx.prepare({
     requestId: request.id, agentId: entry.agentId, snapshotId: snapshot.id,
-    ...(inherited?.dependsOn.length ? { dependsOn: inherited.dependsOn } : {}),
+    ...(dependsOn.length ? { dependsOn } : {}),
     toolProfile: entry.toolProfile, pipelineKey: entry.key, inputScope: entry.inputScope,
-    objective: inherited ? revisionObjectiveText(entry.objectiveText, inherited) : entry.objectiveText,
+    objective: planned ? `${base}\n\n${planned.line}` : base,
   });
   // A5 soft gate: a planning round whose project withholds nothing but whose snapshot carries
   // outcome-looking files gets a non-blocking notice on the card. It never blocks — the user
@@ -185,21 +223,34 @@ export async function mintPipelineRound(ctx: PipelineMintContext, request: Reque
   // keys — an unscoped map would resolve this round's edges onto another request's hops.
   const keyToAssignment = new Map<string, string>();
   for (const item of state.assignments ?? []) if (item.requestId === request.id && item.pipelineKey) keyToAssignment.set(item.pipelineKey, item.id);
+  const restartPrior = request.revisionOf?.restartAt === 'IMPLEMENTATION'
+    ? priorDeliverableHops(state, request.revisionOf.requestId, jobId => Boolean(ctx.store.localSessionForJob(jobId)?.lastReceipt))
+    : undefined;
   let minted = 0;
   for (const entry of mint.entries) {
     if (entry.assignmentId || keyToAssignment.has(entry.key)) continue;
     const missing = entry.dependsOnKeys.filter(key => !keyToAssignment.has(key));
     if (missing.length) throw new Error(`Cannot mint hop '${entry.key}' — ${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} not minted yet.`);
     const snapshot = await ctx.snapshotFor(request, entry);
+    // A restart revision's worker starts from the previous round's verified deliverables.
+    const prior = restartPrior && entry.key.startsWith('implement-') ? restartPrior : [];
     const { assignment } = ctx.prepare({
       requestId: request.id, agentId: entry.agentId, snapshotId: snapshot.id,
-      dependsOn: entry.dependsOnKeys.map(key => keyToAssignment.get(key)!),
+      dependsOn: [...entry.dependsOnKeys.map(key => keyToAssignment.get(key)!), ...prior],
       toolProfile: entry.toolProfile, pipelineKey: entry.key, inputScope: entry.inputScope, objective: entry.objectiveText,
     });
     keyToAssignment.set(entry.key, assignment.id);
     minted++;
   }
   return { minted };
+}
+
+/** The source round's implement hops that settled COMPLETED with a verified receipt — the deliverables a restart revision builds on. */
+function priorDeliverableHops(state: AppState, sourceRequestId: string, receiptFor: (jobId: string) => boolean): string[] {
+  return (state.assignments ?? [])
+    .filter(item => item.requestId === sourceRequestId && item.pipelineKey?.startsWith('implement-'))
+    .filter(item => { const job = latestJobFor(state.jobs, item.id); return job?.state === 'COMPLETED' && receiptFor(job.id); })
+    .map(item => item.id);
 }
 
 /**

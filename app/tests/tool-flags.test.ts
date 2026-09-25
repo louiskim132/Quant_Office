@@ -8,7 +8,7 @@ import { PassThrough } from 'node:stream';
 import { removeTreeSync } from '../src/main/fsx';
 import { buildProviderPayload, type SubmitContext } from '../src/main/controller';
 import { LocalCliExecAdapter, type CliSpawn, type CliSpawnOptions } from '../src/main/local-cli-exec';
-import { mapToolFlags } from '../src/main/tool-flags';
+import { CLAUDE_DEFAULT_TOOLS, CLAUDE_ISOLATION_FLAGS, CODEX_DISABLED_FEATURES, mapToolFlags } from '../src/main/tool-flags';
 import type { LocalSessionRecord } from '../src/shared/local-session';
 import type { ToolProfile } from '../src/shared/tool-profile';
 import type { Assignment, InputSnapshot, Provider, ProviderJob } from '../src/shared/types';
@@ -18,13 +18,20 @@ const sha = (text: string) => createHash('sha256').update(text).digest('hex');
 const PROMPT_SUFFIX = 'This directory is an office-local-session@2 packet: read packet.json and CONTRACT.md, place declared outputs under outputs/, then write result.json exactly as CONTRACT.md specifies.';
 const PROMPT = 'fixture prompt';
 
+/** The pre-profile claude argv; every claude launch now adds the isolation flags after it. */
+const CLAUDE_BASE = ['-p', PROMPT, '--output-format', 'json', '--dangerously-skip-permissions', '--model', 'fixture-model'];
+const CLAUDE_ISOLATION = [...CLAUDE_ISOLATION_FLAGS];
+const CLAUDE_DEFAULT = ['--tools', CLAUDE_DEFAULT_TOOLS.join(',')];
+/** codex's lean baseline: user MCP servers detached, unused tool features (and sub-agents) disabled. */
+const CODEX_LEAN = ['-c', 'mcp_servers={}', ...[...CODEX_DISABLED_FEATURES, 'multi_agent'].flatMap(feature => ['--disable', feature])];
 /**
- * The pre-profile argv for each provider, frozen verbatim — an absent profile must produce
- * byte-identical args, a regression boundary pinned here rather than recomputed.
+ * The argv for each provider with no profile, frozen verbatim — devin stays byte-identical to
+ * the pre-profile builder; claude adds the session-isolation flags and the default packet tool
+ * set; codex adds its lean feature/MCP overrides before the prompt.
  */
 const BASELINE: Record<Provider, string[]> = {
-  claude: ['-p', PROMPT, '--output-format', 'json', '--dangerously-skip-permissions', '--model', 'fixture-model'],
-  openai: ['exec', '-s', 'workspace-write', '--skip-git-repo-check', '-m', 'fixture-model', PROMPT],
+  claude: [...CLAUDE_BASE, ...CLAUDE_ISOLATION, ...CLAUDE_DEFAULT],
+  openai: ['exec', '-s', 'workspace-write', '--skip-git-repo-check', '-m', 'fixture-model', ...CODEX_LEAN, PROMPT],
   devin: ['-p', PROMPT, '--model', 'fixture-model', '--respect-workspace-trust', 'false', '--permission-mode', 'dangerous'],
 };
 const flags = (provider: Provider, profile?: ToolProfile, effort: 'default' | 'high' | 'minimal' = 'default', platform?: NodeJS.Platform) =>
@@ -40,9 +47,14 @@ test('an absent profile produces byte-identical args for every provider', () => 
     assert.equal(result.unmappedEffort, null);
   }
   const effort = flags('claude', undefined, 'high');
-  assert.deepEqual(effort.args, [...BASELINE.claude, '--effort', 'high'], 'the documented effort flag still lands');
+  assert.deepEqual(effort.args, [...CLAUDE_BASE, '--effort', 'high', ...CLAUDE_ISOLATION, ...CLAUDE_DEFAULT], 'the documented effort flag still lands');
   assert.equal(effort.effortFlag, '--effort high');
-  assert.equal(flags('openai', undefined, 'high').unmappedEffort, 'high', 'codex keeps the honest unmapped effort');
+  const codexHigh = flags('openai', undefined, 'high');
+  assert.equal(codexHigh.effortFlag, '-c model_reasoning_effort=high', 'codex effort rides the documented config override');
+  assert.deepEqual(codexHigh.args.slice(6, 8), ['-c', 'model_reasoning_effort=high']);
+  assert.equal(codexHigh.unmappedEffort, null);
+  assert.equal(flags('openai', undefined, 'minimal').unmappedEffort, 'minimal', 'an effort codex refuses stays honestly unmapped');
+  assert.ok(!flags('openai', undefined, 'minimal').args.some(arg => arg.startsWith('model_reasoning_effort')));
 });
 
 test('claude maps allowedTools to --tools and mcpServers to --mcp-config, both verified in --help', () => {
@@ -52,7 +64,8 @@ test('claude maps allowedTools to --tools and mcpServers to --mcp-config, both v
   };
   const result = flags('claude', profile);
   assert.deepEqual(result.args.slice(-4), ['--tools', 'Read,Bash(git *)', '--mcp-config', JSON.stringify({ mcpServers: { serena: { command: 'serena', args: ['serve', '--scope', 'packet'] } } })]);
-  assert.deepEqual(result.args.slice(0, BASELINE.claude.length), BASELINE.claude, 'profile flags append after the baseline argv');
+  assert.deepEqual(result.args.slice(0, CLAUDE_BASE.length + CLAUDE_ISOLATION.length), [...CLAUDE_BASE, ...CLAUDE_ISOLATION], 'profile flags append after the baseline argv');
+  assert.ok(!result.args.includes(CLAUDE_DEFAULT[1]), 'a declared allowlist replaces the default tool set');
   assert.equal(result.applied.length, 2);
   assert.match(result.applied[0], /allowedTools \[Read, Bash\(git \*\)\] restricted via --tools/);
   assert.match(result.applied[1], /mcpServers \[serena\] attached via --mcp-config/);
@@ -219,8 +232,9 @@ test('a bound tool profile reaches the spawned argv and the confinement record n
   };
   const f = fixture(t, { provider: 'openai', profile });
   const result = await f.adapter.submit(f.context);
-  const prompt = `${f.context.payload.text}\n\n${PROMPT_SUFFIX}`;
-  assert.deepEqual(f.calls[0].args, ['exec', '-s', 'read-only', '--skip-git-repo-check', '-m', 'fixture-model', prompt],
+  const prompt = f.calls[0].args.at(-1)!;
+  assert.ok(prompt.startsWith(`${f.context.payload.text}\n\n## Packet essentials (office-generated)`));
+  assert.deepEqual(f.calls[0].args, ['exec', '-s', 'read-only', '--skip-git-repo-check', '-m', 'fixture-model', ...CODEX_LEAN, prompt],
     'the profile downgraded the sandbox to the verified read-only mode');
   const evidence = f.adapter.submitEvidence(f.context, result);
   const submit = evidence.find(e => e.operation === 'LOCAL_SUBMIT')!;
@@ -244,11 +258,11 @@ test('a claude profile lands --tools on the spawned argv and the record marks wh
   assert.match(tools, /canWrite=false: declared, not enforced by claude/);
 });
 
-test('an unprofiled binding keeps the byte-identical argv and declares no tool restriction', async t => {
+test('an unprofiled binding keeps the baseline argv and declares no tool restriction', async t => {
   const f = fixture(t, { provider: 'claude' });
   const result = await f.adapter.submit(f.context);
-  const prompt = `${f.context.payload.text}\n\n${PROMPT_SUFFIX}`;
-  assert.deepEqual(f.calls[0].args, ['-p', prompt, '--output-format', 'json', '--dangerously-skip-permissions', '--model', 'fixture-model']);
+  const prompt = f.calls[0].args[1];
+  assert.deepEqual(f.calls[0].args, ['-p', prompt, '--output-format', 'json', '--dangerously-skip-permissions', '--model', 'fixture-model', ...CLAUDE_ISOLATION, ...CLAUDE_DEFAULT]);
   const submit = f.adapter.submitEvidence(f.context, result).find(e => e.operation === 'LOCAL_SUBMIT')!;
   assert.match(submit.detail, /"appliedRestrictions":\[\],"unmappedRestrictions":\[\]/, 'the launch record shows no profile residue');
   const tools = f.adapter.submitEvidence(f.context, result).find(e => e.operation === 'TOOL_CONFINEMENT')!.confinement!.tools;
@@ -259,6 +273,16 @@ test('the launch-plan preview applies the same profile flags a dispatch would sp
   const f = fixture(t, { provider: 'openai', profile: { canWrite: false } });
   const plan = f.adapter.plan(f.context);
   const prompt = `${f.context.payload.text}\n\n${PROMPT_SUFFIX}`;
-  assert.deepEqual(plan.args, ['exec', '-s', 'read-only', '--skip-git-repo-check', '-m', 'fixture-model', prompt]);
+  assert.deepEqual(plan.args, ['exec', '-s', 'read-only', '--skip-git-repo-check', '-m', 'fixture-model', ...CODEX_LEAN, prompt]);
   assert.equal(plan.executable, 'openai.exe');
+});
+
+test('delegation keeps each CLI\'s own sub-agent surface; without it the lean launch drops it', () => {
+  const withAgents = mapToolFlags({ provider: 'claude', model: 'm', effort: 'default', prompt: PROMPT, delegation: true });
+  assert.deepEqual(withAgents.args.slice(-2), ['--tools', [...CLAUDE_DEFAULT_TOOLS, 'Agent'].join(',')]);
+  assert.ok(!flags('claude').args.at(-1)!.includes('Agent'));
+  const codex = mapToolFlags({ provider: 'openai', model: 'm', effort: 'default', prompt: PROMPT, delegation: true });
+  assert.ok(!codex.args.includes('multi_agent'), 'authorized delegation keeps codex multi_agent');
+  assert.ok(flags('openai').args.includes('multi_agent'));
+  assert.equal(codex.args.at(-1), PROMPT, 'the prompt stays the final codex argument');
 });

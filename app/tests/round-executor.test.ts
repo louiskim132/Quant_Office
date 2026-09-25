@@ -265,3 +265,94 @@ test('pipelineKey lookups are request-scoped — another request\'s hops are inv
   }
   // Two requests minting identical spec keys never collide on the duplicate-key guard either.
 });
+
+test('every hop instruction names the file it writes, and only implement hops may write the deliverables', () => {
+  const r = roster();
+  const mint = planCommRoundMint({ request: request('PLANNING', r.director.id), agents: r.agents, existingAssignments: [] });
+  assert.ok(mint.ok);
+  if (!mint.ok) return;
+  const byKey = new Map(mint.entries.map(entry => [entry.key, entry.objectiveText] as const));
+  const writes: Record<string, RegExp> = {
+    'plan-brief': /Write outputs\/brief\.md/,
+    'plan-draft-a': /Write outputs\/plan\.md/, 'plan-draft-b': /Write outputs\/plan\.md/,
+    'plan-critique-a-on-b': /Write outputs\/critique\.md/, 'plan-critique-b-on-a': /Write outputs\/critique\.md/,
+    'plan-synthesis': /outputs\/plan\.md[\s\S]*outputs\/analysis-plan\.md/,
+    verify: /write outputs\/verification\.md/,
+  };
+  for (const [key, pattern] of Object.entries(writes)) assert.match(byKey.get(key)!, pattern, `${key} names its output file`);
+  for (const key of ['plan-brief', 'plan-draft-a', 'plan-draft-b', 'plan-synthesis'])
+    assert.match(byKey.get(key)!, /Do not write code or the request's deliverables/, `${key} is told not to produce the deliverable`);
+  assert.match(byKey.get('plan-critique-a-on-b')!, /inputs\/inherited\/plan-draft-b\/plan\.md/, 'a critique names the staged path of the opposite draft');
+  assert.match(byKey.get('plan-draft-a')!, /inputs\/inherited\/plan-brief\/brief\.md/);
+  assert.match(byKey.get('verify')!, /Do not rewrite the deliverables/);
+  assert.match(byKey.get('plan-synthesis')!, /exactly 2 sections headed "## Slice 1" … "## Slice 2"/, 'two workers get two disjoint slices');
+  assert.match(byKey.get('implement-1')!, /^Implement Slice 1 of inputs\/inherited\/plan-synthesis\/plan\.md/);
+  assert.match(byKey.get('implement-2')!, /^Implement Slice 2 of .*If Slice 2 is EMPTY/);
+  for (const text of byKey.values()) assert.ok(text.length <= REFINE_NOTE_MAX);
+});
+
+test('a single-worker round has no slices', () => {
+  const r = roster();
+  const agents = r.agents.filter(item => item.id !== r.worker2.id);
+  const mint = planCommRoundMint({ request: request('PLANNING', r.director.id), agents, existingAssignments: [] });
+  assert.ok(mint.ok);
+  if (!mint.ok) return;
+  const byKey = new Map(mint.entries.map(entry => [entry.key, entry.objectiveText] as const));
+  assert.doesNotMatch(byKey.get('plan-synthesis')!, /Slice/);
+  assert.match(byKey.get('implement-1')!, /^Implement inputs\/inherited\/plan-synthesis\/plan\.md exactly/);
+  assert.doesNotMatch(byKey.get('implement-1')!, /Slice/);
+});
+
+test('analysis-round hops name their output files and the brief adopts a pre-registered plan', () => {
+  const r = roster();
+  const mint = planCommRoundMint({ request: request('RESULT_ANALYSIS', r.director.id), agents: r.agents, existingAssignments: [] });
+  assert.ok(mint.ok);
+  if (!mint.ok) return;
+  const byKey = new Map(mint.entries.map(entry => [entry.key, entry.objectiveText] as const));
+  assert.match(byKey.get('analysis-brief')!, /Write outputs\/brief\.md[\s\S]*analysis-plan\.md[\s\S]*adopt it as the work order/);
+  assert.match(byKey.get('analysis-digest')!, /Write outputs\/digest\.md/);
+  assert.match(byKey.get('analysis-finalize')!, /Write outputs\/assessment\.md/);
+  assert.match(byKey.get('analysis-report')!, /Write outputs\/report\.md/);
+});
+
+test('a QUICK planning round is brief → one planner → one worker → verify, and needs no PM_B', () => {
+  const r = roster();
+  const agents = r.agents.filter(item => item.id !== r.plannerB.id);
+  const req = request('PLANNING', r.director.id);
+  const full = planCommRoundMint({ request: req, agents, existingAssignments: [] });
+  assert.equal(full.ok, false, 'the full round still requires PM_B');
+  const mint = planCommRoundMint({ request: req, agents, existingAssignments: [], shape: 'QUICK' });
+  assert.ok(mint.ok);
+  if (!mint.ok) return;
+  assert.deepEqual(mint.entries.map(entry => entry.key), ['plan-brief', 'plan-draft-a', 'implement-1', 'verify']);
+  const byKey = new Map(mint.entries.map(entry => [entry.key, entry] as const));
+  assert.equal(byKey.get('implement-1')!.agentId, r.worker1.id, 'the first live worker takes the single seat');
+  assert.deepEqual(byKey.get('implement-1')!.dependsOnKeys, ['plan-draft-a']);
+  assert.match(byKey.get('plan-draft-a')!.objectiveText, /quick round[\s\S]*this plan is final[\s\S]*outputs\/analysis-plan\.md/);
+  assert.match(byKey.get('implement-1')!.objectiveText, /^Implement inputs\/inherited\/plan-draft-a\/plan\.md exactly/);
+  // The recorded shape is read when no override is passed.
+  const recorded = planCommRoundMint({ request: { ...req, pipeline: { ...req.pipeline!, shape: 'QUICK' } }, agents, existingAssignments: [] });
+  assert.ok(recorded.ok && recorded.entries.length === 4);
+});
+
+test('a QUICK analysis round drops only the two cross-responses', () => {
+  const r = roster();
+  const mint = planCommRoundMint({ request: request('RESULT_ANALYSIS', r.director.id), agents: r.agents, existingAssignments: [], shape: 'QUICK' });
+  assert.ok(mint.ok);
+  if (!mint.ok) return;
+  assert.deepEqual(mint.entries.map(entry => entry.key), ['analysis-brief', 'analysis-digest', 'analysis-interpret', 'analysis-falsify', 'analysis-finalize', 'analysis-report']);
+  assert.deepEqual(mint.entries.find(entry => entry.key === 'analysis-finalize')!.dependsOnKeys, ['analysis-interpret', 'analysis-falsify']);
+});
+
+test('a revision that restarts at implementation mints brief → implement-1 → verify with no planner seat', () => {
+  const r = roster();
+  const agents = r.agents.filter(item => item.role !== 'PM_A' && item.role !== 'PM_B');
+  const req = request('PLANNING', r.director.id, { revisionOf: { requestId: randomUUID(), decisionAt: at(1), round: 1, restartAt: 'IMPLEMENTATION' } });
+  const mint = planCommRoundMint({ request: req, agents, existingAssignments: [] });
+  assert.ok(mint.ok, mint.ok ? '' : mint.detail);
+  if (!mint.ok) return;
+  assert.deepEqual(mint.entries.map(entry => entry.key), ['plan-brief', 'implement-1', 'verify']);
+  const byKey = new Map(mint.entries.map(entry => [entry.key, entry.objectiveText] as const));
+  assert.match(byKey.get('plan-brief')!, /keeps the approved plan[\s\S]*outputs\/plan\.md[\s\S]*outputs\/analysis-plan\.md[\s\S]*outputs\/brief\.md/);
+  assert.match(byKey.get('implement-1')!, /^Apply the amended plan inputs\/inherited\/plan-brief\/plan\.md[\s\S]*prior-implement-\*/);
+});

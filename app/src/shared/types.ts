@@ -35,8 +35,17 @@ export interface PipelineDecision {
  * to AWAITING_DECISION when the terminal hop verifies, and to DECIDED on a recorded user
  * decision. No hop mints user approval — the gate is a waiting state, not a director task.
  */
+/**
+ * The round a pipeline mints at confirm. FULL is the diverge→converge debate (two planners,
+ * cross-critique, synthesis, one implement hop per worker; the analysis round with both
+ * cross-responses). QUICK is for small, well-specified requests: one planner and one worker for
+ * planning, and no cross-responses for analysis. The director still briefs first either way.
+ */
+export type PipelineShape = 'FULL' | 'QUICK';
 export interface RequestPipeline {
   kind: 'PLANNING' | 'RESULT_ANALYSIS';
+  /** Recorded at the first confirm; absent on rounds confirmed before shapes existed (FULL). */
+  shape?: PipelineShape;
   specHash: string | null;
   phase: 'BRIEFING' | 'LAUNCHED' | 'AWAITING_DECISION' | 'DECIDED';
   briefAssignmentId: string | null;
@@ -54,7 +63,16 @@ export interface Request { migratedFromTaskId?:string; teamId?:string; roleSlots
  pipeline?:RequestPipeline; /** Bounded user→director notes recorded while briefing. */
  pipelineNotes?:PipelineNote[];
  /** Set on a request minted by a REVISE decision: which request it revises, when, and its ordinal. */
- revisionOf?: { requestId: string; decisionAt: string; round: number }; }
+ revisionOf?: { requestId: string; decisionAt: string; round: number;
+  /** IMPLEMENTATION: the revision keeps the settled plan — the director amends it and one worker re-applies it. Absent: a full new round. */
+  restartAt?: 'IMPLEMENTATION' };
+ /**
+  * Set on a RESULT_ANALYSIS request that analyzes a planning round's result: the PLANNING request
+  * whose plan-synthesis pre-registered outputs/analysis-plan.md. The analysis brief inherits that
+  * hop's verified outputs, so the analysis plan is fixed at the end of planning — before any
+  * result exists — instead of being re-derived at the start of analysis.
+  */
+ analysisOf?: { requestId: string }; }
 export interface Project { localFolder?:string; cloudWorkspace?:string; id: string; name: string; mandate: string; createdAt: string; updatedAt: string; archived: boolean; removedAt?: string; budgetCents: number; }
 export interface Experiment { id: string; projectId: string; name: string; hypothesis: string; stage: Stage; revision: number; createdAt: string; updatedAt: string; contract: ResearchContract; }
 export interface ResearchContract { objective: string; dataPolicy: string; modelFamilies: string; evaluation: string; economics: string; protectedRegions: string; requiredChecks: string; limitations: string; }
@@ -331,14 +349,16 @@ export interface MemoryGraphEdge { relationshipId: string; from: string; to: str
 export interface MemoryGraph { projectId: string; nodes: MemoryGraphNode[]; edges: MemoryGraphEdge[] }
 export interface AppState { pipeline?: import("./pipeline").PipelineRecord[]; schemaVersion: 1; requests?:Request[]; findings?: MemoryFinding[]; relationships?: MemoryRelationship[]; grants?:RequestGrant[]; probes?:ProbeAttempt[]; branches?:ResearchBranch[]; specs?:FrozenResearchSpec[]; predictions?:PredictionRecord[]; trials?:TrialLedgerEntry[]; attempts?:StageAttempt[]; receipts?:GateReceipt[]; functions?:FunctionAssignment[]; sealed?:SealedReviewReport[]; teams?:Team[]; memberships?:TeamMembership[]; messages?:Message[]; decisions?:ReviewDecision[]; locations?:ProjectLocation[]; snapshots?:InputSnapshot[]; assignments?:Assignment[]; jobs?:ProviderJob[]; jobEvents?:JobEvent[]; connections?:AccountConnection[]; capabilities?:ProviderCapabilitySnapshot[]; localSessions?: import('./local-session.js').LocalSessionRecord[]; localOps?: import('./local-session.js').LocalSessionJournal[]; projects: Project[]; experiments: Experiment[]; tasks: ResearchTask[]; artifacts: Artifact[]; reviews: ReviewReport[]; events: LineageEvent[]; agents: Agent[]; settings: Settings; spend: Spend; }
 export type Command =
- | { type: 'request.create'; idempotencyKey: string; projectId: string; name: string; hypothesis: string; workType?:WorkType; mode?:WorkMode; leadAgentId?:string|null; participantIds?:string[]; acceptanceCriteria?:string }
+ | { type: 'request.create'; idempotencyKey: string; projectId: string; name: string; hypothesis: string; workType?:WorkType; mode?:WorkMode; leadAgentId?:string|null; participantIds?:string[]; acceptanceCriteria?:string; analysisOfRequestId?:string }
  | { type:'request.update';idempotencyKey:string;requestId:string;expectedRevision:number;objective:string;leadAgentId:string|null;participantIds:string[];acceptanceCriteria:string }
- | { type: 'request.start' | 'request.cancel' | 'request.duplicate' | 'request.pipeline.confirm'; idempotencyKey:string; requestId:string; expectedRevision:number }
+ | { type: 'request.start' | 'request.cancel' | 'request.duplicate'; idempotencyKey:string; requestId:string; expectedRevision:number }
+ /** specHash is filled by the main process from the confirm gate's mint; the renderer sends only the shape. */
+ | { type: 'request.pipeline.confirm'; idempotencyKey:string; requestId:string; expectedRevision:number; shape?:PipelineShape; specHash?:string }
  | { type: 'request.pipeline.note'; idempotencyKey:string; requestId:string; expectedRevision:number; text:string }
  /** Re-arm one pipeline hop after a settled or verified-unresolved attempt: mints the next attempt job on the same assignment. */
  | { type: 'request.pipeline.retryHop'; idempotencyKey:string; requestId:string; expectedRevision:number; pipelineKey:string }
  /** The user's decision on a finished round — carries the hashes the UI displayed so a stale approval is refused. */
- | { type: 'request.pipeline.decide'; idempotencyKey:string; requestId:string; expectedRevision:number; decision:'APPROVE'|'REVISE'|'REJECT'; note?:string; expectedSpecHash:string; expectedReceiptHash:string }
+ | { type: 'request.pipeline.decide'; idempotencyKey:string; requestId:string; expectedRevision:number; decision:'APPROVE'|'REVISE'|'REJECT'; note?:string; restartAt?:'IMPLEMENTATION'; expectedSpecHash:string; expectedReceiptHash:string }
  /** A user-authored finding in the office memory ledger — bounded, evidence-referenced, append-only. */
  | { type: 'memory.finding.note'; idempotencyKey:string; projectId:string; requestId?:string|null; kind:FindingKind; title:string; body:string; evidenceRefs?:FindingEvidenceRef[]; supersedesFindingId?:string }
  | { type: 'memory.relationship.settle'; idempotencyKey:string; relationshipId:string; status:'CONFIRMED'|'REFUTED' }

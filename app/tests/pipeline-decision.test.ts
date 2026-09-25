@@ -11,7 +11,7 @@ import { LocalCliExecAdapter, type CliSpawn } from '../src/main/local-cli-exec';
 import { LocalSessionRouter } from '../src/main/local-session-router';
 import { OutputService } from '../src/main/outputs';
 import { prepareInputSnapshot } from '../src/main/locations';
-import { mintPipelineBrief, mintPipelineRound, settlePipelineDecision, revisionInheritance, type PipelineMintContext } from '../src/main/pipeline-runner';
+import { analysisPlanInheritance, mintPipelineBrief, mintPipelineRound, pipelineConfirmGate, settlePipelineDecision, revisionInheritance, type PipelineMintContext } from '../src/main/pipeline-runner';
 import { PACKET_FILE, RESULT_FILE } from '../src/main/local-packet';
 import { latestJobFor } from '../src/core/jobs';
 import type { Agent, Assignment, ProviderJob, Request } from '../src/shared/types';
@@ -291,14 +291,16 @@ test('a REVISE decision mints exactly one revision whose brief inherits the sett
   const bound = f.store.localSessionForJob(jobFor(f, brief.id).id)!;
   const dir = path.join(f.sessionsRoot, bound.storageRelativePath);
   const packet = JSON.parse(readFileSync(path.join(dir, PACKET_FILE), 'utf8'));
-  const inherited: { path: string; sha256: string; sourceJobId: string; objectHash: string }[] = packet.inherited;
+  const inherited: { path: string; sha256: string; sourceJobId: string; objectHash: string; sourceKey?: string }[] = packet.inherited;
+  assert.deepEqual(inherited.map(item => item.sourceKey).filter((key, index, all) => all.indexOf(key) === index).sort(), ['prior-plan-synthesis', 'prior-verify'],
+    'a prior round\'s hops are staged under prior-<hop-key>');
   assert.deepEqual(inherited.map(item => item.sourceJobId).sort(), [terminalJob.id, synthesisJob.id].sort());
   const outputs = [...terminalJob.outputs, ...synthesisJob.outputs];
   for (const item of inherited) {
     const source = outputs.find(output => output.sha256 === item.objectHash)!;
     assert.ok(source, 'every inherited entry names a verified source output by hash');
     assert.equal(item.sha256, source.sha256);
-    assert.ok(item.path.startsWith(`inputs/inherited/${item.sourceJobId}/`));
+    assert.ok(item.path.startsWith(`inputs/inherited/${item.sourceKey}/`));
     assert.equal(readFileSync(path.join(dir, item.path), 'utf8'), `${path.basename(source.path)} bytes`,
       'the staged inherited bytes are the verified predecessor bytes');
   }
@@ -391,4 +393,72 @@ test('APPROVE and REJECT decisions mint no revision request', async t => {
   }
   assert.equal(f.store.snapshot({ history: false }).requests!.filter(item => item.revisionOf).length, 0,
     'only REVISE mints a linked revision');
+});
+
+test('analysisPlanInheritance chains an analysis brief to the planning round that pre-registered its plan', () => {
+  const hop = (id: string, requestId: string, pipelineKey: string) => ({ id, requestId, pipelineKey }) as Assignment;
+  const job = (id: string, assignmentId: string, state: ProviderJob['state']) => ({ id, assignmentId, state, attempt: 1, createdAt: at(1) }) as ProviderJob;
+  const plan = { id: 'plan', name: 'Write ema5 code', pipeline: { kind: 'PLANNING' } } as unknown as Request;
+  const analysis = { id: 'ana', analysisOf: { requestId: 'plan' }, pipeline: { kind: 'RESULT_ANALYSIS' } } as unknown as Request;
+  type State = Parameters<typeof analysisPlanInheritance>[0];
+
+  let state = { requests: [plan], assignments: [hop('a-synth', 'plan', 'plan-synthesis')], jobs: [job('j-synth', 'a-synth', 'COMPLETED')] } as unknown as State;
+  let inherited = analysisPlanInheritance(state, analysis, () => true);
+  assert.deepEqual(inherited.dependsOn, ['a-synth']);
+  assert.equal(inherited.line, "Pre-registered analysis plan: inputs/inherited/prior-plan-synthesis/analysis-plan.md, fixed when 'Write ema5 code' was planned.");
+
+  inherited = analysisPlanInheritance(state, analysis, () => false);
+  assert.deepEqual(inherited.dependsOn, [], 'no verified receipt, no edge');
+  assert.match(inherited.line, /has no verified COMPLETED receipt/);
+
+  state = { requests: [plan], assignments: [hop('a-synth', 'plan', 'plan-synthesis')], jobs: [job('j-synth', 'a-synth', 'FAILED')] } as unknown as State;
+  assert.deepEqual(analysisPlanInheritance(state, analysis, () => true).dependsOn, []);
+
+  state = { requests: [], assignments: [], jobs: [] } as unknown as State;
+  assert.match(analysisPlanInheritance(state, analysis, () => true).line, /not recorded in this workspace/);
+});
+
+test('a QUICK round records its shape and spec hash at confirm; an implementation-only revision reuses the plan and prior deliverables', async t => {
+  const f = await fixture(t);
+  f.store.execute({ type: 'request.create', idempotencyKey: key(), projectId: f.project.id, name: 'Quick one', hypothesis: 'Plan the thing.', workType: 'PLANNING', mode: 'SINGLE', leadAgentId: f.agents.DIRECTOR.id, participantIds: [] });
+  let request = byName(f, 'Quick one');
+  request = f.store.execute({ type: 'request.start', idempotencyKey: key(), requestId: request.id, expectedRevision: request.revision }).requests!.find(item => item.id === request.id)!;
+  await mintPipelineBrief(f.ctx, request);
+  request = requestOf(f, request.id);
+  await completeHop(f, request.pipeline!.briefAssignmentId!, 'brief.txt');
+  request = requestOf(f, request.id);
+  const gate = pipelineConfirmGate(f.store, request.id, 'QUICK');
+  assert.ok(gate.ok);
+  if (!gate.ok) return;
+  assert.notEqual(gate.specHash, request.pipeline!.specHash, 'the quick spec is a different spec than the full one the brief was bound under');
+  request = f.store.execute({ type: 'request.pipeline.confirm', idempotencyKey: key(), requestId: request.id, expectedRevision: request.revision, shape: 'QUICK', specHash: gate.specHash }).requests!.find(item => item.id === request.id)!;
+  assert.equal(request.pipeline!.shape, 'QUICK');
+  assert.equal(request.pipeline!.specHash, gate.specHash);
+  await mintPipelineRound(f.ctx, request);
+  const hops = () => f.store.snapshot({ history: false }).assignments!.filter(item => item.requestId === request.id && item.pipelineKey);
+  assert.deepEqual(hops().map(item => item.pipelineKey).sort(), ['implement-1', 'plan-brief', 'plan-draft-a', 'verify']);
+  await completeRound(f, request.id);
+  assert.equal(settlePipelineDecision(f.ctx, requestOf(f, request.id)).settled, true, 'a quick round settles on its verify hop against the recorded spec hash');
+
+  const current = requestOf(f, request.id);
+  const pending = current.pipeline!.pendingDecision!;
+  assert.throws(() => f.store.execute({ type: 'request.pipeline.decide', idempotencyKey: key(), requestId: request.id, expectedRevision: current.revision, decision: 'APPROVE', restartAt: 'IMPLEMENTATION', expectedSpecHash: pending.specHash, expectedReceiptHash: pending.headReceiptHash }), /Only a planning revision can restart/);
+  f.store.execute({ type: 'request.pipeline.decide', idempotencyKey: key(), requestId: request.id, expectedRevision: current.revision, decision: 'REVISE', note: 'Rename the output column.', restartAt: 'IMPLEMENTATION', expectedSpecHash: pending.specHash, expectedReceiptHash: pending.headReceiptHash });
+  const revision = f.store.snapshot({ history: false }).requests!.find(item => item.revisionOf?.requestId === request.id)!;
+  assert.equal(revision.revisionOf!.restartAt, 'IMPLEMENTATION');
+  const fresh = await startRevision(f, revision);
+  const brief = f.store.snapshot({ history: false }).assignments!.find(item => item.id === fresh.pipeline!.briefAssignmentId)!;
+  const sourceHop = (k: string) => hops().find(item => item.pipelineKey === k)!.id;
+  assert.deepEqual([...(brief.dependsOn ?? [])].sort(), [sourceHop('verify'), sourceHop('plan-draft-a')].sort(), 'a quick source round settles its plan on the single draft');
+  assert.match(brief.frozen!.objective, /keeps the approved plan and restarts at implementation/);
+  await completeHop(f, brief.id, 'plan.md');
+  let revised = requestOf(f, revision.id);
+  const revisedGate = pipelineConfirmGate(f.store, revised.id);
+  assert.ok(revisedGate.ok);
+  revised = f.store.execute({ type: 'request.pipeline.confirm', idempotencyKey: key(), requestId: revised.id, expectedRevision: revised.revision, ...(revisedGate.ok ? { specHash: revisedGate.specHash } : {}) }).requests!.find(item => item.id === revised.id)!;
+  await mintPipelineRound(f.ctx, revised);
+  const revisedHops = f.store.snapshot({ history: false }).assignments!.filter(item => item.requestId === revised.id && item.pipelineKey);
+  assert.deepEqual(revisedHops.map(item => item.pipelineKey).sort(), ['implement-1', 'plan-brief', 'verify']);
+  const implement = revisedHops.find(item => item.pipelineKey === 'implement-1')!;
+  assert.deepEqual([...(implement.dependsOn ?? [])].sort(), [brief.id, sourceHop('implement-1')].sort(), 'the worker inherits the amended plan and the previous deliverables');
 });

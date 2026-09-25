@@ -5,8 +5,9 @@ import { EVIDENCE_SURFACE_ID, type ToolProfile } from '../shared/tool-profile.js
  * Profile-driven launch flags (inter-agent pipeline W1).
  *
  * mapToolFlags builds the full argv for one provider CLI launch from the binding's declared
- * ToolProfile. With no profile the output is byte-identical to the pre-profile builders — that
- * is a regression boundary, not an option. With a profile, every declared restriction either
+ * ToolProfile. With no profile, codex and devin output is byte-identical to the pre-profile
+ * builders — that is a regression boundary, not an option; claude additionally always carries
+ * CLAUDE_ISOLATION_FLAGS and a default --tools set (token diet, 2026-09-25). With a profile, every declared restriction either
  * becomes arguments verified against the installed CLI's --help on this machine or is named in
  * `unmapped` — a restriction the CLI cannot express is never silently dropped and never claimed.
  *
@@ -20,7 +21,8 @@ import { EVIDENCE_SURFACE_ID, type ToolProfile } from '../shared/tool-profile.js
  *   codex exec:  -s/--sandbox read-only|workspace-write|danger-full-access is the only tool-
  *                surface gate documented; -c key=value config overrides exist but the
  *                mcp_servers keys they would need are not documented in exec --help, so
- *                allowedTools/mcpServers stay unmapped.
+ *                allowedTools/mcpServers stay unmapped. The lean baseline (CODEX_DISABLED_FEATURES,
+ *                -c mcp_servers={}) and -c model_reasoning_effort were probed against codex-cli 0.154.
  *   devin 3000.x: --permission-mode auto|accept-edits|smart|dangerous and --respect-workspace-
  *                trust exist; --sandbox is documented for macOS seatbelt / Linux bwrap only —
  *                a no-op on Windows — so it maps filesystem only off win32. There is no
@@ -34,6 +36,11 @@ export interface ToolFlagInput {
   effort: Effort;
   prompt: string;
   profile?: ToolProfile;
+  /**
+   * Whether the payload authorizes delegation. Only then does a lean launch keep the CLI's own
+   * sub-agent surface (claude's Agent tool, codex's multi_agent feature).
+   */
+  delegation?: boolean;
 }
 
 export interface ToolFlagResult {
@@ -88,8 +95,39 @@ export function mapToolFlags(input: ToolFlagInput, platform: NodeJS.Platform = p
   }
 }
 
+/**
+ * The session-isolation flags every office-spawned claude run carries (all verified in
+ * claude --help). Without them a packet session inherits the user's whole interactive setup —
+ * user-level skills and plugins, claude.ai connectors (Drive, Docs, Canva …), the auto-memory
+ * system section and per-session memory folder, and a per-directory system prompt that defeats
+ * prompt caching across hops. Measured on this machine: ~37k (Opus) / ~49k (Sonnet) tokens of
+ * startup context per call before the packet, versus ~6–8k / ~16k with these flags.
+ *   --strict-mcp-config          only servers from --mcp-config attach (none when the profile declares none)
+ *   --setting-sources project    user/local settings (plugins, hooks, model overrides) are not read
+ *   --disable-slash-commands     no skill listing
+ *   --exclude-dynamic-system-prompt-sections  per-machine sections (cwd, memory paths) move out of the
+ *                                system prompt so consecutive hops share one cacheable prefix
+ */
+export const CLAUDE_ISOLATION_FLAGS = ['--strict-mcp-config', '--setting-sources', 'project', '--disable-slash-commands', '--exclude-dynamic-system-prompt-sections'] as const;
+/** The built-in tools a packet session needs when its profile names none: file work plus a shell. */
+export const CLAUDE_DEFAULT_TOOLS = ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep'] as const;
+
+/**
+ * codex features whose tool schemas and instructions ride every call but that a packet session
+ * never uses: the user's app/plugin/browser/computer-use surfaces, image generation, goals and
+ * suggestion tools (all listed by `codex features list`, disabled with the documented
+ * `--disable <feature>`). `multi_agent` is dropped too unless delegation is authorized.
+ * `-c mcp_servers={}` detaches the user's configured MCP servers for this run only. The user's
+ * config.toml is otherwise kept — it carries machine settings such as the Windows sandbox mode,
+ * without which every shell command is rejected (probed: --ignore-user-config broke exec).
+ * Measured on this machine: 17.7k → 13.2k input tokens for a one-word reply.
+ */
+export const CODEX_DISABLED_FEATURES = ['apps', 'browser_use', 'browser_use_external', 'computer_use', 'in_app_browser', 'image_generation', 'plugins', 'remote_plugin', 'goals', 'tool_suggest', 'skill_search', 'personality'] as const;
+/** Reasoning efforts codex accepts as `-c model_reasoning_effort=…` (the set the probed model reported; others are refused by the API). */
+const CODEX_EFFORTS = new Set<Effort>(['low', 'medium', 'high', 'xhigh', 'max']);
+
 function claudeFlags(input: ToolFlagInput): ToolFlagResult {
-  const { model, effort, prompt, profile } = input;
+  const { model, effort, prompt, profile, delegation } = input;
   const args = ['-p', prompt, '--output-format', 'json', '--dangerously-skip-permissions', '--model', model];
   let effortFlag: string | null = null;
   let unmappedEffort: Effort | null = null;
@@ -99,6 +137,7 @@ function claudeFlags(input: ToolFlagInput): ToolFlagResult {
       effortFlag = `--effort ${effort}`;
     } else unmappedEffort = effort;
   }
+  args.push(...CLAUDE_ISOLATION_FLAGS);
   const applied: string[] = [];
   const unmapped: string[] = [];
   if (profile?.allowedTools?.length) {
@@ -107,6 +146,10 @@ function claudeFlags(input: ToolFlagInput): ToolFlagResult {
     // layer allowlist that the bypass flag renders advisory.
     args.push('--tools', profile.allowedTools.join(','));
     applied.push(`allowedTools [${profile.allowedTools.join(', ')}] restricted via --tools (verified in claude --help: the available built-in tool set, enforced even under --dangerously-skip-permissions)`);
+  } else {
+    // No declared allowlist: the default packet tool set, not every built-in (agents, cron,
+    // worktrees, web fetch …) whose schemas would ride every call of the session.
+    args.push('--tools', [...CLAUDE_DEFAULT_TOOLS, ...(delegation ? ['Agent'] : [])].join(','));
   }
   const servers = partitionServers(profile);
   if (servers.surface.length) applied.push(surfaceMounted);
@@ -131,8 +174,11 @@ function claudeFlags(input: ToolFlagInput): ToolFlagResult {
 }
 
 function codexFlags(input: ToolFlagInput): ToolFlagResult {
-  const { model, effort, prompt, profile } = input;
-  const args = ['exec', '-s', 'workspace-write', '--skip-git-repo-check', '-m', model, prompt];
+  const { model, effort, prompt, profile, delegation } = input;
+  // The prompt stays the final argument; the lean flags sit between -m and it.
+  const lean = ['-c', 'mcp_servers={}', ...[...CODEX_DISABLED_FEATURES, ...(delegation ? [] : ['multi_agent'])].flatMap(feature => ['--disable', feature])];
+  const mappedEffort = effort !== 'default' && CODEX_EFFORTS.has(effort);
+  const args = ['exec', '-s', 'workspace-write', '--skip-git-repo-check', '-m', model, ...(mappedEffort ? ['-c', `model_reasoning_effort=${effort}`] : []), ...lean, prompt];
   const applied: string[] = [];
   const unmapped: string[] = [];
   if (profile?.canWrite === false) {
@@ -155,8 +201,8 @@ function codexFlags(input: ToolFlagInput): ToolFlagResult {
   return {
     args,
     bypassFlags: ['-s', args[2], '--skip-git-repo-check'],
-    effortFlag: null,
-    unmappedEffort: effort === 'default' ? null : effort,
+    effortFlag: mappedEffort ? `-c model_reasoning_effort=${effort}` : null,
+    unmappedEffort: effort === 'default' || mappedEffort ? null : effort,
     applied, unmapped,
   };
 }
