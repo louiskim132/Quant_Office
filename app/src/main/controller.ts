@@ -18,6 +18,15 @@ import { settlePipelineDecision } from './pipeline-runner.js';
 import { ingestReceiptMemory } from './memory-ingest.js';
 import type { ToolProfile } from '../shared/tool-profile.js';
 
+const clip = (text: string, max: number) => text.length > max ? `${text.slice(0, max - 1)}…` : text;
+/** Bounds an evidence entry to the store's field limits (detail 1000, each confinement field 400). */
+export function boundEvidence(entry: CapabilityEvidence): CapabilityEvidence {
+  return {
+    ...entry, detail: clip(entry.detail, 1000),
+    ...(entry.confinement ? { confinement: { tools: clip(entry.confinement.tools, 400), filesystem: clip(entry.confinement.filesystem, 400), network: clip(entry.confinement.network, 400), environment: clip(entry.confinement.environment, 400) } } : {}),
+  };
+}
+
 /**
  * The complete text one external action would deliver, assembled once and reviewable before launch.
  *
@@ -257,7 +266,9 @@ export class AssignmentController {
       if (!assignment || !connection) return;
       this.store.recordTransportEvidence({
         connectionId: connection.id, route: job.route, environment: 'LOCAL_MACHINE',
-        model: assignment.requestedModel, operations: entries,
+        // An office-spawned launch record (executable, cwd, argv, restrictions) routinely exceeds the
+        // evidence field limits; bounded prefixes are recorded rather than losing the whole entry.
+        model: assignment.requestedModel, operations: entries.map(boundEvidence),
         source: 'office-local-transport', observedAt: this.now(),
       });
     } catch (error) {
@@ -1027,17 +1038,37 @@ export class AssignmentController {
     }
     const fresh = retrieved.filter(output => !job.outputs.some(old => old.path === output.path && old.sha256 === output.sha256 && old.stored));
     if (job.state === result.state && !fresh.length) return this.store.snapshot({history:false});
-    const transitioned = this.store.recordJobTransition({
-      jobId: job.id, expectedRevision: job.revision, to: result.state, evidence: 'PROVIDER_REPORTED',
-      detail, outputs: fresh.length ? fresh : undefined, at: this.now(),
-    });
+    // The receipt contract allows a longer detail than a job record holds; the full text stays in
+    // the session's result.json, so the record keeps a bounded prefix instead of refusing it.
+    const boundedDetail = detail.length > 2000 ? `${detail.slice(0, 1999)}…` : detail;
+    let transitioned: AppState;
+    let completed = result.state === 'COMPLETED';
+    try {
+      transitioned = this.store.recordJobTransition({
+        jobId: job.id, expectedRevision: job.revision, to: result.state, evidence: 'PROVIDER_REPORTED',
+        detail: boundedDetail, outputs: fresh.length ? fresh : undefined, at: this.now(),
+      });
+    } catch (error) {
+      // A verified receipt is already bound as lastReceipt, so every later observation refuses it as
+      // a replay. A refused COMPLETED (for example, no attributable output) must therefore land as a
+      // visible FAILED outcome here — otherwise the job would sit UNKNOWN forever with the reason
+      // lost. Other refusals keep their original behavior.
+      if (!completed || !result.receipt) throw error;
+      completed = false;
+      const reason = error instanceof Error ? error.message : 'the store refused the transition';
+      const failed = `The session reported COMPLETED on a verified receipt, but the office refused completion: ${reason} Session detail: ${detail}`;
+      transitioned = this.store.recordJobTransition({
+        jobId: job.id, expectedRevision: job.revision, to: 'FAILED', evidence: 'OFFICE_LOCAL',
+        detail: failed.length > 2000 ? `${failed.slice(0, 1999)}…` : failed, at: this.now(),
+      });
+    }
     // A verified observation of a local session is itself office evidence — recorded only when the
     // observation changed something, so repeated polls do not churn capability snapshots.
     this.noteLocalEvidence(job, adapter.observeEvidence?.(job, result) ?? []);
     // The receipt's self-reported memory ingests only after the verified COMPLETED transition —
     // every cited output already exists as a stored artifact by then. Malformed entries are
     // skipped by ingest, never thrown; the report lands as a dedup-keyed job event.
-    if (result.state === 'COMPLETED' && result.receipt && result.memory && (result.memory.findings?.length || result.memory.links?.length)) {
+    if (completed && result.receipt && result.memory && (result.memory.findings?.length || result.memory.links?.length)) {
       const assignment = this.store.snapshot({ history: false }).assignments?.find(item => item.id === job.assignmentId);
       try {
         if (!assignment) throw new Error('the job names an assignment the office does not hold');

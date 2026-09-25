@@ -39,6 +39,15 @@ const MAX_PENDING_BYTES = 256 * 1024;
  * writable stdin. CliSpawnOptions pins stdin to 'ignore' because CLI exec sessions
  * never write to the child; this module must, to drive the MCP handshake.
  */
+/** Splits a declared server command into its executable and any leading sub-command words. */
+export function splitCommand(command: string): string[] {
+  const parts = command.trim().split(/\s+/).filter(Boolean);
+  return parts.length ? parts : [command];
+}
+
+/** Whether a probe failure means the declared executable is not installed at all. */
+export const serenaNotInstalled = (reason: string) => /\bENOENT\b/.test(reason);
+
 export interface SerenaChild extends CliChild {
   readonly stdin: NodeJS.WritableStream | null;
 }
@@ -124,8 +133,11 @@ export function spawnSerenaSession(request: SerenaSessionRequest, deps: SerenaSe
     ...(entry.readOnly ? [SERENA_READ_ONLY_ARG] : []),
   ];
 
+  // A declared command may carry its sub-command ("serena start-mcp-server"); spawn runs without a
+  // shell, so the executable and its leading arguments are separated here.
+  const [executable, ...leading] = splitCommand(entry.command);
   try {
-    child = deps.spawn(entry.command, args, {
+    child = deps.spawn(executable, [...leading, ...args], {
       cwd: request.packetDir, env: process.env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
     });
   } catch (error) {

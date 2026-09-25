@@ -94,14 +94,17 @@ export function requestQueue(state: Pick<AppState, 'tasks' | 'experiments' | 'pr
  const current:QueueEntry[]=(state.requests??[]).filter(request=>!request.removedAt).map(request=>{
   const archived=Boolean(state.projects.find(p=>p.id===request.projectId)?.archived);
   const jobs=requestJobs(state,request.id);
+  // A pipeline mints its hops in stages (brief first, arms only after confirmation), so a settled
+  // job list is not the end of the work until the pipeline itself is decided.
+  const workDone=jobs.length>0&&jobs.every(job=>job.settled)&&(!request.pipeline||request.pipeline.phase==='DECIDED');
   return {
    id:request.id,request,tasks:[],status:request.blockers.length?'BLOCKED':request.status,
    root:{id:request.id,projectId:request.projectId,experimentId:request.experimentId,prompt:request.objective,recipient:'WORKER',status:request.status==='CANCELED'?'CANCELED':'BLOCKED',blocker:null,createdAt:request.createdAt,updatedAt:request.updatedAt},
    // Active while the request is open and its recorded work has not all reached a terminal outcome:
    // an unknown attempt is exactly what must stay in view until it is reconciled. A canceled request
    // with an unresolved job stays in view too — the outcome is not established yet.
-   settled:request.status!=='CANCELED'&&jobs.length>0&&jobs.every(job=>job.settled),
-   active:request.status==='CANCELED'?jobs.some(job=>job.unresolved):!(jobs.length>0&&jobs.every(job=>job.settled)),
+   settled:request.status!=='CANCELED'&&workDone,
+   active:request.status==='CANCELED'?jobs.some(job=>job.unresolved):!workDone,
    canCancel:request.status!=='CANCELED'&&!archived,
    // Only a terminal record leaves the queue, and an unresolved provider job outcome never does:
    // an unknown attempt is exactly what must stay in view until it is reconciled.

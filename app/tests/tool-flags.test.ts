@@ -51,7 +51,7 @@ test('claude maps allowedTools to --tools and mcpServers to --mcp-config, both v
     mcpServers: [{ id: 'serena', command: 'serena serve', args: ['--scope', 'packet'], readOnly: true }],
   };
   const result = flags('claude', profile);
-  assert.deepEqual(result.args.slice(-4), ['--tools', 'Read,Bash(git *)', '--mcp-config', JSON.stringify({ mcpServers: { serena: { command: 'serena serve', args: ['--scope', 'packet'] } } })]);
+  assert.deepEqual(result.args.slice(-4), ['--tools', 'Read,Bash(git *)', '--mcp-config', JSON.stringify({ mcpServers: { serena: { command: 'serena', args: ['serve', '--scope', 'packet'] } } })]);
   assert.deepEqual(result.args.slice(0, BASELINE.claude.length), BASELINE.claude, 'profile flags append after the baseline argv');
   assert.equal(result.applied.length, 2);
   assert.match(result.applied[0], /allowedTools \[Read, Bash\(git \*\)\] restricted via --tools/);
