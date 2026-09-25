@@ -4,7 +4,7 @@ import path from 'node:path';
 import { canonicalHash } from '../core/canonical.js';
 import { parseStrictJson } from '../core/strict-json.js';
 import { efforts } from '../shared/effort.js';
-import { cancelAckV1Schema, cancelRequestV1Schema, localPacketV2Schema, localResultV2Schema, type LocalPacketV2, type LocalResultV2, type LocalSessionRecord } from '../shared/local-session.js';
+import { MEMORY_DIGEST_FILE, cancelAckV1Schema, cancelRequestV1Schema, localPacketV2Schema, localResultV2Schema, memoryDigestSchema, type LocalPacketV2, type LocalResultV2, type LocalSessionRecord, type MemoryDigest } from '../shared/local-session.js';
 import { mountsEvidenceSurface } from '../shared/tool-profile.js';
 import type { Effort } from '../shared/types.js';
 import { MAX_FILE, MAX_TOTAL, safeEntry } from './artifacts.js';
@@ -63,6 +63,13 @@ export interface PrepareLocalPacketInput {
   /** The guarded I/O boundary every read and write goes through. */
   io: LocalFileIO;
   now: string;
+  /**
+   * The caller's store.memoryDigest(projectId) result. It mounts as memory-digest.json only
+   * when the binding's assignment seats memory retrieval — 'plan-synthesis' or
+   * 'analysis-finalize', the exact pipeline keys authorizeMemorySearch authorizes. For every
+   * other seat the value is ignored: a packet never carries memory its seat cannot read.
+   */
+  memoryDigest?: Pick<MemoryDigest, 'findings' | 'links'>;
 }
 
 /** A v2 receipt plus the output bytes the office verified itself — the caller stores them unopened. */
@@ -112,7 +119,7 @@ export const packetClaude = (): string => [
  * control files, and documents the cooperative cancel request/acknowledgement pair (spec §8 —
  * the schema exists in shared/local-session.ts; P3 implements the runtime).
  */
-export const resultContractV2 = (options?: { evidenceSurface?: boolean }): string => [
+export const resultContractV2 = (options?: { evidenceSurface?: boolean; memoryDigest?: boolean }): string => [
   '# Local session result contract',
   '',
   `This directory is a Quant Research Office session packet (office-local-session@2):`,
@@ -135,6 +142,13 @@ export const resultContractV2 = (options?: { evidenceSurface?: boolean }): strin
     'lines. `memorySearch` answers a bounded full-text search over the project\'s office',
     'memory ledger and the office authorizes it per hop — most seats will be refused. Every',
     'frame is grant-checked against this session\'s identity before any evidence bytes move.',
+  ] : []),
+  ...(options?.memoryDigest ? [
+    '',
+    `\`${MEMORY_DIGEST_FILE}\` is a bounded, point-in-time projection of the project's office`,
+    'memory ledger (findings with superseded flags, proposed/confirmed links); it is',
+    'office-recorded self-report context for synthesis, not verified fact; cite',
+    'evidenceRefs when your findings draw on it.',
   ] : []),
   '',
   `## ${RESULT_FILE}`,
@@ -217,8 +231,9 @@ export const resultContractV2 = (options?: { evidenceSurface?: boolean }): strin
  * Writes a v2 packet directory (QO-LOCAL-REV §6.2) entirely through the LocalFileIO boundary.
  *
  * The destination root is inspected, the fresh session directory allocated only under verified
- * real ancestors, and every packet file — inputs/, the instruction files, packet.json,
- * packet.sha256 and finally the packet.ready.json marker — is created with writeNew semantics:
+ * real ancestors, and every packet file — inputs/, the instruction files, memory-digest.json
+ * at an authorized synthesis seat, packet.json, packet.sha256 and finally the
+ * packet.ready.json marker — is created with writeNew semantics:
  * nothing existing is ever overwritten, and a destination that already carries a receipt, a
  * cancel sentinel or a ready marker refuses preparation outright.
  *
@@ -290,9 +305,22 @@ export function prepareLocalPacket(input: PrepareLocalPacketInput): PreparedLoca
     io.writeNew(managed, relativePath, item.bytes);
     inherited.push({ path: relativePath, sha256: digest, bytes: item.bytes.byteLength, sourceJobId: item.sourceJobId, objectHash: item.objectHash });
   }
+  // The bounded ledger digest mounts only at the seats authorizeMemorySearch authorizes —
+  // plan-synthesis and analysis-finalize — and only when the caller supplied the projection.
+  // It is written before packet.json so its hash can be declared on the packet; like every
+  // other generated file it is never part of packetHash — the packet identity stays the
+  // assignment packet.
+  const digestSeat = context.assignment.pipelineKey === 'plan-synthesis' || context.assignment.pipelineKey === 'analysis-finalize';
+  let digestDeclaration: LocalPacketV2['memoryDigest'];
+  if (digestSeat && input.memoryDigest) {
+    const digest = memoryDigestSchema.parse({ schema: 'office-memory-digest@1', generatedAt: now, ...input.memoryDigest });
+    const content = Buffer.from(`${JSON.stringify(digest, null, 2)}\n`, 'utf8');
+    io.writeNew(managed, MEMORY_DIGEST_FILE, content);
+    digestDeclaration = { path: MEMORY_DIGEST_FILE, findings: digest.findings.length, relationships: digest.links.length, sha256: createHash('sha256').update(content).digest('hex') };
+  }
   // Instruction files are ordinary packet members: written once, declared in the manifest.
   const instructions: LocalPacketV2['instructions'] = [];
-  for (const [name, text] of [[AGENTS_FILE, packetAgentsV2()], [CLAUDE_FILE, packetClaude()], [CONTRACT_FILE, resultContractV2({ evidenceSurface: mountsEvidenceSurface(binding.toolProfile) })]] as const) {
+  for (const [name, text] of [[AGENTS_FILE, packetAgentsV2()], [CLAUDE_FILE, packetClaude()], [CONTRACT_FILE, resultContractV2({ evidenceSurface: mountsEvidenceSurface(binding.toolProfile), memoryDigest: digestDeclaration !== undefined })]] as const) {
     const content = Buffer.from(text, 'utf8');
     io.writeNew(managed, name, content);
     instructions.push({ path: name, sha256: createHash('sha256').update(content).digest('hex'), bytes: content.byteLength });
@@ -313,6 +341,7 @@ export function prepareLocalPacket(input: PrepareLocalPacketInput): PreparedLoca
     ...(inherited.length ? { inherited } : {}),
     instructions,
     ...(binding.toolProfile ? { toolProfile: binding.toolProfile } : {}),
+    ...(digestDeclaration ? { memoryDigest: digestDeclaration } : {}),
     contract: CONTRACT_FILE,
   });
   io.writeNew(managed, PACKET_FILE, Buffer.from(`${JSON.stringify(packet, null, 2)}\n`, 'utf8'));
