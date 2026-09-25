@@ -76,8 +76,20 @@ export async function mintPipelineBrief(ctx: PipelineMintContext, request: Reque
     requestId: request.id, agentId: entry.agentId, snapshotId: snapshot.id,
     toolProfile: entry.toolProfile, pipelineKey: entry.key, inputScope: entry.inputScope, objective: entry.objectiveText,
   });
+  // A5 soft gate: a planning round whose project withholds nothing but whose snapshot carries
+  // outcome-looking files gets a non-blocking notice on the card. It never blocks — the user
+  // decides what planning may see — it only says so plainly.
+  let notice: string | undefined;
+  if (request.pipeline?.kind === 'PLANNING') {
+    const location = (state.locations ?? []).find(item => item.projectId === request.projectId);
+    if (!location?.withheldPaths?.length) {
+      const outcomeLike = snapshot.files.filter(file => /(^|\/)(results?|predictions?|backtests?|outputs?)(\/|\.|_)/i.test(file.path)).length;
+      if (outcomeLike)
+        notice = `${outcomeLike} file${outcomeLike === 1 ? ' looks' : 's look'} like outcome data and will be visible to planning. Withhold them in Location & inputs.`;
+    }
+  }
   const fresh = freshRequest(ctx.store, request.id);
-  ctx.store.bindPipelineBrief({ requestId: request.id, expectedRevision: fresh.revision, briefAssignmentId: assignment.id, specHash: mint.specHash });
+  ctx.store.bindPipelineBrief({ requestId: request.id, expectedRevision: fresh.revision, briefAssignmentId: assignment.id, specHash: mint.specHash, ...(notice ? { notice } : {}) });
   return { minted: true, assignment };
 }
 

@@ -103,6 +103,12 @@ export interface ObserveResult {
    */
   provenance?: 'PROVIDER_REPORTED' | 'OFFICE_LOCAL';
   /**
+   * The provider's own terminal record named a documented transient failure (for example Claude's
+   * OAuth-refresh api_error). Only the adapter that parsed the provider record may set this — the
+   * office uses it to schedule exactly one automatic retry, never to classify by message text.
+   */
+  transientProviderError?: boolean;
+  /**
    * Self-reported applied facts a verified receipt declared — what the session says it ran, not
    * what the office asked for. Absent keys mean the tool said nothing; they are never inferred.
    */
@@ -796,6 +802,52 @@ export class AssignmentController {
     try { settlePipelineDecision({ store: this.store }, request); } catch {}
   }
 
+  /**
+   * B5: one automatic retry for a provider-reported transient failure, 60 seconds out. Scope is a
+   * pipeline hop only — a lone dispatch's retry stays a user decision. The `auto-retry:` event is
+   * the once-only latch: it lands durably on the failed job before the timer arms, so a restart or
+   * a repeated observation never schedules a second retry.
+   */
+  private scheduleTransientRetry(assignmentId: string): void {
+    const state = this.store.snapshot({ history: false });
+    const assignment = state.assignments?.find(item => item.id === assignmentId);
+    if (!assignment?.pipelineKey) return;
+    const request = state.requests?.find(item => item.id === assignment.requestId);
+    if (!request?.pipeline || request.status === 'CANCELED') return;
+    const jobIds = new Set((state.jobs ?? []).filter(item => item.assignmentId === assignmentId).map(item => item.id));
+    if ((state.jobEvents ?? []).some(event => jobIds.has(event.jobId) && event.externalId.startsWith('auto-retry:'))) return;
+    const job = latestJobFor(state.jobs, assignmentId);
+    if (!job) return;
+    this.store.recordJobEvents(job.id, [{ externalId: `auto-retry:${assignmentId}`, cursor: '', kind: 'STATUS',
+      text: 'The provider reported a transient error; the office retries this hop once, in about a minute.',
+      occurredAt: this.now(), receivedAt: this.now(), evidence: 'OFFICE_LOCAL' }]);
+    const timer = setTimeout(() => { void this.runTransientRetry(assignmentId); }, 60_000);
+    timer.unref?.();
+  }
+
+  /** Fires the scheduled retry. Any refusal lands as an event on the failed job — never a throw. */
+  private async runTransientRetry(assignmentId: string): Promise<void> {
+    const state = this.store.snapshot({ history: false });
+    const assignment = state.assignments?.find(item => item.id === assignmentId);
+    const request = assignment ? state.requests?.find(item => item.id === assignment.requestId) : undefined;
+    const job = assignment ? latestJobFor(state.jobs, assignmentId) : undefined;
+    if (!assignment?.pipelineKey || !request || !job) return;
+    const report = (text: string) => this.store.recordJobEvents(job.id, [{ externalId: `auto-retry-fired:${job.id}`, cursor: '', kind: 'STATUS',
+      text, occurredAt: this.now(), receivedAt: this.now(), evidence: 'OFFICE_LOCAL' }]);
+    // Guards re-read durable state at fire time: a user cancel, a manual retry or a settled later
+    // attempt must not race a stale timer into minting work.
+    if (request.status === 'CANCELED' || job.state !== 'FAILED') { report('The scheduled transient retry did not run — the hop is no longer awaiting one.'); return; }
+    try {
+      this.store.execute({ type: 'request.pipeline.retryHop', idempotencyKey: randomUUID(),
+        requestId: request.id, pipelineKey: assignment.pipelineKey, expectedRevision: request.revision });
+      const rearmed = latestJobFor(this.store.snapshot({ history: false }).jobs, assignmentId);
+      if (rearmed?.state === 'INTENT') await this.handoff(assignmentId);
+      report('The office retried this hop once after the provider-reported transient error.');
+    } catch (error) {
+      report(`The scheduled transient retry could not run: ${error instanceof Error ? error.message : 'unknown error'} The hop stays failed; retry it manually when the blocker clears.`);
+    }
+  }
+
   /** Serializes chain launches — two predecessors settling together must not race one dependent. */
   private chainTail: Promise<unknown> = Promise.resolve();
 
@@ -1099,6 +1151,9 @@ export class AssignmentController {
     // A verified observation of a local session is itself office evidence — recorded only when the
     // observation changed something, so repeated polls do not churn capability snapshots.
     this.noteLocalEvidence(job, adapter.observeEvidence?.(job, result) ?? []);
+    // One automatic retry for a provider-reported transient failure — scheduled only after the
+    // FAILED transition lands, so the recorded failure stays the fact the retry stands on.
+    if (result.state === 'FAILED' && result.transientProviderError) this.scheduleTransientRetry(job.assignmentId);
     // The receipt's self-reported memory ingests only after the verified COMPLETED transition —
     // every cited output already exists as a stored artifact by then. Malformed entries are
     // skipped by ingest, never thrown; the report lands as a dedup-keyed job event.

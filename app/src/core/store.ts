@@ -128,6 +128,7 @@ const agentSchema = agentDraftSchema.extend({revision:z.number().int().nonnegati
 const logSchema=z.object({id,conversationId:z.string().min(1).max(200),from:z.string().min(1).max(100),to:z.string().min(1).max(100),kind:z.enum(['MESSAGE','TOOL','STATUS']),text:text(64000),timestamp,sourceHash:hash,externalId:z.string().min(1).max(200),provenance:z.literal('USER_IMPORTED')}).strict();
 const requestSchema=z.object({migratedFromTaskId:id.optional(),teamId:id.optional(),roleSlots:z.array(z.object({role,count:z.number().int().min(1).max(64)}).strict()).max(16).optional(),id,projectId:id,experimentId:id.nullable(),name:title,objective:text(12000),workType:z.enum(['QUESTION','ANALYSIS','IMPLEMENTATION','CODE_REVIEW','EXPERIMENT','PLANNING','RESULT_ANALYSIS','OTHER']),mode:z.enum(['SINGLE','GROUP','TEAM']),leadAgentId:id.nullable(),participantIds:z.array(id),acceptanceCriteria:text(12000),revision:z.number().int().nonnegative(),status:z.enum(['DRAFT','READY','CANCELED']),removedAt:timestamp.optional(),blockers:z.array(z.object({code:text(100),message:text(1000),action:text(200)}).strict()),delegation:z.boolean(),createdAt:timestamp,updatedAt:timestamp,sourceRequestId:id.optional(),
   pipeline:z.object({kind:z.enum(['PLANNING','RESULT_ANALYSIS']),specHash:hash.nullable(),phase:z.enum(['BRIEFING','LAUNCHED','AWAITING_DECISION','DECIDED']),briefAssignmentId:id.nullable(),
+    notice:text(1000).optional(),
     pendingDecision:z.object({specHash:hash,headAssignmentId:id,headReceiptHash:hash}).strict().optional(),
     decision:z.object({decision:z.enum(['APPROVE','REVISE','REJECT']),note:text(4000).nullable(),specHash:hash,headReceiptHash:hash,decidedAt:timestamp}).strict().optional()}).strict().optional(),
   pipelineNotes:z.array(z.object({id,text:text(4000),createdAt:timestamp}).strict()).max(64).optional(),
@@ -2510,9 +2511,10 @@ export class OfficeStore {
    * so the renderer can never reach it. The named assignment must be a real minted brief hop on
    * this request held by the chosen director seat — the record cannot point at invented work.
    */
-  bindPipelineBrief(input:{requestId:string;expectedRevision:number;briefAssignmentId:string;specHash?:string}):AppState {
+  bindPipelineBrief(input:{requestId:string;expectedRevision:number;briefAssignmentId:string;specHash?:string;notice?:string}):AppState {
     id.parse(input.requestId);id.parse(input.briefAssignmentId);
     if(input.specHash!==undefined)hash.parse(input.specHash);
+    if(input.notice!==undefined)text(1000).parse(input.notice);
     return this.transaction(()=>{
       const state=this.readProjection();
       const request=state.requests?.find(r=>r.id===input.requestId);
@@ -2530,7 +2532,9 @@ export class OfficeStore {
       // No revision bump: this is office bookkeeping — a pointer to the hop the office itself
       // minted — not a change to the request's frozen content. Bumping would stale the minted
       // hop's requestRevision pin against the very record that binds it.
-      this.append(state,[{collection:'requests',value:{...request,pipeline:{...request.pipeline,briefAssignmentId:input.briefAssignmentId,...(input.specHash?{specHash:input.specHash}:{})},updatedAt:now}}],
+      // The notice rides inside the pipeline record — computed at brief mint; a refine re-bind
+      // that does not resupply one leaves the recorded notice untouched.
+      this.append(state,[{collection:'requests',value:{...request,pipeline:{...request.pipeline,briefAssignmentId:input.briefAssignmentId,...(input.specHash?{specHash:input.specHash}:{}),...(input.notice!==undefined?{notice:input.notice}:{})},updatedAt:now}}],
         {kind:'PIPELINE_BRIEF_BOUND',projectId:request.projectId,experimentId:null,
          reason:`Bound the minted ${assignment.pipelineKey} hop to the briefing phase.`},null);
     });

@@ -40,6 +40,9 @@ export interface RequestPipeline {
   specHash: string | null;
   phase: 'BRIEFING' | 'LAUNCHED' | 'AWAITING_DECISION' | 'DECIDED';
   briefAssignmentId: string | null;
+  /** A soft, non-blocking heads-up recorded at start (for example outcome-looking files visible to
+   *  a planning round with no withheld set). It never gates the request — the user decides. */
+  notice?: string;
   pendingDecision?: PipelinePendingDecision;
   decision?: PipelineDecision;
 }
