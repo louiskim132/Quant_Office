@@ -14,6 +14,18 @@
 /* Graph layout: pan/zoom canvas beside the detail column. */
 .memory-layout{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:16px;align-items:start}
 .memory-graph{border:1px solid var(--border);border-radius:9px;background:var(--panel);overflow:hidden}
+
+/* Kind filter chips: toggled-off kinds strike out and hide their nodes plus incident edges. */
+.memory-kindrow{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:9px 14px;border-bottom:1px solid var(--border)}
+.memory-kind{font:inherit;font-size:10px;text-transform:lowercase;letter-spacing:.04em;padding:3px 9px;border-radius:999px;border:1px solid var(--subtle);background:transparent;color:var(--text);cursor:pointer}
+.memory-kind.off{opacity:.4;text-decoration:line-through}
+.memory-kind.kind-observation{border-color:#7fa8c9}
+.memory-kind.kind-hypothesis{border-color:#b58fc9}
+.memory-kind.kind-result{border-color:var(--teal)}
+.memory-kind.kind-defect{border-color:#c97f7f}
+.memory-kind.kind-decision{border-color:var(--accent)}
+.memory-kind.kind-note{border-color:var(--muted)}
+.memory-refuted{margin-left:auto;display:inline-flex;align-items:center;gap:6px;font-size:10px;color:var(--subtle);text-transform:lowercase;cursor:pointer}
 .memory-graph svg{display:block;width:100%;height:auto;touch-action:none;cursor:grab;user-select:none}
 .memory-graph svg:active{cursor:grabbing}
 .memory-hint{padding:9px 14px;border-top:1px solid var(--border)}
@@ -24,6 +36,8 @@
 .mem-edge.status-proposed .mem-edge-line{stroke-dasharray:7 5;stroke:var(--subtle);opacity:.75}
 .mem-edge.status-confirmed .mem-edge-line{stroke:var(--teal);stroke-width:2}
 .mem-edge.selected .mem-edge-line{stroke:var(--accent);stroke-width:2.4}
+.mem-edge.status-refuted .mem-edge-line{stroke-dasharray:3 4;opacity:.5}
+.mem-edge.status-refuted .mem-edge-label{text-decoration:line-through;opacity:.65}
 .mem-edge-label{fill:var(--subtle);font-size:9px;text-transform:lowercase;pointer-events:none}
 .mem-edge.selected .mem-edge-label{fill:var(--accent)}
 
@@ -37,6 +51,8 @@
 .mem-node.kind-decision circle{stroke:var(--accent)}
 .mem-node.kind-note circle{stroke:var(--muted)}
 .mem-node.selected circle{stroke:var(--accent);stroke-width:3}
+@media(prefers-reduced-motion:no-preference){.mem-node.selected circle{animation:mem-pulse 1.8s ease-out 3}}
+@keyframes mem-pulse{0%{stroke-width:3}50%{stroke-width:6.5}100%{stroke-width:3}}
 .mem-node.superseded{opacity:.42}
 .mem-node .mem-supersede{stroke:var(--text);stroke-width:2.4;pointer-events:none}
 .mem-node-title{fill:var(--text);font-size:10px;pointer-events:none;paint-order:stroke;stroke:var(--panel);stroke-width:3;stroke-linejoin:round}
@@ -52,6 +68,12 @@
 .memory-detail-card .button-row{justify-content:flex-start}
 .memory-detail-empty{border-style:dashed}
 .memory-detail-card .text-button{padding:0;display:inline}
+
+/* Link proposal: compact disclosure inside the selected-node card. */
+.memory-link{border-top:1px dashed var(--border);padding-top:10px;display:grid;gap:4px}
+.memory-link summary{cursor:pointer;font-size:11px;color:var(--muted)}
+.memory-link .field{margin-top:8px}
+.memory-link button{justify-self:start;margin-top:4px}
 
 /* Composer: bounded fields on the frozen command contract. */
 .memory-composer{border:1px solid var(--border);border-radius:9px;background:var(--panel);padding:14px 18px}
