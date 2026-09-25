@@ -35,6 +35,53 @@ export interface PipelineMintContext {
 const liveAgents = (state: AppState): Agent[] => (state.agents ?? []).filter(item => !item.removedAt);
 const briefKey = (request: Request): string => request.pipeline?.kind === 'RESULT_ANALYSIS' ? 'analysis-brief' : 'plan-brief';
 
+/**
+ * The prior-round edges a revision brief inherits (plan item C2). A REVISE-created request
+ * names its immediate source through `revisionOf`; this resolves the source round's terminal
+ * hop ('verify' for PLANNING, 'analysis-report' for RESULT_ANALYSIS — 'user-gate' when an
+ * in-flight spec still minted one) and its synthesis/finalize hop ('plan-synthesis' /
+ * 'analysis-finalize'). Only a hop whose latest job settled COMPLETED with a verified receipt
+ * on record qualifies — the edge is what stages the predecessor bytes under
+ * `inputs/inherited/`, so a hop that cannot prove settled bytes drops out with its reason
+ * named in `dropped`, never silently. Assignments are global: the returned ids deliberately
+ * cross request boundaries; the revision's own `pipelineKey` edges are untouched.
+ */
+export function revisionInheritance(state: AppState, request: Request, receiptFor: (jobId: string) => boolean): { dependsOn: string[]; settled: string[]; dropped: string[]; note: string | null } {
+  const source = (state.requests ?? []).find(item => item.id === request.revisionOf!.requestId);
+  const note = source?.pipeline?.decision?.note ?? null;
+  if (!source) return { dependsOn: [], settled: [], dropped: ['the source request is not recorded in this workspace'], note };
+  const kind = source.pipeline?.kind ?? request.pipeline?.kind;
+  const hops = (state.assignments ?? []).filter(item => item.requestId === source.id && item.pipelineKey);
+  const terminalKey = hops.some(hop => hop.pipelineKey === 'user-gate') ? 'user-gate' : kind === 'RESULT_ANALYSIS' ? 'analysis-report' : 'verify';
+  const synthesisKey = kind === 'RESULT_ANALYSIS' ? 'analysis-finalize' : 'plan-synthesis';
+  const dependsOn: string[] = [], settled: string[] = [], dropped: string[] = [];
+  for (const key of [terminalKey, synthesisKey]) {
+    const hop = hops.find(item => item.pipelineKey === key);
+    const job = hop ? latestJobFor(state.jobs, hop.id) : undefined;
+    if (!hop) dropped.push(`the source round minted no '${key}' hop`);
+    else if (job?.state !== 'COMPLETED') dropped.push(`the source round's '${key}' hop is not settled COMPLETED`);
+    else if (!receiptFor(job.id)) dropped.push(`the source round's '${key}' hop has no verified receipt on record`);
+    else { dependsOn.push(hop.id); settled.push(key); }
+  }
+  return { dependsOn, settled, dropped, note };
+}
+
+/**
+ * The revision brief's instruction: the fresh-mint objective, a bookkeeping line naming which
+ * prior-round edges settled — and why a missing one did not — then the recorded decision note
+ * verbatim in the refine-hop format, so the director sees the revision ask as written.
+ */
+function revisionObjectiveText(base: string, inherited: { settled: string[]; dropped: string[]; note: string | null }): string {
+  const keys = inherited.settled.map(key => `'${key}'`).join(', ');
+  const line = !inherited.dropped.length
+    ? `Prior-round inputs: ${keys} settled.`
+    : inherited.settled.length
+      ? `Prior-round inputs: ${keys} settled; ${inherited.dropped.join('; ')}.`
+      : `Prior-round inputs: none settled — ${inherited.dropped.join('; ')}.`;
+  const note = inherited.note ? `\n\n## Revision note from the office\n${inherited.note}` : '';
+  return `${base}\n\n${line}${note}`;
+}
+
 function freshRequest(store: OfficeStore, requestId: string): Request {
   const request = store.snapshot({ history: false }).requests?.find(item => item.id === requestId);
   if (!request) throw new Error('Request not found');
@@ -72,9 +119,18 @@ export async function mintPipelineBrief(ctx: PipelineMintContext, request: Reque
     return { minted: true, assignment: existing };
   }
   const snapshot = await ctx.snapshotFor(request, entry);
+  // A revision request's brief chains off the settled tail of the round it revises — the
+  // source's terminal and synthesis hops — so the verified prior-round outputs land under
+  // inputs/inherited/. Edges only ever name hops that can prove settled bytes; anything else
+  // drops with its reason written into the objective, and the decision note rides verbatim.
+  const inherited = request.revisionOf
+    ? revisionInheritance(state, request, jobId => Boolean(ctx.store.localSessionForJob(jobId)?.lastReceipt))
+    : undefined;
   const { assignment } = ctx.prepare({
     requestId: request.id, agentId: entry.agentId, snapshotId: snapshot.id,
-    toolProfile: entry.toolProfile, pipelineKey: entry.key, inputScope: entry.inputScope, objective: entry.objectiveText,
+    ...(inherited?.dependsOn.length ? { dependsOn: inherited.dependsOn } : {}),
+    toolProfile: entry.toolProfile, pipelineKey: entry.key, inputScope: entry.inputScope,
+    objective: inherited ? revisionObjectiveText(entry.objectiveText, inherited) : entry.objectiveText,
   });
   // A5 soft gate: a planning round whose project withholds nothing but whose snapshot carries
   // outcome-looking files gets a non-blocking notice on the card. It never blocks — the user

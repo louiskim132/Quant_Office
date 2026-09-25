@@ -13,6 +13,8 @@ import { OutputService } from '../src/main/outputs';
 import { prepareInputSnapshot } from '../src/main/locations';
 import { mintPipelineBrief, mintPipelineRound, settlePipelineDecision, type PipelineMintContext } from '../src/main/pipeline-runner';
 import { RESULT_FILE } from '../src/main/local-packet';
+import { latestJobFor } from '../src/core/jobs';
+import { dependencyStatus } from '../src/shared/cooperation';
 import type { Agent, ProviderJob, Request } from '../src/shared/types';
 
 const sha = (text: string) => createHash('sha256').update(text, 'utf8').digest('hex');
@@ -140,6 +142,20 @@ async function settleHop(f: Fixture, assignmentId: string, outputName: string, s
   assert.equal(jobFor(f, assignmentId).state, state, jobFor(f, assignmentId).detail);
 }
 
+/** Writes a verified receipt for the hop's LATEST attempt — the retry/attempt counterpart of
+ *  settleHop, used where the re-armed attempt was already launched by the chain machinery. */
+async function settleAttempt(f: Fixture, assignmentId: string, outputName: string, state: 'COMPLETED' | 'FAILED' = 'COMPLETED'): Promise<void> {
+  const job = latestJobFor(f.store.snapshot({ history: false }).jobs, assignmentId)!;
+  const bound = f.store.localSessionForJob(job.id)!;
+  const dir = path.join(f.sessionsRoot, bound.storageRelativePath);
+  const output = { path: `outputs/${outputName}`, sha256: sha(`${outputName} bytes`), bytes: Buffer.byteLength(`${outputName} bytes`) };
+  mkdirSync(path.join(dir, 'outputs'), { recursive: true });
+  writeFileSync(path.join(dir, `outputs/${outputName}`), `${outputName} bytes`);
+  writeFileSync(path.join(dir, RESULT_FILE), JSON.stringify({ schema: 'office-local-result@2', jobId: job.id, assignmentId, attemptId: bound.attemptId, packetHash: bound.packetHash, sequence: 1, state, detail: 'Done.', outputs: [output] }));
+  await f.controller.observe(assignmentId);
+  assert.equal(latestJobFor(f.store.snapshot({ history: false }).jobs, assignmentId)!.state, state, latestJobFor(f.store.snapshot({ history: false }).jobs, assignmentId)!.detail);
+}
+
 /** Completes every minted hop on the request in dependency order. */
 async function completeRound(f: Fixture, requestId: string): Promise<void> {
   for (;;) {
@@ -244,4 +260,63 @@ test('settle refuses — never throws, never mutates — for wrong phase, open h
   const notPipeline = settlePipelineDecision(f.ctx, plain);
   assert.equal(notPipeline.settled, false);
   if (!notPipeline.settled) assert.match(notPipeline.reason, /pipeline request/);
+});
+
+test('a re-armed hop leaves dependents gated on the latest attempt', async t => {
+  const f = await fixture(t);
+  const request = await launchedRound(f, 'Plan retry', 'PLANNING');
+  const hops = hopsOf(f, request.id);
+  const draft = hops.find(item => item.pipelineKey === 'plan-draft-a')!;
+  // The critique of draft A is the dependent that must never run on a failed attempt.
+  const dependent = hops.find(item => item.pipelineKey === 'plan-critique-b-on-a')!;
+  await settleHop(f, draft.id, 'plan-draft-a.txt', 'FAILED');
+  assert.equal(jobFor(f, dependent.id).state, 'INTENT', 'a failed dependency releases nothing');
+
+  // The retry command mints attempt 2 INTENT on the same assignment — no duplicate hop.
+  const current = requestOf(f, request.id);
+  f.store.execute({ type: 'request.pipeline.retryHop', idempotencyKey: key(), requestId: request.id, pipelineKey: 'plan-draft-a', expectedRevision: current.revision });
+  const jobs = () => f.store.snapshot({ history: false }).jobs ?? [];
+  const attempt2 = latestJobFor(jobs(), draft.id)!;
+  assert.equal(attempt2.attempt, 2);
+  assert.equal(attempt2.state, 'INTENT');
+  assert.equal(hopsOf(f, request.id).filter(item => item.pipelineKey === 'plan-draft-a').length, 1,
+    'the retry re-arms the same assignment, never a second hop');
+
+  // The dependent's gate reads the dependency's LATEST attempt: attempt 1's failure neither
+  // releases it nor counts against it — it waits on attempt 2 exactly as on a fresh mint.
+  assert.equal(jobFor(f, dependent.id).state, 'INTENT');
+  const status = dependencyStatus(f.store.snapshot({ history: false }), dependent);
+  assert.equal(status.ready, false);
+  assert.match(status.blockers[0] ?? '', /still intent/i);
+  await f.controller.reconcileLocalChain();
+  assert.equal(jobFor(f, dependent.id).state, 'INTENT', 'no dependent may launch while the re-armed attempt is unlaunched');
+});
+
+// The pickup half of the proof is committed as a reproducer, not run: a re-armed hop can never
+// reach launch today because request.pipeline.retryHop bumps request.revision (core/store.ts),
+// so the assignment's frozen requestRevision fails the launchGuard staleness check in
+// controller.ts — both organizer-owned. Delete `.todo` once either the retry stops counting as a
+// request change (markPipelineAwaitingDecision precedent) or pipeline hops are exempt.
+test.todo('a re-armed hop is picked up by the chain exactly like a fresh mint — dependents release on attempt 2', async t => {
+  const f = await fixture(t);
+  const request = await launchedRound(f, 'Plan retry', 'PLANNING');
+  const hops = hopsOf(f, request.id);
+  const draft = hops.find(item => item.pipelineKey === 'plan-draft-a')!;
+  const dependent = hops.find(item => item.pipelineKey === 'plan-critique-b-on-a')!;
+  await settleHop(f, draft.id, 'plan-draft-a.txt', 'FAILED');
+  const current = requestOf(f, request.id);
+  f.store.execute({ type: 'request.pipeline.retryHop', idempotencyKey: key(), requestId: request.id, pipelineKey: 'plan-draft-a', expectedRevision: current.revision });
+  const jobs = () => f.store.snapshot({ history: false }).jobs ?? [];
+
+  // The startup sweep picks the re-armed hop up exactly like a fresh mint.
+  await f.controller.reconcileLocalChain();
+  assert.notEqual(latestJobFor(jobs(), draft.id)!.state, 'INTENT', 'reconcile launched the re-armed attempt');
+  assert.equal(jobFor(f, dependent.id).state, 'INTENT', 'the dependent still waits on attempt 2');
+
+  // Only attempt 2's verified completion releases the dependent through the ordinary chain.
+  await settleAttempt(f, draft.id, 'plan-draft-a.txt');
+  assert.equal(latestJobFor(jobs(), draft.id)!.state, 'COMPLETED');
+  assert.equal(jobFor(f, dependent.id).state, 'INTENT', 'observation alone does not launch');
+  await f.controller.advanceLocalChain(draft.id);
+  assert.notEqual(jobFor(f, dependent.id).state, 'INTENT', 'the dependent launches once the retried attempt completes');
 });
