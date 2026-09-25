@@ -81,11 +81,14 @@ export function MemoryView({state, projectId}: {state: AppState; projectId: stri
   for (const id of Object.keys(stored)) draggedRef.current.add(id);
   setPos(current => {
    const next: Record<string, {x: number; y: number}> = {};
-   const radius = Math.max(150, Math.min(290, nodes.length * 42));
+   // The ellipse stays inside the canvas: a circle wider than H/2 cut the top and bottom nodes off
+   // once a project held a dozen findings. Vertical room leaves space for the label under each node.
+   const spread = Math.max(150, Math.min(290, nodes.length * 42));
+   const rx = Math.min(spread, W / 2 - 80), ry = Math.min(spread, H / 2 - R - 26);
    nodes.forEach((node, i) => {
     const angle = (2 * Math.PI * i) / Math.max(nodes.length, 1) - Math.PI / 2;
     const kept = draggedRef.current.has(node.findingId) ? current[node.findingId] ?? stored[node.findingId] : undefined;
-    next[node.findingId] = kept && typeof kept.x === 'number' && typeof kept.y === 'number' ? kept : {x: W / 2 + radius * Math.cos(angle), y: H / 2 + radius * Math.sin(angle)};
+    next[node.findingId] = kept && typeof kept.x === 'number' && typeof kept.y === 'number' ? kept : {x: W / 2 + rx * Math.cos(angle), y: H / 2 + ry * Math.sin(angle)};
    });
    posRef.current = next;
    return next;
