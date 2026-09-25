@@ -98,9 +98,9 @@ test('critique entries name only the opposite draft artifact; the spec carries n
   assert.deepEqual(map.get('plan-critique-b-on-a')!.dependsOnKeys, ['plan-draft-a']);
   assert.deepEqual(map.get('analysis-response-interpret')!.dependsOnKeys, ['analysis-falsify']);
   assert.deepEqual(map.get('analysis-response-falsify')!.dependsOnKeys, ['analysis-interpret']);
-  // No free-text carryover: every entry carries exactly the eight declared fields.
+  // No free-text carryover: every entry carries exactly the nine declared fields.
   for (const item of entries)
-    assert.deepEqual(Object.keys(item).sort(), ['agentId', 'armRole', 'dependsOnKeys', 'inputKeys', 'inputManifestNote', 'key', 'phase', 'toolProfile']);
+    assert.deepEqual(Object.keys(item).sort(), ['agentId', 'armRole', 'dependsOnKeys', 'inputKeys', 'inputManifestNote', 'inputScope', 'key', 'phase', 'toolProfile']);
   // And no field anywhere holds the brief prose or any transcript.
   for (const item of entries) {
     assert.ok(!JSON.stringify(item).includes('Plan the next evidence review'), `${item.key} must not carry the brief text`);
@@ -163,6 +163,22 @@ test('every entry carries the armRole its roster position fills', () => {
   const remap = byKey(remapped);
   assert.equal(remap.get('plan-draft-a')!.agentId, 'pm-x');
   assert.equal(remap.get('plan-draft-a')!.armRole, 'PM_A', 'the role names the roster slot, not the agent');
+});
+
+test('planning hops mint BLIND; implement, verify and the whole analysis round mint FULL', () => {
+  const entries = buildCommRound(declaration({ analysts: ['pm-c', 'pm-d'] })).entries;
+  const map = byKey(entries);
+  // Every hop ahead of implementation plans blind — including the phase-2 mirror, whose hops
+  // analyze the synthesized plan, not delivered results.
+  for (const key of ['plan-brief', 'plan-draft-a', 'plan-draft-b', 'plan-critique-a-on-b', 'plan-critique-b-on-a', 'plan-synthesis',
+    'analysis-interpret', 'analysis-falsify', 'analysis-response-interpret', 'analysis-response-falsify', 'analysis-finalize'])
+    assert.equal(map.get(key)!.inputScope, 'BLIND', `${key} plans blind`);
+  for (const item of entries)
+    if (item.key.startsWith('implement-') || item.key === 'verify')
+      assert.equal(item.inputScope, 'FULL', `${item.key} reads outcomes`);
+  // The standalone RESULT_ANALYSIS round exists to read results — every hop is FULL.
+  for (const item of buildAnalysisRound(analysisDeclaration()).entries)
+    assert.equal(item.inputScope, 'FULL', `${item.key} — the analysis round reads results`);
 });
 
 test('the analysis round emits brief → digest → interpret ∥ falsify → responses → finalize → report', () => {

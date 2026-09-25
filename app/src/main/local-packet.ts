@@ -119,7 +119,7 @@ export const packetClaude = (): string => [
  * control files, and documents the cooperative cancel request/acknowledgement pair (spec §8 —
  * the schema exists in shared/local-session.ts; P3 implements the runtime).
  */
-export const resultContractV2 = (options?: { evidenceSurface?: boolean; memoryDigest?: boolean }): string => [
+export const resultContractV2 = (options?: { evidenceSurface?: boolean; memoryDigest?: boolean; withheld?: boolean }): string => [
   '# Local session result contract',
   '',
   `This directory is a Quant Research Office session packet (office-local-session@2):`,
@@ -151,6 +151,11 @@ export const resultContractV2 = (options?: { evidenceSurface?: boolean; memoryDi
     'memory ledger (findings with superseded flags, proposed/confirmed links); it is',
     'office-recorded self-report context for synthesis, not verified fact; cite',
     'evidenceRefs when your findings draw on it.',
+  ] : []),
+  ...(options?.withheld ? [
+    '',
+    'Outcome files listed under `withheld` are intentionally unavailable. Do not compute,',
+    'estimate or request outcome metrics. Fix thresholds and decision rules only.',
   ] : []),
   '',
   `## ${RESULT_FILE}`,
@@ -283,8 +288,20 @@ export function prepareLocalPacket(input: PrepareLocalPacketInput): PreparedLoca
   // Copy every declared snapshot file into inputs/ — read through the boundary, re-verified
   // against the frozen manifest. A staged file that drifted fails the export loudly, and bytes
   // that failed verification are never written.
+  // A BLIND-scope assignment withholds the project's withheld paths: they are declared on the
+  // packet hash-only — the manifest's own {path, sha256, bytes} — and their bytes are never
+  // even read, let alone staged. The snapshot manifest itself is untouched: blinding narrows
+  // what the packet carries, not what the office froze.
+  const blinded = context.assignment.inputScope === 'BLIND' && context.withheldPaths?.length
+    ? context.withheldPaths.map(item => item.replace(/\/+$/, '')).filter(item => item.length > 0)
+    : [];
+  const withheld: NonNullable<LocalPacketV2['withheld']> = [];
   const files: LocalPacketV2['files'] = [];
   for (const file of context.snapshot.files) {
+    if (blinded.some(prefix => file.path === prefix || file.path.startsWith(`${prefix}/`))) {
+      withheld.push({ path: file.path, sha256: file.sha256, bytes: file.bytes });
+      continue;
+    }
     const staged = io.read(context.snapshot.stagingPath, file.path, MAX_FILE);
     if (staged.byteLength !== file.bytes || staged.sha256 !== file.sha256)
       throw new Error(`The staged input ${file.path} no longer matches the bytes that were frozen; prepare the request inputs again.`);
@@ -326,7 +343,7 @@ export function prepareLocalPacket(input: PrepareLocalPacketInput): PreparedLoca
   }
   // Instruction files are ordinary packet members: written once, declared in the manifest.
   const instructions: LocalPacketV2['instructions'] = [];
-  for (const [name, text] of [[AGENTS_FILE, packetAgentsV2()], [CLAUDE_FILE, packetClaude()], [CONTRACT_FILE, resultContractV2({ evidenceSurface: mountsEvidenceSurface(binding.toolProfile), memoryDigest: digestDeclaration !== undefined })]] as const) {
+  for (const [name, text] of [[AGENTS_FILE, packetAgentsV2()], [CLAUDE_FILE, packetClaude()], [CONTRACT_FILE, resultContractV2({ evidenceSurface: mountsEvidenceSurface(binding.toolProfile), memoryDigest: digestDeclaration !== undefined, withheld: withheld.length > 0 })]] as const) {
     const content = Buffer.from(text, 'utf8');
     io.writeNew(managed, name, content);
     instructions.push({ path: name, sha256: createHash('sha256').update(content).digest('hex'), bytes: content.byteLength });
@@ -345,6 +362,7 @@ export function prepareLocalPacket(input: PrepareLocalPacketInput): PreparedLoca
     snapshotManifestHash: context.snapshot.manifestHash,
     files,
     ...(inherited.length ? { inherited } : {}),
+    ...(withheld.length ? { withheld } : {}),
     instructions,
     ...(binding.toolProfile ? { toolProfile: binding.toolProfile } : {}),
     ...(digestDeclaration ? { memoryDigest: digestDeclaration } : {}),

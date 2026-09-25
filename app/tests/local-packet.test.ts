@@ -462,6 +462,68 @@ test('an empty ledger still produces a well-formed 0/0 digest for an authorized 
   assert.equal(packet.memoryDigest!.relationships, 0);
 });
 
+test('a BLIND packet withholds matching paths hash-only; bytes are never staged', t => {
+  const f = fixture(t);
+  f.assignment.inputScope = 'BLIND';
+  f.context.withheldPaths = ['data']; // a project-relative prefix withholds everything under it
+  const prepared = prepare(f);
+  const packet = localPacketV2Schema.parse(JSON.parse(readFileSync(path.join(f.dir, PACKET_FILE), 'utf8')));
+  // data/input.csv is declared under withheld with the manifest's own identity — never staged.
+  assert.deepEqual(packet.withheld, [{ path: 'data/input.csv', sha256: sha('a,b\n1,2\n'), bytes: Buffer.byteLength('a,b\n1,2\n') }]);
+  assert.deepEqual(packet.files.map(file => file.path), ['inputs/notes.txt'], 'only the non-withheld file is declared as staged input');
+  assert.equal(existsSync(path.join(f.dir, INPUTS_DIR, 'data', 'input.csv')), false, 'withheld bytes never enter the packet');
+  assert.equal(existsSync(path.join(f.dir, INPUTS_DIR, 'notes.txt')), true);
+  // Blinding narrows the packet, not the manifest: the frozen snapshot identity is untouched.
+  assert.equal(packet.snapshotManifestHash, f.snapshot.manifestHash);
+  assert.equal(prepared.packetHash, canonicalHash(JSON.parse(readFileSync(path.join(f.dir, PACKET_FILE), 'utf8'))));
+  // The contract forbids computing or requesting outcome metrics — only where files are withheld.
+  const contract = readFileSync(path.join(f.dir, CONTRACT_FILE), 'utf8');
+  assert.match(contract, /Outcome files listed under `withheld` are intentionally unavailable/);
+  assert.match(contract, /Do not compute,\s+estimate or request outcome metrics/);
+  assert.match(contract, /Fix thresholds and decision rules only/);
+});
+
+test('an exact withheld path blinds that file alone; a trailing-slash prefix is equivalent', t => {
+  const exact = fixture(t);
+  exact.assignment.inputScope = 'BLIND';
+  exact.context.withheldPaths = ['notes.txt'];
+  prepare(exact);
+  const exactPacket = localPacketV2Schema.parse(JSON.parse(readFileSync(path.join(exact.dir, PACKET_FILE), 'utf8')));
+  assert.deepEqual(exactPacket.withheld, [{ path: 'notes.txt', sha256: sha('fixture notes'), bytes: Buffer.byteLength('fixture notes') }]);
+  assert.deepEqual(exactPacket.files.map(file => file.path), ['inputs/data/input.csv']);
+  assert.equal(existsSync(path.join(exact.dir, INPUTS_DIR, 'notes.txt')), false);
+  const slashed = fixture(t);
+  slashed.assignment.inputScope = 'BLIND';
+  slashed.context.withheldPaths = ['data/']; // a stored prefix with a trailing slash withholds identically
+  prepare(slashed);
+  const slashedPacket = localPacketV2Schema.parse(JSON.parse(readFileSync(path.join(slashed.dir, PACKET_FILE), 'utf8')));
+  assert.deepEqual(slashedPacket.withheld, [{ path: 'data/input.csv', sha256: sha('a,b\n1,2\n'), bytes: Buffer.byteLength('a,b\n1,2\n') }]);
+});
+
+test('FULL scope and an absent scope stage the withheld paths as ordinary inputs', t => {
+  for (const [label, scope] of [['FULL', 'FULL'], ['unspecified', undefined]] as const) {
+    const f = fixture(t);
+    if (scope) f.assignment.inputScope = scope;
+    f.context.withheldPaths = ['data'];
+    prepare(f);
+    const packet = localPacketV2Schema.parse(JSON.parse(readFileSync(path.join(f.dir, PACKET_FILE), 'utf8')));
+    assert.equal(packet.withheld, undefined, `${label} declares nothing`);
+    assert.equal(packet.files.length, 2, `${label} stages every snapshot file`);
+    assert.equal(existsSync(path.join(f.dir, INPUTS_DIR, 'data', 'input.csv')), true);
+    assert.doesNotMatch(readFileSync(path.join(f.dir, CONTRACT_FILE), 'utf8'), /withheld/, `${label} keeps the contract unchanged`);
+  }
+});
+
+test('a BLIND hop on a project with no withheld paths stages everything and declares nothing', t => {
+  const f = fixture(t);
+  f.assignment.inputScope = 'BLIND';
+  prepare(f);
+  const packet = localPacketV2Schema.parse(JSON.parse(readFileSync(path.join(f.dir, PACKET_FILE), 'utf8')));
+  assert.equal(packet.withheld, undefined);
+  assert.equal(packet.files.length, 2);
+  assert.doesNotMatch(readFileSync(path.join(f.dir, CONTRACT_FILE), 'utf8'), /withheld/);
+});
+
 test('readLocalResultV1 accepts a well-formed v1 receipt and defects a malformed one', t => {
   const root = mkdtempSync(path.join(tmpdir(), 'qro-local-v1-'));
   t.after(() => removeTreeSync(root));

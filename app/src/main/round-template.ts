@@ -120,9 +120,9 @@ function manifestNote(declaration: { packetVersion: number }, dependsOnKeys: str
  return [`packet-v${declaration.packetVersion}`, 'declaration.brief', ...dependsOnKeys.map(key => `artifact:${key}`)].join(' + ');
 }
 
-function entry(declaration: { packetVersion: number }, key: string, phase: CommRoundPhase, armRole: CommRoundArmRole, agentId: string, toolProfile: ToolProfile, dependsOnKeys: string[]): CommRoundEntry {
+function entry(declaration: { packetVersion: number }, key: string, phase: CommRoundPhase, armRole: CommRoundArmRole, agentId: string, toolProfile: ToolProfile, dependsOnKeys: string[], inputScope: 'BLIND' | 'FULL'): CommRoundEntry {
  // An ordinary hop stages exactly the predecessors it was declared against — nothing more.
- return { key, phase, armRole, agentId, dependsOnKeys, inputKeys: [...dependsOnKeys], toolProfile, inputManifestNote: manifestNote(declaration, dependsOnKeys) };
+ return { key, phase, armRole, agentId, dependsOnKeys, inputKeys: [...dependsOnKeys], inputScope, toolProfile, inputManifestNote: manifestNote(declaration, dependsOnKeys) };
 }
 
 /** A diverge pair is exactly two distinct agents — a critique of oneself is not a second opinion. */
@@ -199,34 +199,38 @@ export function buildCommRound(declaration: CommRoundDeclaration): CommRoundSpec
  const [plannerA, plannerB] = declaration.planners;
  const entries: CommRoundEntry[] = [];
  // The user-facing first hop: the director takes the brief before either arm diverges on it.
- const brief = entry(declaration, 'plan-brief', 'BRIEF', 'DIRECTOR', declaration.directorAgentId, DIRECTOR_TOOL_PROFILE, []);
+ // Planning hops mint BLIND: their packets withhold the project's withheldPaths as hash-only
+ // declarations and their contracts forbid outcome metrics. That includes the phase-2 mirror —
+ // its hops analyze the synthesized plan, not delivered results, so they stay blind like every
+ // other hop ahead of implementation.
+ const brief = entry(declaration, 'plan-brief', 'BRIEF', 'DIRECTOR', declaration.directorAgentId, DIRECTOR_TOOL_PROFILE, [], 'BLIND');
  // Phase 1: two isolated first positions on identical inputs — the draft arms carry the same
  // manifest by construction, so neither draft is privileged by what it was shown.
- const draftA = entry(declaration, 'plan-draft-a', 'PLAN_DRAFT', 'PM_A', plannerA, PLANNER_TOOL_PROFILE, [brief.key]);
- const draftB = entry(declaration, 'plan-draft-b', 'PLAN_DRAFT', 'PM_B', plannerB, PLANNER_TOOL_PROFILE, [brief.key]);
+ const draftA = entry(declaration, 'plan-draft-a', 'PLAN_DRAFT', 'PM_A', plannerA, PLANNER_TOOL_PROFILE, [brief.key], 'BLIND');
+ const draftB = entry(declaration, 'plan-draft-b', 'PLAN_DRAFT', 'PM_B', plannerB, PLANNER_TOOL_PROFILE, [brief.key], 'BLIND');
  // One bounded cross-response each: a critique names only the opposite draft's artifact.
- const critiqueA = entry(declaration, 'plan-critique-a-on-b', 'PLAN_CRITIQUE', 'PM_A', plannerA, PLANNER_TOOL_PROFILE, [draftB.key]);
- const critiqueB = entry(declaration, 'plan-critique-b-on-a', 'PLAN_CRITIQUE', 'PM_B', plannerB, PLANNER_TOOL_PROFILE, [draftA.key]);
+ const critiqueA = entry(declaration, 'plan-critique-a-on-b', 'PLAN_CRITIQUE', 'PM_A', plannerA, PLANNER_TOOL_PROFILE, [draftB.key], 'BLIND');
+ const critiqueB = entry(declaration, 'plan-critique-b-on-a', 'PLAN_CRITIQUE', 'PM_B', plannerB, PLANNER_TOOL_PROFILE, [draftA.key], 'BLIND');
  const synthesis = entry(declaration, 'plan-synthesis', 'PLAN_SYNTHESIS', 'DIRECTOR', declaration.directorAgentId, DIRECTOR_TOOL_PROFILE,
-  [draftA.key, draftB.key, critiqueA.key, critiqueB.key]);
+  [draftA.key, draftB.key, critiqueA.key, critiqueB.key], 'BLIND');
  entries.push(brief, draftA, draftB, critiqueA, critiqueB, synthesis);
  // Phase 2 mirrors phase 1 against the synthesized plan: interpret ∥ falsify, one bounded
  // cross-response each, then the director finalizes. Same roles, same phase labels.
  let head = synthesis;
  if (declaration.analysts) {
   const [analystC, analystD] = declaration.analysts;
-  const interpret = entry(declaration, 'analysis-interpret', 'PLAN_DRAFT', 'PM_C', analystC, ANALYST_TOOL_PROFILE, [synthesis.key]);
-  const falsify = entry(declaration, 'analysis-falsify', 'PLAN_DRAFT', 'PM_D', analystD, ANALYST_TOOL_PROFILE, [synthesis.key]);
-  const responseC = entry(declaration, 'analysis-response-interpret', 'PLAN_CRITIQUE', 'PM_C', analystC, ANALYST_TOOL_PROFILE, [falsify.key]);
-  const responseD = entry(declaration, 'analysis-response-falsify', 'PLAN_CRITIQUE', 'PM_D', analystD, ANALYST_TOOL_PROFILE, [interpret.key]);
+  const interpret = entry(declaration, 'analysis-interpret', 'PLAN_DRAFT', 'PM_C', analystC, ANALYST_TOOL_PROFILE, [synthesis.key], 'BLIND');
+  const falsify = entry(declaration, 'analysis-falsify', 'PLAN_DRAFT', 'PM_D', analystD, ANALYST_TOOL_PROFILE, [synthesis.key], 'BLIND');
+  const responseC = entry(declaration, 'analysis-response-interpret', 'PLAN_CRITIQUE', 'PM_C', analystC, ANALYST_TOOL_PROFILE, [falsify.key], 'BLIND');
+  const responseD = entry(declaration, 'analysis-response-falsify', 'PLAN_CRITIQUE', 'PM_D', analystD, ANALYST_TOOL_PROFILE, [interpret.key], 'BLIND');
   const finalize = entry(declaration, 'analysis-finalize', 'PLAN_SYNTHESIS', 'DIRECTOR', declaration.directorAgentId, DIRECTOR_TOOL_PROFILE,
-   [interpret.key, falsify.key, responseC.key, responseD.key]);
+   [interpret.key, falsify.key, responseC.key, responseD.key], 'BLIND');
   entries.push(interpret, falsify, responseC, responseD, finalize);
   head = finalize;
  }
  const implements_ = declaration.workerAgentIds.map((agentId, index) =>
-  entry(declaration, `implement-${index + 1}`, 'IMPLEMENT', 'WORKER', agentId, WORKER_TOOL_PROFILE, [head.key]));
- const verify = entry(declaration, 'verify', 'VERIFY', 'DIRECTOR', declaration.directorAgentId, DIRECTOR_TOOL_PROFILE, implements_.map(item => item.key));
+  entry(declaration, `implement-${index + 1}`, 'IMPLEMENT', 'WORKER', agentId, WORKER_TOOL_PROFILE, [head.key], 'FULL'));
+ const verify = entry(declaration, 'verify', 'VERIFY', 'DIRECTOR', declaration.directorAgentId, DIRECTOR_TOOL_PROFILE, implements_.map(item => item.key), 'FULL');
  entries.push(...implements_, verify);
  sealTerminal(entries);
  assertDag(entries);
@@ -242,15 +246,17 @@ export function buildCommRound(declaration: CommRoundDeclaration): CommRoundSpec
 export function buildAnalysisRound(declaration: AnalysisRoundDeclaration): CommRoundSpec {
  validateAnalysis(declaration);
  const [analystC, analystD] = declaration.analysts;
- const brief = entry(declaration, 'analysis-brief', 'BRIEF', 'DIRECTOR', declaration.directorAgentId, DIRECTOR_TOOL_PROFILE, []);
- const digest = entry(declaration, 'analysis-digest', 'DIGEST', 'WORKER', declaration.workerAgentId, WORKER_TOOL_PROFILE, [brief.key]);
- const interpret = entry(declaration, 'analysis-interpret', 'PLAN_DRAFT', 'PM_C', analystC, ANALYST_TOOL_PROFILE, [digest.key]);
- const falsify = entry(declaration, 'analysis-falsify', 'PLAN_DRAFT', 'PM_D', analystD, ANALYST_TOOL_PROFILE, [digest.key]);
- const responseC = entry(declaration, 'analysis-response-interpret', 'PLAN_CRITIQUE', 'PM_C', analystC, ANALYST_TOOL_PROFILE, [falsify.key]);
- const responseD = entry(declaration, 'analysis-response-falsify', 'PLAN_CRITIQUE', 'PM_D', analystD, ANALYST_TOOL_PROFILE, [interpret.key]);
+ // Every hop FULL — a RESULT_ANALYSIS round exists to read the delivered results; withholding
+ // outcome files here would blind the very seats the analysis is for.
+ const brief = entry(declaration, 'analysis-brief', 'BRIEF', 'DIRECTOR', declaration.directorAgentId, DIRECTOR_TOOL_PROFILE, [], 'FULL');
+ const digest = entry(declaration, 'analysis-digest', 'DIGEST', 'WORKER', declaration.workerAgentId, WORKER_TOOL_PROFILE, [brief.key], 'FULL');
+ const interpret = entry(declaration, 'analysis-interpret', 'PLAN_DRAFT', 'PM_C', analystC, ANALYST_TOOL_PROFILE, [digest.key], 'FULL');
+ const falsify = entry(declaration, 'analysis-falsify', 'PLAN_DRAFT', 'PM_D', analystD, ANALYST_TOOL_PROFILE, [digest.key], 'FULL');
+ const responseC = entry(declaration, 'analysis-response-interpret', 'PLAN_CRITIQUE', 'PM_C', analystC, ANALYST_TOOL_PROFILE, [falsify.key], 'FULL');
+ const responseD = entry(declaration, 'analysis-response-falsify', 'PLAN_CRITIQUE', 'PM_D', analystD, ANALYST_TOOL_PROFILE, [interpret.key], 'FULL');
  const finalize = entry(declaration, 'analysis-finalize', 'PLAN_SYNTHESIS', 'DIRECTOR', declaration.directorAgentId, DIRECTOR_TOOL_PROFILE,
-  [interpret.key, falsify.key, responseC.key, responseD.key]);
- const report = entry(declaration, 'analysis-report', 'REPORT', 'WORKER', declaration.workerAgentId, WORKER_TOOL_PROFILE, [finalize.key]);
+  [interpret.key, falsify.key, responseC.key, responseD.key], 'FULL');
+ const report = entry(declaration, 'analysis-report', 'REPORT', 'WORKER', declaration.workerAgentId, WORKER_TOOL_PROFILE, [finalize.key], 'FULL');
  const entries = [brief, digest, interpret, falsify, responseC, responseD, finalize, report];
  sealTerminal(entries);
  assertDag(entries);
