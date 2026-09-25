@@ -11,6 +11,7 @@ import {prepareInputSnapshot} from '../src/main/locations';
 import {officeActivity,ACTIVITY_FRESHNESS_MS} from '../src/shared/activity';
 import {queueScope} from '../src/shared/queue';
 import type {Agent,CapabilityEvidence,CapabilityOperation,ProviderJob,Role} from '../src/shared/types';
+import type {LocalSessionRecord,StopStatus} from '../src/shared/local-session';
 
 const key=()=>randomUUID();
 const base=Date.UTC(2026,8,8,15,0,0);
@@ -182,6 +183,52 @@ test('team filters follow membership, and lifecycle filtering keeps scope counts
  assert.equal(activeOnly.entries.length,1);
  assert.equal(activeOnly.counts.all,2,'counts describe the filtered scope, not the visible page');
  assert.equal(queueScope(state,{lifecycle:'CANCELED'}).entries[0].request!.name,'Beta question');
+});
+
+const binding=(jobId:string,assignmentId:string,projectId:string,stopStatus:StopStatus):LocalSessionRecord=>({
+ schemaVersion:1,id:randomUUID(),jobId,assignmentId,projectId,attemptId:randomUUID(),revision:0,
+ provider:'claude',surface:'CLAUDE_CLI',layout:'FLAT_PACKET',packetVersion:2,packetHash:null,
+ storageRelativePath:'session-fixture',originalCwd:null,repoRelativePath:null,seedCommit:null,worktreeOwner:'NONE',
+ providerSessionId:null,providerProjectId:null,bindingEvidence:'UNBOUND',groupingStatus:'UNKNOWN',
+ requirement:'SCOPED_DELIVERY',confinementStatus:'UNVERIFIED',confinementEvidenceId:null,lifecycle:'READY',
+ archiveRelativePath:null,lastReceipt:null,cancelRequestId:null,stopStatus,createdAt:at(0),updatedAt:at(0)});
+
+test('a canceled request leaves the seat idle only once the process is durably dead',async t=>{
+ const f=await fixture(t);
+ const {assignment}=f.controller.prepare({requestId:f.alphaRequest.id,agentId:f.worker.id,snapshotId:f.snapshot.id});
+ await f.controller.dispatch(assignment.id);
+ const job=f.store.snapshot().jobs![0];
+ f.store.execute({type:'request.cancel',idempotencyKey:key(),requestId:f.alphaRequest.id,expectedRevision:f.alphaRequest.revision});
+ const stale=ms(600); // beyond the freshness window — no fresh provider evidence exists
+ const seat=(withBinding?:StopStatus)=>{const state=f.store.snapshot();
+  if(withBinding)state.localSessions=[binding(job.id,assignment.id,f.alpha.id,withBinding)];
+  return officeActivity(state,{now:stale}).find(item=>item.agentId===f.worker.id)!;};
+ // No recorded session at all: no office-owned process was ever observed for this job.
+ assert.equal(seat().kind,'IDLE');
+ assert.equal(seat().detail,'Last job cancelled; outcome unresolved');
+ // Every durably-dead stop status resolves the canceled leftover the same way.
+ for(const stopStatus of ['PROCESS_EXIT_OBSERVED','SESSION_REPORTED_STOPPED','LEGACY_UNVERIFIED'] as const){
+  const entry=seat(stopStatus);
+  assert.equal(entry.kind,'IDLE',stopStatus);
+  assert.equal(entry.detail,'Last job cancelled; outcome unresolved');
+ }
+ // A binding that could still be live keeps the honest unknown — the office cannot tell.
+ for(const stopStatus of ['NOT_REQUESTED','REQUESTED'] as const)
+  assert.equal(seat(stopStatus).kind,'UNKNOWN',stopStatus);
+});
+
+test('a fresh provider event on a canceled request still reads as working',async t=>{
+ const f=await fixture(t);
+ const {assignment}=f.controller.prepare({requestId:f.alphaRequest.id,agentId:f.worker.id,snapshotId:f.snapshot.id});
+ await f.controller.dispatch(assignment.id);
+ const job=f.store.snapshot().jobs![0];
+ f.store.execute({type:'request.cancel',idempotencyKey:key(),requestId:f.alphaRequest.id,expectedRevision:f.alphaRequest.revision});
+ f.store.recordJobEvents(job.id,[{externalId:'evt-live',cursor:'1',kind:'STATUS',text:'Still working.',occurredAt:at(5),receivedAt:at(5),evidence:'PROVIDER_REPORTED'}]);
+ const state=f.store.snapshot();
+ // Even with a durably-dead binding recorded, fresh provider evidence is live work.
+ state.localSessions=[binding(job.id,assignment.id,f.alpha.id,'PROCESS_EXIT_OBSERVED')];
+ const entry=officeActivity(state,{now:ms(5)}).find(item=>item.agentId===f.worker.id)!;
+ assert.equal(entry.kind,'WORKING','fresh provider evidence outranks the canceled bookkeeping');
 });
 
 test('a request whose jobs all settled reads completed, not active',async t=>{

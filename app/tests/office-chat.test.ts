@@ -60,6 +60,26 @@ test('CLI envelopes show speech and tool names but never thinking, credentials m
   assert.equal(chatEventText('A plain visible update'), 'A plain visible update');
 });
 
+test('office-internal diagnostic events never reach the conversation feed', t => {
+  const f = fixture(t), state = f.store.snapshot();
+  const jobId = randomUUID(), assignmentId = randomUUID(), timestamp = new Date().toISOString();
+  state.assignments = [{ id: assignmentId, agentId: f.agents[0].id } as NonNullable<typeof state.assignments>[number]];
+  state.jobs = [{ id: jobId, assignmentId, projectId: f.project.id, requestId: f.request.id, state: 'RUNNING', evidence: 'PROVIDER_REPORTED', detail: 'Working.', updatedAt: timestamp } as NonNullable<typeof state.jobs>[number]];
+  const event = (externalId: string, text: string) => ({ id: randomUUID(), jobId, externalId, cursor: '', kind: 'STATUS' as const, text, occurredAt: timestamp, receivedAt: timestamp, evidence: 'PROVIDER_REPORTED' as const });
+  // The diagnostics carry plainly visible text — only the externalId prefix keeps them out.
+  state.jobEvents = [
+    event('transport-evidence:session-open', 'transport bytes observed'),
+    event('observe:cli-poll', 'poll detail observed'),
+    event('observe-later-1', 'Kept — the prefix is anchored.'),
+    event('agent-visible-1', 'A plainly visible update.'),
+  ];
+  const page = officeChatPage(state);
+  const providerEntries = page.entries.filter(e => e.source === 'PROVIDER_EVENT');
+  assert.deepEqual(providerEntries.map(e => e.text).sort(),
+    ['A plainly visible update.', 'Kept — the prefix is anchored.'],
+    'transport-evidence:/observe: bookkeeping stays in History, never in the conversation');
+});
+
 test('provider messages are attributed to the assigned agent, retain provenance, and do not create outcomes', t => {
   const f = fixture(t), state = f.store.snapshot();
   const jobId = randomUUID(), assignmentId = randomUUID(), timestamp = new Date().toISOString();
