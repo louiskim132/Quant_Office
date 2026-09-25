@@ -4129,3 +4129,69 @@ conversations existed. The packaged app release
 and the mirrored taskbar install carry this
 revision — byte-identical app.asar (59e5151c…)
 on both sides.
+
+2026-09-25 — round office-mem-2 integrated: the
+M-memory workstream is complete. Organizer
+freeze e087ec2 added the packet-side digest
+contract (packet.json's optional memoryDigest
+declaration for the office-memory-digest@1
+file), store.memoryDigest(projectId) — the
+deterministic bounded projection (64 findings /
+128 links, createdAt+id order, superseded
+marked) — the memory.relationship.propose
+command for user-proposed links, and the
+FINDING evidenceRef kind so findings can cite
+other findings. worker-1 (a4f9dc8) mounts the
+digest inside prepareLocalPacket gated on the
+exact seats authorizeMemorySearch authorizes —
+plan-synthesis and analysis-finalize — written
+before packet.json so its sha256 lands on the
+declaration; every other seat gets neither file
+nor field even when the caller supplies the
+projection, and CONTRACT.md carries the
+self-report honesty paragraph only when the
+digest mounted. worker-2 (d9bf130) exports
+findings/relationships in the project planning
+archive scoped to the exported project, with
+provenance and statuses intact, foreign-project
+exclusion proven, and the self-report clause
+added to reviewMeaning. worker-3 (63fc34d)
+completes the Memory page: user link proposals
+through memory.relationship.propose (dashed
+until settled), kind filters hiding nodes and
+incident edges, search-hit focus that pans to
+the node, per-project localStorage persistence
+of dragged seats with a guarded fallback, and
+ASSIGNMENT/JOB/FINDING options in the
+evidence-ref picker; refuted edges stay hidden
+behind a toggle, struck-through when shown.
+worker-4 (92dfa4e) ships the optional
+engine-evaluation harness —
+app/scripts/memory-eval.mjs plus the
+MemoryEngineAdapter contract, a deterministic
+12-finding/10-link corpus, 10 gold queries
+scored by MRR and recall@5, the Office-native
+baseline routed through searchMemoryFindings on
+a throwaway store, and --adapter ports that
+report UNAVAILABLE on any failure rather than
+failing the run; no engine is installed or
+fetched. Organizer wiring (eb02909):
+SubmitContext.memoryDigest carries the
+projection on bound local submits through all
+three adapter call sites, with an end-to-end
+adapter test proving an authorized seat mounts
+the file and a research-review seat does not.
+Full suite at the integrated head: 817 tests,
+816 passed, 1 pre-existing skip; tsc and build
+clean. The M series is done: append-only
+ledger, interactive graph, pull retrieval
+(memorySearch) and declared digest mount —
+both per-hop authorized — export coverage,
+finished UI, and the bounded evaluation
+harness with the Office baseline. Honest
+remainder: memory stays office-recorded
+self-report, not verified fact; external
+engines remain uninstalled optional adapters —
+no engine has been evaluated, and none may
+become a prerequisite or silent injector;
+REVISE still records intent only.
