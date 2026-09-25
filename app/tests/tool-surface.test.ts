@@ -6,7 +6,7 @@ import { tmpdir } from 'os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import { removeTreeSync } from '../src/main/fsx';
-import { buildProviderPayload, type SubmitContext } from '../src/main/controller';
+import { buildProviderPayload, NotLaunchedError, type SubmitContext } from '../src/main/controller';
 import { LocalCliExecAdapter, type CliSpawn, type CliSpawnOptions } from '../src/main/local-cli-exec';
 import { ANSWERS_DIR, QUERIES_DIR, isQueryFile, prepareEvidenceDropbox, serveEvidenceQuery } from '../src/main/evidence-dropbox';
 import { GuardedLocalFileIO } from '../src/main/local-session-files';
@@ -213,7 +213,7 @@ test('a declared serena profile is gated on an observed initialize handshake bef
 
 test('a serena probe that never answers refuses the launch — no provider spawn', async t => {
   const f = fixture(t, { profile: { mcpServers: [{ id: 'serena', command: 'serena start-mcp-server', readOnly: true }] }, serenaAnswers: false });
-  await assert.rejects(f.adapter.submit(f.context), /readiness probe/);
+  await assert.rejects(f.adapter.submit(f.context), (error: unknown) => error instanceof NotLaunchedError && /readiness probe/.test(error.message));
   assert.equal(f.spawnCalls.length, 0);
 });
 
@@ -253,7 +253,7 @@ test('a declared evidence surface mounts the drop-box and serves a written query
 
 test('a declared evidence surface with no frame handler refuses the launch', async t => {
   const f = fixture(t, { profile: { mcpServers: [{ id: EVIDENCE_SURFACE_ID, command: 'office evidence-surface', readOnly: true }] } });
-  await assert.rejects(f.adapter.submit(f.context), /evidence frame handler/);
+  await assert.rejects(f.adapter.submit(f.context), (error: unknown) => error instanceof NotLaunchedError && /evidence frame handler/.test(error.message));
   assert.equal(f.spawnCalls.length, 0);
 });
 
