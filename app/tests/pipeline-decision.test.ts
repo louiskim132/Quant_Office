@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync as removeTreeSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync as removeTreeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
@@ -11,9 +11,10 @@ import { LocalCliExecAdapter, type CliSpawn } from '../src/main/local-cli-exec';
 import { LocalSessionRouter } from '../src/main/local-session-router';
 import { OutputService } from '../src/main/outputs';
 import { prepareInputSnapshot } from '../src/main/locations';
-import { mintPipelineBrief, mintPipelineRound, type PipelineMintContext } from '../src/main/pipeline-runner';
-import { RESULT_FILE } from '../src/main/local-packet';
-import type { Agent, ProviderJob, Request } from '../src/shared/types';
+import { mintPipelineBrief, mintPipelineRound, settlePipelineDecision, revisionInheritance, type PipelineMintContext } from '../src/main/pipeline-runner';
+import { PACKET_FILE, RESULT_FILE } from '../src/main/local-packet';
+import { latestJobFor } from '../src/core/jobs';
+import type { Agent, Assignment, ProviderJob, Request } from '../src/shared/types';
 
 const sha = (text: string) => createHash('sha256').update(text, 'utf8').digest('hex');
 const key = () => randomUUID();
@@ -141,21 +142,24 @@ async function completeHop(f: Fixture, assignmentId: string, outputName: string)
 
 const byName = (f: Fixture, name: string): Request => f.store.snapshot({ history: false }).requests!.find(item => item.name === name)!;
 
-/** Completes every pipelined hop on the request in dependency order (Kahn on the DAG edges). */
+/** Completes every pipelined hop on the request in dependency order (Kahn on the DAG edges).
+ *  Dependency ids resolve globally — a revision brief's cross-request edges are satisfied by
+ *  the source round's recorded completions, not by anything in this request's own mint. */
 async function completeRound(f: Fixture, requestId: string): Promise<void> {
   for (;;) {
-    const hops = f.store.snapshot({ history: false }).assignments!.filter(item => item.requestId === requestId && item.pipelineKey);
+    const snapshot = f.store.snapshot({ history: false });
+    const hops = snapshot.assignments!.filter(item => item.requestId === requestId && item.pipelineKey);
     const done = new Set(hops.filter(item => jobFor(f, item.id).state === 'COMPLETED').map(item => item.id));
-    const next = hops.find(item => !done.has(item.id) && (item.dependsOn ?? []).every(dep => done.has(dep)));
+    const next = hops.find(item => !done.has(item.id) && (item.dependsOn ?? []).every(dep => latestJobFor(snapshot.jobs, dep)?.state === 'COMPLETED'));
     if (!next) return;
     await completeHop(f, next.id, `${next.pipelineKey}.txt`);
   }
 }
 
 /** Drives a planning request to LAUNCHED with every spec hop minted. */
-async function launchedRound(f: Fixture): Promise<{ request: Request; specHash: string }> {
-  f.store.execute({ type: 'request.create', idempotencyKey: key(), projectId: f.project.id, name: 'Plan it', hypothesis: 'Plan the thing.', workType: 'PLANNING', mode: 'SINGLE', leadAgentId: f.agents.DIRECTOR.id, participantIds: [] });
-  let request = byName(f, 'Plan it');
+async function launchedRound(f: Fixture, name = 'Plan it'): Promise<{ request: Request; specHash: string }> {
+  f.store.execute({ type: 'request.create', idempotencyKey: key(), projectId: f.project.id, name, hypothesis: 'Plan the thing.', workType: 'PLANNING', mode: 'SINGLE', leadAgentId: f.agents.DIRECTOR.id, participantIds: [] });
+  let request = byName(f, name);
   request = f.store.execute({ type: 'request.start', idempotencyKey: key(), requestId: request.id, expectedRevision: request.revision }).requests!.find(item => item.id === request.id)!;
   await mintPipelineBrief(f.ctx, request);
   request = requestOf(f, request.id);
@@ -236,4 +240,155 @@ test('decide and the decision wait refuse outside their honest phases', async t 
   const briefing = byName(f, 'P2');
   const foreign = f.store.snapshot({ history: false }).assignments!.find(item => item.requestId === request.id && item.pipelineKey === 'verify')!;
   assert.throws(() => f.store.markPipelineAwaitingDecision({ requestId: briefing.id, specHash, headAssignmentId: foreign.id, headReceiptHash: sha('z') }), /after the round launches/);
+});
+
+/** Records a pipeline decision bound to the pendingDecision the settle already opened. */
+function decide(f: Fixture, requestId: string, decision: 'APPROVE' | 'REVISE' | 'REJECT', note?: string): void {
+  const current = requestOf(f, requestId);
+  const pending = current.pipeline!.pendingDecision!;
+  f.store.execute({
+    type: 'request.pipeline.decide', idempotencyKey: key(), requestId, expectedRevision: current.revision,
+    decision, ...(note !== undefined ? { note } : {}), expectedSpecHash: pending.specHash, expectedReceiptHash: pending.headReceiptHash,
+  });
+}
+
+/** Drives a minted revision request through start + brief mint — the office's own next step. */
+async function startRevision(f: Fixture, revision: Request): Promise<Request> {
+  const started = f.store.execute({ type: 'request.start', idempotencyKey: key(), requestId: revision.id, expectedRevision: revision.revision })
+    .requests!.find(item => item.id === revision.id)!;
+  const minted = await mintPipelineBrief(f.ctx, started);
+  assert.equal(minted.minted, true);
+  return requestOf(f, revision.id);
+}
+
+test('a REVISE decision mints exactly one revision whose brief inherits the settled round tail', async t => {
+  const f = await fixture(t);
+  const { request } = await launchedRound(f);
+  await completeRound(f, request.id);
+  const hops = f.store.snapshot({ history: false }).assignments!.filter(item => item.requestId === request.id && item.pipelineKey);
+  const terminal = hops.find(item => item.pipelineKey === 'verify')!;
+  const synthesis = hops.find(item => item.pipelineKey === 'plan-synthesis')!;
+  const terminalJob = jobFor(f, terminal.id);
+  const synthesisJob = jobFor(f, synthesis.id);
+  assert.equal(settlePipelineDecision(f.ctx, requestOf(f, request.id)).settled, true);
+  decide(f, request.id, 'REVISE', 'Tighten the scope around what verify proved.');
+  const revisions = f.store.snapshot({ history: false }).requests!.filter(item => item.revisionOf?.requestId === request.id);
+  assert.equal(revisions.length, 1, 'REVISE mints exactly one linked revision request');
+  const revision = revisions[0];
+  assert.equal(revision.revisionOf?.round, 1);
+  assert.equal(revision.name, 'Plan it — revision 1');
+  const fresh = await startRevision(f, revision);
+  const brief = f.store.snapshot({ history: false }).assignments!.find(item => item.id === fresh.pipeline!.briefAssignmentId)!;
+  assert.equal(brief.requestId, revision.id);
+  assert.deepEqual([...(brief.dependsOn ?? [])].sort(), [terminal.id, synthesis.id].sort(),
+    'the revision brief chains off the source round\'s settled terminal and synthesis hops');
+  assert.match(brief.frozen!.objective, /Prior-round inputs: 'verify', 'plan-synthesis' settled\./);
+  assert.match(brief.frozen!.objective, /## Revision note from the office\nTighten the scope around what verify proved\./,
+    'the recorded decision note rides the brief verbatim');
+  // The packet declares the inherited manifest — the source hops' verified outputs arrive
+  // under inputs/inherited/<source job>/, named by the producing job and re-verified bytes.
+  await f.controller.handoff(brief.id);
+  const bound = f.store.localSessionForJob(jobFor(f, brief.id).id)!;
+  const dir = path.join(f.sessionsRoot, bound.storageRelativePath);
+  const packet = JSON.parse(readFileSync(path.join(dir, PACKET_FILE), 'utf8'));
+  const inherited: { path: string; sha256: string; sourceJobId: string; objectHash: string }[] = packet.inherited;
+  assert.deepEqual(inherited.map(item => item.sourceJobId).sort(), [terminalJob.id, synthesisJob.id].sort());
+  const outputs = [...terminalJob.outputs, ...synthesisJob.outputs];
+  for (const item of inherited) {
+    const source = outputs.find(output => output.sha256 === item.objectHash)!;
+    assert.ok(source, 'every inherited entry names a verified source output by hash');
+    assert.equal(item.sha256, source.sha256);
+    assert.ok(item.path.startsWith(`inputs/inherited/${item.sourceJobId}/`));
+    assert.equal(readFileSync(path.join(dir, item.path), 'utf8'), `${path.basename(source.path)} bytes`,
+      'the staged inherited bytes are the verified predecessor bytes');
+  }
+});
+
+test('a revision of a revision increments round and names the immediate source round\'s hops', async t => {
+  const f = await fixture(t);
+  const { request } = await launchedRound(f);
+  await completeRound(f, request.id);
+  assert.equal(settlePipelineDecision(f.ctx, requestOf(f, request.id)).settled, true);
+  decide(f, request.id, 'REVISE', 'First revision.');
+  const first = f.store.snapshot({ history: false }).requests!.find(item => item.revisionOf?.requestId === request.id)!;
+  // Drive the first revision's own round all the way through — its brief already chained off
+  // the round-0 tail, so its own hops are ordinary same-request edges from here.
+  const firstStarted = await startRevision(f, first);
+  await completeHop(f, firstStarted.pipeline!.briefAssignmentId!, 'rev1-brief.txt');
+  let current = requestOf(f, first.id);
+  current = f.store.execute({ type: 'request.pipeline.confirm', idempotencyKey: key(), requestId: first.id, expectedRevision: current.revision })
+    .requests!.find(item => item.id === first.id)!;
+  await mintPipelineRound(f.ctx, current);
+  await completeRound(f, first.id);
+  assert.equal(settlePipelineDecision(f.ctx, requestOf(f, first.id)).settled, true);
+  decide(f, first.id, 'REVISE', 'Second revision.');
+  const second = f.store.snapshot({ history: false }).requests!.find(item => item.revisionOf?.requestId === first.id)!;
+  assert.equal(second.revisionOf?.round, 2);
+  assert.equal(second.name, 'Plan it — revision 2');
+  const firstHops = f.store.snapshot({ history: false }).assignments!.filter(item => item.requestId === first.id && item.pipelineKey);
+  const secondStarted = await startRevision(f, second);
+  const brief = f.store.snapshot({ history: false }).assignments!.find(item => item.id === secondStarted.pipeline!.briefAssignmentId)!;
+  assert.deepEqual([...(brief.dependsOn ?? [])].sort(),
+    [firstHops.find(item => item.pipelineKey === 'verify')!.id, firstHops.find(item => item.pipelineKey === 'plan-synthesis')!.id].sort(),
+    'the second revision chains off the immediate source round, not round 0');
+  assert.match(brief.frozen!.objective, /## Revision note from the office\nSecond revision\./);
+});
+
+test('revisionInheritance names only settled, receipt-verified source hops — every drop carries its reason', () => {
+  const hop = (id: string, requestId: string, pipelineKey: string) => ({ id, requestId, pipelineKey }) as Assignment;
+  const job = (id: string, assignmentId: string, state: ProviderJob['state'], attempt = 1) =>
+    ({ id, assignmentId, state, attempt, createdAt: at(attempt) }) as ProviderJob;
+  const source = { id: 'src', pipeline: { kind: 'PLANNING' } } as unknown as Request;
+  const revision = { id: 'rev', revisionOf: { requestId: 'src', decisionAt: at(9), round: 1 } } as Request;
+
+  // Terminal settled+verified, synthesis failed — only the settled edge survives.
+  let state = {
+    requests: [source],
+    assignments: [hop('a-verify', 'src', 'verify'), hop('a-synth', 'src', 'plan-synthesis')],
+    jobs: [job('j-verify', 'a-verify', 'COMPLETED'), job('j-synth', 'a-synth', 'FAILED')],
+  } as unknown as Parameters<typeof revisionInheritance>[0];
+  let inherited = revisionInheritance(state, revision, () => true);
+  assert.deepEqual(inherited.dependsOn, ['a-verify']);
+  assert.deepEqual(inherited.settled, ['verify']);
+  assert.equal(inherited.dropped.length, 1);
+  assert.match(inherited.dropped[0], /'plan-synthesis' hop is not settled COMPLETED/);
+
+  // COMPLETED without a verified receipt on record does not qualify either.
+  state = {
+    requests: [source],
+    assignments: [hop('a-verify', 'src', 'verify'), hop('a-synth', 'src', 'plan-synthesis')],
+    jobs: [job('j-verify', 'a-verify', 'COMPLETED'), job('j-synth', 'a-synth', 'COMPLETED')],
+  } as unknown as Parameters<typeof revisionInheritance>[0];
+  inherited = revisionInheritance(state, revision, jobId => jobId === 'j-verify');
+  assert.deepEqual(inherited.dependsOn, ['a-verify']);
+  assert.match(inherited.dropped[0], /'plan-synthesis' hop has no verified receipt/);
+
+  // No source request at all — nothing qualifies, and the reason says so plainly.
+  state = { requests: [], assignments: [], jobs: [] } as unknown as Parameters<typeof revisionInheritance>[0];
+  inherited = revisionInheritance(state, revision, () => true);
+  assert.deepEqual(inherited.dependsOn, []);
+  assert.equal(inherited.settled.length, 0);
+  assert.match(inherited.dropped[0], /not recorded/);
+
+  // RESULT_ANALYSIS sources settle on their own terminal/finalize keys.
+  const analysis = { id: 'src', pipeline: { kind: 'RESULT_ANALYSIS' } } as unknown as Request;
+  state = {
+    requests: [analysis],
+    assignments: [hop('a-report', 'src', 'analysis-report'), hop('a-finalize', 'src', 'analysis-finalize')],
+    jobs: [job('j-report', 'a-report', 'COMPLETED'), job('j-finalize', 'a-finalize', 'COMPLETED')],
+  } as unknown as Parameters<typeof revisionInheritance>[0];
+  inherited = revisionInheritance(state, revision, () => true);
+  assert.deepEqual(inherited.dependsOn, ['a-report', 'a-finalize']);
+});
+
+test('APPROVE and REJECT decisions mint no revision request', async t => {
+  const f = await fixture(t);
+  for (const [name, decision] of [['Approve it', 'APPROVE'], ['Reject it', 'REJECT']] as const) {
+    const { request } = await launchedRound(f, name);
+    await completeRound(f, request.id);
+    assert.equal(settlePipelineDecision(f.ctx, requestOf(f, request.id)).settled, true);
+    decide(f, request.id, decision);
+  }
+  assert.equal(f.store.snapshot({ history: false }).requests!.filter(item => item.revisionOf).length, 0,
+    'only REVISE mints a linked revision');
 });
