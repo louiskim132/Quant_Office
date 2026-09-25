@@ -10,6 +10,9 @@ import {OfficeStore} from '../src/core/store.js';
 import {ArtifactService} from '../src/main/artifacts.js';
 import {prepareRestore} from '../src/main/recovery.js';
 import {Subscriptions} from '../src/main/subscriptions.js';
+import {officeActivity} from '../src/shared/activity.js';
+import type {Agent,Assignment,JobEvent,ProviderJob,Request} from '../src/shared/types.js';
+import type {LocalSessionRecord,StopStatus} from '../src/shared/local-session.js';
 const now=Date.parse('2026-09-07T12:00:00Z');
 const usage=(id:string,time:string,output=10)=>({type:'assistant',sessionId:'s1',timestamp:time,message:{id,model:'test-opus',content:[{type:'text',text:'PRIVATE PROMPT MUST NOT APPEAR IN AGGREGATES'}],usage:{input_tokens:100,output_tokens:output,cache_read_input_tokens:20,cache_creation_input_tokens:5}}});
 test('local reconstruction deduplicates streamed/copied responses and uses rolling periods without quota inference',async()=>{
@@ -45,6 +48,36 @@ test('effort changes use optimistic checks, create work-log events and restore w
  store.setAgentEffort(first,'high','default');assert.equal(store.snapshot().agents[0].effort,'high');assert.throws(()=>store.setAgentEffort(first,'low','default'),/another view/);store.setAgentEffort(first,'max','high');
  store.importWorkLogs(parseWorkLogs(Buffer.from(JSON.stringify(exchange(first,second))),first,new Set([first,second])).entries);assert.ok(store.workLogs().some(l=>l.provenance==='OFFICE_EVENT'&&l.text.includes('high → max')));
  const archive=path.join(root,'backup.zip');await new ArtifactService(store,live).backup(archive);store.close();const prepared=await prepareRestore(archive,root),restored=new OfficeStore(path.join(prepared.candidate,'workspace.sqlite'));try{assert.equal(restored.snapshot().agents[0].effort,'max');assert.ok(restored.workLogs().some(l=>l.conversationId==='review-1'));}finally{restored.close();}
+});
+test('a canceled request holds the seat idle only once its process is durably dead',()=>{
+ // The frozen rule: an open job on a CANCELED request reads IDLE with 'outcome unresolved' only
+ // when the office knows no process can still be alive — a recorded dead stop, or no session at
+ // all. Fresh provider evidence still reads WORKING; a possibly-live binding keeps UNKNOWN.
+ const now=Date.parse('2026-09-20T12:00:00Z'),old=new Date(now-60*60000).toISOString();
+ const agent={id:'agent-1',name:'Worker',provider:'claude',model:'opus',role:'WORKER',team:'Research',instructions:'',account:'acct',createdAt:old,connectionVerifiedAt:old,execution:'LOCAL'} as Agent;
+ const assignment={id:'assignment-1',agentId:agent.id} as Assignment;
+ const job={id:'job-1',assignmentId:assignment.id,projectId:'project-1',requestId:'request-1',state:'RUNNING',evidence:'OFFICE_LOCAL',detail:'Running.',createdAt:old,updatedAt:old} as unknown as ProviderJob;
+ const request={id:'request-1',status:'CANCELED'} as Request;
+ const session=(stopStatus:StopStatus):LocalSessionRecord=>({
+  schemaVersion:1,id:'session-1',jobId:job.id,assignmentId:assignment.id,projectId:'project-1',attemptId:'attempt-1',revision:0,
+  provider:'claude',surface:'CLAUDE_CLI',layout:'FLAT_PACKET',packetVersion:2,packetHash:null,
+  storageRelativePath:'session-fixture',originalCwd:null,repoRelativePath:null,seedCommit:null,worktreeOwner:'NONE',
+  providerSessionId:null,providerProjectId:null,bindingEvidence:'UNBOUND',groupingStatus:'UNKNOWN',
+  requirement:'SCOPED_DELIVERY',confinementStatus:'UNVERIFIED',confinementEvidenceId:null,lifecycle:'READY',
+  archiveRelativePath:null,lastReceipt:null,cancelRequestId:null,stopStatus,createdAt:old,updatedAt:old});
+ const seat=(localSessions:LocalSessionRecord[]=[],jobEvents:JobEvent[]=[])=>
+  officeActivity({agents:[agent],assignments:[assignment],jobs:[job],jobEvents,messages:[],requests:[request],localSessions},{now})[0];
+ assert.equal(seat().kind,'IDLE','no recorded session means no office-owned process was ever observed');
+ assert.equal(seat().detail,'Last job cancelled; outcome unresolved');
+ for(const stopStatus of ['PROCESS_EXIT_OBSERVED','SESSION_REPORTED_STOPPED','LEGACY_UNVERIFIED'] as const){
+  const entry=seat([session(stopStatus)]);
+  assert.equal(entry.kind,'IDLE',stopStatus);
+  assert.equal(entry.detail,'Last job cancelled; outcome unresolved');
+ }
+ for(const stopStatus of ['NOT_REQUESTED','REQUESTED'] as const)
+  assert.equal(seat([session(stopStatus)]).kind,'UNKNOWN',`a ${stopStatus} binding might still be live`);
+ const fresh={id:'event-1',jobId:job.id,externalId:'evt-1',cursor:'',kind:'STATUS',text:'Still working.',occurredAt:new Date(now).toISOString(),receivedAt:new Date(now).toISOString(),evidence:'PROVIDER_REPORTED'} as JobEvent;
+ assert.equal(seat([session('PROCESS_EXIT_OBSERVED')],[fresh]).kind,'WORKING','fresh provider evidence outranks the canceled bookkeeping');
 });
 test('effort capability validation rejects unsupported levels instead of substitution',async()=>{
  const root=await mkdtemp(path.join(tmpdir(),'qro-capabilities-')),service=new Subscriptions(root,async()=>{});
