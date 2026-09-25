@@ -4313,3 +4313,63 @@ Open (in the acceptance record):
 - Artifacts omits pipeline outputs.
 - Cancel has no confirmation.
 - The brief is not shown before Launch.
+
+2026-09-25 — batch integration PR #11 merged to
+main (merge commit 2846510) through the
+authenticated protected route after the required
+verify check passed on its exact head. It carries
+the live-acceptance pipeline fixes (receipt-
+binding, transport-evidence, serena gating,
+pipeline copy/queue defects, graph bounds).
+Plan item J of the open-findings revision is
+done: the merge commit was packaged from a clean
+detached worktree and mirrored over the taskbar
+install — byte-identical app.asar
+(80b375c30cbb05041e602e536e6899685e806ac78580ed19ece605d2ee3de183)
+on both sides.
+
+2026-09-25 — round findings-rev-2 published:
+organizer rev-1 freeze for the open-findings
+revision plan
+(Quant Office/Docs/Reviews/revision-plan-open-findings-2026-09-24.md)
+landed on the batch organizer branch at base
+6f15a12, on top of merged PR #11. Freeze scope:
+ProviderJob.attempt + latestJobFor shared helper
+(all 14 first-job lookups migrated;
+requestJobs aggregates latest-per-assignment),
+lastObservation + dedup-keyed observe: STATUS
+events, Assignment.inputScope BLIND/FULL
+threaded through pipeline mint entries,
+ProjectLocation.withheldPaths with relative-
+prefix validation, packet schema withheld[]
+declaration, SubmitContext.withheldPaths,
+Request.revisionOf with the decide transaction
+minting the linked revision request
+('name - revision N' rooted at the original),
+request.pipeline.retryHop minting a next attempt
+on the same assignment (FAILED or pre-dispatch
+UNKNOWN only), NotLaunchedError -> FAILED in
+dispatch and handoff, ObserveResult.
+transientProviderError with the durable
+auto-retry latch (one 60 s retry, journaled),
+pipeline request.cancel cascading to open jobs
+(cancel best-effort, INTENT hops discarded,
+local sessions killed), reconcile() repairing
+stranded verified receipts through the replay
+gate, pipeline.notice for the A5 start heads-up,
+IPC office:pipeline-retry-hop +
+office:job-output-preview, F3/F4 shared rules
+(cancelled-dead seats IDLE-not-UNKNOWN;
+diagnostic prefixes leave the chat feed), and
+the renderer splits pipeline-card.tsx /
+artifacts.tsx for worker isolation. Combined
+verification before publish: 825 tests, 824
+passed, 1 pre-existing skip; tsc clean.
+Seven worker packets are published (W1 blinding
+writer, W2 failure classification, W3 pipeline
+card, W4 artifacts/reviews, W5 renderer hygiene,
+W6 revision-brief inheritance, W7 withheld UI).
+Open before the round integrates: worker
+reviews, exact-SHA accepts, combined
+verification, roadmap close, protected merge,
+then repackage and re-mirror App\.
