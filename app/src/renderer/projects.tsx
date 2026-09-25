@@ -1,4 +1,4 @@
-import React,{useState} from 'react';
+import React,{useEffect,useState} from 'react';
 import {ArrowUpRight,Folder,FolderOpen,FolderPlus,Plus} from 'lucide-react';
 import type {AppState,Command,Project,ProjectLocation} from '../shared/types';
 import {Empty,SearchField} from './components';
@@ -6,22 +6,58 @@ import './projects.css';
 
 export function ProjectLocationPanel({project,saved,location,onState}:{project:Project;saved:ProjectLocation|undefined;location:string;onState:(s:AppState)=>void}){
  const [folder,setFolder]=useState(location);
+ // The draft is pinned to the record it was loaded from. If the location changes elsewhere before
+ // Save, expectedRevision no longer matches and the refusal text surfaces instead of overwriting.
+ const [baseline,setBaseline]=useState(()=>({revision:saved?.revision??0,folder:location,withheld:saved?.withheldPaths??[]}));
+ const [withheld,setWithheld]=useState<string[]>(saved?.withheldPaths??[]);
+ const [notices,setNotices]=useState<string[]>([]);
  const [busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
- const dirty=folder!==location;
+ useEffect(()=>{
+  if(!window.office)return;
+  let live=true;
+  const read=async()=>{
+   try{
+    const s=await window.office.getState();
+    if(live)setNotices([...new Set((s.requests??[]).filter(r=>r.projectId===project.id&&!r.removedAt&&r.status!=='CANCELED').map(r=>r.pipeline?.notice).filter((n):n is string=>!!n))]);
+   }catch{/* The planning-visibility notice is advisory; a failed read leaves the panel usable. */}
+  };
+  void read();
+  const off=window.office.onChanged(()=>{void read();});
+  return()=>{live=false;off();};
+ },[project.id]);
+ const withheldDirty=[...withheld].sort().join('\n')!==[...baseline.withheld].sort().join('\n');
+ const dirty=folder!==baseline.folder||withheldDirty;
  async function pickFolder(){
   setError('');
   try{const chosen=await window.office.chooseProjectFolder();if(chosen)setFolder(chosen);}
   catch(e){setError((e as Error).message);}
  }
+ async function addWithheld(){
+  setError('');
+  try{const chosen=await window.office.chooseInputFiles(folder);setWithheld(list=>[...list,...chosen.filter(entry=>!list.includes(entry))]);}
+  catch(e){setError((e as Error).message);}
+ }
  async function save(){
   setBusy(true);setError('');setNotice('');
-  try{onState(await window.office.command({type:'location.save',idempotencyKey:crypto.randomUUID(),projectId:project.id,expectedRevision:saved?.revision??0,localFolder:folder,outputFolder:saved?.outputFolder??''} as Command));setNotice('Saved. Nothing has been transferred.');}
-  catch(e){setError((e as Error).message);}finally{setBusy(false);}
+  try{
+   const next=await window.office.command({type:'location.save',idempotencyKey:crypto.randomUUID(),projectId:project.id,expectedRevision:baseline.revision,localFolder:folder,outputFolder:saved?.outputFolder??'',withheldPaths:withheld.filter(entry=>entry.trim())} as Command);
+   onState(next);
+   const stored=(next.locations??[]).find(item=>item.projectId===project.id);
+   setBaseline({revision:stored?.revision??baseline.revision,folder:stored?.localFolder??folder,withheld:stored?.withheldPaths??[]});
+   if(stored){setFolder(stored.localFolder);setWithheld(stored.withheldPaths);}
+   setNotice('Saved. Nothing has been transferred.');
+  }catch(e){setError((e as Error).message);}finally{setBusy(false);}
  }
  return <div className="project-row-panel">
   <div><strong>Project folder on this device</strong><p className="path-text">{folder||'Not selected'}</p>
-  {folder&&<p className="muted">Everything in this folder is shared when a request is prepared — hashed into a frozen snapshot the packet manifest lists by path, size and hash. Credential files, tool configuration, dependency and cache folders (e.g. .git, node_modules, .venv) and links are skipped automatically, and each skip is recorded on the snapshot.</p>}</div>
+  {folder&&<p className="muted">Everything in this folder is shared, except withheld paths, which planning hops never see.</p>}</div>
   {project.archived&&<p className="muted">Archived projects are read-only; restore the project to change its location. Remove from list hides it from pickers and lists — its requests, experiments, history and stored files are retained.</p>}
+  {notices.map(text=><p className="notice" role="status" key={text}><span>{text}</span></p>)}
+  <div className="withheld-editor"><strong>Withheld from planning</strong>
+   <p className="muted">Project-relative path prefixes that planning hops never see. Entries may name paths that do not exist yet.</p>
+   {withheld.length===0?<p className="muted">Nothing withheld — planning sees the whole shared folder.</p>:withheld.map(entry=><div className="withheld-row" key={entry}><span className="path-text">{entry}</span><button type="button" className="text-button" disabled={busy||project.archived} onClick={()=>setWithheld(list=>list.filter(item=>item!==entry))}>Remove</button></div>)}
+   <div><button type="button" className="secondary" disabled={busy||project.archived||!folder} onClick={()=>void addWithheld()}>Add withheld path</button></div>
+  </div>
   {error&&<p className="notice error" role="alert">{error}</p>}
   {notice&&<p className="notice success" role="status">{notice}</p>}
   <div className="button-row"><button className="secondary" disabled={busy||project.archived} onClick={()=>void pickFolder()}>Choose folder</button><button className="primary" disabled={busy||!dirty||project.archived} onClick={()=>void save()}>Save</button></div>
