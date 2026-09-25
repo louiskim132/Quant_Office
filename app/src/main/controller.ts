@@ -80,6 +80,14 @@ export interface SubmitContext {
    * ignored and no file or declaration is written.
    */
   memoryDigest?: Pick<MemoryDigest, 'findings' | 'links'>;
+  /**
+   * The project's withheld path prefixes (relative paths or directory prefixes, for example
+   * `results/`), resolved by the controller from the saved project location. The packet writer
+   * alone decides whether they apply — only an assignment minted `inputScope: 'BLIND'` withholds
+   * staged input bytes; a FULL hop ignores this entirely. Hashes still ride the manifest so a
+   * later FULL hop can prove it saw the same bytes.
+   */
+  withheldPaths?: string[];
 }
 export interface SubmitResult {
   externalId: string; externalUrl: string; detail: string; resolvedModel?: string; appliedEffort?: Effort | 'UNVERIFIED';
@@ -594,6 +602,8 @@ export class AssignmentController {
     const submitContext: SubmitContext = { assignment, snapshot: staged, objective: frozen.objective, requestName: frozen.requestName, payload: this.providerPayload(assignment), jobId: job.id };
     if (attempt) { submitContext.localSession = attempt.binding; submitContext.memoryDigest = this.store.memoryDigest(assignment.projectId); }
     if (inherited?.length) submitContext.inherited = inherited;
+    const withheld = (this.store.snapshot({history:false}).locations ?? []).find(item => item.projectId === assignment.projectId)?.withheldPaths;
+    if (withheld?.length) submitContext.withheldPaths = withheld;
     try {
       const result = await adapter.submit(submitContext);
       if (!result.externalId) throw new UnknownDispatchError('The provider returned no identifier for this submission.');
@@ -693,6 +703,8 @@ export class AssignmentController {
     const submitContext: SubmitContext = { assignment, snapshot: staged, objective: frozen.objective, requestName: frozen.requestName, payload: this.providerPayload(assignment), jobId: job.id };
     if (attempt) { submitContext.localSession = attempt.binding; submitContext.memoryDigest = this.store.memoryDigest(assignment.projectId); }
     if (inherited?.length) submitContext.inherited = inherited;
+    const withheld = (this.store.snapshot({history:false}).locations ?? []).find(item => item.projectId === assignment.projectId)?.withheldPaths;
+    if (withheld?.length) submitContext.withheldPaths = withheld;
     try {
       const result = await adapter.submit(submitContext);
       if (attempt) this.settleLocalPreparation(attempt, 'READY', result.localPacket?.packetHash ?? null, null);
