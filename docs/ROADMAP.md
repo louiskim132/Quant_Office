@@ -4195,3 +4195,18 @@ engines remain uninstalled optional adapters —
 no engine has been evaluated, and none may
 become a prerequisite or silent injector;
 REVISE still records intent only.
+
+2026-09-25 — batch integration PR #9 merged to
+main (merge commit 7b545d8) through the
+authenticated protected route: the round was
+closed, origin/main was merged into the branch
+first so the exact PR head 25c8d46 contained
+it, both required verify runs reported SUCCESS
+on that same head (36082815635 and
+36082836153), mergeStateStatus read CLEAN and
+no review conversations existed. The packaged
+app release and the mirrored taskbar install
+carry this revision — byte-identical app.asar
+(64c79aa9…) on both sides, digest-mount
+machinery confirmed present in the bundle.
+The M-memory workstream is complete.
