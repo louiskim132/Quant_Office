@@ -244,6 +244,7 @@ export class ArtifactService {
     predictions:state.predictions?.filter(p=>branchIds.has(p.branchId)),trials:state.trials?.filter(t=>branchIds.has(t.branchId)),
     attempts:state.attempts?.filter(a=>branchIds.has(a.branchId)),receipts:state.receipts?.filter(r=>branchIds.has(r.branchId)),
     functions:state.functions?.filter(f=>f.projectId===projectId),pipeline,
+    findings:(state.findings??[]).filter(f=>f.projectId===projectId),relationships:(state.relationships??[]).filter(r=>r.projectId===projectId),
     evidence:this.store.evidenceRecords().filter(r=>r.projectId===projectId)};
   let cursor:number|undefined;
   do{const page=this.store.historyPage({projectId,limit:200,cursor});state.events.push(...page.entries);cursor=page.nextCursor??undefined;await new Promise<void>(resolve=>setImmediate(resolve));}while(cursor);
@@ -263,9 +264,9 @@ export class ArtifactService {
    if(bytes.length!==item.bytes||createHash('sha256').update(bytes).digest('hex')!==hash)throw new Error('Project object integrity failure.');
    files['objects/'+hash]=bytes;
   }
-  snapshot.provenance.includes.push('assignments','jobs','snapshots','scoped messages','review decision records','job events','local session bindings','local lifecycle journals','grants','available referenced object bytes');
+  snapshot.provenance.includes.push('assignments','jobs','snapshots','scoped messages','review decision records','job events','local session bindings','local lifecycle journals','grants','memory findings','memory relationships','available referenced object bytes');
   files['project.json']=strToU8(JSON.stringify({...snapshot,assignments,jobs,snapshots,messages,decisions,grants,jobEvents,localSessions,localOps,unavailableObjectHashes,...research,
-    reviewMeaning:'Recorded review decisions do not establish context isolation, scientific gate approval or trading authorization.'},null,2));
+    reviewMeaning:'Recorded review decisions do not establish context isolation, scientific gate approval or trading authorization. Memory findings and relationships are session and user self-reports recorded by the office, not verified facts.'},null,2));
   const entries=Object.entries(files).map(([name,data])=>({path:name,size:data.length,sha256:createHash('sha256').update(data).digest('hex')}));
   files['inventory.json']=strToU8(JSON.stringify({schemaVersion:1,kind:'DRAFT',entries,inventoryHash:canonicalHash(entries)},null,2));
   validateArchiveFiles(files);const zipped=await compress(files);validateWrittenArchive(zipped);await atomicWrite(destination,zipped);

@@ -74,7 +74,7 @@ export class LocalWorktreeMailboxAdapter implements ProviderAdapter {
    if (typeof binding.seedCommit !== 'string' || !COMMIT_SHA.test(binding.seedCommit))
     throw new Error(`The binding's recorded seed commit ${JSON.stringify(binding.seedCommit)} is not a full sha1 commit id — the seed is recorded intent and cannot be created here.`);
    const dir = await createWorktree(this.reposRoot(), binding.projectId, segment, binding.seedCommit);
-   const prepared = prepareLocalPacket({ dir, context, binding, io: this.io, now: this.now() });
+   const prepared = prepareLocalPacket({ dir, context, binding, io: this.io, now: this.now(), memoryDigest: context.memoryDigest });
    return {
     externalId: segment,
     externalUrl: '',

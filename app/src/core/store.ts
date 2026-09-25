@@ -66,7 +66,7 @@ const outcomeEnum=z.enum(['IN_PROGRESS','VALID_NEGATIVE','INCONCLUSIVE','RETIRED
 const common = { idempotencyKey: z.string().min(8).max(128).regex(/^[a-zA-Z0-9_-]+$/) };
 const findingKindSchema=z.enum(['OBSERVATION','HYPOTHESIS','RESULT','DEFECT','DECISION','NOTE']);
 const relationshipKindSchema=z.enum(['SUPPORTS','CONTRADICTS','RELATES','DUPLICATES','REFINES']);
-const findingRefSchema=z.object({kind:z.enum(['OBJECT','ASSIGNMENT','JOB','REQUEST']),id:z.string().min(1).max(200)}).strict();
+const findingRefSchema=z.object({kind:z.enum(['OBJECT','ASSIGNMENT','JOB','REQUEST','FINDING']),id:z.string().min(1).max(200)}).strict();
 export const commandSchema = z.discriminatedUnion('type', [
   z.object({...common,type:z.literal('request.create'),projectId:id,name:title,hypothesis:z.string().trim().min(1).max(12000),workType:z.enum(['QUESTION','ANALYSIS','IMPLEMENTATION','CODE_REVIEW','EXPERIMENT','PLANNING','RESULT_ANALYSIS','OTHER']).optional(),mode:z.enum(['SINGLE','GROUP','TEAM']).optional(),leadAgentId:id.nullable().optional(),participantIds:z.array(id).optional(),acceptanceCriteria:text(12000).optional()}).strict(),
   z.object({...common,type:z.literal('request.update'),requestId:id,expectedRevision:z.number().int().nonnegative(),objective:z.string().trim().min(1).max(12000),leadAgentId:id.nullable(),participantIds:z.array(id),acceptanceCriteria:text(12000)}).strict(),
@@ -75,6 +75,7 @@ export const commandSchema = z.discriminatedUnion('type', [
   z.object({...common,type:z.literal('request.pipeline.decide'),requestId:id,expectedRevision:z.number().int().nonnegative(),decision:z.enum(['APPROVE','REVISE','REJECT']),note:z.string().trim().max(4000).optional(),expectedSpecHash:hash,expectedReceiptHash:hash}).strict(),
   z.object({...common,type:z.literal('memory.finding.note'),projectId:id,requestId:id.nullable().optional(),kind:findingKindSchema,title:title,body:text(4000),evidenceRefs:z.array(findingRefSchema).max(32).optional(),supersedesFindingId:id.optional()}).strict(),
   z.object({...common,type:z.literal('memory.relationship.settle'),relationshipId:id,status:z.enum(['CONFIRMED','REFUTED'])}).strict(),
+  z.object({...common,type:z.literal('memory.relationship.propose'),projectId:id,fromFindingId:id,toFindingId:id,kind:relationshipKindSchema,note:text(1000).optional()}).strict(),
   z.object({...common,type:z.literal('agent.remove'),agentId:id,removed:z.boolean()}).strict(),
   z.object({...common,type:z.literal('agent.delete'),agentId:id}).strict(),
   z.object({...common,type:z.literal('agent.update'),agentId:id,expectedRevision:z.number().int().nonnegative().optional(),name:title,team:title,role,instructions:text(12000)}).strict(),
@@ -369,6 +370,9 @@ function assertFindingRefs(state: Projection, projectId: string, refs: FindingEv
       const assignment = job && state.assignments?.find(item => item.id === job.assignmentId);
       if (!job || assignment?.projectId !== projectId)
         throw new Error('A finding cites a job that does not exist in this project.');
+    } else if (ref.kind === 'FINDING') {
+      if (!state.findings?.some(item => item.id === ref.id && item.projectId === projectId))
+        throw new Error('A finding cites a finding that does not exist in this project.');
     } else if (!state.requests?.some(item => item.id === ref.id && item.projectId === projectId))
       throw new Error('A finding cites a request that does not exist in this project.');
   }
@@ -1638,6 +1642,20 @@ export class OfficeStore {
           reason=`A proposed ${relationship.kind.toLowerCase()} link was ${command.status.toLowerCase()} by the user.`;
           break;
         }
+        case 'memory.relationship.propose': {
+          const project=this.activeProject(state,command.projectId);projectId=project.id;experimentId=null;
+          if(command.fromFindingId===command.toFindingId)throw new Error('A finding cannot relate to itself.');
+          const from=state.findings?.find(item=>item.id===command.fromFindingId&&item.projectId===project.id);
+          const to=state.findings?.find(item=>item.id===command.toFindingId&&item.projectId===project.id);
+          if(!from||!to)throw new Error('A relationship can only link findings that exist in this project.');
+          if(state.relationships?.some(item=>item.projectId===project.id&&item.fromFindingId===from.id&&item.toFindingId===to.id&&item.kind===command.kind&&item.status!=='REFUTED'))
+            throw new Error('That link already exists — a repeated proposal writes nothing.');
+          const relationship:MemoryRelationship={id:randomUUID(),projectId:project.id,fromFindingId:from.id,toFindingId:to.id,
+            kind:command.kind,note:command.note?.trim()||null,status:'PROPOSED',createdBy:{surface:'USER'},createdAt:now};
+          changes.push({collection:'relationships',value:relationship});
+          reason=`Proposed a ${command.kind.toLowerCase()} link between findings.`;
+          break;
+        }
         case 'request.update':
         case 'request.start':
         case 'request.cancel':
@@ -2572,6 +2590,25 @@ export class OfficeStore {
     }).filter(entry=>entry.score>0)
       .sort((a,b)=>b.score-a.score||Number(!!a.item.supersededById)-Number(!!b.item.supersededById)||b.item.createdAt.localeCompare(a.item.createdAt));
     return scored.slice(0,capped).map(entry=>entry.item);
+  }
+  /**
+   * The bounded digest a synthesis packet may mount — the ledger projected at call time,
+   * deterministic ordering (createdAt, then id), superseded findings included but marked so
+   * the seat reads corrections rather than stale claims. Mounted only where retrieval is
+   * already authorized — plan-synthesis and analysis-finalize.
+   */
+  memoryDigest(projectId:string):Pick<import('../shared/local-session.js').MemoryDigest,'findings'|'links'> {
+    id.parse(projectId);
+    const state=this.readProjection();
+    const findings=(state.findings??[]).filter(item=>item.projectId===projectId)
+      .sort((a,b)=>a.createdAt.localeCompare(b.createdAt)||a.id.localeCompare(b.id))
+      .slice(-64)
+      .map(item=>({id:item.id,kind:item.kind,title:item.title,body:item.body,evidenceRefs:item.evidenceRefs,superseded:!!item.supersededById,createdAt:item.createdAt}));
+    const links=(state.relationships??[]).filter(item=>item.projectId===projectId)
+      .sort((a,b)=>a.createdAt.localeCompare(b.createdAt)||a.id.localeCompare(b.id))
+      .slice(-128)
+      .map(item=>({from:item.fromFindingId,to:item.toFindingId,kind:item.kind,status:item.status}));
+    return{findings,links};
   }
   /** The bounded graph read model — every finding node and relationship edge in the project. */
   memoryGraph(projectId:string):MemoryGraph {

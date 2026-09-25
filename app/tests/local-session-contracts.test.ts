@@ -9,7 +9,7 @@ import { prepareInputSnapshot } from '../src/main/locations';
 import { removeTreeSync } from '../src/main/fsx';
 import {
   cancelAckV1Schema, cancelRequestV1Schema, localPacketV2Schema, localResultV2Schema,
-  localSessionRecordSchema, managedRelativePath, transitionLocalLifecycle,
+  localSessionRecordSchema, managedRelativePath, memoryDigestSchema, transitionLocalLifecycle,
   type LocalSessionRecord,
 } from '../src/shared/local-session';
 import type { Agent, CapabilityEvidence, CapabilityOperation } from '../src/shared/types';
@@ -168,6 +168,28 @@ test('v2 receipt findings and links are optional, bounded and strict', () => {
   assert.equal(localResultV2Schema.safeParse({ ...receipt, links: [{ ...links[0], kind: 'CAUSES' }] }).success, false);
   assert.equal(localResultV2Schema.safeParse({ ...receipt, links: [{ ...links[0], from: '' }] }).success, false);
   assert.equal(localResultV2Schema.safeParse({ ...receipt, links: [{ ...links[0], note: 'x'.repeat(1001) }] }).success, false);
+});
+
+test('the bounded memory digest and its packet declaration are strict, capped and literal', () => {
+  const finding = { id: randomUUID(), kind: 'OBSERVATION', title: 't', body: 'b', evidenceRefs: [{ kind: 'FINDING', id: randomUUID() }], superseded: true, createdAt: at(0) };
+  const link = { from: randomUUID(), to: randomUUID(), kind: 'SUPPORTS', status: 'PROPOSED' };
+  const digest = { schema: 'office-memory-digest@1', generatedAt: at(0), findings: [finding], links: [link] };
+  assert.equal(memoryDigestSchema.safeParse(digest).success, true);
+  assert.equal(memoryDigestSchema.safeParse({ ...digest, schema: 'office-memory-digest@2' }).success, false);
+  assert.equal(memoryDigestSchema.safeParse({ ...digest, extra: 1 }).success, false, 'strict — unknown keys are refused');
+  assert.equal(memoryDigestSchema.safeParse({ ...digest, findings: Array(65).fill(finding) }).success, false, 'over the 64-finding bound');
+  assert.equal(memoryDigestSchema.safeParse({ ...digest, links: Array(129).fill(link) }).success, false, 'over the 128-link bound');
+  assert.equal(memoryDigestSchema.safeParse({ ...digest, findings: [{ ...finding, superseded: 'yes' }] }).success, false);
+  assert.equal(memoryDigestSchema.safeParse({ ...digest, findings: [{ ...finding, extra: 1 }] }).success, false);
+  assert.equal(memoryDigestSchema.safeParse({ ...digest, links: [{ ...link, status: 'SEEN' }] }).success, false);
+  // The packet declaration names the digest file literally and counts both sections.
+  const packet = { schema: 'office-local-session@2', jobId: randomUUID(), assignmentId: randomUUID(), attemptId: randomUUID(), projectId: randomUUID(),
+    createdAt: at(0), requestName: 'r', objective: 'o', requested: { model: 'opus', effort: 'default', delegation: false },
+    payload: 'p', snapshotManifestHash: sha('e'), files: [], instructions: [], contract: 'CONTRACT.md',
+    memoryDigest: { path: 'memory-digest.json', findings: 1, relationships: 1, sha256: sha('f') } };
+  assert.equal(localPacketV2Schema.safeParse(packet).success, true);
+  assert.equal(localPacketV2Schema.safeParse({ ...packet, memoryDigest: { ...packet.memoryDigest, path: 'digest.json' } }).success, false, 'the declaration names exactly memory-digest.json');
+  assert.equal(localPacketV2Schema.safeParse({ ...packet, memoryDigest: { ...packet.memoryDigest, sha256: 'deadbeef' } }).success, false);
 });
 
 test('cancel request and acknowledgement are strictly bound to one attempt', () => {

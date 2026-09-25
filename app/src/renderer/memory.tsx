@@ -1,10 +1,12 @@
 import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {Network} from 'lucide-react';
-import type {AppState, FindingEvidenceRef, FindingKind, MemoryAuthor, MemoryFinding, MemoryGraph} from '../shared/types';
+import type {AppState, FindingEvidenceRef, FindingKind, MemoryAuthor, MemoryFinding, MemoryGraph, RelationshipKind} from '../shared/types';
 import {Empty, SearchField, label} from './components';
 import './memory.css';
 
 const KINDS: FindingKind[] = ['OBSERVATION', 'HYPOTHESIS', 'RESULT', 'DEFECT', 'DECISION', 'NOTE'];
+const REL_KINDS: RelationshipKind[] = ['SUPPORTS', 'CONTRADICTS', 'RELATES', 'DUPLICATES', 'REFINES'];
+const posKey = (projectId: string) => `qro.memory.pos.${projectId}`;
 const W = 820, H = 540, R = 30;
 
 /** FNV-1a — the first layout sorts on this, so a given node set always opens in the same shape. */
@@ -24,6 +26,11 @@ export function MemoryView({state, projectId}: {state: AppState; projectId: stri
  const [selectedEdge, setSelectedEdge] = useState('');
  const [pos, setPos] = useState<Record<string, {x: number; y: number}>>({});
  const [view, setView] = useState({x: 0, y: 0, k: 1});
+ const [hiddenKinds, setHiddenKinds] = useState<Set<FindingKind>>(new Set());
+ const [showRefuted, setShowRefuted] = useState(false);
+ const [linkTarget, setLinkTarget] = useState('');
+ const [linkKind, setLinkKind] = useState<RelationshipKind>('RELATES');
+ const [linkNote, setLinkNote] = useState('');
  const [cKind, setCKind] = useState<FindingKind>('NOTE');
  const [cTitle, setCTitle] = useState('');
  const [cBody, setCBody] = useState('');
@@ -32,6 +39,7 @@ export function MemoryView({state, projectId}: {state: AppState; projectId: stri
  const [cSupersedes, setCSupersedes] = useState('');
  const svgRef = useRef<SVGSVGElement>(null);
  const gRef = useRef<SVGGElement>(null);
+ const posRef = useRef<Record<string, {x: number; y: number}>>({});
  const dragRef = useRef<{kind: 'pan' | 'node' | 'edge'; id?: string; x: number; y: number; moved: boolean} | null>(null);
  const findings = state.findings ?? [];
  const relationships = state.relationships ?? [];
@@ -47,20 +55,31 @@ export function MemoryView({state, projectId}: {state: AppState; projectId: stri
   return window.office.onChanged(() => { void load().catch(() => {}); });
  }, [load]);
 
- // Deterministic first layout: nodes sorted by a stable hash sit on an ellipse. Positions a user
- // dragged survive for nodes still on the graph; new nodes take their seat by the same rule.
+ // Dragged seats persist per project in localStorage; embedders that forbid storage keep them
+ // session-local — a guarded access never blocks the page.
+ const loadStored = () => {
+  try { const parsed = JSON.parse(window.localStorage.getItem(posKey(projectId)) ?? '{}'); return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, {x: number; y: number}> : {}; }
+  catch { return {}; }
+ };
+ const savePos = () => { try { window.localStorage.setItem(posKey(projectId), JSON.stringify(posRef.current)); } catch { /* positions stay session-local */ } };
+
+ // Deterministic first layout: nodes sorted by a stable hash sit on an ellipse. A stored seat wins
+ // over the ellipse; positions a user dragged this session win over both for nodes still on the graph.
  useEffect(() => {
   const nodes = [...(graph?.nodes ?? [])].sort((a, b) => hashOf(a.findingId) - hashOf(b.findingId));
+  const stored = loadStored();
   setPos(current => {
    const next: Record<string, {x: number; y: number}> = {};
    const radius = Math.max(150, Math.min(290, nodes.length * 42));
    nodes.forEach((node, i) => {
     const angle = (2 * Math.PI * i) / Math.max(nodes.length, 1) - Math.PI / 2;
-    next[node.findingId] = current[node.findingId] ?? {x: W / 2 + radius * Math.cos(angle), y: H / 2 + radius * Math.sin(angle)};
+    const kept = current[node.findingId] ?? stored[node.findingId];
+    next[node.findingId] = kept && typeof kept.x === 'number' && typeof kept.y === 'number' ? kept : {x: W / 2 + radius * Math.cos(angle), y: H / 2 + radius * Math.sin(angle)};
    });
+   posRef.current = next;
    return next;
   });
- }, [graph]);
+ }, [graph, projectId]);
 
  const toGraph = (clientX: number, clientY: number) => {
   const ctm = gRef.current?.getScreenCTM();
@@ -83,13 +102,14 @@ export function MemoryView({state, projectId}: {state: AppState; projectId: stri
   if (!drag) return;
   if (Math.abs(e.clientX - drag.x) + Math.abs(e.clientY - drag.y) > 2) drag.moved = true;
   if (drag.kind === 'pan') setView(v => ({...v, x: v.x + (e.clientX - drag.x), y: v.y + (e.clientY - drag.y)}));
-  else if (drag.kind === 'node' && drag.id && drag.moved) { const p = toGraph(e.clientX, e.clientY); setPos(current => ({...current, [drag.id!]: p})); }
+  else if (drag.kind === 'node' && drag.id && drag.moved) { const p = toGraph(e.clientX, e.clientY); setPos(current => { const next = {...current, [drag.id!]: p}; posRef.current = next; return next; }); }
   drag.x = e.clientX; drag.y = e.clientY;
  };
  const onPointerUp = () => {
   const drag = dragRef.current;
   dragRef.current = null;
-  if (!drag || drag.moved) return;
+  if (!drag) return;
+  if (drag.moved) { if (drag.kind === 'node' && drag.id) savePos(); return; }
   if (drag.kind === 'node' && drag.id) { setSelectedNode(drag.id); setSelectedEdge(''); }
   else if (drag.kind === 'edge' && drag.id) { setSelectedEdge(drag.id); setSelectedNode(''); }
   else { setSelectedNode(''); setSelectedEdge(''); }
@@ -102,6 +122,15 @@ export function MemoryView({state, projectId}: {state: AppState; projectId: stri
  }
  const doSearch = () => { if (!query.trim()) return; void run(async () => setHits((await window.office.searchMemory({projectId, text: query.trim(), limit: 10})).findings), 'Search complete.'); };
  const settle = (relationshipId: string, status: 'CONFIRMED' | 'REFUTED') => void run(() => window.office.command({type: 'memory.relationship.settle', idempotencyKey: crypto.randomUUID(), relationshipId, status}), `Link ${status.toLowerCase()}.`);
+ const proposeLink = () => void run(async () => {
+  await window.office.command({type: 'memory.relationship.propose', idempotencyKey: crypto.randomUUID(), projectId, fromFindingId: selectedNode, toFindingId: linkTarget, kind: linkKind, ...(linkNote.trim() ? {note: linkNote.trim()} : {})});
+  setLinkTarget(''); setLinkNote('');
+ }, 'Link proposed — it renders dashed until confirmed or refuted.');
+ const focusNode = (id: string) => {
+  setSelectedNode(id); setSelectedEdge('');
+  const p = posRef.current[id];
+  if (p) setView(v => ({k: v.k, x: W / 2 - p.x * v.k, y: H / 2 - p.y * v.k}));
+ };
  const post = () => void run(async () => {
   const evidenceRefs: FindingEvidenceRef[] = cRefs.map(entry => { const [kind, id] = entry.split('|'); return {kind: kind as FindingEvidenceRef['kind'], id}; });
   await window.office.command({type: 'memory.finding.note', idempotencyKey: crypto.randomUUID(), projectId, requestId: cRequest || null, kind: cKind, title: cTitle, body: cBody,
@@ -114,10 +143,13 @@ export function MemoryView({state, projectId}: {state: AppState; projectId: stri
   if (ref.kind === 'REQUEST') { const r = state.requests?.find(item => item.id === ref.id); return `Request · ${r?.name ?? `${ref.id.slice(0, 8)}…`}`; }
   if (ref.kind === 'ASSIGNMENT') { const a = state.assignments?.find(item => item.id === ref.id); return `Assignment · ${a?.pipelineKey ?? `${ref.id.slice(0, 8)}…`}`; }
   if (ref.kind === 'JOB') { const j = state.jobs?.find(item => item.id === ref.id); return `Job · ${ref.id.slice(0, 8)}…${j ? ` · ${j.state.toLowerCase().replaceAll('_', ' ')}` : ''}`; }
+  if (ref.kind === 'FINDING') { const f = projectFindings.find(item => item.id === ref.id); return `Finding · ${f?.title ?? `${ref.id.slice(0, 8)}…`}`; }
   const art = state.artifacts.find(item => item.sha256 === ref.id);
   return `Artifact · ${art ? `${art.name} · ` : ''}${shortHash(ref.id)}`;
  };
- const visibleEdges = (graph?.edges ?? []).filter(edge => edge.status !== 'REFUTED' && pos[edge.from] && pos[edge.to]);
+ const nodeKind = new Map((graph?.nodes ?? []).map(node => [node.findingId, node.kind]));
+ const visibleNodes = (graph?.nodes ?? []).filter(node => !hiddenKinds.has(node.kind));
+ const visibleEdges = (graph?.edges ?? []).filter(edge => (edge.status !== 'REFUTED' || showRefuted) && pos[edge.from] && pos[edge.to] && !hiddenKinds.has(nodeKind.get(edge.from) ?? 'NOTE') && !hiddenKinds.has(nodeKind.get(edge.to) ?? 'NOTE'));
  const refutedCount = (graph?.edges ?? []).filter(edge => edge.status === 'REFUTED').length;
  const selNode = graph?.nodes.find(n => n.findingId === selectedNode);
  const selFinding = projectFindings.find(f => f.id === selectedNode);
@@ -125,7 +157,10 @@ export function MemoryView({state, projectId}: {state: AppState; projectId: stri
  const selRel = relationships.find(r => r.id === selectedEdge);
  const refOptions = [
   ...projectRequests.map(item => ({value: `REQUEST|${item.id}`, text: `Request · ${item.name}`})),
+  ...(state.assignments ?? []).filter(item => item.projectId === projectId).map(item => ({value: `ASSIGNMENT|${item.id}`, text: `Assignment · ${item.pipelineKey ?? `${(state.agents.find(agent => agent.id === item.agentId)?.role ?? 'agent').toLowerCase()} ${item.id.slice(0, 8)}`}`})),
+  ...(state.jobs ?? []).filter(item => item.projectId === projectId).map(item => ({value: `JOB|${item.id}`, text: `Job · ${item.state.toLowerCase().replaceAll('_', ' ')} · ${item.id.slice(0, 8)}`})),
   ...projectArtifacts.map(item => ({value: `OBJECT|${item.sha256}`, text: `Artifact · ${item.name} · ${shortHash(item.sha256)}`})),
+  ...projectFindings.map(item => ({value: `FINDING|${item.id}`, text: `Finding · ${item.title}${item.supersededById ? ' (superseded)' : ''}`})),
  ];
 
  return <section className="memory-page">
@@ -138,7 +173,7 @@ export function MemoryView({state, projectId}: {state: AppState; projectId: stri
       <div className="card-heading"><h3>{hit.title}</h3><span><span className="quiet-badge small">{label(hit.kind)}</span>{hit.supersededById && <span className="quiet-badge small superseded-badge">superseded</span>}</span></div>
       <p className="task-prompt">{hit.body}</p>
       <p className="muted">{authorLine(hit.createdBy)} · {stamp(hit.createdAt)}</p>
-      <div className="button-row"><button className="text-button" onClick={() => { setSelectedNode(hit.id); setSelectedEdge(''); }}>Show on graph</button></div>
+      <div className="button-row"><button className="text-button" onClick={() => focusNode(hit.id)}>Show on graph</button></div>
      </article>)}</div>
    : <p className="muted">No findings match that search.</p>)}
   {!graph && !error && <p className="muted">Loading memory…</p>}
@@ -146,6 +181,11 @@ export function MemoryView({state, projectId}: {state: AppState; projectId: stri
    <Empty icon={Network} title="Nothing recorded yet" description="Findings recorded by sessions or by you appear here as an explorable graph. Record the first one below."/>}
   {!!graph?.nodes.length && <div className="memory-layout">
    <div className="memory-graph">
+    <div className="memory-kindrow">
+     {KINDS.map(kind => <button key={kind} type="button" aria-pressed={!hiddenKinds.has(kind)} className={`memory-kind kind-${kind.toLowerCase()}${hiddenKinds.has(kind) ? ' off' : ''}`}
+      onClick={() => setHiddenKinds(current => { const next = new Set(current); if (current.has(kind)) next.delete(kind); else next.add(kind); return next; })}>{label(kind)}</button>)}
+     <label className="memory-refuted"><input type="checkbox" checked={showRefuted} onChange={e => setShowRefuted(e.target.checked)}/>Show refuted</label>
+    </div>
     <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Memory graph"
      onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerLeave={onPointerUp} onWheel={onWheel}>
      <g ref={gRef} transform={`translate(${view.x} ${view.y}) scale(${view.k})`}>
@@ -157,7 +197,7 @@ export function MemoryView({state, projectId}: {state: AppState; projectId: stri
         <text className="mem-edge-label" x={mx} y={my - 4} textAnchor="middle">{label(edge.kind)}</text>
        </g>;
       })}
-      {(graph?.nodes ?? []).map(node => {
+      {visibleNodes.map(node => {
        const p = pos[node.findingId];
        if (!p) return null;
        return <g key={node.findingId} data-finding={node.findingId} className={`mem-node kind-${node.kind.toLowerCase()}${node.superseded ? ' superseded' : ''}${selectedNode === node.findingId ? ' selected' : ''}`} transform={`translate(${p.x} ${p.y})`}>
@@ -168,7 +208,7 @@ export function MemoryView({state, projectId}: {state: AppState; projectId: stri
       })}
      </g>
     </svg>
-    <p className="muted memory-hint">Drag to pan · scroll to zoom · drag a node to place it{refutedCount ? ` · ${refutedCount} refuted link${refutedCount === 1 ? '' : 's'} hidden` : ''}</p>
+    <p className="muted memory-hint">Drag to pan · scroll to zoom · drag a node to place it{refutedCount ? ` · ${refutedCount} refuted link${refutedCount === 1 ? '' : 's'} ${showRefuted ? 'shown struck-through' : 'hidden'}` : ''}</p>
    </div>
    <aside className="memory-detail">
     {selNode && <div className="memory-detail-card">
@@ -179,6 +219,15 @@ export function MemoryView({state, projectId}: {state: AppState; projectId: stri
       {!!selFinding.evidenceRefs.length && <ul className="evidence-list">{selFinding.evidenceRefs.map(ref => <li key={ref.kind + ref.id}>{refLabel(ref)}</li>)}</ul>}
       {selFinding.supersededById && <p className="muted">Superseded by <button className="text-button" onClick={() => setSelectedNode(selFinding.supersededById!)}>{projectFindings.find(f => f.id === selFinding.supersededById)?.title ?? 'a later finding'}</button></p>}
      </> : <p className="muted">The finding record is not in the current workspace state.</p>}
+     <details className="memory-link"><summary>Link to…</summary>
+      <label className="field">Target<select value={linkTarget} onChange={e => setLinkTarget(e.target.value)}>
+       <option value="">Pick a finding…</option>
+       {projectFindings.filter(item => item.id !== selectedNode).map(item => <option key={item.id} value={item.id}>{item.title}{item.supersededById ? ' (superseded)' : ''}</option>)}
+      </select></label>
+      <label className="field">Kind<select value={linkKind} onChange={e => setLinkKind(e.target.value as RelationshipKind)}>{REL_KINDS.map(kind => <option key={kind} value={kind}>{label(kind)}</option>)}</select></label>
+      <label className="field">Note (optional)<input value={linkNote} onChange={e => setLinkNote(e.target.value)} maxLength={1000} placeholder="Why these relate"/></label>
+      <button type="button" className="primary" disabled={!!busy || !linkTarget} onClick={proposeLink}>Propose link</button>
+     </details>
     </div>}
     {selEdge && <div className="memory-detail-card">
      <div className="card-heading"><h3>{titleOf(selEdge.from)} → {titleOf(selEdge.to)}</h3><span><span className="quiet-badge small">{label(selEdge.kind)}</span><span className="quiet-badge small">{label(selEdge.status)}</span></span></div>
