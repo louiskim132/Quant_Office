@@ -1121,7 +1121,7 @@ Latest C9 qualification (2026-09-21) supersedes the historical C9 row's statemen
 | Current acceptance item | Status | Evidence / next item |
 | --- | --- | --- |
 | C9 automated Director → PM → Worker | VERIFIED_LOCAL for bounded live Claude CLI relay | Three distinct role profiles and real processes; one Director start, two event-driven dependent starts; exact inherited manifests, agent-consumed predecessor hashes, verified durable outputs and replay non-duplication. Two product defects repaired; 689/690 unit tests pass (one existing skip), typecheck/build and three development desktop suites pass. [Acceptance record](../records/reviews/three-agent-acceptance-2026-09-21.md). Next: reproduce output-storage failure recovery and retain process/watch bookkeeping until durable terminal admission. Mixed-provider chains, packaged acceptance and the C8 user-run Colab pilot are not established by this test. |
-| Communication pipeline (comm-pipe-1..3) | VERIFIED_LOCAL; P3 live user-decision acceptance NOT_STARTED | Planning and result-analysis pipelines mint request-scoped hop sets. The terminal hop seals with the full emitted key list, then AWAITING_DECISION binds the decision to the terminal hop's verified receipt; `request.pipeline.decide` is idempotent and refuses stale hashes. Merged via PR #6/#7. Open: REVISE records intent only (no automatic re-mint); a real user decision on a live round is unverified. |
+| Communication pipeline (comm-pipe-1..3) | VERIFIED_LOCAL including live P3 on a dev build (2026-09-24); packaged live run NOT_STARTED | Planning and result-analysis pipelines mint request-scoped hop sets; the terminal hop seals, AWAITING_DECISION binds the decision to the verified receipt, and `request.pipeline.decide` is idempotent and refuses stale hashes. 2026-09-24: both pipelines ran live end to end with a mixed Claude/Devin roster, and real Approve and Request-revision decisions were bound to verified receipts, after nine defects were fixed ([acceptance record](../records/reviews/office-live-acceptance-2026-09-24.md)). Open: REVISE records intent only; planning packets expose `results/` (blinding); pipeline cards have no observe/retry path. |
 | M-memory workstream (office-mem-1/2) | VERIFIED_LOCAL; external engines NOT_STARTED | Append-only finding/relationship ledgers, per-hop authorized memorySearch and digest mount (plan-synthesis/analysis-finalize only), Memory page graph/search/links, archive export and an evaluation harness with the Office baseline. Merged via PR #8/#9. Memory is office-recorded self-report, not verified fact. 2026-09-24 packaged-app audit: graph overlap, hidden search focus, stale notice and the missing Opus 5.5 option fixed on `fix/memory-page-bugs-20260924`. |
 
 Status vocabulary: NOT_STARTED, IMPLEMENTED_FOUNDATION, IN_PROGRESS, PARTIALLY_VERIFIED_LOCAL, BLOCKED_EXTERNAL, VERIFIED_LOCAL, VERIFIED_HOSTED. PARTIALLY_VERIFIED_LOCAL means some tested code exists but parent acceptance is not met; list exact open subitems. PARTIALLY_IMPLEMENTED means the larger program still has unimplemented contracts/UI/tests. The latter requires actual provider evidence for the exact scope. A local test cannot advance a hosted gate. Keep this table in the same file.
@@ -4258,3 +4258,58 @@ suite runs in the required verify check on the PR head.
 Open: an effort hint in Add Agent can read "No effort
 levels are published" while a Claude level is selected,
 until models are refreshed.
+
+2026-09-24 — batch integration PR #10 merged to
+main (merge commit 8211590) after the required
+verify check succeeded on the exact head 4e7c2b0.
+It carries the Memory page fixes (graph overlap,
+hidden search focus, stale notice, Opus 5.5
+option) and the rules/roadmap audit.
+
+2026-09-24 — fix/pipeline-live-blockers-20260924:
+live office acceptance of both pipelines (ad-hoc
+Claude Code session, worktree
+`Quant Office/Worktrees/fix-memory-page`, from
+main 8211590). The standard roster ran through
+LOCAL_CLI_EXEC on a seeded synthetic dataset:
+Director Opus 5.5 low, PM_A..PM_D Sonnet 5 low,
+Worker Devin swe-2-max. The desktop UI was driven
+with an isolated QRO_USER_DATA_DIR. Result:
+- The planning pipeline (8 hops) and the result-
+  analysis pipeline (8 hops) completed live.
+- Real Approve and Request-revision decisions were
+  bound to verified receipts.
+- 13 receipt findings were ingested and graphed.
+This is the first live mixed-provider chain and the
+first live P3 decision. It establishes nothing
+hosted, packaged-live or Colab.
+Nine defects were found and fixed:
+- Contract/store mismatches on outputs and
+  detail length (38bd4b0).
+- A refused COMPLETED consumed the receipt and
+  stranded the job UNKNOWN; it now lands as
+  FAILED with the reason (38bd4b0).
+- Transport evidence was never recorded for
+  office-spawned launches, because the details
+  exceeded the field limits (38bd4b0, d165f52).
+- The serena command string could never spawn,
+  and serena was a hard prerequisite that blocked
+  every planner arm (c1209ba).
+- "Use as new request" cloned a launched pipeline
+  (9c7c788).
+- The queue hid a pipeline awaiting Launch
+  (d165f52).
+- The memory graph clipped at 13 nodes (ee26b50).
+Checks: typecheck clean; full suite 825 tests,
+824 passed, 1 pre-existing skip; each fix was
+re-exercised in the app. The packaged release was
+smoke-tested with an isolated data dir; app.asar
+d77eea0e… is mirrored to App\ after merge.
+Open (in the acceptance record):
+- Planning packets expose results/, and the
+  per-request allowlist has no UI.
+- The REVISE UX.
+- No observe/retry path on pipeline cards.
+- Artifacts omits pipeline outputs.
+- Cancel has no confirmation.
+- The brief is not shown before Launch.
