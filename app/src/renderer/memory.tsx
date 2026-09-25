@@ -6,7 +6,10 @@ import './memory.css';
 
 const KINDS: FindingKind[] = ['OBSERVATION', 'HYPOTHESIS', 'RESULT', 'DEFECT', 'DECISION', 'NOTE'];
 const REL_KINDS: RelationshipKind[] = ['SUPPORTS', 'CONTRADICTS', 'RELATES', 'DUPLICATES', 'REFINES'];
-const posKey = (projectId: string) => `qro.memory.pos.${projectId}`;
+// v2 holds only user-dragged seats. The v1 key stored every computed position once any node was
+// dragged, which froze stale ellipse seats that new nodes then landed on; it is discarded on load.
+const posKey = (projectId: string) => `qro.memory.seats.v2.${projectId}`;
+const legacyPosKey = (projectId: string) => `qro.memory.pos.${projectId}`;
 const W = 820, H = 540, R = 30;
 
 /** FNV-1a — the first layout sorts on this, so a given node set always opens in the same shape. */
@@ -40,6 +43,7 @@ export function MemoryView({state, projectId}: {state: AppState; projectId: stri
  const svgRef = useRef<SVGSVGElement>(null);
  const gRef = useRef<SVGGElement>(null);
  const posRef = useRef<Record<string, {x: number; y: number}>>({});
+ const draggedRef = useRef<Set<string>>(new Set());
  const dragRef = useRef<{kind: 'pan' | 'node' | 'edge'; id?: string; x: number; y: number; moved: boolean} | null>(null);
  const findings = state.findings ?? [];
  const relationships = state.relationships ?? [];
@@ -58,22 +62,29 @@ export function MemoryView({state, projectId}: {state: AppState; projectId: stri
  // Dragged seats persist per project in localStorage; embedders that forbid storage keep them
  // session-local — a guarded access never blocks the page.
  const loadStored = () => {
+  try { window.localStorage.removeItem(legacyPosKey(projectId)); } catch { /* storage unavailable */ }
   try { const parsed = JSON.parse(window.localStorage.getItem(posKey(projectId)) ?? '{}'); return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, {x: number; y: number}> : {}; }
   catch { return {}; }
  };
- const savePos = () => { try { window.localStorage.setItem(posKey(projectId), JSON.stringify(posRef.current)); } catch { /* positions stay session-local */ } };
+ const savePos = () => {
+  const seats = Object.fromEntries(Object.entries(posRef.current).filter(([id]) => draggedRef.current.has(id)));
+  try { window.localStorage.setItem(posKey(projectId), JSON.stringify(seats)); } catch { /* positions stay session-local */ }
+ };
+ useEffect(() => { draggedRef.current = new Set(); }, [projectId]);
 
- // Deterministic first layout: nodes sorted by a stable hash sit on an ellipse. A stored seat wins
- // over the ellipse; positions a user dragged this session win over both for nodes still on the graph.
+ // Deterministic first layout: nodes sorted by a stable hash sit on an ellipse sized for the current
+ // node count. Only user-dragged seats are kept — a seat dragged this session wins over a stored one.
+ // Computed seats are never kept, so every undragged node re-flows when the node set changes.
  useEffect(() => {
   const nodes = [...(graph?.nodes ?? [])].sort((a, b) => hashOf(a.findingId) - hashOf(b.findingId));
   const stored = loadStored();
+  for (const id of Object.keys(stored)) draggedRef.current.add(id);
   setPos(current => {
    const next: Record<string, {x: number; y: number}> = {};
    const radius = Math.max(150, Math.min(290, nodes.length * 42));
    nodes.forEach((node, i) => {
     const angle = (2 * Math.PI * i) / Math.max(nodes.length, 1) - Math.PI / 2;
-    const kept = current[node.findingId] ?? stored[node.findingId];
+    const kept = draggedRef.current.has(node.findingId) ? current[node.findingId] ?? stored[node.findingId] : undefined;
     next[node.findingId] = kept && typeof kept.x === 'number' && typeof kept.y === 'number' ? kept : {x: W / 2 + radius * Math.cos(angle), y: H / 2 + radius * Math.sin(angle)};
    });
    posRef.current = next;
@@ -102,7 +113,7 @@ export function MemoryView({state, projectId}: {state: AppState; projectId: stri
   if (!drag) return;
   if (Math.abs(e.clientX - drag.x) + Math.abs(e.clientY - drag.y) > 2) drag.moved = true;
   if (drag.kind === 'pan') setView(v => ({...v, x: v.x + (e.clientX - drag.x), y: v.y + (e.clientY - drag.y)}));
-  else if (drag.kind === 'node' && drag.id && drag.moved) { const p = toGraph(e.clientX, e.clientY); setPos(current => { const next = {...current, [drag.id!]: p}; posRef.current = next; return next; }); }
+  else if (drag.kind === 'node' && drag.id && drag.moved) { draggedRef.current.add(drag.id); const p = toGraph(e.clientX, e.clientY); setPos(current => { const next = {...current, [drag.id!]: p}; posRef.current = next; return next; }); }
   drag.x = e.clientX; drag.y = e.clientY;
  };
  const onPointerUp = () => {
@@ -128,6 +139,9 @@ export function MemoryView({state, projectId}: {state: AppState; projectId: stri
  }, 'Link proposed — it renders dashed until confirmed or refuted.');
  const focusNode = (id: string) => {
   setSelectedNode(id); setSelectedEdge('');
+  // A search hit whose kind is filtered out would otherwise focus an invisible node.
+  const kind = graph?.nodes.find(n => n.findingId === id)?.kind;
+  if (kind) setHiddenKinds(current => { if (!current.has(kind)) return current; const next = new Set(current); next.delete(kind); return next; });
   const p = posRef.current[id];
   if (p) setView(v => ({k: v.k, x: W / 2 - p.x * v.k, y: H / 2 - p.y * v.k}));
  };
