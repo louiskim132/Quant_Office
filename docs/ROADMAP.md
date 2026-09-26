@@ -1135,7 +1135,7 @@ Status vocabulary: NOT_STARTED, IMPLEMENTED_FOUNDATION, IN_PROGRESS, PARTIALLY_V
 | D2 parallel coding setup | VERIFIED_LOCAL tooling; desktop/provider sessions NOT_STARTED | 2026-09-13: the fixed local desktop state machine and detailed Session 1–7/Session 8 manual supplement the general worktree protocol. Four coordination tests pass, including seven simultaneous starts, atomic publication, role/path binding, immutable round hashes, stale review/head refusal, exact-SHA submission, scope enforcement, rejection, integration, close and next-round preservation. The eight prepared local worktrees under `quant-team-sessions/prepared-20260912` were fast-forwarded to setup commit `236ccda4817fcf5320e4ee95389af34bcb92dd46`; setup was run twice, all role/status checks returned the correct clean checkout and `NOT_READY`, and no product round was published. Installing ignored role files does not launch or authenticate a session. The merge policy now authorizes Session 8 to merge only its closed-round integration PR after current-main ancestry, exact-head `verify` success and conversation-resolution checks; direct main pushes and raw-token workarounds remain prohibited. The prior fresh locked install, typecheck, 382/382 application units and build passed in the setup worktree. GitHub main protection requires a strict `verify` check, PR, resolved conversations and admin enforcement, with no force-push/deletion. CI results are on [setup PR #1](https://github.com/louiskim132/Quant_Office/pull/1). Claude Code 2.1.270 reported a signed-in subscription; Codex saved-project path remains the parent folder; Devin browser was signed out and its repository grant/model choice remain unverified. Update 2026-09-14: the desktop workflow has since run two product rounds (list-views-001, ui-refresh-001) in batch prepared-20260912, integrated and merged through PR #2; a fresh batch (next-batch-001) is provisioned on the merged base for the next round. |
 | D1 optional Serena trial | PARTIALLY_IMPLEMENTED, nonblocking | Project-local AGENTS.md and CLAUDE.md pointers plus the Git/worktree policy were added during repository setup on 2026-09-12. The optional Serena comparison and client configuration remain NOT_STARTED; no navigation plugin was installed. |
 | C10 four-plugin office evaluation | MEASURED_LOCAL 2026-09-25 (CLI A/B, scratch installs); no plugin enabled by default | 2026-09-16: section 3.2 and C10 define the trials and `app/benchmarks/plugin-evaluation/`. 2026-09-25: Serena 1.7.0, Ponytail v4.10.0, Graphify 0.9.68 and LightRAG 1.5.7 (Ollama local) trialled alone and stacked on an office implement packet and a 7-item code-navigation task. No plugin or pair saved tokens beyond run-to-run noise; Serena adds ~8.7k tokens per call and is unused unless hinted; stacking adds context and lowered accuracy; LightRAG local indexing failed (5 of 11 files timed out in 2 h). Recommended set: office memory ledger only. See section 17 entry "plugin trials" of this date. |
-| Token diet (pipeline token consumption) | VERIFIED_LOCAL on dev + packaged build 2026-09-25; not yet merged | Branch `fix/token-diet-20260925` (base organizer `9356c2e`). Lean Claude/Codex launches, per-hop deliverables, hop-keyed inherited inputs, worker slices, packet essentials + `finish.py`, split contract, pre-registered analysis plan (`analysisOf`), QUICK round shape, implementation-only REVISE, claude launch spacing. Live: quick ema5 round 574k input tokens (was 2.50M), implementation-only revision 345k (was 3.10M), Codex implement 147k (was 374k). App\ `app.asar` `642139F3…`. Plugin trials done (C10 row); follow-ups: evidence-surface frame format, memory capture/digest at the brief — see section 17 entries of this date. |
+| Token diet (pipeline token consumption) | VERIFIED_LOCAL on dev + packaged build 2026-09-25; not yet merged | Branch `fix/token-diet-20260925` (base organizer `9356c2e`). Lean Claude/Codex launches, per-hop deliverables, hop-keyed inherited inputs, worker slices, packet essentials + `finish.py`, split contract, pre-registered analysis plan (`analysisOf`), QUICK round shape, implementation-only REVISE, claude launch spacing. Live: quick ema5 round 574k input tokens (was 2.50M), implementation-only revision 345k (was 3.10M), Codex implement 147k (was 374k). App\ `app.asar` `642139F3…`. Plugin trials done (C10 row). Follow-ups done on `fix/evidence-and-memory-20260925` (PR #14): evidence-surface args documented; memory capture restored and digest mounted at `plan-brief`. App\ `app.asar` `0901A8DF…` — see section 17 entries of this date. |
 | OmniRoute routing extension | NOT_STARTED implementation; architecture reviewed 2026-09-11 | Section 3.1 proposes operation-specific model/session/research contracts and an optional bounded free-worker route. Current subscription-only runtime policy remains unchanged; no gateway installation, provider transfer or live compatibility test occurred. Integrate with C2/C4/C7 and retain R5/custody requirements. |
 | R2 | VERIFIED_LOCAL within documented limits | Snapshot/output inventory is shared by backup and restore; both formats restore actual bytes into a new root. OutputService reserves real destinations on prepare/launch and stores versioned verified bytes. Required missing objects refuse backup. Snapshot identity rejects null/wrong request revisions. Remaining constraints: source swap races, recorded-platform Git reconstruction and R5 transport limits. |
 | R3 | VERIFIED_LOCAL | Preserve exact per-operation scope, durable evidence order, independent confinement and frozen account context. No new live capability evidence in this pass. |
@@ -4562,3 +4562,38 @@ default, and do not stack them. Graphify is the only one worth re-testing, on a 
 repository where navigation dominates; Serena only with an explicit per-hop tool hint. The token
 diet (lean launches, per-hop deliverables, quick rounds) remains the main lever. Follow-ups:
 evidence-surface frame format; memory capture prompt and digest at the director brief.
+
+### 2026-09-25 — evidence-surface args and memory capture
+
+Status: VERIFIED_LOCAL (dev build and packaged `App\`); branch `fix/evidence-and-memory-20260925`
+(PR #14, stacked on `fix/token-diet-20260925`), commits `7f30e14` and `4246d18`.
+
+Evidence surface: a live analyst seat (PM_D, analysis-falsify) had all 4 frames refused MALFORMED
+after guessing `{name}`/`{kind,title}`/`{text}`/`{query}` — per-op args were documented nowhere and
+the prompt deferred the format to the contract it tells sessions not to open. `EVIDENCE_ARGS`
+(`evidence-tool.ts`) is now the single source for the contract paragraph, the prompt essentials
+line (with one working example) and every MALFORMED refusal detail. The prompt says answers arrive
+within about a second (no sleep polling), that earlier hops are under `inputs/inherited/`, and
+offers `memorySearch` only at seats authorized for it. Tests prove each documented shape is served
+and that the exact live frames now get refusals naming the expected args. Not exercised live: the
+test roster's tool profiles do not mount the surface.
+
+Memory: one optional prompt line asks for up to 3 durable project facts via `finish.py --extra
+findings.json` (exact shape given). `MEMORY_SEATS` (`shared/local-session.ts`) = `plan-brief`,
+`plan-synthesis`, `analysis-finalize` governs both the digest mount and `authorizeMemorySearch`;
+`analysis-brief` stays excluded because its brief feeds the independent interpret/falsify arms.
+Quick rounds now reach memory through their brief. Measured through the app (isolated
+`QRO_USER_DATA_DIR`, fresh project per arm, same CSV, quick ema5 then ema8; `Test dir 1` = Claude
+Opus 5.5 low, `Test PM A`/`Test worker 1` = Devin SWE-2 Max): findings recorded 0/0 on the
+token-diet build vs 2/4 on this branch (row-0 16 h gap, footprint column breaks naive CSV parsing,
+seed decision, pandas present). The second brief read the digest, followed the first request's
+row-0 convention and skipped re-analysing the CSV (baseline rediscovered the gap with a Python
+scan); brief 29.9k vs 32.2k input tokens. Round totals 334k/376k vs 472k/356k — within the ±40 %
+run-to-run noise, so no token saving is claimed; the gain is consistency and not re-deriving facts.
+Keep the mount; revisit if the ledger outgrows the digest bound.
+
+Checks: typecheck clean; 871 pass, 1 skipped. Packaged mirror: `App\resources\app.asar` SHA-256
+`0901A8DFD23E5B3F4DC16AD099FA013765E5287E7DBE23D7C89C77883F817FB7` (smoke-launched with an
+isolated data dir); previous install (`642139F3…`) backed up at
+`Quant Office\Archive\App-before-evidence-memory-20260925`. Plugin trial installs (Serena, Graphify,
+LightRAG, Ponytail, Ollama + models, uv) were removed after the trials.
