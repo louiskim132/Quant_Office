@@ -4,7 +4,7 @@ import path from 'node:path';
 import { canonicalHash } from '../core/canonical.js';
 import { parseStrictJson } from '../core/strict-json.js';
 import { efforts } from '../shared/effort.js';
-import { MEMORY_DIGEST_FILE, cancelAckV1Schema, cancelRequestV1Schema, localPacketV2Schema, localResultV2Schema, memoryDigestSchema, type LocalPacketV2, type LocalResultV2, type LocalSessionRecord, type MemoryDigest } from '../shared/local-session.js';
+import { MEMORY_DIGEST_FILE, MEMORY_SEATS, cancelAckV1Schema, cancelRequestV1Schema, localPacketV2Schema, localResultV2Schema, memoryDigestSchema, type LocalPacketV2, type LocalResultV2, type LocalSessionRecord, type MemoryDigest } from '../shared/local-session.js';
 import { mountsEvidenceSurface } from '../shared/tool-profile.js';
 import type { Effort } from '../shared/types.js';
 import { MAX_FILE, MAX_TOTAL, safeEntry } from './artifacts.js';
@@ -73,8 +73,8 @@ export interface PrepareLocalPacketInput {
   now: string;
   /**
    * The caller's store.memoryDigest(projectId) result. It mounts as memory-digest.json only
-   * when the binding's assignment seats memory retrieval — 'plan-synthesis' or
-   * 'analysis-finalize', the exact pipeline keys authorizeMemorySearch authorizes. For every
+   * when the binding's assignment seats memory retrieval — MEMORY_SEATS, the exact pipeline
+   * keys authorizeMemorySearch authorizes. For every
    * other seat the value is ignored: a packet never carries memory its seat cannot read.
    */
   memoryDigest?: Pick<MemoryDigest, 'findings' | 'links'>;
@@ -166,8 +166,8 @@ export const resultContractV2 = (options?: { evidenceSurface?: boolean; memoryDi
     '',
     `\`${MEMORY_DIGEST_FILE}\` is a bounded, point-in-time projection of the project's office`,
     'memory ledger (findings with superseded flags, proposed/confirmed links); it is',
-    'office-recorded self-report context for synthesis, not verified fact; cite',
-    'evidenceRefs when your findings draw on it.',
+    'office-recorded self-report context, not verified fact: apply what still holds (skip',
+    'superseded entries), and cite evidenceRefs when your findings draw on it.',
   ] : []),
   ...(options?.withheld ? [
     '',
@@ -354,7 +354,7 @@ export const finishScript = (): string => [
  *
  * The destination root is inspected, the fresh session directory allocated only under verified
  * real ancestors, and every packet file — inputs/, the instruction files, memory-digest.json
- * at an authorized synthesis seat, packet.json, packet.sha256 and finally the
+ * at an authorized memory seat, packet.json, packet.sha256 and finally the
  * packet.ready.json marker — is created with writeNew semantics:
  * nothing existing is ever overwritten, and a destination that already carries a receipt, a
  * cancel sentinel or a ready marker refuses preparation outright.
@@ -453,11 +453,11 @@ export function prepareLocalPacket(input: PrepareLocalPacketInput): PreparedLoca
     inherited.push({ path: relativePath, sha256: digest, bytes: item.bytes.byteLength, sourceJobId: item.sourceJobId, objectHash: item.objectHash, ...(item.sourceKey ? { sourceKey: item.sourceKey } : {}) });
   }
   // The bounded ledger digest mounts only at the seats authorizeMemorySearch authorizes —
-  // plan-synthesis and analysis-finalize — and only when the caller supplied the projection.
+  // MEMORY_SEATS — and only when the caller supplied the projection.
   // It is written before packet.json so its hash can be declared on the packet; like every
   // other generated file it is never part of packetHash — the packet identity stays the
   // assignment packet.
-  const digestSeat = context.assignment.pipelineKey === 'plan-synthesis' || context.assignment.pipelineKey === 'analysis-finalize';
+  const digestSeat = MEMORY_SEATS.includes(context.assignment.pipelineKey ?? '');
   let digestDeclaration: LocalPacketV2['memoryDigest'];
   if (digestSeat && input.memoryDigest) {
     const digest = memoryDigestSchema.parse({ schema: 'office-memory-digest@1', generatedAt: now, ...input.memoryDigest });
@@ -552,6 +552,13 @@ export function tabularSummary(relativePath: string, bytes: Uint8Array): string 
 const MAX_LISTED_INPUTS = 40;
 
 /**
+ * The one-line memory capture prompt. The essentials block tells sessions not to open the
+ * contract, so without it receipts stopped reporting findings at all; it asks only for durable
+ * project facts, caps the count, and names the exact --extra shape so no contract read is needed.
+ */
+const FINDINGS_PROMPT = `Optional memory: if you learned a durable fact about this project's data or code that a later request should know (a data quirk, a defect, a decision), record up to 3 — write findings.json next to ${FINISH_FILE} (not under ${OUTPUTS_DIR}/) as {"findings":[{"kind":"OBSERVATION","title":"<short fact>","body":"<what, where, and how you know>"}]} (kind: OBSERVATION, DEFECT, DECISION or NOTE) and add \`--extra findings.json\` to the finish command. Skip it when nothing durable was learned.`;
+
+/**
  * The evidence-surface line of the prompt: the frame shape, one working example and every op's
  * args, since the prompt tells the session not to open CONTRACT.md. memorySearch is listed only
  * where it is authorized — the digest seats — so no other seat spends a call on a refusal.
@@ -597,11 +604,13 @@ export function packetPromptBlock(prepared: PreparedLocalPacket, pipelineKey?: s
     `Inputs under ${INPUTS_DIR}/ (earlier hops' verified outputs are under ${INPUTS_DIR}/inherited/<hop-key>/):`,
     ...(listed.length ? listed : ['- (none)']),
     ...(packet.withheld?.length ? [`- ${packet.withheld.length} withheld file${packet.withheld.length === 1 ? '' : 's'} (hash-only; do not compute, estimate or request outcome metrics)`] : []),
-    ...(packet.memoryDigest ? [`- ${packet.memoryDigest.path} — office memory digest (${packet.memoryDigest.findings} findings; self-report context, not verified fact)`] : []),
+    ...(packet.memoryDigest ? [`- ${packet.memoryDigest.path} — office memory digest (${packet.memoryDigest.findings} findings from earlier work on this project; self-report context, not verified fact)${packet.memoryDigest.findings ? ' — read it before you plan and apply what still holds; skip superseded entries' : ''}`] : []),
     ...(mountsEvidenceSurface(packet.toolProfile) ? [evidencePromptLine(packet.memoryDigest !== undefined)] : []),
     '',
     `Finish: put your deliverable files under ${OUTPUTS_DIR}/ (only deliverables — remove scratch files), then run \`python ${FINISH_FILE} COMPLETED "<one paragraph: what you did and found>"\`. It writes ${RESULT_FILE} with every output's sha256 and byte count and prints them — no separate hashing or re-reading needed. Without Python, write ${RESULT_FILE} yourself (UTF-8, no byte-order mark):`,
     receipt,
+    '',
+    FINDINGS_PROMPT,
     '',
     `If ${CANCEL_FILE} exists at the start or before you write ${RESULT_FILE}, stop and follow ${CONTRACT_FILE}. Open ${CONTRACT_FILE} only for that; optional receipt sections (findings, links, applied) are in ${CONTRACT_OPTIONAL_FILE}.`,
   ].join('\n');

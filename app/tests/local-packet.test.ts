@@ -442,7 +442,7 @@ test('an authorized synthesis seat mounts the bounded memory digest and declares
   ledger.store.proposeMemoryRelationship({ projectId: ledger.project.id, fromFindingId: correction.id, toFindingId: prior.id, kind: 'REFINES', createdBy: { surface: 'OFFICE' } });
   const digest = ledger.store.memoryDigest(ledger.project.id);
   let priorBytes: Buffer | undefined;
-  for (const seat of ['plan-synthesis', 'analysis-finalize']) {
+  for (const seat of ['plan-brief', 'plan-synthesis', 'analysis-finalize']) {
     const f = fixture(t);
     f.assignment.pipelineKey = seat;
     // The digest names this packet's project — bind every id to the ledger's project.
@@ -462,7 +462,8 @@ test('an authorized synthesis seat mounts the bounded memory digest and declares
     assert.equal(prepared.packetHash, canonicalHash(JSON.parse(readFileSync(path.join(f.dir, PACKET_FILE), 'utf8'))), 'the declaration rides inside the hashed packet; the digest bytes do not');
     const contract = readFileSync(path.join(f.dir, CONTRACT_FILE), 'utf8');
     assert.match(contract, /memory-digest\.json` is a bounded, point-in-time projection/);
-    assert.match(contract, /self-report context for synthesis, not verified fact/);
+    assert.match(contract, /self-report context, not verified fact: apply what still holds/);
+    assert.match(packetPromptBlock(prepared), /2 findings from earlier work on this project.*read it before you plan/);
     assert.match(contract, /cite\s+evidenceRefs when your findings draw on it/);
     if (priorBytes) assert.deepEqual(onDisk, priorBytes, 'the digest is deterministic for the same ledger state');
     priorBytes = onDisk;
@@ -472,7 +473,7 @@ test('an authorized synthesis seat mounts the bounded memory digest and declares
 test('no other seat and no plain assignment carries the digest file or the declaration', t => {
   const ledger = digestLedger(t);
   const digest = ledger.store.memoryDigest(ledger.project.id);
-  for (const [label, pipelineKey] of [['a non-synthesis pipeline hop', 'plan-draft-a'], ['a plain assignment', undefined]] as const) {
+  for (const [label, pipelineKey] of [['a non-director pipeline hop', 'plan-draft-a'], ['the analysis brief, whose brief feeds the independent arms', 'analysis-brief'], ['a plain assignment', undefined]] as const) {
     const f = fixture(t);
     if (pipelineKey) f.assignment.pipelineKey = pipelineKey;
     prepareLocalPacket({ dir: f.dir, context: f.context, binding: f.binding, io: f.io, now: at(1), memoryDigest: digest });
@@ -618,4 +619,27 @@ test('the prompt block documents the evidence surface args and lists memorySearc
   const digestSeat = packetPromptBlock({ ...mounted, packet: { ...mounted.packet, memoryDigest: { path: 'memory-digest.json', findings: 1, relationships: 0, sha256: 'a'.repeat(64) } } });
   assert.ok(digestSeat.includes(`memorySearch ${EVIDENCE_ARGS.memorySearch}`));
   assert.doesNotMatch(packetPromptBlock(prepared), /queries\//, 'an unmounted packet carries no surface line');
+});
+
+test('the prompt asks for at most 3 durable findings in the exact --extra shape the office ingests', async t => {
+  const f = fixture(t);
+  const prepared = prepare(f);
+  const block = packetPromptBlock(prepared);
+  const example = /as (\{"findings":\[.*?\]\}) \(kind:/.exec(block);
+  assert.ok(example, 'the prompt carries a findings example');
+  assert.match(block, /record up to 3/);
+  assert.match(block, /--extra findings\.json/);
+  const { spawnSync } = await import('node:child_process');
+  const python = ['python', 'python3', 'py'].find(bin => spawnSync(bin, ['--version']).status === 0);
+  if (!python) { t.skip('no Python on this machine'); return; }
+  const filled = example[1].replace('<short fact>', 'First CSV row is discontinuous').replace('<what, where, and how you know>', 'row 1 is 16 h before row 2');
+  writeFileSync(path.join(f.dir, 'findings.json'), filled);
+  mkdirSync(path.join(f.dir, 'outputs'), { recursive: true });
+  writeFileSync(path.join(f.dir, 'outputs', 'ema.csv'), 'x\n');
+  const run = spawnSync(python, [FINISH_FILE, 'COMPLETED', 'Done.', '--extra', 'findings.json'], { cwd: f.dir, encoding: 'utf8' });
+  assert.equal(run.status, 0, run.stderr);
+  const read = readLocalResult(f.dir, { ...f.binding, packetHash: prepared.packetHash }, f.io);
+  assert.ok('value' in read, 'defect' in read ? read.defect : '');
+  assert.equal(read.value.result.findings?.[0].kind, 'OBSERVATION');
+  assert.equal(read.value.result.findings?.[0].title, 'First CSV row is discontinuous');
 });

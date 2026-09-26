@@ -191,7 +191,7 @@ export const localPacketV2Schema = z.object({
    */
   toolProfile: toolProfileSchema.optional(),
   /**
-   * Declared when the office mounted a bounded memory digest for an authorized synthesis seat
+   * Declared when the office mounted a bounded memory digest for an authorized memory seat
    * (`plan-synthesis` / `analysis-finalize`). The digest file sits beside this packet and is
    * hashed like every input — office-recorded context, never verified facts.
    */
@@ -252,9 +252,16 @@ export const localResultV2Schema = z.object({
 });
 export type LocalResultV2 = z.infer<typeof localResultV2Schema>;
 
-// --- Bounded memory digest (mounted for authorized synthesis seats only) ---
+// --- Bounded memory digest (mounted for the MEMORY_SEATS only) ---
 
 export const MEMORY_DIGEST_FILE = 'memory-digest.json';
+/**
+ * The director seats that receive the memory digest and may run memorySearch: the planning brief
+ * (so a known project fact shapes the plan before both drafts and a quick round's single plan
+ * inherit it) and the planning synthesis / analysis finalize. The analysis brief is deliberately
+ * absent — its brief feeds the independent interpret/falsify arms, which must not inherit memory.
+ */
+export const MEMORY_SEATS: readonly string[] = ['plan-brief', 'plan-synthesis', 'analysis-finalize'];
 export const MAX_DIGEST_FINDINGS = 64;
 export const MAX_DIGEST_LINKS = 128;
 /**
