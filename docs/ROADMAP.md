@@ -1112,16 +1112,50 @@ Ordered implementation packets (organizer owns shared contracts, IPC, dependenci
 
 Exact next local work: implement C10-A attempt preparation/ledger and C10-B contracts on organizer-published packets; retain C9's separate local-session probe and pilot as outstanding. Local fixture work can proceed without changing R5 or waiting for real data. Do not start paid/live provider runs merely because a packet is written.
 
-### C11 — Launch-readiness revision (LR packets) — NOT_STARTED 2026-09-25
+### C11 — Launch-readiness revision (LR packets) — NOT_STARTED; decisions answered 2026-09-26
 
 Source: the 2026-09-25 commercial launch-readiness review in section 17 (findings L1–L15).
-Base: `origin/main` at or after `3be1a94`. This slice is written so that a small model (for
-example Claude Haiku) can execute each packet mechanically. Every packet names the exact files,
-the exact text to find, the exact change, the exact test and the exact commands with their
-expected result. The `Model` field says which packets are safe for a small model and which need
-a person or a stronger model first.
+Base: `origin/main` at or after `3be1a94`. This slice is written so that a coding model
+(the user runs **Devin SWE-2 Max**) can execute each packet mechanically. Every packet names the
+exact files, the exact text to find, the exact change, the exact test and the exact commands with
+their expected result. The `Model` field says which packets are for the coding model and which
+are for the organizer (Claude Opus) or the user.
+
+#### C11.D The user's decisions (answered 2026-09-26) — these are rules, not suggestions
+
+Read this block before every packet. If a packet seems to conflict with it, this block wins;
+stop and report the conflict instead of choosing yourself.
+
+- **D-1 Agent isolation = "C now, A at launch".** During development, agents keep running with
+  the user's own Windows permissions; the only protections are LR-4 (a consent checkbox) and LR-5
+  (a prompt line saying input files are data). Do **not** add sandboxing, a separate Windows
+  user, containers or permission changes in any development packet. Option A (a separate
+  low-privilege Windows user for agent sessions) is packet LR-16 and belongs to the launch gate.
+- **D-2 LR-6 is approved, in the lighter form written in LR-6 below.** Three rules may never be
+  broken: (1) the permanent history (the `events` table) is authoritative and is never edited or
+  deleted; (2) the quick-access copy (the `projection` row) is disposable and must always be
+  rebuildable from the history; (3) every change has a lossless way back. Workspace data is
+  **never** committed to Git — Git holds code only. The recovery checkpoint is an automatic copy
+  of the workspace file made next to it before migrating.
+- **D-3 Signing, installer, updates and fuses = deferred to the very last step.** The product
+  must stay free to build. Do not buy, request or configure certificates, installers, update
+  hosts or `@electron/fuses` until the user reopens D-3. The former LR-12 packet is parked in
+  "Deferred — final step" below.
+- **D-4 Provider terms = "C": both a legal review and an API-key mode.** Every user must use
+  **their own** provider account or API key, never the developer's. LR-15 (API-key mode) and the
+  legal review are launch-gate items. No development packet may add, embed or reference any
+  developer account, e-mail, token or key.
+- **D-5 Formatting and design.** Formatter = **Prettier, line width 120**, and it runs **first**
+  (LR-0), before any other revision. Design = **unify the look, with light as the default
+  theme** (LR-14). The dark theme stays available in Settings.
 
 #### C11.0 Rules for every packet (read these first, every time)
+
+0. **⚓ Re-anchor gate.** The `Find` texts in LR-1…LR-16 were written against the code layout of
+   `3be1a94`. LR-0 reformats every file, so after LR-0 merges those texts no longer match. The
+   organizer (Claude Opus) then re-anchors this whole slice against the formatted `main` and
+   re-verifies the prototypes, and writes a line `Re-anchored on <commit>` under this rule.
+   **Do not start any packet other than LR-0 until that line exists.** If it exists, trust it.
 
 1. **One packet = one branch = one PR.** Never combine packets unless the packet says so.
 2. **Create the worktree** (PowerShell, from any folder):
@@ -1140,6 +1174,8 @@ a person or a stronger model first.
    - `pnpm exec tsx --test --test-concurrency=4 tests/*.test.ts` → expected: the summary line
      `ℹ fail 0`. The pass count must be at least the previous count plus the tests you added.
    - `node scripts/build.mjs` → expected: the line `Built Quant Research Office`.
+   - After LR-0 is merged, first run `pnpm format`, and last run `pnpm format:check` → expected:
+     `All matched files use Prettier code style!`.
 5. **Find text, not line numbers.** Line numbers in this plan are hints from `3be1a94` and may
    drift. Always search for the quoted `Find` text. If the `Find` text is not found exactly once,
    **stop** and report which text was missing. Do not guess a different place.
@@ -1159,31 +1195,104 @@ a person or a stronger model first.
     `node scripts/package.mjs`, open the packaged app with an isolated `QRO_USER_DATA_DIR` and look
     at the changed screen. Record what you saw in the PR.
 
-#### C11.1 Order, dependencies and who can do what
+#### C11.1 Order, dependencies and who does what
 
-| Order | Packet | Finding | Model | Depends on |
+| Order | Packet | Finding | Who | Depends on |
 | --- | --- | --- | --- | --- |
-| 1 | LR-1 Repair the desktop e2e suite and run it in CI | L6 | Small model | — |
-| 2 | LR-2 Crash handling and a local log | L7 | Small model | — |
-| 3 | LR-3 Long prompts through PROMPT.md | L8 | Small model | — |
-| 4 | LR-4 Local-first Add agent defaults with risk consent | L5, L9 (tagline), L1 (consent) | Small model | LR-1 |
-| 5 | LR-5 Treat packet data as untrusted in the prompt | L1 (prompt) | Small model | — |
-| 6 | LR-6 One model catalog per connection in the projection | L2 | Small model **after** decision D-2 | D-2 |
-| 7 | LR-7 Show the window before the workspace opens | L2 | Small model | LR-6 |
-| 8 | LR-8 Measure startup and decide on an integrity checkpoint | L2 | Small model (measurement only) | LR-6, LR-7 |
-| 9 | LR-9 Plain provider status in Settings | L5, L10 | Small model | LR-1 |
-| 10 | LR-10 One date and number formatter | L11 | Small model | LR-1 |
-| 11 | LR-11 Accessible names for icon buttons | L13 | Small model | LR-1 |
-| 12 | LR-12 Electron fuses in the packaged build | L3 | Small model **after** decision D-3 | D-3 |
-| 13 | LR-13 Formatting-only pass | L12 | Small model **after** decision D-5, last | all others merged |
-| — | D-1 OS isolation for agent sessions | L1 | Person + stronger model | — |
-| — | D-2 Approve the projection catalog rule | L2 | Person | — |
-| — | D-3 Signing certificate, installer and update host | L3 | Person | — |
-| — | D-4 Provider terms review | L4 | Person (legal) | — |
-| — | D-5 Formatter choice and design pass | L12, L14 | Person | — |
+| 1 | LR-0 Format the code with Prettier (120) and check it in CI | L12 | Coding model | — |
+| 2 | RA Re-anchor this slice on the formatted `main` (C11.0 rule 0) | — | Organizer (Claude Opus) | LR-0 |
+| 3 | LR-1 Repair the desktop e2e suite and run it in CI | L6 | Coding model | RA |
+| 4 | LR-2 Crash handling and a local log | L7 | Coding model | RA |
+| 5 | LR-3 Long prompts through PROMPT.md | L8 | Coding model | RA |
+| 6 | LR-5 Treat packet data as untrusted in the prompt | L1 | Coding model | RA |
+| 7 | LR-4 Local-first Add agent defaults with risk consent | L5, L9, L1 | Coding model | LR-1 |
+| 8 | LR-6 One model catalog per account in the quick-access copy | L2 | Coding model | RA |
+| 9 | LR-7 Show the window before the workspace opens | L2 | Coding model | LR-6 |
+| 10 | LR-8 Measure startup and decide on an integrity checkpoint | L2 | Coding model (measure only) | LR-6, LR-7 |
+| 11 | LR-9 Plain provider status in Settings | L5, L10 | Coding model | LR-1 |
+| 12 | LR-10 One date and number formatter | L11 | Coding model | LR-1 |
+| 13 | LR-11 Accessible names for icon buttons | L13 | Coding model | LR-1 |
+| 14 | LR-14 Unified look with light as the default theme | L14 | Coding model | LR-6, LR-1 |
+| Launch gate | LR-15 API-key mode (design first) | L4 | Organizer designs, coding model builds | all above |
+| Launch gate | LR-16 Separate Windows user for agent sessions (design first) | L1 | Organizer designs, coding model builds | all above |
+| Launch gate | Legal review of provider terms | L4 | User (lawyer) | — |
+| Very last | Deferred — signing, installer, updates, fuses (former LR-12) | L3 | User reopens D-3 first | everything |
 
 L15 needs no code: until a repeated-measures benchmark exists, no public material may claim token
 savings from memory or plugins.
+
+#### LR-0 — Format the code with Prettier (120) and check it in CI (L12, D-5)
+
+- Branch `chore/lr0-prettier`; Folder `lr0`. Files: `app/package.json`, `app/pnpm-lock.yaml`,
+  new `app/.prettierrc.json`, new `app/.prettierignore`, every file under `app/src`, `app/tests`
+  and `app/scripts` (layout only), `.github/workflows/verify.yml`, new `.git-blame-ignore-revs`.
+- Why: many lines are 400–965 characters long, which makes review and targeted edits error-prone.
+- The user approved adding Prettier (D-5). This packet downloads it through pnpm; nothing else.
+- **This packet changes layout only.** If any test, typecheck or build result changes, the
+  formatter changed meaning somewhere: stop and report; do not "fix" code by hand.
+
+Steps:
+1. Create the worktree (C11.0 rule 2) and install (rule 3). Record the unit-test summary line
+   from rule 4 before any change (for example `ℹ pass 871`). You will compare against it.
+2. From `lr0\app`: `pnpm add -D --save-exact prettier@3`. Expected: `package.json` gains one
+   `devDependencies` entry `"prettier": "3.x.y"` (exact version, no `^`). Record the version.
+3. Create `app/.prettierrc.json` with exactly:
+   ```json
+   {
+     "printWidth": 120,
+     "singleQuote": true,
+     "semi": true,
+     "trailingComma": "all",
+     "arrowParens": "avoid",
+     "endOfLine": "lf"
+   }
+   ```
+4. Create `app/.prettierignore` with exactly:
+   ```
+   dist
+   release
+   node_modules
+   test-output
+   benchmarks
+   research-templates
+   pnpm-lock.yaml
+   ```
+5. In `app/package.json`, inside `"scripts"`, add these two entries after the `"typecheck"` line:
+   ```json
+   "format": "prettier --write \"src/**/*.{ts,tsx,css}\" \"tests/**/*.ts\" \"scripts/**/*.{mjs,ts}\"",
+   "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\" \"tests/**/*.ts\" \"scripts/**/*.{mjs,ts}\"",
+   ```
+6. Commit steps 2–5 alone: message `Add Prettier (120 columns) as the code formatter`.
+7. Run `pnpm format`. Expected: a list of files; no `[error]` lines. If Prettier prints
+   `[error]` for a file, stop and report the file and message.
+8. Run the standard checks (rule 4). Expected: the **same** unit-test pass count as step 1,
+   `ℹ fail 0`, clean typecheck, and the build line. Then run `pnpm format:check`. Expected:
+   `All matched files use Prettier code style!`.
+9. Commit everything from step 7 alone: message `Format app/ with Prettier (layout only, no
+   logic change)`. Copy that commit's full hash (`git log -1 --format=%H`).
+10. Create `.git-blame-ignore-revs` at the repository root containing two lines:
+    ```
+    # LR-0: Prettier formatting pass (layout only)
+    <the full hash from step 9>
+    ```
+11. In `.github/workflows/verify.yml`, find the step
+    ```
+          - name: Typecheck
+    ```
+    and insert directly **above** it (same 6-space indentation):
+    ```
+          - name: Format check
+            working-directory: app
+            run: pnpm format:check
+    ```
+12. Commit steps 10–11: message `Check formatting in CI; ignore the format commit in blame`.
+13. User-level check: `node scripts/package.mjs`, start the packaged app with a fresh
+    `QRO_USER_DATA_DIR`, click every sidebar page once. Expected: every page opens as before.
+14. Push and open the PR (rule 9). Add to the PR body: "After merge, the organizer must re-anchor
+    C11 (rule 0) before any other LR packet starts."
+- Done when: CI passes, including `Format check`.
+- From now on, **every** packet ends with `pnpm format` before its final standard checks, so CI's
+  format check stays green.
 
 #### LR-1 — Repair the desktop e2e suite and run it in CI (L6)
 
@@ -1499,84 +1608,194 @@ Steps:
    stop.
 - Done when: checks pass.
 
-#### LR-6 — One model catalog per connection in the projection (L2)
+#### LR-6 — One model catalog per account in the quick-access copy (L2, approved as D-2)
 
-- **Blocked until decision D-2 is approved.** This packet changes a stated invariant: today every
-  capability snapshot keeps its full model list in the projection forever ("earlier evidence is
-  never rewritten"). After this packet the **event log** still keeps every snapshot unchanged,
-  but the **projection** keeps the model list only on the newest snapshot of each connection;
-  older snapshots keep every other field (operations, hashes, ids) and show `models: []`.
-  Nothing reads the models of an older snapshot (checked in `readiness.ts`, `agents.tsx`,
-  `store.ts`, `controller.ts` on `3be1a94`).
+Plain summary: every account check saves a record with the full model list (~120 KB). The
+workspace keeps two copies of everything: the **permanent history** (`events` table, append-only,
+never edited) and the **quick-access copy** (the single `projection` row the app reads). This
+packet keeps the model list only on the newest record per account **in the quick-access copy**,
+marks older ones `modelsOmitted: true`, migrates existing workspaces once with an automatic
+backup, and adds a tool that converts a workspace back to the old format without losing anything.
+
+The user reviewed a heavier proposal (Git checkpoints of workspace data, separate recovery
+storage, staged deployment) and asked for a lighter version. What was kept and what was dropped:
+
+| Proposal item | In this packet |
+| --- | --- |
+| History is authoritative and never rewritten | Kept (already enforced by SQLite triggers); a test proves every event record is byte-identical after migration |
+| Quick-access copy is disposable and rebuildable | Kept; the migration rebuilds it from history |
+| Explicit omission marker | Kept: `modelsOmitted: true`, so an empty list the provider really reported is never confused with an omitted one |
+| Explicit schema version + migration | Kept: `SCHEMA_VERSION = 4` |
+| Checkpoint before migrating | Kept, lightweight: SQLite `VACUUM INTO` copy next to the workspace (the store already does this for another repair) |
+| Atomic replace / interrupted migration safe | Kept: rebuild and version bump commit in one SQLite transaction |
+| Lossless rollback that keeps later records | Kept, lightweight: `downgradeWorkspaceToV3` rebuilds the old format from the full history, so records made after the upgrade survive |
+| Workspace checkpoints in Git | **Dropped**: workspaces hold private data; Git holds code only (D-2) |
+| Separate versioned checkpoint storage, staged production rollout | **Dropped**: one local app, one file; the automatic copy is the checkpoint |
+
+Verified on 2026-09-26 by prototyping exactly these steps on `3be1a94` (then reverted):
+- unit suite 875 pass / 0 fail, including the four tests in step 12;
+- `bench-store.ts 200`: projection 5,855,685 → 168,464 bytes, reopen 7,419 → 539 ms,
+  `snapshot()` 131 → 3 ms;
+- a real test workspace (8.4 MB, 497 events): migrated to 1.0 MB, reopen ~19 s → 2–3.5 s;
+  `downgradeWorkspaceToV3` then produced a quick-access copy byte-identical to the original
+  (same SHA-256), and the **previous packaged app** (`Archive\App-before-evidence-memory-20260925`)
+  opened it with all projects and requests.
+
 - Branch `fix/lr6-capability-compaction`; Folder `lr6`. Files: `app/src/core/store.ts`,
-  `app/tests/connections.test.ts`, new `app/tests/capability-compaction.test.ts`.
-- Measured on `3be1a94` with `pnpm exec tsx scripts/bench-store.ts 200`: projection 5,855,685
-  bytes, reopen 7,419 ms, `snapshot()` 131 ms, 200 writes 64 s. The same code change, prototyped
-  on 2026-09-25: 168,464 bytes, 539 ms, 3 ms, 20 s.
+  `app/src/shared/types.ts`, `app/tests/connections.test.ts`, new
+  `app/tests/capability-compaction.test.ts`, new `app/scripts/downgrade-workspace.ts`,
+  `docs/plans/lr6-capability-compaction.test.ts` (delete after copying).
+- Never run any step against the user's live workspace (`%APPDATA%\Quant Research Office`).
 
 Steps:
-1. Record the baseline: from `lr6\app` run `pnpm exec tsx scripts/bench-store.ts 200` and copy the
-   printed JSON line into your notes.
-2. In `app/src/core/store.ts`, find the line (inside `function applyChanges`):
+1. Baseline: from `lr6\app` run `pnpm exec tsx scripts/bench-store.ts 200` and keep the JSON line.
+2. **Marker type.** In `app/src/shared/types.ts`, in the line that starts
+   `export interface ProviderCapabilitySnapshot {`, replace
+   `source: string; contentHash: string; observedAt: string; }` with
+   ```ts
+   source: string; contentHash: string; observedAt: string; /** Set only in the projection: this older snapshot's model list was omitted (LR-6); the event log still holds it. */ modelsOmitted?: true; }
+   ```
+3. **Reducer option.** In `app/src/core/store.ts`, replace the line
+   `function applyChanges(current: Projection, changes: Change[]): Projection {` with these two lines:
+   ```ts
+   function applyChanges(current: Projection, changes: Change[], options: { compactCatalogs?: boolean } = {}): Projection {
+     const compactCatalogs = options.compactCatalogs ?? true;
+   ```
+4. **Compaction.** In the same function, find the line
    ```ts
          if (index === -1) {lookup.set(change.value.id,items.length);items.push(structuredClone(change.value));} else items[index] = structuredClone(change.value);
    ```
-   and insert directly **after** it:
+   and insert directly after it:
    ```ts
-         // The projection keeps one model catalog per connection: the newest snapshot's. Older
-         // snapshots keep every other field; the event log keeps them whole.
-         if (change.collection === 'capabilities' && index === -1) {
+         // LR-6: the projection keeps one model catalog per connection — the newest snapshot's. Older
+         // snapshots keep every other field and are marked modelsOmitted; the event log keeps them whole.
+         if (compactCatalogs && change.collection === 'capabilities' && index === -1) {
            const added = change.value as ProviderCapabilitySnapshot;
            const list = items as ProviderCapabilitySnapshot[];
            for (let i = 0; i < list.length - 1; i++)
-             if (list[i].connectionId === added.connectionId && list[i].models.length) list[i] = { ...list[i], models: [] };
+             if (list[i].connectionId === added.connectionId && !list[i].modelsOmitted) list[i] = { ...list[i], models: [], modelsOmitted: true };
          }
    ```
-3. Find `if (version !== 0 && version !== 1 && version !== 2 && version !== 3) throw` and change it
-   to `if (version !== 0 && version !== 1 && version !== 2 && version !== 3 && version !== 4) throw`.
-4. In the constructor, find the three lines
+5. **Schema version and downgrade tool.** Find the line `export class OfficeStore {` and insert
+   directly **above** it:
+   ```ts
+   /** Workspace schema version. 4 = LR-6 projection (one model catalog per connection). */
+   export const SCHEMA_VERSION = 4;
+
+   /**
+    * LR-6 recovery path: rewrites a version-4 workspace's projection in the version-3 format (every
+    * snapshot keeps its model list) so a build from before LR-6 can open it. The event log — every
+    * record, including those written after the upgrade — is not touched. A copy of the file is made
+    * first; its path is returned. Run it only while no Quant Research Office window has the file open.
+    */
+   export function downgradeWorkspaceToV3(file: string): string {
+     const db = new DatabaseSync(file);
+     try {
+       const version = Number((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version);
+       if (version !== 4) throw new Error(`Only a version-4 workspace can be downgraded; this one is version ${version}.`);
+       const backup = `${file}.before-downgrade-${randomUUID()}.sqlite`;
+       db.prepare('VACUUM INTO ?').run(backup);
+       let rebuilt = blank();
+       for (const row of db.prepare('SELECT record FROM events ORDER BY sequence').all())
+         rebuilt = applyChanges(rebuilt, eventSchema.parse(JSON.parse(String(row.record))).payload.changes, { compactCatalogs: false });
+       db.exec('BEGIN IMMEDIATE');
+       try {
+         db.prepare('UPDATE projection SET state=? WHERE singleton=1').run(canonical(rebuilt));
+         db.exec('PRAGMA user_version=3');
+         db.exec('COMMIT');
+       } catch (error) { db.exec('ROLLBACK'); throw error; }
+       return backup;
+     } finally { db.close(); }
+   }
+
+   ```
+   `DatabaseSync`, `randomUUID`, `canonical`, `blank`, `applyChanges` and `eventSchema` already
+   exist in `store.ts`; if the typecheck says one is missing, stop and report.
+6. **Accept version 4.** Replace
+   `if (version !== 0 && version !== 1 && version !== 2 && version !== 3) throw` with
+   `if (version < 0 || version > SCHEMA_VERSION) throw` (keep the rest of that line).
+7. **Skip the old check before migrating.** Find these three lines (they come right before
+   `if(version<3){`):
    ```ts
            this.db.exec('COMMIT');
          }
          this.verifyIntegrity();
    ```
-   that come right before `if(version<3){`, and change only the third line to
-   `      this.verifyIntegrity(version < 4);`.
-5. Find `      this.researchIndexReady=true;` that is directly followed by
-   `      this.db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;');` and insert between them:
-   `      if (version < 4) this.db.exec('PRAGMA user_version=4;');`
-6. Find `  private verifyIntegrity(): void {` and change it to
-   `  private verifyIntegrity(rewriteProjection = false): void {`.
-7. In the same method, find
+   and change only the third line to:
+   ```ts
+         if (version >= SCHEMA_VERSION) this.verifyIntegrity();
+   ```
+8. **The migration.** Find these two consecutive lines:
+   ```ts
+         this.researchIndexReady=true;
+         this.db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;');
+   ```
+   and insert between them:
+   ```ts
+         if (version < SCHEMA_VERSION) {
+           // One-time projection rebuild (LR-6). An existing workspace is copied first; the rebuild and
+           // the version bump commit together, so an interrupted migration leaves the old file intact.
+           if (version > 0 && databasePath !== ':memory:') this.db.prepare('VACUUM INTO ?').run(`${databasePath}.before-v${SCHEMA_VERSION}-${randomUUID()}.sqlite`);
+           this.db.exec('BEGIN IMMEDIATE');
+           try {
+             this.verifyIntegrity(true);
+             this.db.exec(`PRAGMA user_version=${SCHEMA_VERSION}`);
+             this.db.exec('COMMIT');
+           } catch (error) { this.db.exec('ROLLBACK'); throw error; }
+         }
+   ```
+9. **Allow the one-time rewrite.** Replace `  private verifyIntegrity(): void {` with
+   `  private verifyIntegrity(rewriteProjection = false): void {`, and in that method replace
    `    if (canonical(rebuilt) !== canonical(this.readProjection())) throw new Error('Workspace projection integrity failure');`
-   and replace it with:
+   with:
    ```ts
        if (canonical(rebuilt) !== canonical(this.readProjection())) {
-         // A one-time schema migration may change what the reducer derives; the hash chain above
-         // was already verified, so the rebuilt projection replaces the stored one.
+         // Only the one-time migration may replace the stored projection, and only after the hash
+         // chain above was verified; the projection is derived data.
          if (!rewriteProjection) throw new Error('Workspace projection integrity failure');
          this.db.prepare('UPDATE projection SET state=? WHERE singleton=1').run(canonical(rebuilt));
        }
    ```
-8. In `app/tests/connections.test.ts`, in the test
-   `unchanged refreshes do not grow history; a changed catalog adds a new immutable snapshot`,
-   replace
-   `assert.equal(changed.capabilities![0].models.length,1,'earlier evidence is never rewritten');`
-   with
-   `assert.equal(changed.capabilities![0].models.length,0,'the projection keeps one catalog per connection; the event log keeps the original');`
-9. Create `app/tests/capability-compaction.test.ts` by copying the prepared file (do not retype
-   it). From `lr6\app` in PowerShell:
-   ```
-   Copy-Item ..\docs\plans\lr6-capability-compaction.test.ts tests\capability-compaction.test.ts
-   ```
-   Then delete `docs/plans/lr6-capability-compaction.test.ts` in the same commit (it has served
-   its purpose).
-10. Run the standard checks. Expected: 2 more passing tests and no other failures.
-11. Run `pnpm exec tsx scripts/bench-store.ts 200` again. Expected: `projectionBytes` below
-    1,000,000, `openMs` below 2,000 and `snapshotMs` below 20. Put both JSON lines in the PR.
-12. Downgrade note for the PR: a workspace opened by this build is schema version 4; an older build
-    refuses it with its existing "newer version" message. Say so in the PR body.
-- Done when: checks pass and the benchmark meets step 11.
+10. **Update the one existing test that encoded the old rule.** In `app/tests/connections.test.ts`,
+    replace
+    `assert.equal(changed.capabilities![0].models.length,1,'earlier evidence is never rewritten');`
+    with these two lines:
+    ```ts
+    assert.equal(changed.capabilities![0].models.length,0,'the projection keeps one catalog per connection (LR-6); the event log keeps the original');
+     assert.equal(changed.capabilities![0].modelsOmitted,true);
+    ```
+11. **Downgrade script.** Create `app/scripts/downgrade-workspace.ts`:
+    ```ts
+    // LR-6 recovery: converts a version-4 workspace back to the version-3 format so an older build can
+    // open it. Close Quant Research Office first. A copy of the file is written before anything changes.
+    // Usage from app/: pnpm exec tsx scripts/downgrade-workspace.ts "<path to workspace.sqlite>"
+    import { downgradeWorkspaceToV3 } from '../src/core/store';
+
+    const file = process.argv[2];
+    if (!file) { console.error('Give the path to workspace.sqlite.'); process.exit(1); }
+    const backup = downgradeWorkspaceToV3(file);
+    console.log(JSON.stringify({ downgraded: file, backup }));
+    ```
+12. **Tests.** From `lr6\app` in PowerShell:
+    ```
+    Copy-Item ..\docs\plans\lr6-capability-compaction.test.ts tests\capability-compaction.test.ts
+    ```
+    Then delete `docs/plans/lr6-capability-compaction.test.ts` in the same commit. The four tests
+    prove: one catalog per account with markers; an empty catalog the provider reported is not
+    marked; a version-3 workspace migrates once with its history byte-identical and one backup;
+    and the downgrade restores the old format including records made after the upgrade.
+13. Run `pnpm format`, then the standard checks. Expected: 4 more passing tests, no failures.
+14. Run `pnpm exec tsx scripts/bench-store.ts 200`. Expected: `projectionBytes` < 1,000,000,
+    `openMs` < 2,000, `snapshotMs` < 20. Put both JSON lines (step 1 and now) in the PR.
+15. **Round-trip check on a copy** (never the live workspace). Copy a scratch or test workspace
+    folder, open the copy once with the packaged app of this branch (it migrates), close it, run
+    `pnpm exec tsx scripts/downgrade-workspace.ts "<copy>\workspace\workspace.sqlite"`, then open
+    the copy with the previous packaged app (`Quant Office\App\` before you mirror this build, or
+    `Quant Office\Archive\App-before-evidence-memory-20260925`). Expected: it opens and shows the
+    same projects and requests. Record the result in the PR.
+16. PR note (required): "Workspaces opened by this build become schema version 4. An older build
+    refuses them until `scripts/downgrade-workspace.ts` is run; that tool keeps every record."
+- Done when: checks pass, step 14 meets its targets, and step 15 is observed.
 
 #### LR-7 — Show the window before the workspace opens (L2)
 
@@ -1612,7 +1831,7 @@ Steps:
 
 #### LR-8 — Measure startup and decide on an integrity checkpoint (L2)
 
-- Model: small model for the measurement; the design that may follow is for a stronger model.
+- Who: the coding model does the measurement; any design that follows is for the organizer.
 - Branch: none unless the result says so. Files: none.
 
 Steps:
@@ -1709,9 +1928,137 @@ Steps:
 3. Repeat until the e2e passes. Run the standard checks.
 - Done when: the e2e passes with the new check.
 
-#### LR-12 — Electron fuses in the packaged build (L3)
+#### LR-14 — Unified look with light as the default theme (L14, D-5)
 
-- **Blocked until D-3 approves adding the dev dependency `@electron/fuses`** (a download).
+- Branch `fix/lr14-light-default`; Folder `lr14`. Files: `app/src/core/store.ts`,
+  `app/tests/core.test.ts`, new `app/tests/theme-default.test.ts`,
+  `app/src/renderer/office-chat.css`, `docs/plans/lr14-theme-default.test.ts` (delete after copying).
+- Depends on LR-6 (it reuses LR-6's migration and downgrade tool).
+- Why: new users should start in the light theme, and the office chat panel should follow the
+  chosen theme instead of always being light.
+- Why a migration is needed: the default theme lives in `blank()`, the starting state that the
+  history is replayed onto. Changing it changes what replay produces, so the stored quick-access
+  copy must be rebuilt once — exactly the mechanism LR-6 added. Users who explicitly chose a theme
+  keep it (their choice is in the history); users who never chose become light.
+- Verified on 2026-09-26 by prototyping steps 1–5 on top of LR-6 (then reverted): unit tests pass,
+  and the real test workspace round-trip (upgrade → downgrade) again produced a byte-identical
+  old-format copy.
+
+Steps:
+1. In `app/src/core/store.ts`, in `function blank()`, replace
+   `settings: { theme: 'dark', reducedMotion: false, globalBudgetCents: 0 } }; }` with
+   `settings: { theme: 'light', reducedMotion: false, globalBudgetCents: 0 } }; }`.
+2. Replace the two lines
+   ```ts
+   /** Workspace schema version. 4 = LR-6 projection (one model catalog per connection). */
+   export const SCHEMA_VERSION = 4;
+   ```
+   with:
+   ```ts
+   /** Workspace schema version. 4 = LR-6 projection (one model catalog per connection); 5 = light default theme (LR-14). */
+   export const SCHEMA_VERSION = 5;
+   ```
+3. In `downgradeWorkspaceToV3`, replace
+   ``if (version !== 4) throw new Error(`Only a version-4 workspace can be downgraded; this one is version ${version}.`);``
+   with
+   ```ts
+       if (version !== 4 && version !== 5) throw new Error(`Only a version-4 or version-5 workspace can be downgraded; this one is version ${version}.`);
+   ```
+   and replace `    let rebuilt = blank();` (inside that function only) with:
+   ```ts
+       // Version-3 builds started every workspace from the dark theme.
+       let rebuilt: Projection = { ...blank(), settings: { ...blank().settings, theme: 'dark' } };
+   ```
+4. In `app/tests/core.test.ts`, in the test
+   `fresh workspace has no agents, spend, approvals, reviews, projects, or synthetic work`, replace
+   `settings: { theme: 'dark', reducedMotion: false, globalBudgetCents: 0 }, spend` with
+   `settings: { theme: 'light', reducedMotion: false, globalBudgetCents: 0 }, spend`.
+5. From `lr14\app` in PowerShell:
+   ```
+   Copy-Item ..\docs\plans\lr14-theme-default.test.ts tests\theme-default.test.ts
+   ```
+   and delete `docs/plans/lr14-theme-default.test.ts` in the same commit.
+6. **Chat panel follows the theme.** In `app/src/renderer/office-chat.css`, change these values.
+   Each row names the selector, the property and the exact old value; replace only that value.
+   Do not change the office scene (`office.css`) — it is an illustration and stays as drawn.
+
+   | Selector | Property | Old value | New value |
+   | --- | --- | --- | --- |
+   | `.office-chat` | `border` | `1px solid var(--border,#d0dcd7)` | `1px solid var(--border)` |
+   | `.office-chat` | `background` | `#eeeae1` | `var(--panel-2)` |
+   | `.office-chat` | `color` | `#253d37` | `var(--text)` |
+   | `.office-chat-filters` | `background` | `#f8faf7` | `var(--panel)` |
+   | `.office-chat-filters` | `border-bottom` | `1px solid #dce5de` | `1px solid var(--border)` |
+   | `.office-chat-filters label` | `color` | `#5e746a` | `var(--muted)` |
+   | `.office-chat-filters select` | `color` | `#29483d` | `var(--text)` |
+   | `.office-chat-filters select` | `background` | `#fff` | `var(--input)` |
+   | `.office-chat-filters select` | `border` | `1px solid #d3dfd7` | `1px solid var(--border)` |
+   | `.office-chat-feed` | `background-color` | `#f1eee6` | `var(--bg)` |
+   | `.office-chat-day span` | `background` | `#e1edeb` | `var(--panel-2)` |
+   | `.office-chat-day span` | `color` | `#4e6a66` | `var(--muted)` |
+   | `.office-chat-avatar` | `background` | `#fff9` | `var(--panel)` |
+   | `.office-chat-bubble` | `background` | `#fff` | `var(--panel)` |
+   | `.office-chat-bubble` | `border` | `1px solid #dfe5dc` | `1px solid var(--border)` |
+   | `.director-message .office-chat-bubble` | `background` | `#e1efce` | `var(--accent-bg)` |
+   | `.director-message .office-chat-bubble` | `border-color` | `#d3e4be` | `var(--border)` |
+   | `.office-chat-author>span` | `color` | `#758175` | `var(--subtle)` |
+   | `.office-chat-context` | `color` | `#6b8075` | `var(--muted)` |
+   | `.office-chat-bubble footer` | `color` | `#789084` | `var(--subtle)` |
+   | `.office-chat-bubble time` | `color` | `#6c7d70` | `var(--subtle)` |
+   | `.office-chat-system` | `background` | `#e3eeed` | `var(--panel-2)` |
+   | `.office-chat-system` | `border` | `1px solid #d5e3df` | `1px solid var(--border)` |
+   | `.office-chat-system` | `color` | `#476660` | `var(--muted)` |
+   | `.office-chat-system time` | `color` | `#758a83` | `var(--subtle)` |
+   | `.office-chat summary` | `color` | `#217365` | `var(--teal)` |
+   | `.office-chat-empty` | `color` | `#7b9385` | `var(--subtle)` |
+   | `.office-chat-empty h3` | `color` | `#496759` | `var(--muted)` |
+   | `.office-chat-footer` | `background` | `#fafbf7` | `var(--panel)` |
+   | `.office-chat-footer` | `border-top` | `1px solid #dce5de` | `1px solid var(--border)` |
+   | `.office-chat-footer` | `color` | `#75877d` | `var(--subtle)` |
+   | `.office-chat-record-dot` | `background` | `#7aa593` | `var(--teal)` |
+   | `.office-chat-error` | `background` | `#fff0e9` | `#ab50421a` |
+   | `.office-chat-error` | `color` | `#854630` | `var(--text)` |
+   | `.office-chat-history-notice` | `background` | `#e3eeed` | `var(--panel-2)` |
+   | `.office-chat-history-notice` | `color` | `#476660` | `var(--muted)` |
+   | `.office-chat-older,.office-chat-latest` | `border` | `1px solid #cbded3!important` | `1px solid var(--border)!important` |
+   | `.office-chat-older,.office-chat-latest` | `background` | `#f9fffb!important` | `var(--panel)!important` |
+   | `.office-chat-older,.office-chat-latest` | `color` | `#276955!important` | `var(--teal)!important` |
+   | `.office-chat :focus-visible` | `outline` | `2px solid #1a987b` | `2px solid var(--teal)` |
+
+   Keep unchanged: the green header (`.office-chat-heading`, `.office-chat-icon`,
+   `.office-chat-refresh`, `.office-chat-heading p`) — it is the chat's brand bar — and all
+   `box-shadow` values. After formatting (LR-0) a selector may be split over lines; match by
+   selector and property, not by line.
+7. Run `pnpm format`, the standard checks (expected: 3 more passing tests) and LR-1's e2e.
+8. User-level check: fresh `QRO_USER_DATA_DIR` → the app opens light. Settings → Theme → Dark →
+   the office chat panel turns dark with readable text; back to Light → it is light again.
+   Take both screenshots for the PR.
+- Done when: checks and e2e pass and step 8 is observed.
+
+#### Launch gate — do not start during development
+
+- **LR-15 API-key mode (D-4).** The organizer writes the design first; the coding model builds it.
+  Requirements already fixed by the user: every user signs in with their **own** provider account
+  or enters their **own** API key; the developer's accounts are never used, embedded or
+  referenced; keys are stored with Electron `safeStorage` (Windows DPAPI), never in the workspace,
+  logs, Git or prompts; subscription mode stays available for users' own subscriptions.
+- **Legal review (D-4).** The user has each provider's terms reviewed for commercial automated
+  use before any sale. Record the outcome in section 17.
+- **LR-16 Separate Windows user for agent sessions (D-1 option A).** The organizer writes the
+  design first. Direction: a dedicated low-privilege local account created once with the user's
+  consent, agent CLIs started as that account, and file access limited to the packet folders.
+
+#### Deferred — final step (D-3, reopen only when the user says so)
+
+Parked until the user reopens D-3 (the product must stay free to build): code signing (Azure
+Trusted Signing, OV or EV certificate), installer (MSIX or NSIS), update channel (GitHub
+Releases, own host or Microsoft Store), `@electron/fuses` hardening (the former LR-12 steps,
+kept below for later), and a release check that the packaged app contains no workspace data and
+no developer account identifiers.
+
+##### Parked: former LR-12 — Electron fuses in the packaged build (L3)
+
+- **Parked (D-3 deferred).** Do not run until the user reopens D-3.
 - Branch `fix/lr12-fuses`; Folder `lr12`. Files: `app/package.json`, `app/pnpm-lock.yaml`,
   `app/scripts/package.mjs`.
 
@@ -1738,37 +2085,12 @@ Steps:
    Package with `QRO_TEST_BUILD=1` and run LR-1's e2e. Expected: it passes.
 - Done when: both expectations hold.
 
-#### LR-13 — Formatting-only pass (L12)
+#### C11 exit criteria
 
-- **Blocked until D-5 picks the formatter** and every other LR packet is merged (a formatting pass
-  conflicts with everything).
-- One PR that only runs the formatter over `app/src` and `app/tests` and adds a CI check. The diff
-  must contain no other change. Run the standard checks and the e2e; all must pass unchanged.
-
-#### Decisions for the user (not small-model work)
-
-- **D-1 OS isolation (L1).** Measured 2026-09-25: Claude Code in `-p` mode denied a disallowed
-  write (`echo > file`) when run without `--dangerously-skip-permissions`, but still ran read-only
-  shell commands and an allowed `python`, and `python` can do anything the account can. So tool
-  allowlists narrow the surface but are not a security boundary. Options: (a) run each session
-  under a dedicated low-privilege local Windows account with ACLs limited to the packet folder;
-  (b) Windows Sandbox or a Hyper-V/WSL2 container per session; (c) ship "unattended local agents"
-  only to users who accept the LR-4 consent, and say so in the EULA. Choose one; a stronger model
-  then writes the packet.
-- **D-2 Approve LR-6's projection rule** (older snapshots lose their model list in the
-  projection only; the event log is unchanged; schema version becomes 4).
-- **D-3 Release channel (L3).** Buy or choose a code-signing route (OV/EV certificate or Azure
-  Trusted Signing); choose the installer (MSIX or NSIS) and the update host; approve adding
-  `@electron/fuses`. After that a packet wires `@electron/windows-sign` (already a dev dependency)
-  into `package.mjs`.
-- **D-4 Provider terms (L4).** Legal review of Anthropic, OpenAI and Cognition terms for automated
-  commercial use of personal subscriptions; decide whether an API-key route is required.
-- **D-5 Formatter and design (L12, L14).** Pick Prettier or dprint and the line width; commission a
-  design pass on the light office panels inside the dark shell.
-
-Exit criteria for C11: LR-1…LR-12 merged, D-1…D-4 decided and their packets merged, the desktop
-e2e green in CI, `bench-store.ts 1000` under 3 s to open, a signed installer tested on a clean
-Windows machine, and the section 11 row moved to VERIFIED_LOCAL.
+Development phase done: LR-0…LR-11 and LR-14 merged, the desktop e2e and format check green in
+CI, `bench-store.ts 1000` under 3 s to open. Launch: LR-15, LR-16 and the legal review done, then
+the deferred D-3 items, a signed installer tested on a clean Windows machine, and the section 11
+row moved to VERIFIED_LOCAL.
 
 ## 11. Execution checklist and progress record
 
@@ -1794,7 +2116,7 @@ Status vocabulary: NOT_STARTED, IMPLEMENTED_FOUNDATION, IN_PROGRESS, PARTIALLY_V
 | D1 optional Serena trial | PARTIALLY_IMPLEMENTED, nonblocking | Project-local AGENTS.md and CLAUDE.md pointers plus the Git/worktree policy were added during repository setup on 2026-09-12. The optional Serena comparison and client configuration remain NOT_STARTED; no navigation plugin was installed. |
 | C10 four-plugin office evaluation | MEASURED_LOCAL 2026-09-25 (CLI A/B, scratch installs); no plugin enabled by default | 2026-09-16: section 3.2 and C10 define the trials and `app/benchmarks/plugin-evaluation/`. 2026-09-25: Serena 1.7.0, Ponytail v4.10.0, Graphify 0.9.68 and LightRAG 1.5.7 (Ollama local) trialled alone and stacked on an office implement packet and a 7-item code-navigation task. No plugin or pair saved tokens beyond run-to-run noise; Serena adds ~8.7k tokens per call and is unused unless hinted; stacking adds context and lowered accuracy; LightRAG local indexing failed (5 of 11 files timed out in 2 h). Recommended set: office memory ledger only. See section 17 entry "plugin trials" of this date. |
 | Token diet (pipeline token consumption) | VERIFIED_LOCAL on dev + packaged build 2026-09-25; not yet merged | Branch `fix/token-diet-20260925` (base organizer `9356c2e`). Lean Claude/Codex launches, per-hop deliverables, hop-keyed inherited inputs, worker slices, packet essentials + `finish.py`, split contract, pre-registered analysis plan (`analysisOf`), QUICK round shape, implementation-only REVISE, claude launch spacing. Live: quick ema5 round 574k input tokens (was 2.50M), implementation-only revision 345k (was 3.10M), Codex implement 147k (was 374k). App\ `app.asar` `642139F3…`. Plugin trials done (C10 row). Follow-ups done on `fix/evidence-and-memory-20260925` (PR #14): evidence-surface args documented; memory capture restored and digest mounted at `plan-brief`. App\ `app.asar` `0901A8DF…` — see section 17 entries of this date. |
-| Commercial launch readiness | NOT_STARTED — revision plan C11 written 2026-09-25 | Private/internal beta only. Five launch blockers (L1–L5) from the 2026-09-25 review. Next: execute section 10 slice C11 in its order — LR-1 (desktop e2e + CI), LR-2 (crash log), LR-3 (long prompts), LR-4 (local-first defaults + consent), LR-5 (untrusted data line) are ready for a small model now; LR-6 waits on decision D-2, LR-12 on D-3; D-1 (OS isolation), D-3 (signing/installer/updates) and D-4 (provider terms) are user decisions. Exit criteria at the end of C11. |
+| Commercial launch readiness | NOT_STARTED — C11 plan with user decisions D-1…D-5 answered 2026-09-26 | Private/internal beta only. Next: LR-0 (Prettier, 120 columns) by the coding model, then the organizer re-anchors C11 on the formatted main (C11.0 rule 0), then LR-1…LR-11 and LR-14 in the C11.1 order. LR-6 approved in a lighter form (history untouched, one catalog per account in the quick-access copy, automatic backup, lossless downgrade tool). Launch gate: LR-15 API-key mode, LR-16 separate Windows user, legal review. Signing/installer/updates/fuses deferred to the very last step (free-first). |
 | OmniRoute routing extension | NOT_STARTED implementation; architecture reviewed 2026-09-11 | Section 3.1 proposes operation-specific model/session/research contracts and an optional bounded free-worker route. Current subscription-only runtime policy remains unchanged; no gateway installation, provider transfer or live compatibility test occurred. Integrate with C2/C4/C7 and retain R5/custody requirements. |
 | R2 | VERIFIED_LOCAL within documented limits | Snapshot/output inventory is shared by backup and restore; both formats restore actual bytes into a new root. OutputService reserves real destinations on prepare/launch and stores versioned verified bytes. Required missing objects refuse backup. Snapshot identity rejects null/wrong request revisions. Remaining constraints: source swap races, recorded-platform Git reconstruction and R5 transport limits. |
 | R3 | VERIFIED_LOCAL | Preserve exact per-operation scope, durable evidence order, independent confinement and frozen account context. No new live capability evidence in this pass. |
@@ -5332,3 +5654,28 @@ prototyping that shaped the plan:
 Added: `app/scripts/bench-store.ts` (throwaway-workspace benchmark; never run on a real
 workspace) and `docs/plans/lr6-capability-compaction.test.ts` (LR-6's test, copied verbatim by
 that packet). Worktrees `token-diet` and `evidence-surface` are merged and may be removed.
+
+### 2026-09-26 — launch plan decisions D-1…D-5 recorded in C11
+
+Status: PLAN (docs only). Branch `docs/launch-revision-plan-20260925` (PR #15). The user answered
+the five decisions; C11.D now states them as rules for the coding model (Devin SWE-2 Max):
+- D-1: during development agents keep the user's permissions, guarded only by LR-4's consent and
+  LR-5's untrusted-data line; a separate low-privilege Windows user (LR-16) is a launch-gate item.
+- D-2: LR-6 approved in a lighter form than the user's draft (kept: authoritative untouched
+  history, rebuildable quick-access copy, `modelsOmitted` marker, schema version 4, automatic
+  `VACUUM INTO` copy before migrating, one-transaction migration, lossless
+  `downgradeWorkspaceToV3` plus `scripts/downgrade-workspace.ts`; dropped: workspace data in Git,
+  separate checkpoint storage, staged rollout). Re-prototyped on `3be1a94`: unit suite 875/0;
+  bench 5.86 MB → 0.17 MB, reopen 7.4 s → 0.54 s; a real 8.4 MB test workspace migrated to
+  1.0 MB (reopen ~19 s → 2–3.5 s), downgraded to a byte-identical old-format copy, and opened in
+  the previous packaged app.
+- D-3: signing, installer, update channel and fuses deferred to the very last step (free-first);
+  former LR-12 parked.
+- D-4: legal review plus API-key mode (LR-15); every user uses their own account or key.
+- D-5: Prettier at 120 columns runs first as LR-0; after it merges the organizer re-anchors every
+  `Find` text (C11.0 rule 0). New LR-14 makes light the default theme through a schema-5
+  migration (users who chose a theme keep it; downgrade restores dark) and maps the office chat's
+  40 hard-coded colours to theme variables; prototyped with LR-6 (tests pass, round-trip still
+  byte-identical). LR-13 was folded into LR-0.
+Prepared test files: `docs/plans/lr6-capability-compaction.test.ts` (four tests) and
+`docs/plans/lr14-theme-default.test.ts` (three tests); each packet copies and then deletes its file.
