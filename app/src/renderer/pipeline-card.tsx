@@ -108,11 +108,11 @@ export function PipelineCard({request,state,busy,onAction}:{request:Request;stat
    {!!notes.length&&<ul className="evidence-list">{notes.map(item=><li key={item.id}>{item.text} <span className="muted">— {new Date(item.createdAt).toLocaleString()}</span></li>)}</ul>}
    {previewBlock()}
    <form onSubmit={e=>{e.preventDefault();const form=e.currentTarget;const text=String(new FormData(form).get('note')).trim();if(!text)return;onAction({type:'request.pipeline.note',idempotencyKey:crypto.randomUUID(),requestId:request.id,expectedRevision:request.revision,text});form.reset();}}>
-    <label className="field">Brief note<input name="note" maxLength={4000} placeholder="Refine the director brief" disabled={busy||!ready}/></label>
+    <label className="field">Brief note<input name="note" aria-label="Brief note" maxLength={4000} placeholder="Refine the director brief" disabled={busy||!ready}/></label>
     <button className="secondary" disabled={busy||!ready}>Add note</button>
    </form>
    {!ready&&<p className="muted">Notes are recorded once the request is started.</p>}
-   {request.revisionOf?.restartAt==='IMPLEMENTATION'?<p className="muted">This revision keeps the approved plan: the director amends it, one worker re-applies it, and the director verifies.</p>:<label className="field">Round<select value={shape} disabled={busy||!ready} onChange={e=>setShape(e.target.value as PipelineShape)}>
+   {request.revisionOf?.restartAt==='IMPLEMENTATION'?<p className="muted">This revision keeps the approved plan: the director amends it, one worker re-applies it, and the director verifies.</p>:<label className="field">Round<select aria-label="Round shape" value={shape} disabled={busy||!ready} onChange={e=>setShape(e.target.value as PipelineShape)}>
     <option value="FULL">{pipeline.kind==='PLANNING'?'Full — two planners, critique, synthesis':'Full — with cross-responses'}</option>
     <option value="QUICK">{pipeline.kind==='PLANNING'?'Quick — one planner, one worker':'Quick — no cross-responses'}</option>
    </select></label>}
@@ -143,8 +143,8 @@ export function PipelineCard({request,state,busy,onAction}:{request:Request;stat
     <p className="muted">Terminal hop{headJob?`: job ${headJob.state.toLowerCase().replaceAll('_',' ')}`:' recorded; its job is not on record'}{headJob?.outputs.length?` — ${headJob.outputs.length} recorded output${headJob.outputs.length===1?'':'s'}`:''}</p>
     {!!headJob?.outputs.length&&<ul className="evidence-list">{headJob.outputs.map(output=>{const artifact=state.artifacts.find(item=>item.sha256===output.sha256);return <li key={output.path+output.sha256}>{output.path} · {output.bytes} bytes · sha256 {output.sha256.slice(0,16)}…{artifact?` · stored as ${artifact.name}`:output.stored?' · stored':''}</li>;})}</ul>}
     {previewBlock()}
-    <label className="field">Decision note<textarea value={decisionNote} onChange={e=>setDecisionNote(e.target.value)} maxLength={4000} placeholder="Required to request a revision; optional otherwise" disabled={busy||!ready}/></label>
-    {pipeline.kind==='PLANNING'&&<label className="field">A revision restarts at<select value={restartAt} disabled={busy||!ready} onChange={e=>setRestartAt(e.target.value as 'PLANNING'|'IMPLEMENTATION')}>
+    <label className="field">Decision note<textarea aria-label="Decision note" value={decisionNote} onChange={e=>setDecisionNote(e.target.value)} maxLength={4000} placeholder="Required to request a revision; optional otherwise" disabled={busy||!ready}/></label>
+    {pipeline.kind==='PLANNING'&&<label className="field">A revision restarts at<select aria-label="Revision restart point" value={restartAt} disabled={busy||!ready} onChange={e=>setRestartAt(e.target.value as 'PLANNING'|'IMPLEMENTATION')}>
      <option value="PLANNING">Planning — a new round</option>
      <option value="IMPLEMENTATION">Implementation — keep the approved plan</option>
     </select></label>}

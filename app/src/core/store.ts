@@ -2013,7 +2013,7 @@ export class OfficeStore {
             if(command.analysisOfRequestId){
               if(command.workType!=='RESULT_ANALYSIS')throw new Error('Only a result-analysis request can follow a planning request\'s pre-registered analysis plan');
               const plan=state.requests?.find(item=>item.id===command.analysisOfRequestId);
-              if(!plan||plan.removedAt||plan.projectId!==projectId||plan.pipeline?.kind!=='PLANNING')throw new Error('Choose a planning request in this project');
+              if(!plan||plan.removedAt||plan.status==='CANCELED'||plan.projectId!==projectId||plan.pipeline?.kind!=='PLANNING')throw new Error('Choose a live planning request in this project');
             }
             const request:Request={id:randomUUID(),projectId,experimentId,name:command.name,objective:command.hypothesis,workType:command.workType,mode,leadAgentId,participantIds,acceptanceCriteria:command.acceptanceCriteria??'',revision:0,status:'DRAFT',blockers:[],delegation:mode!=='SINGLE',createdAt:now,updatedAt:now,
               ...(pipelineKind?{pipeline:{kind:pipelineKind,specHash:null,phase:'BRIEFING' as const,briefAssignmentId:null}}:{}),

@@ -2129,7 +2129,7 @@ Latest C9 qualification (2026-09-21) supersedes the historical C9 row's statemen
 | Current acceptance item | Status | Evidence / next item |
 | --- | --- | --- |
 | C9 automated Director → PM → Worker | VERIFIED_LOCAL for bounded live Claude CLI relay | Three distinct role profiles and real processes; one Director start, two event-driven dependent starts; exact inherited manifests, agent-consumed predecessor hashes, verified durable outputs and replay non-duplication. Two product defects repaired; 689/690 unit tests pass (one existing skip), typecheck/build and three development desktop suites pass. [Acceptance record](../records/reviews/three-agent-acceptance-2026-09-21.md). Next: reproduce output-storage failure recovery and retain process/watch bookkeeping until durable terminal admission. Mixed-provider chains, packaged acceptance and the C8 user-run Colab pilot are not established by this test. |
-| Communication pipeline (comm-pipe-1..3) | VERIFIED_LOCAL including live P3 on a dev build (2026-09-24); packaged live run NOT_STARTED | Planning and result-analysis pipelines mint request-scoped hop sets; the terminal hop seals, AWAITING_DECISION binds the decision to the verified receipt, and `request.pipeline.decide` is idempotent and refuses stale hashes. 2026-09-24: both pipelines ran live end to end with a mixed Claude/Devin roster, and real Approve and Request-revision decisions were bound to verified receipts, after nine defects were fixed ([acceptance record](../records/reviews/office-live-acceptance-2026-09-24.md)). 2026-09-25 round `findings-rev-2` (head `7a4153c`): planning packets now blind `withheldPaths`; REVISE auto-mints a linked revision request whose brief inherits verified prior-round outputs and the decision note; pipeline cards carry a per-hop Observe/Retry/Cancel table with verified output previews and a named cancel confirmation; pre-launch failures settle FAILED with `lastObservation`; stored agent outputs and pipeline reviews are visible in Artifacts/Reviews. 2026-09-25 packaged acceptance round 3 on the taskbar install: planning + result-analysis pipelines ran live on real userData with dead-spawn retry, transient auto-retry, stranded-receipt reconcile and hash-bound decisions all exercised ([acceptance record](../records/reviews/office-live-acceptance-2026-09-25.md)). 2026-09-25 (same day): REVISE end-to-end, cancel cascade/dialog and withheld-path blinding all exercised live on the packaged install — verified. Open: the formal C8 S3 run-package/return pilot; hosted-provider execution remains gated; provider effort/tool claims remain unverified beyond what the session result reports. |
+| Communication pipeline (comm-pipe-1..3) | VERIFIED_LOCAL including live P3 on a dev build (2026-09-24); packaged live run NOT_STARTED | Planning and result-analysis pipelines mint request-scoped hop sets; the terminal hop seals, AWAITING_DECISION binds the decision to the verified receipt, and `request.pipeline.decide` is idempotent and refuses stale hashes. 2026-09-24: both pipelines ran live end to end with a mixed Claude/Devin roster, and real Approve and Request-revision decisions were bound to verified receipts, after nine defects were fixed ([acceptance record](../records/reviews/office-live-acceptance-2026-09-24.md)). 2026-09-25 round `findings-rev-2` (head `7a4153c`): planning packets now blind `withheldPaths`; REVISE auto-mints a linked revision request whose brief inherits verified prior-round outputs and the decision note; pipeline cards carry a per-hop Observe/Retry/Cancel table with verified output previews and a named cancel confirmation; pre-launch failures settle FAILED with `lastObservation`; stored agent outputs and pipeline reviews are visible in Artifacts/Reviews. 2026-09-25 packaged acceptance round 3 on the taskbar install: planning + result-analysis pipelines ran live on real userData with dead-spawn retry, transient auto-retry, stranded-receipt reconcile and hash-bound decisions all exercised ([acceptance record](../records/reviews/office-live-acceptance-2026-09-25.md)). 2026-09-25 (same day): REVISE end-to-end, cancel cascade/dialog and withheld-path blinding all exercised live on the packaged install — verified. 2026-09-26 round `findings-rev-4` (head `4c113ad`, packaged acceptance round 4): request-form `analysisOf` no longer silently binds the newest plan — the select defaults to an explicit "None" and the link is emitted only on a real pick; dialog/card controls carry unique accessible names (label-wrapping collision fixed); `request.create` rejects a CANCELED `analysisOf` target; `npm test` bounded to `--test-concurrency=4`; `desktop.mjs` gained `reopen` for rejected slots. 904 tests — 903 pass/0 fail/1 skip; tsc + build clean; packaged check on `App\` (`app.asar` `44091982…`) verified all three behaviors live. Open: the formal C8 S3 run-package/return pilot; hosted-provider execution remains gated; provider effort/tool claims remain unverified beyond what the session result reports. |
 | M-memory workstream (office-mem-1/2) | VERIFIED_LOCAL; external engines NOT_STARTED | Append-only finding/relationship ledgers, per-hop authorized memorySearch and digest mount (plan-synthesis/analysis-finalize only), Memory page graph/search/links, archive export and an evaluation harness with the Office baseline. Merged via PR #8/#9. Memory is office-recorded self-report, not verified fact. 2026-09-24 packaged-app audit: graph overlap, hidden search focus, stale notice and the missing Opus 5.5 option fixed on `fix/memory-page-bugs-20260924`. |
 
 Status vocabulary: NOT_STARTED, IMPLEMENTED_FOUNDATION, IN_PROGRESS, PARTIALLY_VERIFIED_LOCAL, BLOCKED_EXTERNAL, VERIFIED_LOCAL, VERIFIED_HOSTED. PARTIALLY_VERIFIED_LOCAL means some tested code exists but parent acceptance is not met; list exact open subitems. PARTIALLY_IMPLEMENTED means the larger program still has unimplemented contracts/UI/tests. The latter requires actual provider evidence for the exact scope. A local test cannot advance a hosted gate. Keep this table in the same file.
@@ -5753,3 +5753,51 @@ per-file test swarm stalls under leftover IDE/MCP processes on this box; rerunni
 `--test-concurrency=4` completed deterministically.
 Per the sequencing entry, SWE-2 Max may now start C11 LR-0 from merged `main` once this
 round's integration PR lands; the Codex local route remains assigned outside this batch.
+
+**2026-09-26 — packaged live acceptance round 4 (QUICK shapes + restart revisions).**
+On the packaged `findings-rev-3` build (`3781351`/`app.asar` `512025F4…`, which also carries the
+merged PR #13/#14 round-shape work) the packaged UI was driven end to end on real userData:
+QUICK planning ("Write sma5 code") confirmed through the card's Round select minted exactly the
+4-hop quick spec; REVISE with `restartAt: IMPLEMENTATION` minted "— revision 1" carrying the
+decision note verbatim and, on confirm, exactly the 3-hop restart spec (no planner seat); a QUICK
+result-analysis round pre-registered `analysisOf` to the sma5 round minted exactly the 6-hop
+no-cross-response spec. All hops COMPLETED; two real Approve decisions bound to verified receipts;
+the transient OAuth auto-retry and the INTENT-observe freeze fix were exercised live again. No
+functional defects found — details in
+[acceptance record](../records/reviews/office-live-acceptance-2026-09-26.md). Still open: the
+inter-Claude spawn gap has not been observable (no phase launches two Claude hops in the test
+roster), the formal C8 pilot remains user-run, and `npm test` on this box wants
+`--test-concurrency=4`. No worker packet was cut — the findings queue is empty; remaining items
+are external (C8 pilot, R5, custody, plugin installs) or belong to the C11 track.
+
+### 2026-09-26 — findings-rev-4 closed: request-form provenance + unique accessible names
+
+Round `findings-rev-4` (base `10ea21a`, packaged acceptance round-4 findings) integrated both
+CODE packets into `parallel/next-batch-001/organizer`, no merge conflicts:
+- worker-1 `056a037` → merge `1f6057e`: the New-request dialog's pre-registered analysis-plan
+  select now defaults to the explicit "None — the director plans the analysis" option instead
+  of silently binding the newest planning request (a provenance link a user never chose, and
+  immutable after create). `requestCreatePayload` is extracted as a pure tested helper — the
+  link rides the command only when a plan was actually picked. Every dialog and
+  pipeline-card control carries an `aria-label` equal to its visible label, fixing the two
+  live label collisions (`Director`, `Round`) where a wrapping `<label>`'s accessible name
+  absorbed its control's selected option text.
+- worker-2 `84fbc43` → merge `4c113ad`: regression pins on `request.create`'s `analysisOf`
+  guard — a CANCELED plan refuses (exercised through a real `request.cancel`), a
+  non-planning target refuses, `analysisOfRequestId` on a non-RESULT_ANALYSIS workType
+  refuses, and a live same-project plan persists. Mutation-verified against the guard.
+
+Organizer-owned freeze landed pre-round (`311cc1b`, `10ea21a`): `request.create` rejects a
+CANCELED `analysisOf` target (the link could never produce a verified plan receipt);
+`npm test` is bounded to `--test-concurrency=4`; and `tools/desktop.mjs` gained `reopen` —
+a REJECTED worker re-arms with its decision/result files archived
+(`-rejected-<sha>`/`-superseded-<sha>`), codifying the rev-3 manual fix.
+
+Combined verification at integrated head `4c113ad`: 904 tests — 903 pass, 0 fail, 1
+pre-existing conditional skip; `tsc --noEmit` clean; `node scripts/build.mjs` clean.
+Packaged user-level check on the mirrored `App\` build (`app.asar` SHA-256
+`440919823ADF0C11ADA9569C4D0F09BF5265D22B2F94D4A717574BC4F33045D2`, scratch copy of live
+userData): `Director` and `Pre-registered analysis plan` each resolve exactly one control,
+the plan select defaults to the explicit None, saving untouched persists no `analysisOf`,
+an explicit pick persists the id verbatim, and `Round` resolves only `Round shape` selects
+— no restart-point collision remains.
