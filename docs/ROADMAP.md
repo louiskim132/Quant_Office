@@ -1134,8 +1134,8 @@ Status vocabulary: NOT_STARTED, IMPLEMENTED_FOUNDATION, IN_PROGRESS, PARTIALLY_V
 | D0 developer map | VERIFIED_LOCAL documentation | Section 1.3 map/fingerprints and selective-read protocol added after inspecting R0 source/log. |
 | D2 parallel coding setup | VERIFIED_LOCAL tooling; desktop/provider sessions NOT_STARTED | 2026-09-13: the fixed local desktop state machine and detailed Session 1–7/Session 8 manual supplement the general worktree protocol. Four coordination tests pass, including seven simultaneous starts, atomic publication, role/path binding, immutable round hashes, stale review/head refusal, exact-SHA submission, scope enforcement, rejection, integration, close and next-round preservation. The eight prepared local worktrees under `quant-team-sessions/prepared-20260912` were fast-forwarded to setup commit `236ccda4817fcf5320e4ee95389af34bcb92dd46`; setup was run twice, all role/status checks returned the correct clean checkout and `NOT_READY`, and no product round was published. Installing ignored role files does not launch or authenticate a session. The merge policy now authorizes Session 8 to merge only its closed-round integration PR after current-main ancestry, exact-head `verify` success and conversation-resolution checks; direct main pushes and raw-token workarounds remain prohibited. The prior fresh locked install, typecheck, 382/382 application units and build passed in the setup worktree. GitHub main protection requires a strict `verify` check, PR, resolved conversations and admin enforcement, with no force-push/deletion. CI results are on [setup PR #1](https://github.com/louiskim132/Quant_Office/pull/1). Claude Code 2.1.270 reported a signed-in subscription; Codex saved-project path remains the parent folder; Devin browser was signed out and its repository grant/model choice remain unverified. Update 2026-09-14: the desktop workflow has since run two product rounds (list-views-001, ui-refresh-001) in batch prepared-20260912, integrated and merged through PR #2; a fresh batch (next-batch-001) is provisioned on the merged base for the next round. |
 | D1 optional Serena trial | PARTIALLY_IMPLEMENTED, nonblocking | Project-local AGENTS.md and CLAUDE.md pointers plus the Git/worktree policy were added during repository setup on 2026-09-12. The optional Serena comparison and client configuration remain NOT_STARTED; no navigation plugin was installed. |
-| C10 four-plugin office evaluation | IMPLEMENTED_FOUNDATION; plugin integration/comparisons NOT_STARTED | 2026-09-16: section 3.2 and C10 define Serena, Ponytail, Graphify and LightRAG trials, Add Agent/environment/session lifecycle, quality-first same-task comparisons and role-scoped rollout. `app/benchmarks/plugin-evaluation/` contains a synthetic metadata checker, eight example rows, seven documents, two task tracks and an external 16-case grader. No real chart data, plugin installation, provider benchmark or token-saving result. C9 route acceptance remains separate. |
-| Token diet (pipeline token consumption) | VERIFIED_LOCAL on dev + packaged build 2026-09-25; not yet merged | Branch `fix/token-diet-20260925` (base organizer `9356c2e`). Lean Claude/Codex launches, per-hop deliverables, hop-keyed inherited inputs, worker slices, packet essentials + `finish.py`, split contract, pre-registered analysis plan (`analysisOf`), QUICK round shape, implementation-only REVISE, claude launch spacing. Live: quick ema5 round 574k input tokens (was 2.50M), implementation-only revision 345k (was 3.10M), Codex implement 147k (was 374k). App\ `app.asar` `642139F3…`. Next: plugin findings (evidence-surface frames refused, memory capture dropped to 0, C10 plugins not installed) — see section 17 entry of this date. |
+| C10 four-plugin office evaluation | MEASURED_LOCAL 2026-09-25 (CLI A/B, scratch installs); no plugin enabled by default | 2026-09-16: section 3.2 and C10 define the trials and `app/benchmarks/plugin-evaluation/`. 2026-09-25: Serena 1.7.0, Ponytail v4.10.0, Graphify 0.9.68 and LightRAG 1.5.7 (Ollama local) trialled alone and stacked on an office implement packet and a 7-item code-navigation task. No plugin or pair saved tokens beyond run-to-run noise; Serena adds ~8.7k tokens per call and is unused unless hinted; stacking adds context and lowered accuracy; LightRAG local indexing failed (5 of 11 files timed out in 2 h). Recommended set: office memory ledger only. See section 17 entry "plugin trials" of this date. |
+| Token diet (pipeline token consumption) | VERIFIED_LOCAL on dev + packaged build 2026-09-25; not yet merged | Branch `fix/token-diet-20260925` (base organizer `9356c2e`). Lean Claude/Codex launches, per-hop deliverables, hop-keyed inherited inputs, worker slices, packet essentials + `finish.py`, split contract, pre-registered analysis plan (`analysisOf`), QUICK round shape, implementation-only REVISE, claude launch spacing. Live: quick ema5 round 574k input tokens (was 2.50M), implementation-only revision 345k (was 3.10M), Codex implement 147k (was 374k). App\ `app.asar` `642139F3…`. Plugin trials done (C10 row); follow-ups: evidence-surface frame format, memory capture/digest at the brief — see section 17 entries of this date. |
 | OmniRoute routing extension | NOT_STARTED implementation; architecture reviewed 2026-09-11 | Section 3.1 proposes operation-specific model/session/research contracts and an optional bounded free-worker route. Current subscription-only runtime policy remains unchanged; no gateway installation, provider transfer or live compatibility test occurred. Integrate with C2/C4/C7 and retain R5/custody requirements. |
 | R2 | VERIFIED_LOCAL within documented limits | Snapshot/output inventory is shared by backup and restore; both formats restore actual bytes into a new root. OutputService reserves real destinations on prepare/launch and stores versioned verified bytes. Required missing objects refuse backup. Snapshot identity rejects null/wrong request revisions. Remaining constraints: source swap races, recorded-platform Git reconstruction and R5 transport limits. |
 | R3 | VERIFIED_LOCAL | Preserve exact per-operation scope, durable evidence order, independent confinement and frozen account context. No new live capability evidence in this pass. |
@@ -4517,3 +4517,48 @@ digest at the brief (measure whether it pays); C10 A0/AS/AP trial once installs 
 
 Not done: an office-side automatic verify (would execute agent-written code, which the office
 does not do); hosted execution stays BLOCKED_EXTERNAL; no scientific or live-research claim.
+
+### 2026-09-25 — plugin trials (C10) and recommended plugin set
+
+Status: MEASURED_LOCAL; no product code changed. Branch `fix/token-diet-20260925`. Plugins were
+installed into a session scratch folder (off `PATH`, no global Claude/Codex/Devin configuration):
+uv + `serena-agent` 1.7.0 (MCP, `--context claude-code --mode no-onboarding`), Ponytail v4.10.0
+(full-mode rules via `--append-system-prompt-file` for Claude, `.windsurf/rules` with
+`trigger: always_on` for Devin; its hooks were not installed), `graphifyy` 0.9.68 (code graph,
+project `CLAUDE.md` rule + PreToolUse hook, `graphify query`), `lightrag-hku` 1.5.7 server with
+Ollama 0.34.4 (`qwen2.5:7b-instruct`, `nomic-embed-text`). Trials ran the office's own CLI argv
+(isolation flags, packet essentials prompt) on copies of real packets, CLI A/B; n = 2 per arm, and
+run-to-run noise on the same arm is ±20–40 %, so only large effects are detectable.
+
+Results (input tokens incl. cache reads; model and effort per arm):
+- Office memory ledger (through the app, isolated `QRO_USER_DATA_DIR`, `Test dir 1` = Claude
+  Opus 5.5 low, PMs/workers = Devin SWE-2 Max): spontaneous formation is rare (1 finding in 3
+  rounds, 0 in a quick round). Injected findings were used correctly: synthesis applied the
+  current 6-dp rule and ignored a superseded 4-dp note and an irrelevant hypothesis; analysis
+  finalize rejected a 10-dp upload citing memory while the falsify seat (no digest) accepted it.
+  The brief (no digest) planned 10 dp — the digest arrives after the plan is already drafted.
+  Quick rounds mount no digest.
+- Serena: +8.7k tokens of tool schema per call. Unhinted it was never called (0/4 runs); on
+  navigation 370k vs 288k baseline with 6/7 vs 7/7 accuracy. Hinted ("use the Serena tools") it
+  was called 7–9 times, 326k, 7/7 — more tokens for equal accuracy.
+- Ponytail: +1.3–1.9k per call. Implement hop, Claude Sonnet 5 low: 170k/145k baseline vs
+  158k/214k; Devin SWE-2 Max: 341k/326k vs 306k/299k (rule verified loaded). Same 66 LOC, all
+  PASS — office plans already constrain scope, so there is little over-engineering to remove.
+  Navigation 262k vs 288k, 7/7 (within noise).
+- Graphify: graph of 1,711 nodes / 4,912 edges built in seconds without an LLM; +0.5k per call;
+  used spontaneously (2–4 queries); navigation 294k, 6/7 and 7/7.
+- Stacked (navigation, Claude Sonnet 5 low): Serena+Ponytail 297k (Serena unused, 6/7, 7/7);
+  Graphify+Ponytail 242k but 6/7 twice; Serena+Graphify 319k (only Graphify used). Implement hop:
+  Serena+Ponytail 245k/209k, Graphify+Ponytail 214k/162k, plugins unused, all PASS. Stacking
+  adds instruction and schema context; no combination beat the baseline on accuracy.
+- LightRAG: indexing with the local 7B model on this machine (RTX 3060 6 GB) ran ~1 chunk/min
+  (full `app/src` ≈ 7 h); an 11-file subset extracted 5 chunks in 2 h and 5 files failed on
+  LLM timeouts even at 1200 s. No usable index, so query-side savings were not measured.
+  A hosted LLM for indexing would be required, which is outside the local-only boundary.
+
+Recommended plugin set: the office memory ledger only (cheap, and it measurably corrected an
+answer when it reached the right seat). Do not enable Serena, Ponytail, Graphify or LightRAG by
+default, and do not stack them. Graphify is the only one worth re-testing, on a large unfamiliar
+repository where navigation dominates; Serena only with an explicit per-hop tool hint. The token
+diet (lean launches, per-hop deliverables, quick rounds) remains the main lever. Follow-ups:
+evidence-surface frame format; memory capture prompt and digest at the director brief.
