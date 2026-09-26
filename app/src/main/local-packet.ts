@@ -4,18 +4,21 @@ import path from 'node:path';
 import { canonicalHash } from '../core/canonical.js';
 import { parseStrictJson } from '../core/strict-json.js';
 import { efforts } from '../shared/effort.js';
-import { MEMORY_DIGEST_FILE, cancelAckV1Schema, cancelRequestV1Schema, localPacketV2Schema, localResultV2Schema, memoryDigestSchema, type LocalPacketV2, type LocalResultV2, type LocalSessionRecord, type MemoryDigest } from '../shared/local-session.js';
+import { MEMORY_DIGEST_FILE, MEMORY_SEATS, cancelAckV1Schema, cancelRequestV1Schema, localPacketV2Schema, localResultV2Schema, memoryDigestSchema, type LocalPacketV2, type LocalResultV2, type LocalSessionRecord, type MemoryDigest } from '../shared/local-session.js';
 import { mountsEvidenceSurface } from '../shared/tool-profile.js';
 import type { Effort } from '../shared/types.js';
 import { MAX_FILE, MAX_TOTAL, safeEntry } from './artifacts.js';
 import type { SubmitContext } from './controller.js';
 import type { LocalFileIO, VerifiedLocalFile } from './local-session-files.js';
+import { EVIDENCE_ARGS } from './evidence-tool.js';
 
 export const PACKET_FILE = 'packet.json';
 export const RESULT_FILE = 'result.json';
 export const CANCEL_FILE = 'cancel.requested';
 export const CANCEL_ACK_FILE = 'cancel.ack.json';
 export const CONTRACT_FILE = 'CONTRACT.md';
+export const CONTRACT_OPTIONAL_FILE = 'CONTRACT-OPTIONAL.md';
+export const FINISH_FILE = 'finish.py';
 export const AGENTS_FILE = 'AGENTS.md';
 export const CLAUDE_FILE = 'CLAUDE.md';
 export const INPUTS_DIR = 'inputs';
@@ -51,6 +54,11 @@ export interface PreparedLocalPacket {
   dir: string;
   packet: LocalPacketV2;
   packetHash: string;
+  /**
+   * One-line shape summaries of tabular inputs (columns, row count, wide columns), computed from
+   * the verified staged bytes. Prompt context only — never part of packet.json or its hash.
+   */
+  inputSummaries: { path: string; summary: string }[];
 }
 
 export interface PrepareLocalPacketInput {
@@ -65,8 +73,8 @@ export interface PrepareLocalPacketInput {
   now: string;
   /**
    * The caller's store.memoryDigest(projectId) result. It mounts as memory-digest.json only
-   * when the binding's assignment seats memory retrieval — 'plan-synthesis' or
-   * 'analysis-finalize', the exact pipeline keys authorizeMemorySearch authorizes. For every
+   * when the binding's assignment seats memory retrieval — MEMORY_SEATS, the exact pipeline
+   * keys authorizeMemorySearch authorizes. For every
    * other seat the value is ignored: a packet never carries memory its seat cannot read.
    */
   memoryDigest?: Pick<MemoryDigest, 'findings' | 'links'>;
@@ -92,7 +100,9 @@ export const packetAgentsV2 = (): string => [
   '# Quant Research Office session packet',
   '',
   `This directory is a bounded work packet. \`${PACKET_FILE}\` is the frozen assignment and`,
-  `\`${CONTRACT_FILE}\` is the result contract — read it before doing anything else. Declared`,
+  `\`${CONTRACT_FILE}\` is the result contract. If your prompt carries a "Packet essentials"`,
+  'section, it already summarizes both — start from it; otherwise read the contract before',
+  'doing anything else. Declared',
   `input files, when the snapshot carried any, are under \`${INPUTS_DIR}/\`. Put every file`,
   `the receipt declares under \`${OUTPUTS_DIR}/\` and report back by writing \`${RESULT_FILE}\``,
   'in this directory exactly as the contract specifies.',
@@ -109,7 +119,7 @@ export const packetAgentsV2 = (): string => [
 export const packetClaude = (): string => [
   '@AGENTS.md',
   '',
-  `This packet was prepared by Quant Research Office; read \`${CONTRACT_FILE}\` for the result contract before doing anything else.`,
+  `This packet was prepared by Quant Research Office; \`${CONTRACT_FILE}\` is the result contract (a prompt's "Packet essentials" section summarizes it).`,
   '',
 ].join('\n');
 
@@ -127,7 +137,8 @@ export const resultContractV2 = (options?: { evidenceSurface?: boolean; memoryDi
   `it, \`${PACKET_READY_FILE}\` the office's ready marker, and \`${INPUTS_DIR}/\` the declared`,
   `input files. When \`${PACKET_FILE}\` declares an \`inherited\` manifest, those verified`,
   `outputs from earlier work in this request's dependency chain are under`,
-  `\`${INPUTS_DIR}/inherited/<job-id>/\`. Do the bounded work, then write \`${RESULT_FILE}\``,
+  `\`${INPUTS_DIR}/inherited/<hop-key>/\` (for example \`plan-draft-a\`; a revision's prior round is`,
+  `\`prior-<hop-key>\`). Do the bounded work, then write \`${RESULT_FILE}\``,
   'in this directory to report.',
   '',
   `When \`${PACKET_FILE}\` declares a \`toolProfile\`, it names this session's tool`,
@@ -138,19 +149,25 @@ export const resultContractV2 = (options?: { evidenceSurface?: boolean; memoryDi
   'deliverable area, and writing your answer there is required, not a scope violation.',
   ...(options?.evidenceSurface ? [
     '',
-    'This packet mounts the office evidence surface: write `queries/<name>.jsonl` — one',
-    '`{"id":"<label>","op":"queryEvidence|readEvidence|stagePacket|memorySearch","args":{...}}`',
-    'frame per line — then read `answers/<name>.jsonl` for `{id,result}` or `{id,refused}`',
-    'lines. `memorySearch` answers a bounded full-text search over the project\'s office',
-    'memory ledger and the office authorizes it per hop — most seats will be refused. Every',
-    'frame is grant-checked against this session\'s identity before any evidence bytes move.',
+    'This packet mounts the office evidence surface over the project\'s stored evidence objects',
+    '(earlier hops\' outputs are already under `inputs/inherited/` — do not query for them). Write',
+    'a new `queries/<name>.jsonl` in one write — one `{"id":"<label>","op":"<op>","args":{...}}`',
+    'frame per line — and read `answers/<name>.jsonl` once: the office answers within about a',
+    'second with one `{id,result}` or `{id,refused}` line per frame; do not loop on sleep. Args',
+    'per op (`?` marks an optional key; no other keys are accepted):',
+    ...Object.entries(EVIDENCE_ARGS).map(([op, shape]) => `- \`${op}\` ${shape}`),
+    '`queryEvidence` is a literal line match; its hits carry the `objectHash` that `readEvidence`',
+    'takes, and a `nextCursor` continues a page. `memorySearch` searches the project\'s office',
+    'memory ledger and is authorized only at the seats that also receive the memory digest —',
+    'elsewhere it is refused. Every frame is grant-checked against this session\'s identity',
+    'before any evidence bytes move.',
   ] : []),
   ...(options?.memoryDigest ? [
     '',
     `\`${MEMORY_DIGEST_FILE}\` is a bounded, point-in-time projection of the project's office`,
     'memory ledger (findings with superseded flags, proposed/confirmed links); it is',
-    'office-recorded self-report context for synthesis, not verified fact; cite',
-    'evidenceRefs when your findings draw on it.',
+    'office-recorded self-report context, not verified fact: apply what still holds (skip',
+    'superseded entries), and cite evidenceRefs when your findings draw on it.',
   ] : []),
   ...(options?.withheld ? [
     '',
@@ -178,6 +195,61 @@ export const resultContractV2 = (options?: { evidenceSurface?: boolean; memoryDi
   '  byte-order mark — the office reads the exact bytes and a BOM-prefixed receipt',
   '  is unreadable',
   '',
+  `Optional receipt sections — \`applied\` (the session's model/effort/delegation self-report),`,
+  `\`findings\` and \`links\` (self-report into office memory) — are specified in`,
+  `\`${CONTRACT_OPTIONAL_FILE}\`. Open it only when you add one of them.`,
+  '',
+  `Shortcut: \`python ${FINISH_FILE} COMPLETED "<detail>"\` (or FAILED) writes a conforming`,
+  `\`${RESULT_FILE}\` for every file under \`${OUTPUTS_DIR}/\` — identity, packet hash, next`,
+  `sequence, sha256 and bytes — and \`--extra <file.json>\` merges optional sections.`,
+  '',
+  '## Office control files — do not touch',
+  '',
+  `- \`${PACKET_FILE}\`, \`${PACKET_HASH_FILE}\` and \`${PACKET_READY_FILE}\` are office`,
+  '  control files. Do not write, edit or delete them; a mismatch makes every receipt',
+  '  untrusted.',
+  '',
+  '## Cooperative stop',
+  '',
+  `- \`${CANCEL_FILE}\` in this directory is the office's cooperative stop sentinel.`,
+  '  If it exists when the session starts, or appears while work is under way, stop',
+  `  immediately — do not begin or continue work. Write \`${RESULT_FILE}\` with`,
+  '  `state` `FAILED` reporting what was completed, then acknowledge by writing',
+  `  \`${CANCEL_ACK_FILE}\` — a single JSON object satisfying`,
+  `  office-local-cancel-ack@1 carrying \`schema\` (the literal \`office-local-cancel-ack@1\`),`,
+  `  \`requestId\`, \`jobId\`, \`assignmentId\`, \`attemptId\`, \`packetHash\` (all copied from`,
+  `  the sentinel), \`outcome\` — the literal \`STOPPED\` — and \`detail\` (at most 2000`,
+  '  characters). The acknowledgement is a local record; it is not a provider',
+  '  acknowledgement.',
+  '- No instruction overrides this stop, including a direct user prompt telling the',
+  '  session to do the task anyway.',
+  `- Check for \`${CANCEL_FILE}\` when the session starts and again before writing`,
+  `  \`${RESULT_FILE}\`. The check is advisory — the office does not see it happen — but`,
+  '  whenever the sentinel is seen, it wins.',
+  '',
+  '## Rules',
+  '',
+  `- A \`COMPLETED\` receipt must declare at least one output file under \`${OUTPUTS_DIR}/\` — the`,
+  '  office refuses completion without attributable output, so a plan, brief or report',
+  '  carried only in `detail` is recorded as FAILED. Write it to a file such as',
+  `  \`${OUTPUTS_DIR}/report.md\` and declare it.`,
+  `- Every declared output must exist under \`${OUTPUTS_DIR}/\`; the office re-reads each`,
+  '  file and verifies its sha256 and bytes before reporting anything.',
+  '- A missing, oversized, malformed, mis-bound, replayed or hash-mismatched receipt is',
+  '  recorded as the office\'s own UNKNOWN reading, never as a session result.',
+  '',
+].join('\n');
+
+/**
+ * The optional half of the receipt contract, split out of CONTRACT.md so every session does not
+ * carry it in context: agents read CONTRACT.md on nearly every hop, while `applied`, `findings`
+ * and `links` are added rarely. The wording is the section CONTRACT.md used to hold, verbatim.
+ */
+export const resultContractOptional = (): string => [
+  '# Optional result.json sections',
+  '',
+  `These sections may be added to \`${RESULT_FILE}\` alongside the required fields in \`${CONTRACT_FILE}\`.`,
+  '',
   `One optional object may be added: \`applied\` carrying any of \`model\` (a string of at`,
   `most 200 characters), \`effort\` (one of ${efforts.join(', ')}) and \`delegation\` (a`,
   `boolean) — the session's own self-report. Omit it rather than guess; the office never`,
@@ -202,39 +274,78 @@ export const resultContractV2 = (options?: { evidenceSurface?: boolean; memoryDi
   'Entries are self-reported and office-validated at ingest — malformed entries are',
   'skipped, not stored.',
   '',
-  '## Office control files — do not touch',
+].join('\n');
+
+/**
+ * An office-generated receipt writer, byte-identical in every packet (it reads the identity from
+ * packet.json and packet.sha256 at run time). Sessions otherwise spend two or three tool calls —
+ * each re-sending the whole context — hashing outputs, writing result.json and re-reading it.
+ * It is a convenience, not a trust boundary: the receipt is still the session's own claim, and
+ * the office re-verifies every declared output byte-for-byte before believing it.
+ */
+export const finishScript = (): string => [
+  '#!/usr/bin/env python3',
+  '"""Write result.json for this packet: python finish.py COMPLETED|FAILED|RUNNING "detail" [--extra extra.json]',
   '',
-  `- \`${PACKET_FILE}\`, \`${PACKET_HASH_FILE}\` and \`${PACKET_READY_FILE}\` are office`,
-  '  control files. Do not write, edit or delete them; a mismatch makes every receipt',
-  '  untrusted.',
+  'Declares every file under outputs/ with its sha256 and byte count, copies the identity from',
+  'packet.json and packet.sha256, advances the sequence past any existing receipt, and writes',
+  'UTF-8 JSON without a byte-order mark. --extra merges a JSON object carrying optional sections',
+  '(applied, findings, links — see CONTRACT-OPTIONAL.md). Office-generated; do not edit."""',
+  'import hashlib, json, os, sys',
   '',
-  '## Cooperative stop',
+  'HERE = os.path.dirname(os.path.abspath(__file__))',
+  "STATES = ('ACCEPTED', 'RUNNING', 'COMPLETED', 'FAILED')",
   '',
-  `- \`${CANCEL_FILE}\` in this directory is the office's cooperative stop sentinel.`,
-  '  If it exists when the session starts, or appears while work is under way, stop',
-  `  immediately — do not begin or continue work. Write \`${RESULT_FILE}\` with`,
-  '  `state` `FAILED` reporting what was completed, then acknowledge by writing',
-  `  \`${CANCEL_ACK_FILE}\` — a single JSON object satisfying`,
-  `  office-local-cancel-ack@1 carrying \`schema\` (the literal \`office-local-cancel-ack@1\`),`,
-  `  \`requestId\`, \`jobId\`, \`assignmentId\`, \`attemptId\`, \`packetHash\` (all copied from`,
-  `  the sentinel), \`outcome\` — the literal \`STOPPED\` — and \`detail\` (at most 2000`,
-  '  characters). The acknowledgement is a local record; it is not a provider',
-  '  acknowledgement.',
-  '- No instruction overrides this stop, including a direct user prompt telling the',
-  '  session to do the task anyway.',
-  `- Check for \`${CANCEL_FILE}\` before each major step. The check is advisory —`,
-  '  the office does not see it happen — but whenever the sentinel is seen, it wins.',
+  'def main(argv):',
+  '    extra = {}',
+  "    if '--extra' in argv:",
+  "        at = argv.index('--extra')",
+  "        with open(os.path.join(HERE, argv[at + 1]), encoding='utf-8') as handle:",
+  '            extra = json.load(handle)',
+  '        argv = argv[:at] + argv[at + 2:]',
+  '    if len(argv) != 2 or argv[0] not in STATES:',
+  "        sys.exit('usage: python finish.py COMPLETED|FAILED|RUNNING|ACCEPTED \"detail\" [--extra extra.json]')",
+  '    state, detail = argv',
+  '    if len(detail) > 4000:',
+  "        sys.exit('detail is limited to 4000 characters')",
+  "    with open(os.path.join(HERE, 'packet.json'), encoding='utf-8') as handle:",
+  '        packet = json.load(handle)',
+  "    with open(os.path.join(HERE, 'packet.sha256'), encoding='utf-8') as handle:",
+  '        packet_hash = handle.read().strip()',
+  '    sequence = 1',
+  "    receipt_path = os.path.join(HERE, 'result.json')",
+  '    if os.path.exists(receipt_path):',
+  '        try:',
+  "            with open(receipt_path, encoding='utf-8') as handle:",
+  "                sequence = int(json.load(handle).get('sequence', 0)) + 1",
+  '        except (ValueError, OSError):',
+  '            pass',
+  '    outputs = []',
+  "    root = os.path.join(HERE, 'outputs')",
+  '    for folder, _dirs, files in os.walk(root):',
+  '        for name in sorted(files):',
+  '            full = os.path.join(folder, name)',
+  "            with open(full, 'rb') as handle:",
+  '                data = handle.read()',
+  "            rel = os.path.relpath(full, HERE).replace(os.sep, '/')",
+  "            outputs.append({'path': rel, 'sha256': hashlib.sha256(data).hexdigest(), 'bytes': len(data)})",
+  "    outputs.sort(key=lambda item: item['path'])",
+  "    if state == 'COMPLETED' and not outputs:",
+  "        sys.exit('a COMPLETED receipt must declare at least one file under outputs/')",
+  "    receipt = {'schema': 'office-local-result@2', 'jobId': packet['jobId'], 'assignmentId': packet['assignmentId'],",
+  "               'attemptId': packet['attemptId'], 'packetHash': packet_hash, 'sequence': sequence,",
+  "               'state': state, 'detail': detail, 'outputs': outputs}",
+  '    receipt.update({key: value for key, value in extra.items() if key not in receipt})',
+  "    temporary = receipt_path + '.tmp'",
+  "    with open(temporary, 'w', encoding='utf-8', newline='\\n') as handle:",
+  '        json.dump(receipt, handle, indent=2, ensure_ascii=False)',
+  '    os.replace(temporary, receipt_path)',
+  "    print(f'result.json written: {state}, sequence {sequence}, {len(outputs)} output(s)')",
+  '    for item in outputs:',
+  "        print(f\"  {item['path']}  {item['bytes']} bytes  {item['sha256']}\")",
   '',
-  '## Rules',
-  '',
-  `- A \`COMPLETED\` receipt must declare at least one output file under \`${OUTPUTS_DIR}/\` — the`,
-  '  office refuses completion without attributable output, so a plan, brief or report',
-  '  carried only in `detail` is recorded as FAILED. Write it to a file such as',
-  `  \`${OUTPUTS_DIR}/report.md\` and declare it.`,
-  `- Every declared output must exist under \`${OUTPUTS_DIR}/\`; the office re-reads each`,
-  '  file and verifies its sha256 and bytes before reporting anything.',
-  '- A missing, oversized, malformed, mis-bound, replayed or hash-mismatched receipt is',
-  '  recorded as the office\'s own UNKNOWN reading, never as a session result.',
+  "if __name__ == '__main__':",
+  '    main(sys.argv[1:])',
   '',
 ].join('\n');
 
@@ -243,7 +354,7 @@ export const resultContractV2 = (options?: { evidenceSurface?: boolean; memoryDi
  *
  * The destination root is inspected, the fresh session directory allocated only under verified
  * real ancestors, and every packet file — inputs/, the instruction files, memory-digest.json
- * at an authorized synthesis seat, packet.json, packet.sha256 and finally the
+ * at an authorized memory seat, packet.json, packet.sha256 and finally the
  * packet.ready.json marker — is created with writeNew semantics:
  * nothing existing is ever overwritten, and a destination that already carries a receipt, a
  * cancel sentinel or a ready marker refuses preparation outright.
@@ -297,6 +408,7 @@ export function prepareLocalPacket(input: PrepareLocalPacketInput): PreparedLoca
     : [];
   const withheld: NonNullable<LocalPacketV2['withheld']> = [];
   const files: LocalPacketV2['files'] = [];
+  const inputSummaries: PreparedLocalPacket['inputSummaries'] = [];
   for (const file of context.snapshot.files) {
     if (blinded.some(prefix => file.path === prefix || file.path.startsWith(`${prefix}/`))) {
       withheld.push({ path: file.path, sha256: file.sha256, bytes: file.bytes });
@@ -310,14 +422,26 @@ export function prepareLocalPacket(input: PrepareLocalPacketInput): PreparedLoca
     mkdirSync(path.dirname(target), { recursive: true });
     io.writeNew(managed, relativePath, staged.bytes);
     files.push({ path: relativePath, sha256: staged.sha256, bytes: staged.byteLength });
+    const summary = tabularSummary(relativePath, staged.bytes);
+    if (summary) inputSummaries.push({ path: relativePath, summary });
   }
   // Verified predecessor outputs ride as ordinary inputs, under a path that names the producing
-  // job. The bytes are re-hashed against the recorded object identity before anything is written —
+  // hop (or job). The bytes are re-hashed against the recorded object identity before anything is written —
   // a dependent never inherits an output it cannot prove byte-for-byte.
   const inherited: NonNullable<LocalPacketV2['inherited']> = [];
+  // One directory per producing job, named by its hop key when it has one. Two jobs claiming the
+  // same key (never minted by the spec, but not structurally impossible) fall back to the job id.
+  const directoryFor = new Map<string, string>();
+  const claimed = new Set<string>();
+  for (const item of context.inherited ?? []) {
+    if (directoryFor.has(item.sourceJobId)) continue;
+    const name = item.sourceKey && !claimed.has(item.sourceKey) ? item.sourceKey : item.sourceJobId;
+    claimed.add(name);
+    directoryFor.set(item.sourceJobId, name);
+  }
   for (const item of context.inherited ?? []) {
     const rel = item.name.startsWith(`${OUTPUTS_DIR}/`) ? item.name.slice(OUTPUTS_DIR.length + 1) : item.name;
-    const relativePath = `${INPUTS_DIR}/inherited/${item.sourceJobId}/${rel}`;
+    const relativePath = `${INPUTS_DIR}/inherited/${directoryFor.get(item.sourceJobId)}/${rel}`;
     if (!safeEntry(rel) || !safeEntry(relativePath))
       throw new Error(`A predecessor output path is unsafe for inheritance: ${item.name}.`);
     const digest = createHash('sha256').update(item.bytes).digest('hex');
@@ -326,14 +450,14 @@ export function prepareLocalPacket(input: PrepareLocalPacketInput): PreparedLoca
     const target = path.join(managed, relativePath);
     mkdirSync(path.dirname(target), { recursive: true });
     io.writeNew(managed, relativePath, item.bytes);
-    inherited.push({ path: relativePath, sha256: digest, bytes: item.bytes.byteLength, sourceJobId: item.sourceJobId, objectHash: item.objectHash });
+    inherited.push({ path: relativePath, sha256: digest, bytes: item.bytes.byteLength, sourceJobId: item.sourceJobId, objectHash: item.objectHash, ...(item.sourceKey ? { sourceKey: item.sourceKey } : {}) });
   }
   // The bounded ledger digest mounts only at the seats authorizeMemorySearch authorizes —
-  // plan-synthesis and analysis-finalize — and only when the caller supplied the projection.
+  // MEMORY_SEATS — and only when the caller supplied the projection.
   // It is written before packet.json so its hash can be declared on the packet; like every
   // other generated file it is never part of packetHash — the packet identity stays the
   // assignment packet.
-  const digestSeat = context.assignment.pipelineKey === 'plan-synthesis' || context.assignment.pipelineKey === 'analysis-finalize';
+  const digestSeat = MEMORY_SEATS.includes(context.assignment.pipelineKey ?? '');
   let digestDeclaration: LocalPacketV2['memoryDigest'];
   if (digestSeat && input.memoryDigest) {
     const digest = memoryDigestSchema.parse({ schema: 'office-memory-digest@1', generatedAt: now, ...input.memoryDigest });
@@ -343,7 +467,7 @@ export function prepareLocalPacket(input: PrepareLocalPacketInput): PreparedLoca
   }
   // Instruction files are ordinary packet members: written once, declared in the manifest.
   const instructions: LocalPacketV2['instructions'] = [];
-  for (const [name, text] of [[AGENTS_FILE, packetAgentsV2()], [CLAUDE_FILE, packetClaude()], [CONTRACT_FILE, resultContractV2({ evidenceSurface: mountsEvidenceSurface(binding.toolProfile), memoryDigest: digestDeclaration !== undefined, withheld: withheld.length > 0 })]] as const) {
+  for (const [name, text] of [[AGENTS_FILE, packetAgentsV2()], [CLAUDE_FILE, packetClaude()], [CONTRACT_FILE, resultContractV2({ evidenceSurface: mountsEvidenceSurface(binding.toolProfile), memoryDigest: digestDeclaration !== undefined, withheld: withheld.length > 0 })], [CONTRACT_OPTIONAL_FILE, resultContractOptional()], [FINISH_FILE, finishScript()]] as const) {
     const content = Buffer.from(text, 'utf8');
     io.writeNew(managed, name, content);
     instructions.push({ path: name, sha256: createHash('sha256').update(content).digest('hex'), bytes: content.byteLength });
@@ -374,7 +498,122 @@ export function prepareLocalPacket(input: PrepareLocalPacketInput): PreparedLoca
   // The ready marker is written last: a packet without it is unfinished preparation, and a
   // receipt can only be bound once the marker names this attempt and this packet hash.
   io.writeNew(managed, PACKET_READY_FILE, Buffer.from(`${JSON.stringify({ attemptId: binding.attemptId, packetHash }, null, 2)}\n`, 'utf8'));
-  return { dir: managed, packet, packetHash };
+  return { dir: managed, packet, packetHash, inputSummaries };
+}
+
+/** Tabular inputs larger than this are listed without a shape summary. */
+const MAX_SUMMARY_BYTES = 16 * 1024 * 1024;
+/** A first-row cell longer than this is named as wide, so a session knows not to print whole rows. */
+const WIDE_CELL = 120;
+
+/** Splits one delimited line, honoring double-quoted cells (with "" escapes). */
+function splitDelimited(line: string, delimiter: string): string[] {
+  const cells: string[] = [];
+  let cell = '', quoted = false;
+  for (let index = 0; index < line.length; index++) {
+    const char = line[index];
+    if (quoted) {
+      if (char === '"' && line[index + 1] === '"') { cell += '"'; index++; }
+      else if (char === '"') quoted = false;
+      else cell += char;
+    } else if (char === '"') quoted = true;
+    else if (char === delimiter) { cells.push(cell); cell = ''; }
+    else cell += char;
+  }
+  cells.push(cell);
+  return cells;
+}
+
+/**
+ * A one-line shape summary for a .csv/.tsv input: data rows, column names, and any column whose
+ * first-row value is wide. Sessions otherwise `head` the file to learn its shape, and one wide
+ * JSON column turned a 5-line peek into ~6–14k characters of context on every hop that did it.
+ */
+export function tabularSummary(relativePath: string, bytes: Uint8Array): string | null {
+  const delimiter = /\.csv$/i.test(relativePath) ? ',' : /\.tsv$/i.test(relativePath) ? '\t' : null;
+  if (!delimiter || bytes.byteLength > MAX_SUMMARY_BYTES) return null;
+  const text = Buffer.from(bytes).toString('utf8').replace(/^\uFEFF/, '');
+  const lines = text.split(/\r?\n/);
+  while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+  if (!lines.length) return null;
+  const header = splitDelimited(lines[0], delimiter).map(cell => cell.trim());
+  const first = lines.length > 1 ? splitDelimited(lines[1], delimiter) : [];
+  const wide = header
+    .map((name, index) => ({ name, width: first[index]?.length ?? 0 }))
+    .filter(column => column.width > WIDE_CELL)
+    .map(column => `${column.name} (~${column.width} chars)`);
+  const columns = header.length > 40 ? `${header.slice(0, 40).join(', ')}, … (${header.length} columns)` : header.join(', ');
+  // Line count, not a parse: a quoted cell spanning lines makes this an upper bound.
+  return `${lines.length - 1} data row${lines.length === 2 ? '' : 's'} (line count); columns: ${columns}`
+    + (wide.length ? `; wide columns — select columns instead of printing whole rows: ${wide.join(', ')}` : '');
+}
+
+/** Inputs listed by name in the prompt before the list defers to packet.json. */
+const MAX_LISTED_INPUTS = 40;
+
+/**
+ * The one-line memory capture prompt. The essentials block tells sessions not to open the
+ * contract, so without it receipts stopped reporting findings at all; it asks only for durable
+ * project facts, caps the count, and names the exact --extra shape so no contract read is needed.
+ */
+const FINDINGS_PROMPT = `Optional memory: if you learned a durable fact about this project's data or code that a later request should know (a data quirk, a defect, a decision), record up to 3 — write findings.json next to ${FINISH_FILE} (not under ${OUTPUTS_DIR}/) as {"findings":[{"kind":"OBSERVATION","title":"<short fact>","body":"<what, where, and how you know>"}]} (kind: OBSERVATION, DEFECT, DECISION or NOTE) and add \`--extra findings.json\` to the finish command. Skip it when nothing durable was learned.`;
+
+/**
+ * The evidence-surface line of the prompt: the frame shape, one working example and every op's
+ * args, since the prompt tells the session not to open CONTRACT.md. memorySearch is listed only
+ * where it is authorized — the digest seats — so no other seat spends a call on a refusal.
+ */
+const evidencePromptLine = (memorySeat: boolean): string => {
+  const ops = Object.entries(EVIDENCE_ARGS).filter(([op]) => memorySeat || op !== 'memorySearch');
+  return '- queries/ → answers/ — the office evidence surface over stored project evidence (not earlier hops; those are listed above). '
+    + 'Write queries/q1.jsonl in one write, one frame per line, e.g. {"id":"q1","op":"queryEvidence","args":{"pattern":"<literal text>"}}; '
+    + 'then read answers/q1.jsonl once — it is answered within about a second, so do not loop on sleep. '
+    + `Args per op (? = optional, no other keys): ${ops.map(([op, shape]) => `${op} ${shape}`).join('; ')}.`;
+};
+
+/**
+ * The office-generated context appended to a spawned session's prompt. It carries what every
+ * session otherwise spent its first tool calls reading — the receipt identity (including the
+ * packet hash, which is not in packet.json), the staged inputs by path and size, tabular shapes
+ * — and a ready receipt skeleton. It is derived from the written packet after its hash is
+ * fixed, so it never changes packet identity; CONTRACT.md stays the full reference.
+ */
+export function packetPromptBlock(prepared: PreparedLocalPacket, pipelineKey?: string): string {
+  const { packet, packetHash, inputSummaries } = prepared;
+  const summaries = new Map(inputSummaries.map(item => [item.path, item.summary]));
+  const inputs = [...packet.files, ...(packet.inherited ?? [])];
+  const listed = inputs.slice(0, MAX_LISTED_INPUTS).map(file => {
+    const summary = summaries.get(file.path);
+    return `- ${file.path} (${file.bytes} bytes)${summary ? ` — ${summary}` : ''}`;
+  });
+  if (inputs.length > MAX_LISTED_INPUTS) listed.push(`- … and ${inputs.length - MAX_LISTED_INPUTS} more (see ${PACKET_FILE})`);
+  const receipt = JSON.stringify({
+    schema: 'office-local-result@2', jobId: packet.jobId, assignmentId: packet.assignmentId, attemptId: packet.attemptId,
+    packetHash, sequence: 1, state: 'COMPLETED', detail: '<one paragraph: what you did and found>',
+    outputs: [{ path: `${OUTPUTS_DIR}/<file>`, sha256: '<sha256 hex of the file as written>', bytes: 0 }],
+  });
+  const refine = pipelineKey && /^brief-refine-\d+$/.test(pipelineKey)
+    ? [`Deliverable: the revised \`${OUTPUTS_DIR}/brief.md\` reflecting the note above. Do not write code or the request's deliverables.`, '']
+    : [];
+  return [
+    '## Packet essentials (office-generated)',
+    '',
+    ...refine,
+    `This directory is an office-local-session@2 packet. Everything below is already true of it: do not open ${PACKET_FILE}, ${PACKET_HASH_FILE}, ${CONTRACT_FILE} or ${FINISH_FILE} — each read stays in your context for the rest of the session.`,
+    '',
+    `Inputs under ${INPUTS_DIR}/ (earlier hops' verified outputs are under ${INPUTS_DIR}/inherited/<hop-key>/):`,
+    ...(listed.length ? listed : ['- (none)']),
+    ...(packet.withheld?.length ? [`- ${packet.withheld.length} withheld file${packet.withheld.length === 1 ? '' : 's'} (hash-only; do not compute, estimate or request outcome metrics)`] : []),
+    ...(packet.memoryDigest ? [`- ${packet.memoryDigest.path} — office memory digest (${packet.memoryDigest.findings} findings from earlier work on this project; self-report context, not verified fact)${packet.memoryDigest.findings ? ' — read it before you plan and apply what still holds; skip superseded entries' : ''}`] : []),
+    ...(mountsEvidenceSurface(packet.toolProfile) ? [evidencePromptLine(packet.memoryDigest !== undefined)] : []),
+    '',
+    `Finish: put your deliverable files under ${OUTPUTS_DIR}/ (only deliverables — remove scratch files), then run \`python ${FINISH_FILE} COMPLETED "<one paragraph: what you did and found>"\`. It writes ${RESULT_FILE} with every output's sha256 and byte count and prints them — no separate hashing or re-reading needed. Without Python, write ${RESULT_FILE} yourself (UTF-8, no byte-order mark):`,
+    receipt,
+    '',
+    FINDINGS_PROMPT,
+    '',
+    `If ${CANCEL_FILE} exists at the start or before you write ${RESULT_FILE}, stop and follow ${CONTRACT_FILE}. Open ${CONTRACT_FILE} only for that; optional receipt sections (findings, links, applied) are in ${CONTRACT_OPTIONAL_FILE}.`,
+  ].join('\n');
 }
 
 /**

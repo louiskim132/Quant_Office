@@ -1,10 +1,7 @@
 import { createHash } from 'node:crypto';
-import type { Agent, Assignment, Request, Role } from '../shared/types.js';
+import type { Agent, Assignment, Request, Role, PipelineShape } from '../shared/types.js';
 import type { ToolProfile } from '../shared/tool-profile.js';
-import {
-  buildAnalysisRound, buildCommRound, DIRECTOR_TOOL_PROFILE,
-  type CommRoundEntry, type CommRoundPhase, type CommRoundSpec,
-} from './round-template.js';
+import { buildAnalysisRound, buildCommRound, DIRECTOR_TOOL_PROFILE, type CommRoundEntry, type CommRoundPhase, type CommRoundSpec, buildQuickCommRound, buildQuickAnalysisRound, buildRestartRound } from './round-template.js';
 
 /**
  * The comm-round mint (inter-agent pipeline): the pure resolution layer between a pipeline
@@ -77,40 +74,80 @@ function objectiveExcerpt(objective: string): string {
   return text.length <= OBJECTIVE_EXCERPT_MAX ? text : `${text.slice(0, OBJECTIVE_EXCERPT_MAX)}…(truncated — the full objective rides the packet)`;
 }
 
-/** The bounded per-phase instruction a minted entry carries — keyed by the seat's position. */
-function objectiveText(entry: CommRoundEntry, objective: string): string {
+/** Where a predecessor hop's verified outputs are staged in a dependent packet (see local-packet.ts). */
+const inheritedDir = (key: string): string => `inputs/inherited/${key}/`;
+
+/** What the round looks like around one entry — the facts a hop instruction must name. */
+interface RoundShape {
+  /** The number of implement hops the round minted (one per live worker). */
+  workerCount: number;
+  /** The hop the implement hops execute against: 'plan-synthesis', 'analysis-finalize' with the phase-2 mirror, 'plan-draft-a' in a quick round, 'plan-brief' in a restart. */
+  planKey: string;
+  /** A revision that keeps the settled plan and restarts at implementation. */
+  restart: boolean;
+}
+
+/**
+ * The bounded per-phase instruction a minted entry carries — keyed by the seat's position.
+ *
+ * Every instruction names the exact file(s) the hop writes and what it must not do. Without that
+ * line each seat read "Request objective: … Deliverables: a script and a README" as its own
+ * work order, so the brief, both drafts, both critiques, the synthesis, every worker and the
+ * verifier all re-implemented the deliverable (observed 2026-09-25: nine hops writing the same
+ * ema5.py). Inputs are named by the directory the packet stages them under.
+ */
+function objectiveText(entry: CommRoundEntry, objective: string, shape: RoundShape): string {
   const excerpt = objectiveExcerpt(objective);
   const opposite = entry.dependsOnKeys[0];
+  const slices = shape.workerCount > 1;
+  const noDeliverable = "Do not write code or the request's deliverables — later hops do that.";
+  const sliced = (file: string) => slices
+    ? `${file} split into exactly ${shape.workerCount} sections headed "## Slice 1" … "## Slice ${shape.workerCount}" that touch disjoint files (write "EMPTY" under a slice when the work does not split that far)`
+    : file;
   const text = (() => {
     switch (entry.key) {
-      case 'plan-brief': case 'analysis-brief':
-        return `Brief the round: set the work order the declared arms execute against. Request objective: ${excerpt}`;
+      case 'plan-brief':
+        if (shape.restart)
+          return `This revision keeps the approved plan and restarts at implementation. From the prior round's settled plan (inputs/inherited/prior-*/plan.md), its verification and the revision note, write outputs/plan.md — the prior plan amended only where the note or the verification requires — outputs/analysis-plan.md carried forward (changed only if the note changes it), and outputs/brief.md stating what changed and why. ${noDeliverable} Request objective: ${excerpt}`;
+        return `Brief the round: set the work order the declared arms execute against. Write outputs/brief.md — goal, constraints, the exact definitions the result must use, acceptance criteria, and any question the user should answer before planning. ${noDeliverable} Request objective: ${excerpt}`;
+      case 'analysis-brief':
+        return `Brief the round: set the work order the declared arms execute against. Write outputs/brief.md — the questions to answer, the metrics and thresholds that decide them, and the evidence each arm should check. When an inherited analysis-plan.md is present (pre-registered when the plan was synthesized), adopt it as the work order: restate it briefly and name only deliberate deviations. Do not compute results yourself. Request objective: ${excerpt}`;
       case 'plan-draft-a': case 'plan-draft-b':
-        return `Draft the plan for this request from the director's brief. Request objective: ${excerpt}`;
+        if (shape.planKey === entry.key)
+          return `Write the plan the worker executes, from the director's brief (${inheritedDir('plan-brief')}brief.md). This is a quick round: there is no second planner, critique or synthesis, so this plan is final. Write ${sliced('outputs/plan.md — approach, files to create, exact definitions, edge cases and how the result will be checked —')}, and outputs/analysis-plan.md — the pre-registered result analysis: metrics, thresholds, decision rules and what would falsify the result, fixed now before any result exists. ${noDeliverable} Request objective: ${excerpt}`;
+        return `Draft the plan for this request from the director's brief (${inheritedDir('plan-brief')}brief.md). Write outputs/plan.md — approach, files to create, exact definitions, edge cases, and how the result will be checked. ${noDeliverable} Request objective: ${excerpt}`;
       case 'plan-critique-a-on-b': case 'plan-critique-b-on-a':
-        return `Critique only the named opposite artifact ${opposite}. Request objective: ${excerpt}`;
+        return `Critique only the named opposite artifact ${opposite} (${inheritedDir(opposite)}plan.md). Write outputs/critique.md — concrete defects, missing cases and the fix for each. Do not write your own plan or code. Request objective: ${excerpt}`;
       case 'plan-synthesis':
-        return `Arbitrate the two drafts and their critiques into a single plan. Request objective: ${excerpt}`;
+        return `Arbitrate the two drafts and their critiques (${inheritedDir('plan-draft-a')}, ${inheritedDir('plan-draft-b')} and the two critique directories) into a single plan. Write ${sliced('outputs/plan.md — the single plan the workers execute —')}, and outputs/analysis-plan.md — the pre-registered result analysis: metrics, thresholds, decision rules and what would falsify the result, fixed now before any result exists. ${noDeliverable} Request objective: ${excerpt}`;
       case 'analysis-digest':
-        return `Summarize the declared inputs into an evidence brief and name the gaps. Request objective: ${excerpt}`;
+        return `Summarize the declared inputs into an evidence brief and name the gaps, following the director's brief (${inheritedDir('analysis-brief')}brief.md). Write outputs/digest.md. Request objective: ${excerpt}`;
       case 'analysis-interpret':
-        return `Interpret the digest against the request. Request objective: ${excerpt}`;
+        return `Interpret the digest against the request. Write outputs/interpretation.md. Request objective: ${excerpt}`;
       case 'analysis-falsify':
-        return `Falsify the digest's claims wherever the declared inputs do not support them. Request objective: ${excerpt}`;
+        return `Falsify the digest's claims wherever the declared inputs do not support them. Write outputs/falsification.md. Request objective: ${excerpt}`;
       case 'analysis-response-interpret': case 'analysis-response-falsify':
-        return `Respond to the named opposite analysis artifact ${opposite} only. Request objective: ${excerpt}`;
+        return `Respond to the named opposite analysis artifact ${opposite} only (${inheritedDir(opposite)}). Write outputs/response.md. Request objective: ${excerpt}`;
       case 'analysis-finalize':
-        return `Arbitrate the analysis arms into the final assessment. Request objective: ${excerpt}`;
+        return shape.planKey === 'analysis-finalize'
+          ? `Arbitrate the analysis arms into the final plan the workers execute. Write ${sliced('outputs/plan.md')}, and carry forward outputs/analysis-plan.md from ${inheritedDir('plan-synthesis')} with only the changes the arms justified. ${noDeliverable} Request objective: ${excerpt}`
+          : `Arbitrate the analysis arms into the final assessment. Write outputs/assessment.md. Request objective: ${excerpt}`;
       case 'analysis-report':
-        return `Write the bounded report from the finalized analysis. Request objective: ${excerpt}`;
+        return `Write the bounded report from the finalized analysis (${inheritedDir('analysis-finalize')}). Write outputs/report.md. Request objective: ${excerpt}`;
       case 'verify':
-        return `Verify the declared outputs against the contract. Request objective: ${excerpt}`;
+        return `Verify the declared outputs against the contract and the plan. The workers' outputs are under ${inheritedDir('implement-1')}${shape.workerCount > 1 ? ` … ${inheritedDir(`implement-${shape.workerCount}`)}` : ''}. Run them where they are runnable and write outputs/verification.md — pass or fail per acceptance criterion, with the evidence. Do not rewrite the deliverables; report defects instead. Request objective: ${excerpt}`;
       case 'user-gate':
         return `Human gate: present the verified outcome and await the user's decision — no further hops proceed without it. Request objective: ${excerpt}`;
-      default:
-        return entry.key.startsWith('implement-')
-          ? `Implement your assigned slice of the plan within your declared scope. Request objective: ${excerpt}`
-          : `${entry.phase} hop ${entry.key}. Request objective: ${excerpt}`;
+      default: {
+        const slice = /^implement-(\d+)$/.exec(entry.key);
+        if (!slice) return `${entry.phase} hop ${entry.key}. Request objective: ${excerpt}`;
+        const plan = `${inheritedDir(shape.planKey)}plan.md`;
+        if (shape.restart)
+          return `Apply the amended plan ${plan}. The previous round's deliverables are under inputs/inherited/prior-implement-*/ — start from them, change only what the amended plan requires, and write the complete deliverables under outputs/. Request objective: ${excerpt}`;
+        return slices
+          ? `Implement Slice ${slice[1]} of ${plan} exactly, within your declared scope, writing its deliverables under outputs/. If Slice ${slice[1]} is EMPTY, write outputs/slice-${slice[1]}.md saying so and finish without further work. Do not implement other slices. Request objective: ${excerpt}`
+          : `Implement ${plan} exactly, within your declared scope, writing the deliverables under outputs/. Request objective: ${excerpt}`;
+      }
     }
   })();
   return text.length <= REFINE_NOTE_MAX ? text : text.slice(0, REFINE_NOTE_MAX);
@@ -121,6 +158,11 @@ export interface CommRoundMintInput {
   request: Request;
   agents: readonly Agent[];
   existingAssignments: readonly Assignment[];
+  /**
+   * The round shape to mint. Absent: the shape the request recorded at confirm, else FULL. The
+   * confirm gate passes the shape the user is about to confirm, before the store records it.
+   */
+  shape?: PipelineShape;
 }
 
 /**
@@ -130,10 +172,13 @@ export interface CommRoundMintInput {
  */
 export function planCommRoundMint(input: CommRoundMintInput): CommRoundMint {
   const { request, agents, existingAssignments } = input;
+  const roundShape: PipelineShape = input.shape ?? request.pipeline?.shape ?? 'FULL';
+  const quick = roundShape === 'QUICK';
   const kind = request.pipeline?.kind
     ?? (request.workType === 'PLANNING' || request.workType === 'RESULT_ANALYSIS' ? request.workType : null);
   if (!kind)
     return { ok: false, missingRoles: [], detail: `Request ${request.id} carries no pipeline kind — workType ${request.workType} is not a comm-round.` };
+  const restart = request.revisionOf?.restartAt === 'IMPLEMENTATION' && kind === 'PLANNING';
 
   const director = request.leadAgentId ? agents.find(agent => agent.id === request.leadAgentId) : undefined;
   const workers = agents.filter(agent => live(agent) && agent.role === 'WORKER');
@@ -141,12 +186,16 @@ export function planCommRoundMint(input: CommRoundMintInput): CommRoundMint {
   if (!director || !live(director)) missingRoles.push('DIRECTOR');
   let plannerPair: [string, string] | undefined;
   let analystPair: [string, string] | undefined;
-  if (kind === 'PLANNING') {
+  if (kind === 'PLANNING' && restart) {
+    // A restart keeps the settled plan: no planner seat is needed.
+  } else if (kind === 'PLANNING') {
     const plannerA = firstLive(agents, 'PM_A');
     const plannerB = firstLive(agents, 'PM_B');
     if (!plannerA) missingRoles.push('PM_A');
-    if (!plannerB) missingRoles.push('PM_B');
+    // A quick round has a single planner seat — PM_B is not required.
+    if (!plannerB && !quick) missingRoles.push('PM_B');
     if (plannerA && plannerB) plannerPair = [plannerA.id, plannerB.id];
+    else if (plannerA && quick) plannerPair = [plannerA.id, plannerA.id];
   } else {
     const analystC = firstLive(agents, 'PM_C');
     const analystD = firstLive(agents, 'PM_D');
@@ -160,7 +209,15 @@ export function planCommRoundMint(input: CommRoundMintInput): CommRoundMint {
 
   const brief = request.objective;
   let spec: CommRoundSpec;
-  if (kind === 'PLANNING') {
+  if (kind === 'PLANNING' && restart) {
+    spec = buildRestartRound({ projectId: request.projectId, brief, directorAgentId: director!.id, workerAgentId: workers[0]!.id, packetVersion: PACKET_VERSION });
+  } else if (kind === 'PLANNING' && quick) {
+    // The quick round is one planner and one worker — the first live worker fills the seat.
+    spec = buildQuickCommRound({
+      projectId: request.projectId, brief, directorAgentId: director!.id,
+      planner: plannerPair![0], workerAgentId: workers[0]!.id, packetVersion: PACKET_VERSION,
+    });
+  } else if (kind === 'PLANNING') {
     spec = buildCommRound({
       projectId: request.projectId, brief, directorAgentId: director!.id,
       planners: plannerPair!, workerAgentIds: workers.map(agent => agent.id), packetVersion: PACKET_VERSION,
@@ -168,11 +225,13 @@ export function planCommRoundMint(input: CommRoundMintInput): CommRoundMint {
   } else {
     // The analysis spec's digest and report hops are a single seat — the first live worker
     // fills it deterministically; the rest of the roster is unused in this round shape.
-    spec = buildAnalysisRound({
+    spec = (quick ? buildQuickAnalysisRound : buildAnalysisRound)({
       projectId: request.projectId, brief, directorAgentId: director!.id,
       analysts: analystPair!, workerAgentId: workers[0]!.id, packetVersion: PACKET_VERSION,
     });
   }
+  const implementHops = spec.entries.filter(item => item.key.startsWith('implement-'));
+  const shape: RoundShape = { workerCount: implementHops.length, planKey: implementHops[0]?.dependsOnKeys[0] ?? 'plan-synthesis', restart };
   const specHash = createHash('sha256').update(JSON.stringify(spec), 'utf8').digest('hex');
   // Request-scoped: two requests mint the same deterministic spec keys, so a pipelineKey lookup
   // must only ever see this request's own assignments — a foreign key is not this round's mint.
@@ -181,7 +240,7 @@ export function planCommRoundMint(input: CommRoundMintInput): CommRoundMint {
     key: specEntry.key, phase: specEntry.phase, armRole: armRoleFor(specEntry), agentId: specEntry.agentId,
     toolProfile: specEntry.toolProfile, dependsOnKeys: [...specEntry.dependsOnKeys],
     ...(specEntry.inputScope ? { inputScope: specEntry.inputScope } : {}),
-    objectiveText: objectiveText(specEntry, request.objective),
+    objectiveText: objectiveText(specEntry, request.objective, shape),
     ...(minted.has(specEntry.key) ? { assignmentId: minted.get(specEntry.key)! } : {}),
   }));
   return { ok: true, spec, specHash, entries };

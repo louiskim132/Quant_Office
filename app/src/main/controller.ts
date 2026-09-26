@@ -69,10 +69,12 @@ export interface SubmitContext {
   localSession?: LocalSessionRecord;
   /**
    * Verified bytes of completed predecessor outputs, resolved from content-addressed storage by
-   * the controller. A local packet writes them under `inputs/inherited/<sourceJobId>/` and binds
-   * the exact {sourceJobId, objectHash} provenance in its manifest; hosted adapters ignore this.
+   * the controller. A local packet writes them under `inputs/inherited/<sourceKey>/` (the
+   * producing hop's pipeline key, `prior-<key>` across a revision boundary) or, for hops without
+   * one, `inputs/inherited/<sourceJobId>/`, and binds the exact {sourceJobId, objectHash}
+   * provenance in its manifest; hosted adapters ignore this.
    */
-  inherited?: { name: string; bytes: Uint8Array; sourceJobId: string; objectHash: string }[];
+  inherited?: { name: string; bytes: Uint8Array; sourceJobId: string; objectHash: string; sourceKey?: string }[];
   /**
    * The project's bounded memory-ledger projection, populated by the controller for bound local
    * submits. The packet writer alone decides whether it mounts — only the seats
@@ -758,13 +760,17 @@ export class AssignmentController {
     const inherited: NonNullable<SubmitContext['inherited']> = [];
     for (const dependency of assignment.dependsOn ?? []) {
       const job = latestJobFor(state.jobs, dependency);
+      // Name the staged directory after the producing hop so the instruction's artifact names
+      // ('plan-draft-a', 'plan-synthesis') resolve to a path; a prior round's hop is prefixed.
+      const source = state.assignments?.find(item => item.id === dependency);
+      const sourceKey = source?.pipelineKey ? (source.requestId === assignment.requestId ? source.pipelineKey : `prior-${source.pipelineKey}`) : undefined;
       for (const output of job?.outputs ?? []) {
         if (!output.stored) continue;
         if (!this.readObject) throw new Error('This workspace cannot read stored predecessor output for a dependent packet.');
         const bytes = await this.readObject(output.sha256);
         if (createHash('sha256').update(bytes).digest('hex') !== output.sha256)
           throw new Error(`The recorded output ${output.path} could not be read back intact for the dependent packet.`);
-        inherited.push({ name: output.path, bytes, sourceJobId: job!.id, objectHash: output.sha256 });
+        inherited.push({ name: output.path, bytes, sourceJobId: job!.id, objectHash: output.sha256, ...(sourceKey ? { sourceKey } : {}) });
       }
     }
     return inherited;
@@ -797,7 +803,15 @@ export class AssignmentController {
    */
   async reconcileLocalChain(): Promise<AppState> {
     const state = this.store.snapshot({history:false});
-    for (const dependent of (state.assignments ?? []).filter(item => item.dependsOn?.length))
+    // Dependency-free hops (a request's brief is the common one) mint INTENT at start and were
+    // stranded forever if the office died before dispatch — the filter used to require a
+    // recorded predecessor, so no reconcile could ever reach them.
+    const live = (item: Assignment) => {
+      const request = state.requests?.find(r => r.id === item.requestId);
+      return !!request && request.status !== 'CANCELED'
+        && (!request.pipeline || request.pipeline.phase === 'BRIEFING' || request.pipeline.phase === 'LAUNCHED');
+    };
+    for (const dependent of (state.assignments ?? []).filter(item => (item.dependsOn?.length || item.pipelineKey) && live(item)))
       await this.launchChainDependent(state, dependent);
     // Startup reconciliation also seals a launched round whose last hop completed while the
     // office was down — the settle reports a non-terminal round instead of throwing, so a
@@ -1040,6 +1054,11 @@ export class AssignmentController {
     let job = this.job(assignmentId);
     if (isTerminalJob(job.state)) return this.store.snapshot({history:false});
     const adapter = this.adapterFor({ route: job.route });
+    // Undispatched work has nothing to observe: the adapter would only report that no session
+    // exists yet, and writing that as lastObservation manufactures a diagnosis out of nothing —
+    // the exact residue the legacy-binding prefix produced on INTENT hops. The route still
+    // resolves above so an unconfigured route fails closed rather than silently no-oping.
+    if (job.state === 'INTENT' || job.state === 'SUBMITTING') return this.store.snapshot({history:false});
     const result = await adapter.observe(job, undefined, replayReceiptHash ? { receiptHash: replayReceiptHash } : undefined);
     if (result.events?.length) this.store.recordJobEvents(job.id, result.events);
     // The latest verified observation persists on the job itself — the interface reads

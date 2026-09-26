@@ -1,5 +1,5 @@
 import React, {useEffect, useState} from 'react';
-import type {AppState,Command,ProviderJob,Request} from '../shared/types';
+import type {AppState,Command,PipelineShape,ProviderJob,Request} from '../shared/types';
 import {latestJobFor} from '../core/jobs';
 import './pipeline.css';
 import './office.css';
@@ -37,6 +37,10 @@ export function PipelineCard({request,state,busy,onAction}:{request:Request;stat
  const [hopBusy,setHopBusy]=useState('');
  const [hopError,setHopError]=useState('');
  const [confirmCancel,setConfirmCancel]=useState(false);
+ /** The round shape the user confirms: the full debate, or one planner and one worker. */
+ const [shape,setShape]=useState<PipelineShape>('FULL');
+ /** Where a requested revision restarts: a new planning round, or implementation on the approved plan. */
+ const [restartAt,setRestartAt]=useState<'PLANNING'|'IMPLEMENTATION'>('PLANNING');
  const [preview,setPreview]=useState<{path:string;sha256:string;bytes:number;text:string;truncated:boolean}|null>(null);
  const [previewError,setPreviewError]=useState('');
  const archived=!!state.projects.find(item=>item.id===request.projectId)?.archived;
@@ -46,7 +50,7 @@ export function PipelineCard({request,state,busy,onAction}:{request:Request;stat
   if(!pending)return;
   const note=decisionNote.trim();
   if(decision==='REVISE'&&!note)return;
-  onAction({type:'request.pipeline.decide',idempotencyKey:crypto.randomUUID(),requestId:request.id,expectedRevision:request.revision,decision,...(note?{note}:{}),expectedSpecHash:pending.specHash,expectedReceiptHash:pending.headReceiptHash});
+  onAction({type:'request.pipeline.decide',idempotencyKey:crypto.randomUUID(),requestId:request.id,expectedRevision:request.revision,decision,...(note?{note}:{}),...(decision==='REVISE'&&restartAt==='IMPLEMENTATION'?{restartAt}:{}),expectedSpecHash:pending.specHash,expectedReceiptHash:pending.headReceiptHash});
  };
  const hopAction=async(label:string,action:()=>Promise<unknown>)=>{
   setHopBusy(label);setHopError('');
@@ -74,7 +78,8 @@ export function PipelineCard({request,state,busy,onAction}:{request:Request;stat
    :<p className="muted">Loading preview…</p>}
  </div>;
  return <div className="pipeline-card" id={`pipeline-card-${request.id}`} data-open={request.status!=='CANCELED'||undefined} data-started={request.status!=='DRAFT'||undefined}>
-  {request.revisionOf&&<p className="muted">Revision {request.revisionOf.round} of {source?<button type="button" className="text-button" onClick={()=>jumpTo(source.id)}>{source.name}</button>:'the earlier round'}</p>}
+  {request.revisionOf&&<p className="muted">{request.revisionOf.restartAt==='IMPLEMENTATION'?'Implementation-only revision':'Revision'} {request.revisionOf.round} of {source?<button type="button" className="text-button" onClick={()=>jumpTo(source.id)}>{source.name}</button>:'the earlier round'}</p>}
+  {request.analysisOf&&(()=>{const plan=(state.requests??[]).find(item=>item.id===request.analysisOf!.requestId);return <p className="muted">Follows the analysis plan pre-registered by {plan?<button type="button" className="text-button" onClick={()=>jumpTo(plan.id)}>{plan.name}</button>:'an earlier planning request'}</p>;})()}
   {pipeline.phase==='BRIEFING'&&<>
    <p className="muted">Director brief{pipeline.briefAssignmentId?`: ${briefJob?briefJob.state.toLowerCase().replaceAll('_',' '):'hop recorded; no job on record yet'}`:' — not minted yet; start the request to brief the director'}</p>
    {!!notes.length&&<ul className="evidence-list">{notes.map(item=><li key={item.id}>{item.text} <span className="muted">— {new Date(item.createdAt).toLocaleString()}</span></li>)}</ul>}
@@ -84,9 +89,13 @@ export function PipelineCard({request,state,busy,onAction}:{request:Request;stat
     <button className="secondary" disabled={busy||!ready}>Add note</button>
    </form>
    {!ready&&<p className="muted">Notes are recorded once the request is started.</p>}
-   <button className="primary" disabled={busy||!ready||briefJob?.state!=='COMPLETED'} title={briefJob?.state==='COMPLETED'?'':'Available once the director brief completes'} onClick={()=>onAction({type:'request.pipeline.confirm',idempotencyKey:crypto.randomUUID(),requestId:request.id,expectedRevision:request.revision})}>{briefJob?.state==='COMPLETED'?'Confirm brief & launch':'Launch pipeline'}</button>
+   {request.revisionOf?.restartAt==='IMPLEMENTATION'?<p className="muted">This revision keeps the approved plan: the director amends it, one worker re-applies it, and the director verifies.</p>:<label className="field">Round<select value={shape} disabled={busy||!ready} onChange={e=>setShape(e.target.value as PipelineShape)}>
+    <option value="FULL">{pipeline.kind==='PLANNING'?'Full — two planners, critique, synthesis':'Full — with cross-responses'}</option>
+    <option value="QUICK">{pipeline.kind==='PLANNING'?'Quick — one planner, one worker':'Quick — no cross-responses'}</option>
+   </select></label>}
+   <button className="primary" disabled={busy||!ready||briefJob?.state!=='COMPLETED'} title={briefJob?.state==='COMPLETED'?'':'Available once the director brief completes'} onClick={()=>onAction({type:'request.pipeline.confirm',idempotencyKey:crypto.randomUUID(),requestId:request.id,expectedRevision:request.revision,shape})}>{briefJob?.state==='COMPLETED'?'Confirm brief & launch':'Launch pipeline'}</button>
   </>}
-  {(pipeline.phase==='LAUNCHED'||pipeline.phase==='AWAITING_DECISION')&&<p className="muted">{`Launched${hops.length?` — ${hops.length} minted hop${hops.length===1?'':'s'}`:' — no minted hops on record yet'}`}</p>}
+  {(pipeline.phase==='LAUNCHED'||pipeline.phase==='AWAITING_DECISION')&&<p className="muted">{`Launched${pipeline.shape==='QUICK'?' as a quick round':''}${hops.length?` — ${hops.length} minted hop${hops.length===1?'':'s'}`:' — no minted hops on record yet'}`}</p>}
   {!!hops.length&&<table className="pipeline-hops">
    <thead><tr><th>Hop</th><th>Agent</th><th>Latest job</th><th>Elapsed</th><th>Last reason</th><th aria-label="Actions"/></tr></thead>
    <tbody>{hops.map(hop=>{
@@ -111,6 +120,10 @@ export function PipelineCard({request,state,busy,onAction}:{request:Request;stat
     {!!headJob?.outputs.length&&<ul className="evidence-list">{headJob.outputs.map(output=>{const artifact=state.artifacts.find(item=>item.sha256===output.sha256);return <li key={output.path+output.sha256}>{output.path} · {output.bytes} bytes · sha256 {output.sha256.slice(0,16)}…{artifact?` · stored as ${artifact.name}`:output.stored?' · stored':''}</li>;})}</ul>}
     {previewBlock('office-verified bytes')}
     <label className="field">Decision note<textarea value={decisionNote} onChange={e=>setDecisionNote(e.target.value)} maxLength={4000} placeholder="Required to request a revision; optional otherwise" disabled={busy||!ready}/></label>
+    {pipeline.kind==='PLANNING'&&<label className="field">A revision restarts at<select value={restartAt} disabled={busy||!ready} onChange={e=>setRestartAt(e.target.value as 'PLANNING'|'IMPLEMENTATION')}>
+     <option value="PLANNING">Planning — a new round</option>
+     <option value="IMPLEMENTATION">Implementation — keep the approved plan</option>
+    </select></label>}
     <div className="button-row">
      <button className="primary" disabled={busy||!ready} onClick={()=>decide('APPROVE')}>Approve</button>
      <button className="secondary" disabled={busy||!ready||!decisionNote.trim()} onClick={()=>decide('REVISE')}>Request revision</button>

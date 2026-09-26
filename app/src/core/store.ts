@@ -30,6 +30,7 @@ import { resolve, isAbsolute } from 'node:path';
 import { DatabaseSync, backup as sqliteBackup } from 'node:sqlite';
 import { z } from 'zod';
 import { independenceClaimBlocker } from '../shared/cooperation.js';
+import { MEMORY_SEATS } from '../shared/local-session.js';
 import { requestJobs, UNRESOLVED } from '../shared/queue.js';
 import type { AccountConnection, ProviderCapabilitySnapshot, ProjectLocation, InputSnapshot, Assignment, ProviderJob, JobEvent, JobEvidence, JobState, Team, TeamMembership, Message, ReviewDecision, RequestGrant, ProbeAttempt, ResearchBranch, FrozenResearchSpec, PredictionRecord, TrialLedgerEntry, StageAttempt, GateReceipt, FunctionAssignment, SealedReviewReport, Agent, AgentLog, WorkLog, Effort, AppState, Artifact, Command, Experiment, LineageEvent, Project, ResearchContract, ResearchTask, Request, Settings, MemoryFinding, MemoryRelationship, MemoryGraph, FindingEvidenceRef, FindingKind, RelationshipStatus } from '../shared/types.js';
 import { canonical, canonicalHash, sha256 } from './canonical.js';
@@ -69,11 +70,12 @@ const findingKindSchema=z.enum(['OBSERVATION','HYPOTHESIS','RESULT','DEFECT','DE
 const relationshipKindSchema=z.enum(['SUPPORTS','CONTRADICTS','RELATES','DUPLICATES','REFINES']);
 const findingRefSchema=z.object({kind:z.enum(['OBJECT','ASSIGNMENT','JOB','REQUEST','FINDING']),id:z.string().min(1).max(200)}).strict();
 export const commandSchema = z.discriminatedUnion('type', [
-  z.object({...common,type:z.literal('request.create'),projectId:id,name:title,hypothesis:z.string().trim().min(1).max(12000),workType:z.enum(['QUESTION','ANALYSIS','IMPLEMENTATION','CODE_REVIEW','EXPERIMENT','PLANNING','RESULT_ANALYSIS','OTHER']).optional(),mode:z.enum(['SINGLE','GROUP','TEAM']).optional(),leadAgentId:id.nullable().optional(),participantIds:z.array(id).optional(),acceptanceCriteria:text(12000).optional()}).strict(),
+  z.object({...common,type:z.literal('request.create'),projectId:id,name:title,hypothesis:z.string().trim().min(1).max(12000),workType:z.enum(['QUESTION','ANALYSIS','IMPLEMENTATION','CODE_REVIEW','EXPERIMENT','PLANNING','RESULT_ANALYSIS','OTHER']).optional(),mode:z.enum(['SINGLE','GROUP','TEAM']).optional(),leadAgentId:id.nullable().optional(),participantIds:z.array(id).optional(),acceptanceCriteria:text(12000).optional(),analysisOfRequestId:id.optional()}).strict(),
   z.object({...common,type:z.literal('request.update'),requestId:id,expectedRevision:z.number().int().nonnegative(),objective:z.string().trim().min(1).max(12000),leadAgentId:id.nullable(),participantIds:z.array(id),acceptanceCriteria:text(12000)}).strict(),
-  ...(['request.start','request.cancel','request.duplicate','request.pipeline.confirm'] as const).map(type=>z.object({...common,type:z.literal(type),requestId:id,expectedRevision:z.number().int().nonnegative()}).strict()),
+  ...(['request.start','request.cancel','request.duplicate'] as const).map(type=>z.object({...common,type:z.literal(type),requestId:id,expectedRevision:z.number().int().nonnegative()}).strict()),
+  z.object({...common,type:z.literal('request.pipeline.confirm'),requestId:id,expectedRevision:z.number().int().nonnegative(),shape:z.enum(['FULL','QUICK']).optional(),specHash:hash.optional()}).strict(),
   z.object({...common,type:z.literal('request.pipeline.note'),requestId:id,expectedRevision:z.number().int().nonnegative(),text:z.string().trim().min(1).max(4000)}).strict(),
-  z.object({...common,type:z.literal('request.pipeline.decide'),requestId:id,expectedRevision:z.number().int().nonnegative(),decision:z.enum(['APPROVE','REVISE','REJECT']),note:z.string().trim().max(4000).optional(),expectedSpecHash:hash,expectedReceiptHash:hash}).strict(),
+  z.object({...common,type:z.literal('request.pipeline.decide'),requestId:id,expectedRevision:z.number().int().nonnegative(),decision:z.enum(['APPROVE','REVISE','REJECT']),note:z.string().trim().max(4000).optional(),restartAt:z.literal('IMPLEMENTATION').optional(),expectedSpecHash:hash,expectedReceiptHash:hash}).strict(),
   z.object({...common,type:z.literal('request.pipeline.retryHop'),requestId:id,expectedRevision:z.number().int().nonnegative(),pipelineKey:z.string().trim().min(1).max(80)}).strict(),
   z.object({...common,type:z.literal('memory.finding.note'),projectId:id,requestId:id.nullable().optional(),kind:findingKindSchema,title:title,body:text(4000),evidenceRefs:z.array(findingRefSchema).max(32).optional(),supersedesFindingId:id.optional()}).strict(),
   z.object({...common,type:z.literal('memory.relationship.settle'),relationshipId:id,status:z.enum(['CONFIRMED','REFUTED'])}).strict(),
@@ -127,12 +129,13 @@ export const agentDraftSchema = z.object({ name: title, provider: z.enum(['opena
 const agentSchema = agentDraftSchema.extend({revision:z.number().int().nonnegative().optional(),removedAt:timestamp.optional(),deletedAt:timestamp.optional(),id, account: title, setupAccount: title.optional(), createdAt: timestamp, connectionVerifiedAt: timestamp, connectionId:id.optional(), bindingVerifiedAt:timestamp.optional(), execution: z.enum(['HOSTED_SETUP_REQUIRED','LOCAL']).default('HOSTED_SETUP_REQUIRED')}).strict();
 const logSchema=z.object({id,conversationId:z.string().min(1).max(200),from:z.string().min(1).max(100),to:z.string().min(1).max(100),kind:z.enum(['MESSAGE','TOOL','STATUS']),text:text(64000),timestamp,sourceHash:hash,externalId:z.string().min(1).max(200),provenance:z.literal('USER_IMPORTED')}).strict();
 const requestSchema=z.object({migratedFromTaskId:id.optional(),teamId:id.optional(),roleSlots:z.array(z.object({role,count:z.number().int().min(1).max(64)}).strict()).max(16).optional(),id,projectId:id,experimentId:id.nullable(),name:title,objective:text(12000),workType:z.enum(['QUESTION','ANALYSIS','IMPLEMENTATION','CODE_REVIEW','EXPERIMENT','PLANNING','RESULT_ANALYSIS','OTHER']),mode:z.enum(['SINGLE','GROUP','TEAM']),leadAgentId:id.nullable(),participantIds:z.array(id),acceptanceCriteria:text(12000),revision:z.number().int().nonnegative(),status:z.enum(['DRAFT','READY','CANCELED']),removedAt:timestamp.optional(),blockers:z.array(z.object({code:text(100),message:text(1000),action:text(200)}).strict()),delegation:z.boolean(),createdAt:timestamp,updatedAt:timestamp,sourceRequestId:id.optional(),
-  pipeline:z.object({kind:z.enum(['PLANNING','RESULT_ANALYSIS']),specHash:hash.nullable(),phase:z.enum(['BRIEFING','LAUNCHED','AWAITING_DECISION','DECIDED']),briefAssignmentId:id.nullable(),
+  pipeline:z.object({kind:z.enum(['PLANNING','RESULT_ANALYSIS']),shape:z.enum(['FULL','QUICK']).optional(),specHash:hash.nullable(),phase:z.enum(['BRIEFING','LAUNCHED','AWAITING_DECISION','DECIDED']),briefAssignmentId:id.nullable(),
     notice:text(1000).optional(),
     pendingDecision:z.object({specHash:hash,headAssignmentId:id,headReceiptHash:hash}).strict().optional(),
     decision:z.object({decision:z.enum(['APPROVE','REVISE','REJECT']),note:text(4000).nullable(),specHash:hash,headReceiptHash:hash,decidedAt:timestamp}).strict().optional()}).strict().optional(),
   pipelineNotes:z.array(z.object({id,text:text(4000),createdAt:timestamp}).strict()).max(64).optional(),
-  revisionOf:z.object({requestId:id,decisionAt:timestamp,round:z.number().int().min(1)}).strict().optional()}).strict();
+  revisionOf:z.object({requestId:id,decisionAt:timestamp,round:z.number().int().min(1),restartAt:z.literal('IMPLEMENTATION').optional()}).strict().optional(),
+  analysisOf:z.object({requestId:id}).strict().optional()}).strict();
 const memoryAuthorSchema=z.object({surface:z.enum(['AGENT_SESSION','OFFICE','USER']),agentId:id.optional(),receiptHash:hash.optional()}).strict();
 const providerEnum=z.enum(['openai','claude','devin']);
 /** Defence in depth: durable records must never carry provider secrets, even in free-text fields. */
@@ -1595,12 +1598,16 @@ export class OfficeStore {
             if(!request.pipeline.briefAssignmentId)throw new Error('No director brief hop exists yet — start the request first.');
             const briefJob=latestJobFor(state.jobs,request.pipeline!.briefAssignmentId);
             if(!briefJob||briefJob.state!=='COMPLETED')throw new Error('The director brief has not completed — the shaped brief must exist before the pipeline launches.');
-            reason='Pipeline confirmed; the office mints the remaining hops';
+            reason=`Pipeline confirmed as a ${command.type==='request.pipeline.confirm'&&command.shape==='QUICK'?'quick':'full'} round; the office mints the remaining hops`;
           }else reason='Pipeline re-confirmed; the office retries any unminted hops';
           // Re-confirm on a launched pipeline is the mint-retry path: the record is unchanged,
           // the revision bump gives the renderer a fresh expectedRevision, and the office's
           // post-command mint skips already-minted hops by pipelineKey.
-          changes.push({collection:'requests',value:{...request,pipeline:{...request.pipeline,phase:'LAUNCHED'},revision:request.revision+1,updatedAt:now}});
+          // The first confirm records the round shape and the hash of the spec the office will mint;
+          // a re-confirm keeps both — the round being retried is the one already launched.
+          const confirmed=command.type==='request.pipeline.confirm'&&request.pipeline.phase==='BRIEFING'
+            ?{shape:command.shape??'FULL' as const,...(command.specHash?{specHash:command.specHash}:{})}:{};
+          changes.push({collection:'requests',value:{...request,pipeline:{...request.pipeline,...confirmed,phase:'LAUNCHED'},revision:request.revision+1,updatedAt:now}});
           break;
         }
         case 'request.pipeline.decide': {
@@ -1619,6 +1626,7 @@ export class OfficeStore {
             throw new Error(`A ${prior.decision.toLowerCase()} decision is already recorded against this round — the record is append-only.`);
           }
           if(pipeline.phase!=='AWAITING_DECISION'||!pending)throw new Error('This pipeline is not awaiting a decision — the terminal hop must verify first.');
+          if(command.restartAt&&(command.decision!=='REVISE'||pipeline.kind!=='PLANNING'))throw new Error('Only a planning revision can restart at implementation.');
           // Staleness gate: the decision must name the exact spec and verified report receipt
           // the UI displayed. Anything else approved nothing.
           if(command.expectedSpecHash!==pending.specHash||command.expectedReceiptHash!==pending.headReceiptHash)
@@ -1640,7 +1648,8 @@ export class OfficeStore {
               acceptanceCriteria:request.acceptanceCriteria,revision:0,status:'DRAFT',blockers:[],
               delegation:request.delegation,createdAt:now,updatedAt:now,
               pipeline:{kind:pipeline.kind,specHash:null,phase:'BRIEFING' as const,briefAssignmentId:null},
-              revisionOf:{requestId:request.id,decisionAt:now,round}};
+              revisionOf:{requestId:request.id,decisionAt:now,round,...(command.restartAt?{restartAt:command.restartAt}:{})},
+              ...(request.analysisOf?{analysisOf:request.analysisOf}:{})};
             changes.push({collection:'requests',value:revision});
             reason=`Revision ${round} request minted for "${request.name}", linked to the verified report receipt`;
           }
@@ -2001,8 +2010,14 @@ export class OfficeStore {
             for(const id of [leadAgentId,...participantIds].filter(Boolean))if(!state.agents?.some(a=>a.id===id&&!a.removedAt))throw new Error('Choose an active agent');
             experimentId=command.workType==='EXPERIMENT'?randomUUID():null;
             const pipelineKind=command.workType==='PLANNING'||command.workType==='RESULT_ANALYSIS'?command.workType:null;
+            if(command.analysisOfRequestId){
+              if(command.workType!=='RESULT_ANALYSIS')throw new Error('Only a result-analysis request can follow a planning request\'s pre-registered analysis plan');
+              const plan=state.requests?.find(item=>item.id===command.analysisOfRequestId);
+              if(!plan||plan.removedAt||plan.projectId!==projectId||plan.pipeline?.kind!=='PLANNING')throw new Error('Choose a planning request in this project');
+            }
             const request:Request={id:randomUUID(),projectId,experimentId,name:command.name,objective:command.hypothesis,workType:command.workType,mode,leadAgentId,participantIds,acceptanceCriteria:command.acceptanceCriteria??'',revision:0,status:'DRAFT',blockers:[],delegation:mode!=='SINGLE',createdAt:now,updatedAt:now,
-              ...(pipelineKind?{pipeline:{kind:pipelineKind,specHash:null,phase:'BRIEFING' as const,briefAssignmentId:null}}:{})};
+              ...(pipelineKind?{pipeline:{kind:pipelineKind,specHash:null,phase:'BRIEFING' as const,briefAssignmentId:null}}:{}),
+              ...(command.analysisOfRequestId?{analysisOf:{requestId:command.analysisOfRequestId}}:{})};
             changes.push({collection:'requests',value:request});
             if(experimentId)changes.push({collection:'experiments',value:{id:experimentId,projectId,name:command.name,hypothesis:command.hypothesis,stage:'DRAFT',revision:0,contract:{...emptyContract(),objective:command.hypothesis},createdAt:now,updatedAt:now}});
             reason='Saved draft request; no work queued';break;
@@ -2671,7 +2686,7 @@ export class OfficeStore {
    * The bounded digest a synthesis packet may mount — the ledger projected at call time,
    * deterministic ordering (createdAt, then id), superseded findings included but marked so
    * the seat reads corrections rather than stale claims. Mounted only where retrieval is
-   * already authorized — plan-synthesis and analysis-finalize.
+   * already authorized — the MEMORY_SEATS (plan-brief, plan-synthesis, analysis-finalize).
    */
   memoryDigest(projectId:string):Pick<import('../shared/local-session.js').MemoryDigest,'findings'|'links'> {
     id.parse(projectId);
@@ -2698,7 +2713,8 @@ export class OfficeStore {
   }
   /**
    * Whether the given assignment's caller may run memory.search — retrieval is director-only
-   * and only at the synthesis/finalize hop of a pipeline round. Every other seat, every other
+   * and only at the MEMORY_SEATS hops of a pipeline round (planning brief, planning synthesis,
+   * analysis finalize). Every other seat, every other
    * phase and every non-pipeline assignment is refused: memory never silently enters an
    * independent research-review arm's context.
    */
@@ -2708,10 +2724,9 @@ export class OfficeStore {
     if(!assignment)return{ok:false,reason:'The caller names no known assignment.'};
     const key=assignment.pipelineKey;
     if(!key)return{ok:false,reason:'Memory retrieval is reserved for pipeline synthesis hops — a manual assignment carries no search authorization.'};
-    const authorized=key==='plan-synthesis'||key==='analysis-finalize';
-    return authorized
+    return MEMORY_SEATS.includes(key)
       ?{ok:true}
-      :{ok:false,reason:`The '${key}' hop is not the director's synthesis seat — memory retrieval is bounded to plan-synthesis and analysis-finalize.`};
+      :{ok:false,reason:`The '${key}' hop is not a director memory seat — memory retrieval is bounded to ${MEMORY_SEATS.join(', ')}.`};
   }
   /** Applies one job transition through the shared reducer. The renderer can never call this. */
   recordJobTransition(input:{jobId:string;expectedRevision:number;to:JobState;evidence:JobEvidence;detail:string;externalId?:string;externalUrl?:string;outputs?:{path:string;sha256:string;bytes:number}[];at?:string}):AppState {

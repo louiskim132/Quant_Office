@@ -10,11 +10,15 @@ import { buildProviderPayload, NotLaunchedError, type SubmitContext } from '../s
 import { LocalCliExecAdapter, type CliSpawn, type CliSpawnOptions } from '../src/main/local-cli-exec';
 import { CONTRACT_FILE, PACKET_FILE, RESULT_FILE } from '../src/main/local-packet';
 import { PACKET_HASH_FILE, PACKET_READY_FILE } from '../src/main/local-packet';
+import { CLAUDE_DEFAULT_TOOLS, CLAUDE_ISOLATION_FLAGS, CODEX_DISABLED_FEATURES } from '../src/main/tool-flags';
+const CODEX_LEAN = ['-c', 'mcp_servers={}', ...[...CODEX_DISABLED_FEATURES, 'multi_agent'].flatMap(feature => ['--disable', feature])];
 import type { LocalSessionRecord } from '../src/shared/local-session';
 import type { Assignment, Effort, InputSnapshot, Provider, ProviderJob } from '../src/shared/types';
 
 const at = (minutes: number) => new Date(Date.UTC(2026, 8, 8, 10, 0, 0) + minutes * 60000).toISOString();
 const sha = (text: string) => createHash('sha256').update(text).digest('hex');
+const ESSENTIALS = '\n\n## Packet essentials (office-generated)';
+const CLAUDE_TAIL = [...CLAUDE_ISOLATION_FLAGS, '--tools', CLAUDE_DEFAULT_TOOLS.join(',')];
 const PROMPT_SUFFIX = 'This directory is an office-local-session@2 packet: read packet.json and CONTRACT.md, place declared outputs under outputs/, then write result.json exactly as CONTRACT.md specifies.';
 
 /** A scripted child process — emits output, records kills, exits on command. Never a real spawn. */
@@ -159,9 +163,12 @@ test('submit writes a real v2 packet and spawns the claude command with cwd insi
   assert.deepEqual(JSON.parse(readFileSync(path.join(f.dir, PACKET_READY_FILE), 'utf8')), { attemptId: f.binding.attemptId, packetHash: result.localPacket!.packetHash });
   assert.equal(f.calls.length, 1);
   const call = f.calls[0];
-  const prompt = `${f.context.payload.text}\n\n${PROMPT_SUFFIX}`;
+  const prompt = call.args[1];
+  assert.ok(prompt.startsWith(`${f.context.payload.text}${ESSENTIALS}`), 'the frozen payload rides first, then the office-generated packet essentials');
+  assert.ok(prompt.includes(`"packetHash":"${result.localPacket!.packetHash}"`), 'the receipt skeleton carries the packet hash, which packet.json does not');
+  assert.ok(prompt.includes(`"attemptId":"${f.binding.attemptId}"`));
   assert.equal(call.executable, 'claude.exe');
-  assert.deepEqual(call.args, ['-p', prompt, '--output-format', 'json', '--dangerously-skip-permissions', '--model', 'fixture-model']);
+  assert.deepEqual(call.args, ['-p', prompt, '--output-format', 'json', '--dangerously-skip-permissions', '--model', 'fixture-model', ...CLAUDE_TAIL]);
   assert.equal(call.options.cwd, f.dir, 'the spawn cwd is the packet directory — authoritative over any -C flag');
   assert.equal(call.options.env.TEST_ENV, 'scrubbed-subscription-env', 'the injected environment is used, never ambient');
   assert.equal(call.options.windowsHide, true);
@@ -172,14 +179,16 @@ test('submit writes a real v2 packet and spawns the claude command with cwd insi
 test('codex and devin commands match the probed table verbatim', async t => {
   const codex = fixture(t, { provider: 'openai' });
   await submitted(codex);
-  const codexPrompt = `${codex.context.payload.text}\n\n${PROMPT_SUFFIX}`;
+  const codexPrompt = codex.calls[0].args.at(-1)!;
+  assert.ok(codexPrompt.startsWith(`${codex.context.payload.text}${ESSENTIALS}`));
   assert.equal(codex.calls[0].executable, 'codex.exe');
-  assert.deepEqual(codex.calls[0].args, ['exec', '-s', 'workspace-write', '--skip-git-repo-check', '-m', 'fixture-model', codexPrompt]);
+  assert.deepEqual(codex.calls[0].args, ['exec', '-s', 'workspace-write', '--skip-git-repo-check', '-m', 'fixture-model', ...CODEX_LEAN, codexPrompt]);
   assert.equal(codex.calls[0].options.cwd, codex.dir);
 
   const devin = fixture(t, { provider: 'devin' });
   await submitted(devin);
-  const devinPrompt = `${devin.context.payload.text}\n\n${PROMPT_SUFFIX}`;
+  const devinPrompt = devin.calls[0].args[1];
+  assert.ok(devinPrompt.startsWith(`${devin.context.payload.text}${ESSENTIALS}`));
   assert.equal(devin.calls[0].executable, 'devin.exe');
   assert.deepEqual(devin.calls[0].args, ['-p', devinPrompt, '--model', 'fixture-model', '--respect-workspace-trust', 'false', '--permission-mode', 'dangerous']);
 });
@@ -187,7 +196,8 @@ test('codex and devin commands match the probed table verbatim', async t => {
 test('effort maps only where the CLI documents a flag; unmapped effort is recorded, not dropped', async t => {
   const claude = fixture(t, { provider: 'claude', effort: 'high' });
   await submitted(claude);
-  assert.deepEqual(claude.calls[0].args.slice(-2), ['--effort', 'high'], 'claude --effort is documented and emitted');
+  const effortAt = claude.calls[0].args.indexOf('--effort');
+  assert.deepEqual(claude.calls[0].args.slice(effortAt, effortAt + 2), ['--effort', 'high'], 'claude --effort is documented and emitted');
 
   const unmapped = fixture(t, { provider: 'claude', effort: 'minimal' });
   await submitted(unmapped);
@@ -197,9 +207,9 @@ test('effort maps only where the CLI documents a flag; unmapped effort is record
 
   const codex = fixture(t, { provider: 'openai', effort: 'high' });
   await submitted(codex);
-  assert.ok(!codex.calls[0].args.includes('high'), 'codex exec documents no effort flag');
+  assert.ok(codex.calls[0].args.includes('model_reasoning_effort=high'), 'codex effort rides -c model_reasoning_effort');
   const codexEvidence = codex.adapter.submitEvidence(codex.context, { externalId: 'exec-session', externalUrl: '', detail: '', localPacket: { packetHash: 'x' } });
-  assert.match(codexEvidence.find(e => e.operation === 'LOCAL_SUBMIT')!.detail, /"unmappedEffort":"high"/);
+  assert.match(codexEvidence.find(e => e.operation === 'LOCAL_SUBMIT')!.detail, /"effortFlag":"-c model_reasoning_effort=high","unmappedEffort":null/);
   assert.match(codexEvidence.find(e => e.operation === 'LOCAL_SUBMIT')!.detail, /"requestedEffort":"high"/, 'the requested effort is still on record');
 });
 
@@ -216,7 +226,7 @@ test('submitEvidence carries the launch record — pid, arg marker, bypass flags
   assert.match(submit.detail, /office-spawned unattended run/);
   assert.match(submit.detail, /"pid":4321/);
   assert.match(submit.detail, /"executable":"codex\.exe"/);
-  const promptSha = sha(`${f.context.payload.text}\n\n${PROMPT_SUFFIX}`);
+  const promptSha = sha(f.calls[0].args.at(-1)!);
   assert.match(submit.detail, new RegExp(`<prompt:${promptSha}>`), 'the prompt slot is the hash marker, not the text');
   assert.ok(!submit.detail.includes(f.context.payload.text), 'the payload text itself is not in the record');
   assert.match(submit.detail, /"bypassFlags":\["-s","workspace-write","--skip-git-repo-check"\]/, 'exact flags verbatim');
@@ -451,7 +461,7 @@ test('plan returns the exact spawn command for the preview, prompt included', as
   const planned = f.adapter.plan(f.context);
   const prompt = `${f.context.payload.text}\n\n${PROMPT_SUFFIX}`;
   assert.equal(planned.executable, 'claude.exe');
-  assert.deepEqual(planned.args, ['-p', prompt, '--output-format', 'json', '--dangerously-skip-permissions', '--model', 'fixture-model', '--effort', 'low']);
+  assert.deepEqual(planned.args, ['-p', prompt, '--output-format', 'json', '--dangerously-skip-permissions', '--model', 'fixture-model', '--effort', 'low', ...CLAUDE_TAIL]);
   assert.equal(planned.cwd, f.dir, 'a bound context plans into the recorded session directory');
 });
 
@@ -465,4 +475,17 @@ test('fetch returns verified output bytes through the guarded boundary', async t
   assert.equal(Buffer.from(bytes).toString('utf8'), 'result bytes');
   await assert.rejects(f.adapter.fetch(f.job(), { ...output, sha256: sha('drifted') }, bound), /hashes to/);
   await assert.rejects(f.adapter.fetch(f.job(), { ...output, bytes: 1 }, bound), /not the 1 the receipt recorded/);
+});
+
+test('consecutive claude launches are spaced so concurrent sessions do not race the OAuth refresh', async t => {
+  const f = fixture(t, { provider: 'claude' });
+  const spawnedAt: number[] = [];
+  const spawn: CliSpawn = (executable, args, options) => { spawnedAt.push(Date.now()); return f.spawn(executable, args, options); };
+  const gap = 150;
+  const adapter = new LocalCliExecAdapter(() => f.sessions, provider => f.executables[provider], () => at(1), undefined, spawn, f.environment,
+    undefined, undefined, undefined, undefined, undefined, undefined, undefined, gap);
+  const second = { ...f.binding, id: randomUUID(), jobId: randomUUID(), attemptId: randomUUID(), storageRelativePath: 'exec-session-2' };
+  await Promise.all([adapter.submit(f.context), adapter.submit({ ...f.context, jobId: second.jobId, localSession: second })]);
+  assert.equal(spawnedAt.length, 2);
+  assert.ok(spawnedAt[1] - spawnedAt[0] >= gap - 5, `the second claude spawn waited ${spawnedAt[1] - spawnedAt[0]}ms, at least the ${gap}ms gap`);
 });

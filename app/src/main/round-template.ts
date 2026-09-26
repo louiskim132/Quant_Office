@@ -262,3 +262,76 @@ export function buildAnalysisRound(declaration: AnalysisRoundDeclaration): CommR
  assertDag(entries);
  return { schema: 'office-comm-round@1', projectId: declaration.projectId, packetVersion: declaration.packetVersion, entries };
 }
+
+/**
+ * The declaration for a quick PLANNING round — for small, well-specified requests where a
+ * diverge pair and cross-critique cost more than they catch. One planner writes the plan the
+ * single worker executes; the director still briefs first and verifies last.
+ */
+export interface QuickRoundDeclaration {
+ projectId: string;
+ brief: string;
+ directorAgentId: string;
+ planner: string;
+ workerAgentId: string;
+ packetVersion: number;
+}
+
+/**
+ * The quick planning spec: brief → plan-draft-a (the final plan, which also pre-registers the
+ * analysis plan) → implement-1 → verify. Keys are the full spec's keys, so every consumer that
+ * resolves hops by key (settle, revision inheritance, the analysis-plan link) keeps working.
+ */
+export function buildQuickCommRound(declaration: QuickRoundDeclaration): CommRoundSpec {
+ if (!declaration || typeof declaration !== 'object') throw new Error('A quick-round declaration is required.');
+ for (const [name, value] of [['projectId', declaration.projectId], ['brief', declaration.brief], ['director', declaration.directorAgentId], ['planner', declaration.planner], ['worker', declaration.workerAgentId]] as const)
+  if (!nonEmpty(value)) throw new Error(`The quick-round declaration must name its ${name}.`);
+ requirePacketVersion(declaration.packetVersion);
+ const brief = entry(declaration, 'plan-brief', 'BRIEF', 'DIRECTOR', declaration.directorAgentId, DIRECTOR_TOOL_PROFILE, [], 'BLIND');
+ const plan = entry(declaration, 'plan-draft-a', 'PLAN_DRAFT', 'PM_A', declaration.planner, PLANNER_TOOL_PROFILE, [brief.key], 'BLIND');
+ const implement = entry(declaration, 'implement-1', 'IMPLEMENT', 'WORKER', declaration.workerAgentId, WORKER_TOOL_PROFILE, [plan.key], 'FULL');
+ const verify = entry(declaration, 'verify', 'VERIFY', 'DIRECTOR', declaration.directorAgentId, DIRECTOR_TOOL_PROFILE, [implement.key], 'FULL');
+ const entries = [brief, plan, implement, verify];
+ sealTerminal(entries);
+ assertDag(entries);
+ return { schema: 'office-comm-round@1', projectId: declaration.projectId, packetVersion: declaration.packetVersion, entries };
+}
+
+/**
+ * The quick RESULT_ANALYSIS spec: the full round minus the two cross-responses — interpret and
+ * falsify still diverge on the digest, and the director finalizes both directly.
+ */
+export function buildQuickAnalysisRound(declaration: AnalysisRoundDeclaration): CommRoundSpec {
+ validateAnalysis(declaration);
+ const [analystC, analystD] = declaration.analysts;
+ const brief = entry(declaration, 'analysis-brief', 'BRIEF', 'DIRECTOR', declaration.directorAgentId, DIRECTOR_TOOL_PROFILE, [], 'FULL');
+ const digest = entry(declaration, 'analysis-digest', 'DIGEST', 'WORKER', declaration.workerAgentId, WORKER_TOOL_PROFILE, [brief.key], 'FULL');
+ const interpret = entry(declaration, 'analysis-interpret', 'PLAN_DRAFT', 'PM_C', analystC, ANALYST_TOOL_PROFILE, [digest.key], 'FULL');
+ const falsify = entry(declaration, 'analysis-falsify', 'PLAN_DRAFT', 'PM_D', analystD, ANALYST_TOOL_PROFILE, [digest.key], 'FULL');
+ const finalize = entry(declaration, 'analysis-finalize', 'PLAN_SYNTHESIS', 'DIRECTOR', declaration.directorAgentId, DIRECTOR_TOOL_PROFILE, [interpret.key, falsify.key], 'FULL');
+ const report = entry(declaration, 'analysis-report', 'REPORT', 'WORKER', declaration.workerAgentId, WORKER_TOOL_PROFILE, [finalize.key], 'FULL');
+ const entries = [brief, digest, interpret, falsify, finalize, report];
+ sealTerminal(entries);
+ assertDag(entries);
+ return { schema: 'office-comm-round@1', projectId: declaration.projectId, packetVersion: declaration.packetVersion, entries };
+}
+
+/**
+ * The spec for a revision that keeps the approved plan (REVISE with restart at implementation):
+ * the director amends the settled plan in its brief hop, one worker applies it starting from the
+ * previous deliverables, and the director verifies. No planner debate is re-run — a revision
+ * note about the code should not cost a second full planning round.
+ */
+export function buildRestartRound(declaration: { projectId: string; brief: string; directorAgentId: string; workerAgentId: string; packetVersion: number }): CommRoundSpec {
+ if (!declaration || typeof declaration !== 'object') throw new Error('A restart-round declaration is required.');
+ for (const [name, value] of [['projectId', declaration.projectId], ['brief', declaration.brief], ['director', declaration.directorAgentId], ['worker', declaration.workerAgentId]] as const)
+  if (!nonEmpty(value)) throw new Error(`The restart-round declaration must name its ${name}.`);
+ requirePacketVersion(declaration.packetVersion);
+ const brief = entry(declaration, 'plan-brief', 'BRIEF', 'DIRECTOR', declaration.directorAgentId, DIRECTOR_TOOL_PROFILE, [], 'BLIND');
+ const implement = entry(declaration, 'implement-1', 'IMPLEMENT', 'WORKER', declaration.workerAgentId, WORKER_TOOL_PROFILE, [brief.key], 'FULL');
+ const verify = entry(declaration, 'verify', 'VERIFY', 'DIRECTOR', declaration.directorAgentId, DIRECTOR_TOOL_PROFILE, [implement.key], 'FULL');
+ const entries = [brief, implement, verify];
+ sealTerminal(entries);
+ assertDag(entries);
+ return { schema: 'office-comm-round@1', projectId: declaration.projectId, packetVersion: declaration.packetVersion, entries };
+}

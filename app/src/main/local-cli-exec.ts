@@ -11,7 +11,7 @@ import { serenaNotInstalled, spawnSerenaSession, type SerenaSpawn } from './sere
 import { MAX_FILE } from './artifacts.js';
 import type { LaunchRequest } from './handoff.js';
 import { GuardedLocalFileIO, type LocalFileIO } from './local-session-files.js';
-import { CANCEL_ACK_FILE, PACKET_FILE, RESULT_FILE, RESULT_STATES, prepareLocalPacket, readLocalCancelAck, readLocalResult, writeLocalCancelRequest } from './local-packet.js';
+import { CANCEL_ACK_FILE, PACKET_FILE, RESULT_FILE, RESULT_STATES, packetPromptBlock, prepareLocalPacket, readLocalCancelAck, readLocalResult, writeLocalCancelRequest } from './local-packet.js';
 import { discover, type Discovery } from './local-provider-records.js';
 import { mapToolFlags, providerAttachesMcp, type ToolFlagResult } from './tool-flags.js';
 import { subscriptionEnvironment } from './subscriptions.js';
@@ -21,10 +21,19 @@ import type { ObserveResult, ProviderAdapter, SubmitContext, SubmitResult } from
 /** The recorded source of every observation this adapter produces. */
 const EVIDENCE_SOURCE = 'office-local-cli-exec@1';
 /**
- * Appended to the frozen payload text so a spawned CLI session reads the packet contract the way
- * a user-launched one would. Fixed by the adapter — never renderer input.
+ * The launch-plan preview's stand-in for the packet essentials block: the preview runs before a
+ * packet exists, so it names the contract the way a user-launched session would read it. A real
+ * launch appends packetPromptBlock(prepared) instead — derived from the written packet. Fixed by
+ * the adapter — never renderer input.
  */
 const PROMPT_SUFFIX = 'This directory is an office-local-session@2 packet: read packet.json and CONTRACT.md, place declared outputs under outputs/, then write result.json exactly as CONTRACT.md specifies.';
+/**
+ * The minimum spacing between two claude CLI launches from this office. Parallel hops (the two
+ * planner drafts, the critiques) spawned claude processes within milliseconds of each other, and
+ * concurrent sessions race on the shared OAuth token refresh — observed 2026-09-25 as a brief
+ * that died with "another Claude Code process is refreshing it", a whole wasted hop each time.
+ */
+export const CLAUDE_SPAWN_GAP_MS = 4000;
 /** A run that has not reported is killed after this long — an office decision, not a provider timeout. */
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
 /** Buffered child output is evidence, not a transcript — bounded so a chatty process cannot grow memory. */
@@ -136,6 +145,9 @@ export class LocalCliExecAdapter implements ProviderAdapter {
    * informational, never as ownership.
    */
   private readonly registry = new Map<string, SpawnRecord>();
+  /** Serializes claude launches so consecutive spawns are at least claudeSpawnGapMs apart. */
+  private claudeLaunches: Promise<void> = Promise.resolve();
+  private lastClaudeLaunchAt = 0;
 
   constructor(
     private readonly sessionsRoot: () => string,
@@ -171,14 +183,27 @@ export class LocalCliExecAdapter implements ProviderAdapter {
      * The caller identity comes from the assignment record at submit — never from file bytes.
      */
     private readonly evidenceFrames?: EvidenceFrameHandler,
+    /** The claude launch spacing; tests pass 0. */
+    private readonly claudeSpawnGapMs: number = CLAUDE_SPAWN_GAP_MS,
   ) {}
+
+  /** Waits until a claude launch would be at least claudeSpawnGapMs after the previous one. */
+  private claudeLaunchSlot(): Promise<void> {
+    const slot = this.claudeLaunches.then(async () => {
+      const wait = this.lastClaudeLaunchAt + this.claudeSpawnGapMs - Date.now();
+      if (wait > 0) await new Promise(resolve => setTimeout(resolve, wait));
+      this.lastClaudeLaunchAt = Date.now();
+    });
+    this.claudeLaunches = slot.catch(() => undefined);
+    return slot;
+  }
 
   /**
    * The documented argv for each installed CLI (docs/cli-exec-probes.md), built by
    * mapToolFlags in tool-flags.ts — every flag was verified against the installed tool's
    * --help at development time:
    *   claude 2.1.x: -p, --output-format json, --dangerously-skip-permissions, --model, --effort.
-   *   codex:        exec, -s workspace-write, --skip-git-repo-check, -m (exec documents no effort flag).
+   *   codex:        exec, -s workspace-write, --skip-git-repo-check, -m, -c model_reasoning_effort=…
    *   devin 3000.x: -p, --model, --respect-workspace-trust, --permission-mode (no effort flag).
    * Devin runs `--permission-mode dangerous`: the probed `auto` and `accept-edits` modes both get
    * the write tool rejected in non-interactive use, so dangerous is the least mode that actually
@@ -187,8 +212,8 @@ export class LocalCliExecAdapter implements ProviderAdapter {
    * A binding's declared toolProfile adds only flags verified in the installed --help; every
    * restriction no flag expresses lands in unmappedRestrictions instead of being dropped.
    */
-  private providerCommand(provider: Provider, prompt: string, model: string, effort: Effort, profile?: ToolProfile): ToolFlagResult {
-    return mapToolFlags({ provider, model, effort, prompt, profile });
+  private providerCommand(provider: Provider, prompt: string, model: string, effort: Effort, profile?: ToolProfile, delegation = false): ToolFlagResult {
+    return mapToolFlags({ provider, model, effort, prompt, profile, delegation });
   }
 
   /**
@@ -288,8 +313,8 @@ export class LocalCliExecAdapter implements ProviderAdapter {
         throw new NotLaunchedError(`The declared evidence surface drop-box could not be watched: ${error instanceof Error ? error.message : String(error)}. The session was not launched.`);
       }
     }
-    const prompt = `${context.payload.text}\n\n${PROMPT_SUFFIX}`;
-    const command = this.providerCommand(binding.provider, prompt, context.payload.model, context.payload.effort, launchProfile);
+    const prompt = `${context.payload.text}\n\n${packetPromptBlock(prepared, context.assignment.pipelineKey)}`;
+    const command = this.providerCommand(binding.provider, prompt, context.payload.model, context.payload.effort, launchProfile, context.payload.delegation ?? false);
     let executable: string;
     try {
       executable = this.executable(binding.provider);
@@ -297,6 +322,7 @@ export class LocalCliExecAdapter implements ProviderAdapter {
       try { queryWatcher?.close(); } catch { /* the launch refusal is the record that matters */ }
       throw new NotLaunchedError(error instanceof Error ? error.message : `The ${binding.provider} CLI executable could not be resolved.`);
     }
+    if (binding.provider === 'claude' && this.claudeSpawnGapMs > 0) await this.claudeLaunchSlot();
     let child: CliChild;
     try {
       child = this.spawnChild(executable, command.args, {
@@ -634,7 +660,7 @@ export class LocalCliExecAdapter implements ProviderAdapter {
     const provider = context.localSession?.provider ?? this.providerFor?.(context.assignment.agentId);
     if (!provider) throw new Error('The provider for this launch cannot be resolved, so the exec command cannot be named.');
     const prompt = `${context.payload.text}\n\n${PROMPT_SUFFIX}`;
-    const { args } = this.providerCommand(provider, prompt, context.payload.model, context.payload.effort, context.localSession?.toolProfile);
+    const { args } = this.providerCommand(provider, prompt, context.payload.model, context.payload.effort, context.localSession?.toolProfile, context.payload.delegation ?? false);
     return {
       executable: this.executable(provider), args,
       cwd: context.localSession ? path.resolve(this.sessionsRoot(), context.localSession.storageRelativePath) : this.sessionsRoot(),

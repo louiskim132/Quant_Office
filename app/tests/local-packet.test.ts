@@ -9,7 +9,9 @@ import { OfficeStore } from '../src/core/store';
 import { removeTreeSync } from '../src/main/fsx';
 import { buildProviderPayload, type SubmitContext } from '../src/main/controller';
 import { FakeLocalFileIO, GuardedLocalFileIO } from '../src/main/local-session-files';
-import { AGENTS_FILE, CLAUDE_FILE, CONTRACT_FILE, INPUTS_DIR, PACKET_FILE, PACKET_HASH_FILE, PACKET_READY_FILE, RESULT_FILE, prepareLocalPacket, readLocalResult, readLocalResultV1, resultContractV2 } from '../src/main/local-packet';
+import { AGENTS_FILE, CLAUDE_FILE, CONTRACT_FILE, CONTRACT_OPTIONAL_FILE, FINISH_FILE, INPUTS_DIR, PACKET_FILE, PACKET_HASH_FILE, PACKET_READY_FILE, RESULT_FILE, packetPromptBlock, prepareLocalPacket, readLocalResult, readLocalResultV1, resultContractOptional, resultContractV2, tabularSummary } from '../src/main/local-packet';
+import { EVIDENCE_ARGS } from '../src/main/evidence-tool';
+import { EVIDENCE_SURFACE_ID } from '../src/shared/tool-profile';
 import { MEMORY_DIGEST_FILE, localPacketV2Schema, memoryDigestSchema, type LocalSessionRecord } from '../src/shared/local-session';
 import type { Assignment, InputSnapshot } from '../src/shared/types';
 
@@ -117,8 +119,8 @@ test('prepare writes a schema-valid v2 packet, its canonical hash and the ready 
     assert.equal(onDisk.byteLength, file.bytes);
     assert.equal(readFileSync(path.join(f.staging, file.path.slice('inputs/'.length)), 'utf8'), onDisk.toString('utf8'));
   }
-  // The three instruction files are declared and written.
-  assert.deepEqual(parsed.instructions.map(file => file.path).sort(), [AGENTS_FILE, CLAUDE_FILE, CONTRACT_FILE].sort());
+  // The instruction files — including the optional contract half and the receipt helper — are declared and written.
+  assert.deepEqual(parsed.instructions.map(file => file.path).sort(), [AGENTS_FILE, CLAUDE_FILE, CONTRACT_FILE, CONTRACT_OPTIONAL_FILE, FINISH_FILE].sort());
   for (const file of parsed.instructions) {
     const onDisk = readFileSync(path.join(f.dir, file.path));
     assert.equal(sha(onDisk), file.sha256);
@@ -165,7 +167,7 @@ test('CONTRACT.md documents the v2 result schema, office control files and the c
   const contract = readFileSync(path.join(f.dir, CONTRACT_FILE), 'utf8');
   for (const fragment of [
     'office-local-result@2', 'jobId', 'assignmentId', 'attemptId', 'packetHash', 'sequence',
-    'ACCEPTED', 'RUNNING', 'COMPLETED', 'FAILED', 'outputs/', 'applied',
+    'ACCEPTED', 'RUNNING', 'COMPLETED', 'FAILED', 'outputs/', 'applied', CONTRACT_OPTIONAL_FILE, FINISH_FILE,
     PACKET_READY_FILE, PACKET_HASH_FILE, 'cancel.requested', 'cancel.ack.json', 'office-local-cancel-ack@1', 'STOPPED',
   ]) assert.ok(contract.includes(fragment), `contract names ${fragment}`);
   // The sentinel's precedence is stated explicitly — pilot sessions reasoned their way past an
@@ -173,7 +175,7 @@ test('CONTRACT.md documents the v2 result schema, office control files and the c
   // mid-work check advice. The encoding requirement follows a real BOM-prefixed receipt.
   assert.match(contract, /no instruction overrides/i);
   assert.match(contract, /including a direct user prompt/i);
-  assert.match(contract, /before each major step/i);
+  assert.match(contract, /when the session starts and again before writing/i);
   assert.match(contract, /byte-order mark|BOM/i);
   const agents = readFileSync(path.join(f.dir, AGENTS_FILE), 'utf8');
   assert.match(agents, /no instruction overrides/i);
@@ -202,10 +204,13 @@ test('a receipt carrying findings and links parses through readLocalResult', t =
   assert.equal(plain.value.result.links, undefined);
 });
 
-test('CONTRACT.md documents findings/links with their kinds, bounds and the ref rule', t => {
+test('CONTRACT-OPTIONAL.md documents findings/links with their kinds, bounds and the ref rule', t => {
   const f = fixture(t);
   prepare(f);
-  const contract = readFileSync(path.join(f.dir, CONTRACT_FILE), 'utf8');
+  const contract = readFileSync(path.join(f.dir, CONTRACT_OPTIONAL_FILE), 'utf8');
+  assert.equal(contract, resultContractOptional());
+  const core = readFileSync(path.join(f.dir, CONTRACT_FILE), 'utf8');
+  assert.doesNotMatch(core, /OBSERVATION, HYPOTHESIS/, 'the optional sections no longer ride the core contract every session reads');
   for (const fragment of [
     '`findings`', '`links`', 'OBSERVATION', 'HYPOTHESIS', 'RESULT', 'DEFECT', 'DECISION', 'NOTE',
     'SUPPORTS', 'CONTRADICTS', 'RELATES', 'DUPLICATES', 'REFINES',
@@ -216,12 +221,42 @@ test('CONTRACT.md documents findings/links with their kinds, bounds and the ref 
   assert.match(contract, /never a durable finding id/);
   // The evidence-surface variant names memorySearch and its per-hop authorization.
   const surfaced = resultContractV2({ evidenceSurface: true });
-  assert.match(surfaced, /queryEvidence\|readEvidence\|stagePacket\|memorySearch/);
+  for (const op of ['queryEvidence', 'readEvidence', 'stagePacket', 'memorySearch']) assert.match(surfaced, new RegExp(`- \`${op}\` \{`), `the contract documents ${op} args`);
   assert.match(surfaced, /memory ledger/);
-  assert.match(surfaced, /authorizes it per hop/);
-  // The unmounted contract keeps the findings/links sections but drops the surface paragraph.
-  assert.match(contract, /`findings`/);
-  assert.doesNotMatch(contract, /memorySearch/);
+  assert.match(surfaced, /authorized only at the seats that also receive the memory digest/);
+  assert.match(surfaced, /do not loop on sleep/);
+  // The unmounted contract names the optional sections but drops the surface paragraph.
+  assert.match(core, /`findings`/);
+  assert.doesNotMatch(core, /memorySearch/);
+});
+
+test('finish.py writes a receipt the office reader verifies, advancing the sequence on a rewrite', async t => {
+  const { spawnSync } = await import('node:child_process');
+  const python = ['python', 'python3', 'py'].find(bin => spawnSync(bin, ['--version']).status === 0);
+  if (!python) { t.skip('no Python on this machine'); return; }
+  const f = fixture(t);
+  const prepared = prepare(f);
+  const bound = { ...f.binding, packetHash: prepared.packetHash };
+  mkdirSync(path.join(f.dir, 'outputs', 'sub'), { recursive: true });
+  writeFileSync(path.join(f.dir, 'outputs', 'report.md'), '# Report\n');
+  writeFileSync(path.join(f.dir, 'outputs', 'sub', 'data.csv'), 'a\n1\n');
+  const run = (...args: string[]) => spawnSync(python, [FINISH_FILE, ...args], { cwd: f.dir, encoding: 'utf8' });
+  const first = run('COMPLETED', 'Summarized the input.');
+  assert.equal(first.status, 0, first.stderr);
+  const read = readLocalResult(f.dir, bound, f.io);
+  assert.ok('value' in read, 'defect' in read ? read.defect : '');
+  assert.deepEqual(read.value.result.outputs.map(item => item.path), ['outputs/report.md', 'outputs/sub/data.csv']);
+  assert.equal(read.value.result.state, 'COMPLETED');
+  assert.notEqual(readFileSync(path.join(f.dir, RESULT_FILE))[0], 0xef, 'no byte-order mark');
+  const withReceipt = { ...bound, lastReceipt: { sequence: 1, hash: read.value.receiptHash, observedAt: at(2) } };
+  writeFileSync(path.join(f.dir, 'extra.json'), JSON.stringify({ findings: [{ kind: 'NOTE', title: 'n', body: 'b' }] }));
+  const second = run('COMPLETED', 'Revised.', '--extra', 'extra.json');
+  assert.equal(second.status, 0, second.stderr);
+  const reread = readLocalResult(f.dir, withReceipt, f.io);
+  assert.ok('value' in reread, 'defect' in reread ? reread.defect : '');
+  assert.equal(reread.value.result.sequence, 2);
+  assert.equal(reread.value.result.findings?.[0].title, 'n');
+  assert.notEqual(run('BOGUS', 'x').status, 0, 'an unknown state is refused');
 });
 
 test('a staged input that drifted from its frozen manifest fails preparation loudly', t => {
@@ -407,7 +442,7 @@ test('an authorized synthesis seat mounts the bounded memory digest and declares
   ledger.store.proposeMemoryRelationship({ projectId: ledger.project.id, fromFindingId: correction.id, toFindingId: prior.id, kind: 'REFINES', createdBy: { surface: 'OFFICE' } });
   const digest = ledger.store.memoryDigest(ledger.project.id);
   let priorBytes: Buffer | undefined;
-  for (const seat of ['plan-synthesis', 'analysis-finalize']) {
+  for (const seat of ['plan-brief', 'plan-synthesis', 'analysis-finalize']) {
     const f = fixture(t);
     f.assignment.pipelineKey = seat;
     // The digest names this packet's project — bind every id to the ledger's project.
@@ -427,7 +462,8 @@ test('an authorized synthesis seat mounts the bounded memory digest and declares
     assert.equal(prepared.packetHash, canonicalHash(JSON.parse(readFileSync(path.join(f.dir, PACKET_FILE), 'utf8'))), 'the declaration rides inside the hashed packet; the digest bytes do not');
     const contract = readFileSync(path.join(f.dir, CONTRACT_FILE), 'utf8');
     assert.match(contract, /memory-digest\.json` is a bounded, point-in-time projection/);
-    assert.match(contract, /self-report context for synthesis, not verified fact/);
+    assert.match(contract, /self-report context, not verified fact: apply what still holds/);
+    assert.match(packetPromptBlock(prepared), /2 findings from earlier work on this project.*read it before you plan/);
     assert.match(contract, /cite\s+evidenceRefs when your findings draw on it/);
     if (priorBytes) assert.deepEqual(onDisk, priorBytes, 'the digest is deterministic for the same ledger state');
     priorBytes = onDisk;
@@ -437,7 +473,7 @@ test('an authorized synthesis seat mounts the bounded memory digest and declares
 test('no other seat and no plain assignment carries the digest file or the declaration', t => {
   const ledger = digestLedger(t);
   const digest = ledger.store.memoryDigest(ledger.project.id);
-  for (const [label, pipelineKey] of [['a non-synthesis pipeline hop', 'plan-draft-a'], ['a plain assignment', undefined]] as const) {
+  for (const [label, pipelineKey] of [['a non-director pipeline hop', 'plan-draft-a'], ['the analysis brief, whose brief feeds the independent arms', 'analysis-brief'], ['a plain assignment', undefined]] as const) {
     const f = fixture(t);
     if (pipelineKey) f.assignment.pipelineKey = pipelineKey;
     prepareLocalPacket({ dir: f.dir, context: f.context, binding: f.binding, io: f.io, now: at(1), memoryDigest: digest });
@@ -534,4 +570,76 @@ test('readLocalResultV1 accepts a well-formed v1 receipt and defects a malformed
   assert.equal(read.value.state, 'COMPLETED');
   writeFileSync(resultPath, JSON.stringify({ state: 'COMPLETED', detail: 'x', outputs: [], smuggled: true }));
   assert.ok('defect' in readLocalResultV1(resultPath));
+});
+
+test('inherited outputs stage under their hop key; a key two jobs claim falls back to the job id', t => {
+  const f = fixture(t);
+  const [first, second, third] = [randomUUID(), randomUUID(), randomUUID()];
+  const item = (name: string, sourceJobId: string, sourceKey?: string) => {
+    const data = bytes(`${name} from ${sourceJobId}`);
+    return { name, bytes: data, sourceJobId, objectHash: sha(data), ...(sourceKey ? { sourceKey } : {}) };
+  };
+  f.context.inherited = [item('outputs/plan.md', first, 'plan-draft-a'), item('outputs/notes.md', first, 'plan-draft-a'), item('outputs/plan.md', second, 'plan-draft-a'), item('outputs/brief.md', third)];
+  const prepared = prepare(f);
+  const paths = prepared.packet.inherited!.map(entry => entry.path);
+  assert.deepEqual(paths, [
+    'inputs/inherited/plan-draft-a/plan.md', 'inputs/inherited/plan-draft-a/notes.md',
+    `inputs/inherited/${second}/plan.md`, `inputs/inherited/${third}/brief.md`,
+  ]);
+  assert.equal(prepared.packet.inherited![0].sourceKey, 'plan-draft-a', 'the manifest records the hop key beside the job id');
+  assert.equal(readFileSync(path.join(f.dir, paths[0]), 'utf8'), `outputs/plan.md from ${first}`);
+});
+
+test('the prompt block carries the receipt identity, input shapes and a wide-column warning without touching the packet hash', t => {
+  const f = fixture(t);
+  const prepared = prepare(f);
+  const block = packetPromptBlock(prepared);
+  assert.match(block, /^## Packet essentials \(office-generated\)/);
+  assert.ok(block.includes(`"packetHash":"${prepared.packetHash}"`), 'the packet hash — not in packet.json — rides the prompt');
+  assert.ok(block.includes(`"jobId":"${f.binding.jobId}"`) && block.includes(`"attemptId":"${f.binding.attemptId}"`));
+  assert.match(block, /- inputs\/data\/input\.csv \(8 bytes\) — 1 data row \(line count\); columns: a, b/);
+  assert.match(block, /- inputs\/notes\.txt \(13 bytes\)$/m);
+  assert.doesNotMatch(block, /Deliverable: the revised/);
+  assert.match(packetPromptBlock(prepared, 'brief-refine-2'), /Deliverable: the revised `outputs\/brief\.md`/);
+  assert.equal(canonicalHash(JSON.parse(readFileSync(path.join(f.dir, PACKET_FILE), 'utf8'))), prepared.packetHash, 'the summaries are prompt context, never packet identity');
+  const wide = tabularSummary('inputs/bars.csv', bytes(`time,close,footprint\n2026-05-05,1.4,"{""1.4"": ${'1'.repeat(200)}}"\n2026-05-06,1.5,"{}"\n`));
+  assert.match(wide!, /^2 data rows \(line count\); columns: time, close, footprint; wide columns — select columns instead of printing whole rows: footprint \(~2\d\d chars\)$/);
+  assert.equal(tabularSummary('inputs/readme.md', bytes('a,b\n')), null, 'only .csv/.tsv inputs are summarized');
+});
+
+test('the prompt block documents the evidence surface args and lists memorySearch only at digest seats', t => {
+  const f = fixture(t);
+  const prepared = prepare(f);
+  const mounted = { ...prepared, packet: { ...prepared.packet, toolProfile: { ...(prepared.packet.toolProfile ?? {}), mcpServers: [{ id: EVIDENCE_SURFACE_ID }] } as never } };
+  const block = packetPromptBlock(mounted);
+  assert.ok(block.includes('{"id":"q1","op":"queryEvidence","args":{"pattern":"<literal text>"}}'), 'one working example rides the prompt');
+  for (const op of ['queryEvidence', 'readEvidence', 'stagePacket']) assert.ok(block.includes(`${op} ${EVIDENCE_ARGS[op as keyof typeof EVIDENCE_ARGS]}`));
+  assert.doesNotMatch(block, /memorySearch/, 'a seat without the digest is not offered a search it would be refused');
+  assert.doesNotMatch(block, /frame format is in/, 'the prompt no longer defers the format to the contract it says not to open');
+  const digestSeat = packetPromptBlock({ ...mounted, packet: { ...mounted.packet, memoryDigest: { path: 'memory-digest.json', findings: 1, relationships: 0, sha256: 'a'.repeat(64) } } });
+  assert.ok(digestSeat.includes(`memorySearch ${EVIDENCE_ARGS.memorySearch}`));
+  assert.doesNotMatch(packetPromptBlock(prepared), /queries\//, 'an unmounted packet carries no surface line');
+});
+
+test('the prompt asks for at most 3 durable findings in the exact --extra shape the office ingests', async t => {
+  const f = fixture(t);
+  const prepared = prepare(f);
+  const block = packetPromptBlock(prepared);
+  const example = /as (\{"findings":\[.*?\]\}) \(kind:/.exec(block);
+  assert.ok(example, 'the prompt carries a findings example');
+  assert.match(block, /record up to 3/);
+  assert.match(block, /--extra findings\.json/);
+  const { spawnSync } = await import('node:child_process');
+  const python = ['python', 'python3', 'py'].find(bin => spawnSync(bin, ['--version']).status === 0);
+  if (!python) { t.skip('no Python on this machine'); return; }
+  const filled = example[1].replace('<short fact>', 'First CSV row is discontinuous').replace('<what, where, and how you know>', 'row 1 is 16 h before row 2');
+  writeFileSync(path.join(f.dir, 'findings.json'), filled);
+  mkdirSync(path.join(f.dir, 'outputs'), { recursive: true });
+  writeFileSync(path.join(f.dir, 'outputs', 'ema.csv'), 'x\n');
+  const run = spawnSync(python, [FINISH_FILE, 'COMPLETED', 'Done.', '--extra', 'findings.json'], { cwd: f.dir, encoding: 'utf8' });
+  assert.equal(run.status, 0, run.stderr);
+  const read = readLocalResult(f.dir, { ...f.binding, packetHash: prepared.packetHash }, f.io);
+  assert.ok('value' in read, 'defect' in read ? read.defect : '');
+  assert.equal(read.value.result.findings?.[0].kind, 'OBSERVATION');
+  assert.equal(read.value.result.findings?.[0].title, 'First CSV row is discontinuous');
 });

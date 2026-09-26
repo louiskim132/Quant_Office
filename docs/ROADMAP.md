@@ -1121,7 +1121,7 @@ Latest C9 qualification (2026-09-21) supersedes the historical C9 row's statemen
 | Current acceptance item | Status | Evidence / next item |
 | --- | --- | --- |
 | C9 automated Director → PM → Worker | VERIFIED_LOCAL for bounded live Claude CLI relay | Three distinct role profiles and real processes; one Director start, two event-driven dependent starts; exact inherited manifests, agent-consumed predecessor hashes, verified durable outputs and replay non-duplication. Two product defects repaired; 689/690 unit tests pass (one existing skip), typecheck/build and three development desktop suites pass. [Acceptance record](../records/reviews/three-agent-acceptance-2026-09-21.md). Next: reproduce output-storage failure recovery and retain process/watch bookkeeping until durable terminal admission. Mixed-provider chains, packaged acceptance and the C8 user-run Colab pilot are not established by this test. |
-| Communication pipeline (comm-pipe-1..3) | VERIFIED_LOCAL including live P3 on a dev build (2026-09-24); packaged live run NOT_STARTED | Planning and result-analysis pipelines mint request-scoped hop sets; the terminal hop seals, AWAITING_DECISION binds the decision to the verified receipt, and `request.pipeline.decide` is idempotent and refuses stale hashes. 2026-09-24: both pipelines ran live end to end with a mixed Claude/Devin roster, and real Approve and Request-revision decisions were bound to verified receipts, after nine defects were fixed ([acceptance record](../records/reviews/office-live-acceptance-2026-09-24.md)). 2026-09-25 round `findings-rev-2` (head `7a4153c`): planning packets now blind `withheldPaths`; REVISE auto-mints a linked revision request whose brief inherits verified prior-round outputs and the decision note; pipeline cards carry a per-hop Observe/Retry/Cancel table with verified output previews and a named cancel confirmation; pre-launch failures settle FAILED with `lastObservation`; stored agent outputs and pipeline reviews are visible in Artifacts/Reviews. Open: user-level packaged re-run of the revision set (acceptance round 3); hosted-provider execution remains gated; provider effort/tool claims remain unverified beyond what the session result reports. |
+| Communication pipeline (comm-pipe-1..3) | VERIFIED_LOCAL including live P3 on a dev build (2026-09-24); packaged live run NOT_STARTED | Planning and result-analysis pipelines mint request-scoped hop sets; the terminal hop seals, AWAITING_DECISION binds the decision to the verified receipt, and `request.pipeline.decide` is idempotent and refuses stale hashes. 2026-09-24: both pipelines ran live end to end with a mixed Claude/Devin roster, and real Approve and Request-revision decisions were bound to verified receipts, after nine defects were fixed ([acceptance record](../records/reviews/office-live-acceptance-2026-09-24.md)). 2026-09-25 round `findings-rev-2` (head `7a4153c`): planning packets now blind `withheldPaths`; REVISE auto-mints a linked revision request whose brief inherits verified prior-round outputs and the decision note; pipeline cards carry a per-hop Observe/Retry/Cancel table with verified output previews and a named cancel confirmation; pre-launch failures settle FAILED with `lastObservation`; stored agent outputs and pipeline reviews are visible in Artifacts/Reviews. 2026-09-25 packaged acceptance round 3 on the taskbar install: planning + result-analysis pipelines ran live on real userData with dead-spawn retry, transient auto-retry, stranded-receipt reconcile and hash-bound decisions all exercised ([acceptance record](../records/reviews/office-live-acceptance-2026-09-25.md)). Open: REVISE, cancel and withheld-paths live coverage; the formal C8 S3 run-package/return pilot; hosted-provider execution remains gated; provider effort/tool claims remain unverified beyond what the session result reports. |
 | M-memory workstream (office-mem-1/2) | VERIFIED_LOCAL; external engines NOT_STARTED | Append-only finding/relationship ledgers, per-hop authorized memorySearch and digest mount (plan-synthesis/analysis-finalize only), Memory page graph/search/links, archive export and an evaluation harness with the Office baseline. Merged via PR #8/#9. Memory is office-recorded self-report, not verified fact. 2026-09-24 packaged-app audit: graph overlap, hidden search focus, stale notice and the missing Opus 5.5 option fixed on `fix/memory-page-bugs-20260924`. |
 
 Status vocabulary: NOT_STARTED, IMPLEMENTED_FOUNDATION, IN_PROGRESS, PARTIALLY_VERIFIED_LOCAL, BLOCKED_EXTERNAL, VERIFIED_LOCAL, VERIFIED_HOSTED. PARTIALLY_VERIFIED_LOCAL means some tested code exists but parent acceptance is not met; list exact open subitems. PARTIALLY_IMPLEMENTED means the larger program still has unimplemented contracts/UI/tests. The latter requires actual provider evidence for the exact scope. A local test cannot advance a hosted gate. Keep this table in the same file.
@@ -1134,7 +1134,9 @@ Status vocabulary: NOT_STARTED, IMPLEMENTED_FOUNDATION, IN_PROGRESS, PARTIALLY_V
 | D0 developer map | VERIFIED_LOCAL documentation | Section 1.3 map/fingerprints and selective-read protocol added after inspecting R0 source/log. |
 | D2 parallel coding setup | VERIFIED_LOCAL tooling; desktop/provider sessions NOT_STARTED | 2026-09-13: the fixed local desktop state machine and detailed Session 1–7/Session 8 manual supplement the general worktree protocol. Four coordination tests pass, including seven simultaneous starts, atomic publication, role/path binding, immutable round hashes, stale review/head refusal, exact-SHA submission, scope enforcement, rejection, integration, close and next-round preservation. The eight prepared local worktrees under `quant-team-sessions/prepared-20260912` were fast-forwarded to setup commit `236ccda4817fcf5320e4ee95389af34bcb92dd46`; setup was run twice, all role/status checks returned the correct clean checkout and `NOT_READY`, and no product round was published. Installing ignored role files does not launch or authenticate a session. The merge policy now authorizes Session 8 to merge only its closed-round integration PR after current-main ancestry, exact-head `verify` success and conversation-resolution checks; direct main pushes and raw-token workarounds remain prohibited. The prior fresh locked install, typecheck, 382/382 application units and build passed in the setup worktree. GitHub main protection requires a strict `verify` check, PR, resolved conversations and admin enforcement, with no force-push/deletion. CI results are on [setup PR #1](https://github.com/louiskim132/Quant_Office/pull/1). Claude Code 2.1.270 reported a signed-in subscription; Codex saved-project path remains the parent folder; Devin browser was signed out and its repository grant/model choice remain unverified. Update 2026-09-14: the desktop workflow has since run two product rounds (list-views-001, ui-refresh-001) in batch prepared-20260912, integrated and merged through PR #2; a fresh batch (next-batch-001) is provisioned on the merged base for the next round. |
 | D1 optional Serena trial | PARTIALLY_IMPLEMENTED, nonblocking | Project-local AGENTS.md and CLAUDE.md pointers plus the Git/worktree policy were added during repository setup on 2026-09-12. The optional Serena comparison and client configuration remain NOT_STARTED; no navigation plugin was installed. |
-| C10 four-plugin office evaluation | IMPLEMENTED_FOUNDATION; plugin integration/comparisons NOT_STARTED | 2026-09-16: section 3.2 and C10 define Serena, Ponytail, Graphify and LightRAG trials, Add Agent/environment/session lifecycle, quality-first same-task comparisons and role-scoped rollout. `app/benchmarks/plugin-evaluation/` contains a synthetic metadata checker, eight example rows, seven documents, two task tracks and an external 16-case grader. No real chart data, plugin installation, provider benchmark or token-saving result. C9 route acceptance remains separate. |
+| C10 four-plugin office evaluation | MEASURED_LOCAL 2026-09-25 (CLI A/B, scratch installs); no plugin enabled by default | 2026-09-16: section 3.2 and C10 define the trials and `app/benchmarks/plugin-evaluation/`. 2026-09-25: Serena 1.7.0, Ponytail v4.10.0, Graphify 0.9.68 and LightRAG 1.5.7 (Ollama local) trialled alone and stacked on an office implement packet and a 7-item code-navigation task. No plugin or pair saved tokens beyond run-to-run noise; Serena adds ~8.7k tokens per call and is unused unless hinted; stacking adds context and lowered accuracy; LightRAG local indexing failed (5 of 11 files timed out in 2 h). Recommended set: office memory ledger only. See section 17 entry "plugin trials" of this date. |
+| Token diet (pipeline token consumption) | VERIFIED_LOCAL on dev + packaged build 2026-09-25; not yet merged | Branch `fix/token-diet-20260925` (base organizer `9356c2e`). Lean Claude/Codex launches, per-hop deliverables, hop-keyed inherited inputs, worker slices, packet essentials + `finish.py`, split contract, pre-registered analysis plan (`analysisOf`), QUICK round shape, implementation-only REVISE, claude launch spacing. Live: quick ema5 round 574k input tokens (was 2.50M), implementation-only revision 345k (was 3.10M), Codex implement 147k (was 374k). App\ `app.asar` `642139F3…`. Plugin trials done (C10 row). Follow-ups done on `fix/evidence-and-memory-20260925` (PR #14): evidence-surface args documented; memory capture restored and digest mounted at `plan-brief`. App\ `app.asar` `0901A8DF…` — see section 17 entries of this date. |
+| Commercial launch readiness | NOT_STARTED — review 2026-09-25 found 5 launch blockers | Private/internal beta for technical Windows users only. Blockers: L1 unsandboxed agent execution; L2 store scalability (8.4 MB projection, 17 s to window after ~10 rounds); L3 release engineering (unsigned, no installer/updater/fuses/licence); L4 provider-terms review for automated subscription use; L5 hosted default path cannot run. Full list L1–L15 in the section 17 entry "commercial launch-readiness review" of this date. |
 | OmniRoute routing extension | NOT_STARTED implementation; architecture reviewed 2026-09-11 | Section 3.1 proposes operation-specific model/session/research contracts and an optional bounded free-worker route. Current subscription-only runtime policy remains unchanged; no gateway installation, provider transfer or live compatibility test occurred. Integrate with C2/C4/C7 and retain R5/custody requirements. |
 | R2 | VERIFIED_LOCAL within documented limits | Snapshot/output inventory is shared by backup and restore; both formats restore actual bytes into a new root. OutputService reserves real destinations on prepare/launch and stores versioned verified bytes. Required missing objects refuse backup. Snapshot identity rejects null/wrong request revisions. Remaining constraints: source swap races, recorded-platform Git reconstruction and R5 transport limits. |
 | R3 | VERIFIED_LOCAL | Preserve exact per-operation scope, durable evidence order, independent confinement and frozen account context. No new live capability evidence in this pass. |
@@ -4420,3 +4422,224 @@ launches and releases its dependent on attempt 2.
 Verification basis remains local unit/typecheck/build; no hosted-provider, scientific,
 brokerage, or live-research capability is claimed. Memory remains office-recorded self-report.
 The packaged mirror and user-level acceptance follow under the release protocol.
+
+### 2026-09-25 — packaged acceptance round 3 (findings-rev-2 live re-run)
+
+Status: VERIFIED_LOCAL on the packaged install; C8-stage-machine pilot still pending.
+
+The user-facing `App\` build at `cce6aee` (merged `4533d57`; identical `app.asar`
+`6D98FC8E…`) was driven end to end on real userData through the desktop UI. Three
+rounds ran with a mixed Claude/Devin LOCAL_CLI_EXEC roster on the user's real
+`XRPUSDT_Asia_Last_Day_Sample.csv` (98 rows): planning "Write 200ema code" (APPROVE
+`e9469207…`, superseded by the period fix), planning "Write ema3 code" (APPROVE
+`6ee27338…`), and result-analysis "Analyze ema3 results" on the user's Colab-run
+`ema3_result.csv` (APPROVE `31c2b22c…`, unanimous CORRECT verdict, byte-identical to
+local ground truth).
+
+Rev-2 machinery exercised live: orphaned-spawn pid-liveness reporting and bridge
+retry (plan-brief#1, implement-1/2#1), the transient OAuth-refresh one-shot
+auto-retry (ema3 plan-brief#1), stranded-receipt repair through `reconcile()` across
+an office restart (plan-synthesis), hash-checked output previews, and the sealed
+AWAITING_DECISION → hash-bound decision chain.
+
+New findings recorded in `records/reviews/office-live-acceptance-2026-09-25.md`:
+`jobOutputPreview` returns no positive `verified` flag; the card's Retry is gated to
+LAUNCHED while the store also allows BRIEFING (a dead brief has no UI retry);
+chain-launched dependents mint jobs without a local-session binding (observe falls
+back to flat-packet rule); observing an INTENT job throws a raw IPC error. These feed
+the next round. REVISE, cancel cascade/dialog, withheld-paths blinding, and the Codex
+local route remain unexercised live; hosted execution stays BLOCKED_EXTERNAL.
+
+Same-day update: the live gaps above were then exercised on the packaged app —
+withheld `internal/` prefix minted a BLIND packet carrying hash-only
+`packet.withheld` (bytes absent from `inputs/`); cancel through the confirmation
+dialog killed the spawned pid, marked the job FAILED with the honest office-termination
+detail and retained the CANCELED record; an ema5 REVISE round minted `revisionOf`
+with verbatim note inheritance, pulled cross-request inputs from the decided ema3
+round, ran all nine hops and reached DECIDED/APPROVE. The freeze at `ffc40c7`
+fixed the preview `verified` flag, made INTENT/SUBMITTING observe a no-op, and taught
+startup reconcile to relaunch stranded dependency-free pipeline hops (the stranded
+brief observed live is now self-healing). Only the Codex local route from that list
+stays open — assigned separately outside this batch.
+
+### 2026-09-25 — token-consumption audit, token diet and plugin findings
+
+Status: VERIFIED_LOCAL (dev build and packaged `App\`); branch `fix/token-diet-20260925`,
+based on organizer `9356c2e` (includes its four unpublished commits `2f90cc6`..`9356c2e`).
+Test agents are named per the updated AGENTS.md rule: `Test dir 1` (DIRECTOR, Claude Opus 5.5
+low), `Test PM A`–`Test PM D` and `Test worker 1`/`2` (Devin SWE-2 Max), all LOCAL_CLI_EXEC.
+
+Audit of the user's 2026-09-25 rounds (Claude transcripts `~/.claude/projects/*local-sessions*`,
+Devin `sessions.db`): the ema5 planning round used 2.50M input tokens over 65 model calls,
+revision 1 3.10M, the ema3 analysis round 3.35M. ~70% of input was fixed startup context: every
+office-spawned `claude -p` inherited the user's whole interactive setup (skills, claude.ai
+connectors, auto-memory section, per-cwd prompt that defeated caching) — ~25k (Opus) / ~37k
+(Sonnet) tokens per call. Hop instructions named no output file, so the brief, both drafts, both
+critiques, synthesis, both workers and verify each rewrote `ema5.py`; inherited inputs were named
+by job id, so "plan-draft-a" resolved to nothing; every worker re-implemented the whole plan.
+
+Changes (all in `app/`): `tool-flags.ts` claude isolation flags + default tool set; codex
+`-c mcp_servers={}`, disabled unused features, `-c model_reasoning_effort` mapping; delegation
+keeps each CLI's sub-agent surface. `round-executor.ts` per-hop deliverables and "do not"
+lines; worker slices; `round-template.ts` QUICK planning/analysis specs and the restart spec.
+`local-packet.ts` inherited dirs by hop key (`prior-<key>` across requests), prompt "Packet
+essentials" block (receipt identity incl. packet hash, inputs, CSV shape with wide-column
+warning), `finish.py` receipt helper, `CONTRACT-OPTIONAL.md` split. `pipeline-runner.ts`
+analysis-plan inheritance via `request.analysisOf`, plan-hop resolution for quick/restart
+rounds, prior deliverables for restart implement hops. Store: `analysisOfRequestId` on
+request.create, `shape`/`specHash` on confirm, `restartAt` on REVISE. Renderer: pre-registered
+plan picker, Round picker, revision restart picker. `local-cli-exec.ts` 4 s claude launch
+spacing (OAuth refresh races). 867/868 tests pass (1 skipped), typecheck clean.
+
+Live results (isolated `QRO_USER_DATA_DIR`, same ema5 task and CSV): full round 1.51M /
+67 calls (verification PASS 6/6); analysis round with pre-registered plan 1.63M (verdict RIGHT);
+QUICK round 574k / 26 calls (PASS); implementation-only revision 345k / 20 calls (PASS). Per
+hop: `Test dir 1` brief 164k → 44k, synthesis 190k → 80k, verify 172k → 49k. Codex implement
+hop on the same packet (CLI A/B, gpt-6-astra low): 374k / 12 commands → 147k / 7. Devin has no
+startup-trimming flags (~12.5k fixed); its saving comes from `finish.py` (one call instead of
+2–3) and fewer contract reads. Packaged mirror: `App\resources\app.asar` SHA-256
+`642139F37042AA7A3FCF866A310DBFE26AC9FAFA3386F5242E0A665D91E66EEF`; previous install
+(`782248C6…`) backed up at `Quant Office\Archive\App-before-token-diet-20260925`.
+
+Plugin findings (measured, no code changed for them):
+- C10 plugins: Serena, Ponytail, Graphify and LightRAG are not installed on this machine; the
+  office drops a declared serena when absent, so none contributed tokens or savings. Ponytail's
+  core skill is ~6.6 KB re-injected per turn (≈1.7k tokens × 4–13 calls per hop) — plausible net
+  gain only on implement hops; Serena only helps symbol navigation in real codebases.
+- Claude auto-memory: 37 per-packet memory folders, all empty — zero reuse, ~13.5k-char system
+  section per Sonnet call. Now excluded by the isolation flags.
+- Office memory ledger: digest opened in 3 of 5 synthesis/finalize hops, never cited, no
+  evidenceRefs. After the token diet, receipts recorded 0 findings (the prompt tells agents to
+  skip the contract where findings are described) — capture needs a deliberate decision.
+- Evidence surface: all 4 analyst frames (3 queryEvidence, 1 memorySearch) were refused
+  MALFORMED because the contract never documents per-op args — 7 wasted tool calls in one hop.
+Follow-ups proposed as separate tasks: evidence-surface frame format; cheap memory capture and
+digest at the brief (measure whether it pays); C10 A0/AS/AP trial once installs are approved.
+
+Not done: an office-side automatic verify (would execute agent-written code, which the office
+does not do); hosted execution stays BLOCKED_EXTERNAL; no scientific or live-research claim.
+
+### 2026-09-25 — plugin trials (C10) and recommended plugin set
+
+Status: MEASURED_LOCAL; no product code changed. Branch `fix/token-diet-20260925`. Plugins were
+installed into a session scratch folder (off `PATH`, no global Claude/Codex/Devin configuration):
+uv + `serena-agent` 1.7.0 (MCP, `--context claude-code --mode no-onboarding`), Ponytail v4.10.0
+(full-mode rules via `--append-system-prompt-file` for Claude, `.windsurf/rules` with
+`trigger: always_on` for Devin; its hooks were not installed), `graphifyy` 0.9.68 (code graph,
+project `CLAUDE.md` rule + PreToolUse hook, `graphify query`), `lightrag-hku` 1.5.7 server with
+Ollama 0.34.4 (`qwen2.5:7b-instruct`, `nomic-embed-text`). Trials ran the office's own CLI argv
+(isolation flags, packet essentials prompt) on copies of real packets, CLI A/B; n = 2 per arm, and
+run-to-run noise on the same arm is ±20–40 %, so only large effects are detectable.
+
+Results (input tokens incl. cache reads; model and effort per arm):
+- Office memory ledger (through the app, isolated `QRO_USER_DATA_DIR`, `Test dir 1` = Claude
+  Opus 5.5 low, PMs/workers = Devin SWE-2 Max): spontaneous formation is rare (1 finding in 3
+  rounds, 0 in a quick round). Injected findings were used correctly: synthesis applied the
+  current 6-dp rule and ignored a superseded 4-dp note and an irrelevant hypothesis; analysis
+  finalize rejected a 10-dp upload citing memory while the falsify seat (no digest) accepted it.
+  The brief (no digest) planned 10 dp — the digest arrives after the plan is already drafted.
+  Quick rounds mount no digest.
+- Serena: +8.7k tokens of tool schema per call. Unhinted it was never called (0/4 runs); on
+  navigation 370k vs 288k baseline with 6/7 vs 7/7 accuracy. Hinted ("use the Serena tools") it
+  was called 7–9 times, 326k, 7/7 — more tokens for equal accuracy.
+- Ponytail: +1.3–1.9k per call. Implement hop, Claude Sonnet 5 low: 170k/145k baseline vs
+  158k/214k; Devin SWE-2 Max: 341k/326k vs 306k/299k (rule verified loaded). Same 66 LOC, all
+  PASS — office plans already constrain scope, so there is little over-engineering to remove.
+  Navigation 262k vs 288k, 7/7 (within noise).
+- Graphify: graph of 1,711 nodes / 4,912 edges built in seconds without an LLM; +0.5k per call;
+  used spontaneously (2–4 queries); navigation 294k, 6/7 and 7/7.
+- Stacked (navigation, Claude Sonnet 5 low): Serena+Ponytail 297k (Serena unused, 6/7, 7/7);
+  Graphify+Ponytail 242k but 6/7 twice; Serena+Graphify 319k (only Graphify used). Implement hop:
+  Serena+Ponytail 245k/209k, Graphify+Ponytail 214k/162k, plugins unused, all PASS. Stacking
+  adds instruction and schema context; no combination beat the baseline on accuracy.
+- LightRAG: indexing with the local 7B model on this machine (RTX 3060 6 GB) ran ~1 chunk/min
+  (full `app/src` ≈ 7 h); an 11-file subset extracted 5 chunks in 2 h and 5 files failed on
+  LLM timeouts even at 1200 s. No usable index, so query-side savings were not measured.
+  A hosted LLM for indexing would be required, which is outside the local-only boundary.
+
+Recommended plugin set: the office memory ledger only (cheap, and it measurably corrected an
+answer when it reached the right seat). Do not enable Serena, Ponytail, Graphify or LightRAG by
+default, and do not stack them. Graphify is the only one worth re-testing, on a large unfamiliar
+repository where navigation dominates; Serena only with an explicit per-hop tool hint. The token
+diet (lean launches, per-hop deliverables, quick rounds) remains the main lever. Follow-ups:
+evidence-surface frame format; memory capture prompt and digest at the director brief.
+
+### 2026-09-25 — evidence-surface args and memory capture
+
+Status: VERIFIED_LOCAL (dev build and packaged `App\`); branch `fix/evidence-and-memory-20260925`
+(PR #14, stacked on `fix/token-diet-20260925`), commits `7f30e14` and `4246d18`.
+
+Evidence surface: a live analyst seat (PM_D, analysis-falsify) had all 4 frames refused MALFORMED
+after guessing `{name}`/`{kind,title}`/`{text}`/`{query}` — per-op args were documented nowhere and
+the prompt deferred the format to the contract it tells sessions not to open. `EVIDENCE_ARGS`
+(`evidence-tool.ts`) is now the single source for the contract paragraph, the prompt essentials
+line (with one working example) and every MALFORMED refusal detail. The prompt says answers arrive
+within about a second (no sleep polling), that earlier hops are under `inputs/inherited/`, and
+offers `memorySearch` only at seats authorized for it. Tests prove each documented shape is served
+and that the exact live frames now get refusals naming the expected args. Not exercised live: the
+test roster's tool profiles do not mount the surface.
+
+Memory: one optional prompt line asks for up to 3 durable project facts via `finish.py --extra
+findings.json` (exact shape given). `MEMORY_SEATS` (`shared/local-session.ts`) = `plan-brief`,
+`plan-synthesis`, `analysis-finalize` governs both the digest mount and `authorizeMemorySearch`;
+`analysis-brief` stays excluded because its brief feeds the independent interpret/falsify arms.
+Quick rounds now reach memory through their brief. Measured through the app (isolated
+`QRO_USER_DATA_DIR`, fresh project per arm, same CSV, quick ema5 then ema8; `Test dir 1` = Claude
+Opus 5.5 low, `Test PM A`/`Test worker 1` = Devin SWE-2 Max): findings recorded 0/0 on the
+token-diet build vs 2/4 on this branch (row-0 16 h gap, footprint column breaks naive CSV parsing,
+seed decision, pandas present). The second brief read the digest, followed the first request's
+row-0 convention and skipped re-analysing the CSV (baseline rediscovered the gap with a Python
+scan); brief 29.9k vs 32.2k input tokens. Round totals 334k/376k vs 472k/356k — within the ±40 %
+run-to-run noise, so no token saving is claimed; the gain is consistency and not re-deriving facts.
+Keep the mount; revisit if the ledger outgrows the digest bound.
+
+Checks: typecheck clean; 871 pass, 1 skipped. Packaged mirror: `App\resources\app.asar` SHA-256
+`0901A8DFD23E5B3F4DC16AD099FA013765E5287E7DBE23D7C89C77883F817FB7` (smoke-launched with an
+isolated data dir); previous install (`642139F3…`) backed up at
+`Quant Office\Archive\App-before-evidence-memory-20260925`. Plugin trial installs (Serena, Graphify,
+LightRAG, Ponytail, Ollama + models, uv) were removed after the trials.
+
+### 2026-09-25 — commercial launch-readiness review (front and back end)
+
+Status: REVIEW (no product code changed). Reviewed `fix/token-diet-20260925` at the merge of PR #14
+(`3f423d8`) plus `origin/main` (`4533d57`) — the content that reaches `main` with PR #13 — and the
+packaged `App\` build (`app.asar` `0901A8DF…`). Method: source and configuration inspection; a
+fresh-install walkthrough and a history-laden walkthrough of the packaged app (isolated
+`QRO_USER_DATA_DIR`); a store benchmark on a scratch copy of the A/B test workspace; the repo's
+desktop e2e suite against the packaged app; `pnpm audit --prod`; Authenticode inspection.
+
+Verdict: **not ready for a commercial launch.** Suitable for a private beta with technical
+Windows users who accept that agents run with their own account's full privileges. Five launch
+blockers (P0) must close first.
+
+Strengths worth keeping:
+- Electron hardening is sound: contextIsolation, renderer sandbox, nodeIntegration off and a strict CSP. Navigation, window-open and webview are denied, permission requests are denied, there is a single-instance lock, and devtools are off when packaged.
+- All 57 IPC handlers validate input with zod or refuse data.
+- Provider sign-in URLs are allow-listed.
+- The event log is append-only and hash-chained, with an integrity check.
+- Receipts are re-hashed byte-for-byte.
+- Backups go outside any checkout.
+- `pnpm audit --prod` reports no known vulnerabilities, and 871 unit tests pass.
+
+| ID | Sev | Area | Finding | Evidence | Recommended fix |
+| --- | --- | --- | --- | --- | --- |
+| L1 | P0 | Security (back end) | Office-spawned agents run unsandboxed, with permission bypass, under the user's account: claude `--dangerously-skip-permissions`; devin `--permission-mode dangerous --respect-workspace-trust false` (its `--sandbox` is a no-op on Windows); codex `-s workspace-write`. `canWrite=false` and the devin/Claude tool allowlists are declared but not enforced. Project data and inherited outputs reach an agent with a full shell, so a crafted CSV or prior output can prompt-inject arbitrary commands. | `app/src/main/tool-flags.ts`: claude args l.131, devin l.212, and the `unmapped` notes | OS-level confinement per session (Windows Sandbox/AppContainer, or a container/VM), or provider permission modes with an allow-list. An explicit first-run consent that states the risk. Treat data files as untrusted in prompts. |
+| L2 | P0 | Performance (back end) | The whole workspace is one JSON projection row. It is parsed and canonical-checked on every read (79 `readProjection` call sites) and rewritten on every write, and startup replays and re-hashes the full event chain before the window opens. After ~10 test rounds: projection 8.4 MB, of which 99% is 105 capability snapshots, each carrying a ~123 KB model catalog appended on account checks. Store open 19 s; `snapshot()` 155 ms; the packaged app takes 17 s to show its window and 21 s to a usable UI; each renderer `getState` takes 226 ms. It grows without bound. | Scratch benchmark on the A/B workspace (497 events); `store.ts` `readProjection`/`verifyIntegrity`; capability append l.2195/2328 | Keep only the latest capability snapshot per connection in the projection, with the catalog stored once by content hash. Move hot collections to tables or an incremental projection. Make integrity verification incremental or background. Show the window with a loading state before the store opens. |
+| L3 | P0 | Release engineering | The executable is not code-signed (Authenticode `NotSigned`, so SmartScreen warns). There is no installer or uninstaller (installs are a manual folder mirror) and no auto-update channel. Electron fuses are not set (RunAsNode, NODE_OPTIONS, asar integrity). `license: UNLICENSED`, with no EULA, privacy policy or third-party notices beyond Chromium's. Build targets win32-x64 only. | `scripts/package.mjs`; `Get-AuthenticodeSignature` on `App\Quant Research Office.exe` | EV/OV signing in `package.mjs` (`@electron/windows-sign` is already a dev dependency), an MSIX/NSIS installer, an update feed, `@electron/fuses`, and legal documents with a licence/notices bundle. |
+| L4 | P0 | Legal / provider terms | The product automates consumer subscription accounts (Claude, ChatGPT/Codex, Devin) through their CLIs in multi-agent pipelines, with no API-key route. Nobody has reviewed whether each provider's terms allow commercial automated use of personal subscriptions. | Usage page ("No API billing or automatic paid fallback"); `subscriptions.ts` | Legal review of each provider's terms before sale; an API-key or enterprise route where subscriptions are not permitted. |
+| L5 | P0 | Product (front end) | Hosted execution is BLOCKED_EXTERNAL, yet Add agent defaults to "Provider-hosted (setup required)", which cannot run work. The working local transport appears only after switching. Settings shows "Ready: No" and "Automatic start: Blocked" for an account that runs local work fine. | Fresh-install walkthrough of the packaged app | Default to local CLI (or hide hosted until verified), with readiness copy per transport. |
+| L6 | P1 | Quality / CI | The desktop e2e suite is broken, and CI doesn't run it. `tests/desktop.e2e.ts:68` expects copy that changed when withheld paths were added. The preload-bridge key snapshot at l.139 is missing `jobOutputPreview` and other new keys. CI (`verify.yml`) runs unit and tools tests only, so the renderer has no automated regression coverage. | e2e run against the packaged app | Fix both assertions, run the e2e in CI on a Windows runner, and derive the bridge snapshot from the preload module. |
+| L7 | P1 | Supportability | There are no `uncaughtException`, `unhandledRejection`, `render-process-gone` or `child-process-gone` handlers, no log file and no crash reporter. A renderer crash leaves a blank window and nothing to diagnose. | `app/src/main/main.ts` | Handlers with a reload/recover UI, a rotating local log, opt-in crash reports, and an "export diagnostics" action. |
+| L8 | P1 | Robustness | The prompt reaches each CLI as an argv string. Objectives allow 12,000 characters, on top of the brief and the packet-essentials block, and Windows caps a command line at 32,767 characters, so a long request fails to launch. | `tool-flags.ts` l.131/181/212; `store.ts` objective `max(12000)` | Pass the prompt through stdin or a prompt file, and enforce a total bound with a clear error. |
+| L9 | P1 | Onboarding (front end) | First run lands on an empty office with no guided setup; the user must work out on their own: install and sign in to a CLI, add a director, PMs and a worker, create a project, make a first request. The sidebar says "Research runs on provider infrastructure" while real work runs locally. | Fresh-install walkthrough | A setup checklist or wizard, and a corrected tagline. |
+| L10 | P1 | UX copy (front end) | Settings and readiness text is internal evidence jargon ("Unverified cloud submission: documented, documented.", repeated per operation) that customers cannot act on. | Settings page | A plain status summary per provider and transport, with the evidence detail collapsed. |
+| L11 | P2 | Localisation (front end) | The UI is English, but dates use the OS locale: a Korean timestamp appeared next to English text. There are 22 `toLocale*` call sites and no i18n layer. | Settings page; `grep toLocale src/renderer` | One formatter bound to the UI language; an i18n plan if non-English markets are targeted. |
+| L12 | P2 | Maintainability | The code is dense: 117 lines over 400 characters (max 965), `store.ts` at 3,283 lines with single-line methods, and IPC handlers on one line each in `main.ts`. This slows review and the onboarding of new contributors. | Line-length scan of `src/main`, `src/core`, `src/renderer` | A formatter (Prettier/dprint) in CI; split `store.ts` by aggregate. |
+| L13 | P2 | Accessibility (front end) | There are 42 `aria-label`s across 113 buttons, and several icon-only buttons expose no accessible name. No keyboard-only or contrast audit has been done. | Button inventory on the Projects page; `grep` of `src/renderer` | Name every icon button, then run an axe/keyboard pass. |
+| L14 | P2 | Visual (front end) | The light office scene and chat panel sit inside a dark shell. It is readable, but inconsistent for a paid product. | Office screenshots | A design pass on the theme tokens. |
+| L15 | P2 | Product evidence | Memory's token effect is unproven (n = 1 per arm, ±40% noise), and the C10 trials found no plugin savings. Marketing claims about token savings or memory must stay qualitative until a larger study. | 2026-09-25 A/B and C10 entries | A repeated-measures benchmark before any public claim. |
+
+Not assessed: macOS/Linux builds (none exist), multi-user or team deployment, data-protection
+compliance (GDPR and similar), load beyond the one scratch workspace, and provider rate-limit
+behaviour at scale. The review ran `npx pnpm@latest --version`, which may have fetched pnpm
+into the npm cache; nothing was installed globally.

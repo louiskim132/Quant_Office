@@ -272,7 +272,7 @@ const changed=()=>win?.webContents.send('office:changed');
   const bytes=await readFile(path.join(workspace,'objects',output.sha256.slice(0,2),output.sha256));
   if(createHash('sha256').update(bytes).digest('hex')!==output.sha256)throw new Error('Stored output object integrity failure — the bytes do not match the recorded identity.');
   const PREVIEW_BYTES=64*1024;
-  return {path:output.path,sha256:output.sha256,bytes:output.bytes,text:bytes.subarray(0,PREVIEW_BYTES).toString('utf8'),truncated:bytes.byteLength>PREVIEW_BYTES};
+  return {path:output.path,sha256:output.sha256,bytes:output.bytes,text:bytes.subarray(0,PREVIEW_BYTES).toString('utf8'),truncated:bytes.byteLength>PREVIEW_BYTES,verified:true as const};
  });
  handle('office:request-discard-preparation',async value=>{const input=assignmentInput.parse(value);return dispatch(async()=>{const state=controller.discardPreparation(input.assignmentId);changed();return state;});});
  handle('office:request-link',value=>{
@@ -360,8 +360,11 @@ const changed=()=>win?.webContents.send('office:changed');
   return dispatch(async()=>{
    if(type==='request.pipeline.confirm'){
     // The whole spec must resolve before the phase flips — a refusal leaves the request briefing.
-    const gate=pipelineConfirmGate(store,requestId!);
+    // The recorded spec hash is always the office's own mint of the confirmed shape.
+    const shape=(value as {shape?:'FULL'|'QUICK'}).shape;
+    const gate=pipelineConfirmGate(store,requestId!,shape);
     if(!gate.ok)throw new Error(gate.detail);
+    value={...(value as object),specHash:gate.specHash};
    }
    let state=store.execute(value);
    const request=state.requests?.find(r=>r.id===requestId);
