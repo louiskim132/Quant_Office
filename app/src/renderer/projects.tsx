@@ -4,12 +4,34 @@ import type {AppState,Command,Project,ProjectLocation} from '../shared/types';
 import {Empty,SearchField} from './components';
 import './projects.css';
 
+/**
+ * Normalizes a typed withheld entry exactly as `location.save` will — trim, backslashes to
+ * forward slashes, leading './' and trailing '/' stripped — and refuses up front what the
+ * store's relativePath schema would refuse on save: absolute or drive-qualified paths,
+ * '.'/'..'/empty segments, control characters. A withheld prefix may name a path that does not
+ * exist yet, so existence is never consulted. The duplicate check folds case because the
+ * matcher's rule (path === prefix || path.startsWith(prefix + '/')) already resolves on this
+ * platform's case-insensitive filesystem — 'Results/' and 'results/' withhold the same files.
+ */
+export function normalizeWithheldEntry(raw:string,existing:readonly string[]):{entry:string;duplicate:boolean}|{error:string}{
+ const entry=raw.trim().replace(/\\/g,'/').replace(/^\.(?:\/)+/,'').replace(/\/+$/,'');
+ if(!entry)return{error:'Type a project-relative path prefix — for example results/ or internal/notes.txt.'};
+ if(entry.length>1000)return{error:'A withheld path is limited to 1000 characters.'};
+ if(/^([a-zA-Z]:|[\\/])/.test(entry))return{error:`"${raw.trim()}" is not project-relative — no drive letters or leading slashes.`};
+ if(entry.split('/').some(part=>part==='..'||part==='.'||part===''))return{error:`"${raw.trim()}" cannot traverse directories — withheld paths stay inside the project folder.`};
+ if(/[\x00-\x1f]/.test(entry))return{error:'A withheld path cannot contain control characters.'};
+ const duplicate=existing.some(item=>item.toLowerCase()===entry.toLowerCase());
+ if(!duplicate&&existing.length>=256)return{error:'A project can withhold at most 256 paths.'};
+ return{entry,duplicate};
+}
+
 export function ProjectLocationPanel({project,saved,location,onState}:{project:Project;saved:ProjectLocation|undefined;location:string;onState:(s:AppState)=>void}){
  const [folder,setFolder]=useState(location);
  // The draft is pinned to the record it was loaded from. If the location changes elsewhere before
  // Save, expectedRevision no longer matches and the refusal text surfaces instead of overwriting.
  const [baseline,setBaseline]=useState(()=>({revision:saved?.revision??0,folder:location,withheld:saved?.withheldPaths??[]}));
  const [withheld,setWithheld]=useState<string[]>(saved?.withheldPaths??[]);
+ const [withheldDraft,setWithheldDraft]=useState('');
  const [notices,setNotices]=useState<string[]>([]);
  const [busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
  useEffect(()=>{
@@ -34,8 +56,16 @@ export function ProjectLocationPanel({project,saved,location,onState}:{project:P
  }
  async function addWithheld(){
   setError('');
-  try{const chosen=await window.office.chooseInputFiles(folder);setWithheld(list=>[...list,...chosen.filter(entry=>!list.includes(entry))]);}
+  try{const chosen=await window.office.chooseInputFiles(folder);setWithheld(list=>{const merged=[...list];for(const entry of chosen)if(!merged.some(item=>item.toLowerCase()===entry.toLowerCase()))merged.push(entry);return merged;});}
   catch(e){setError((e as Error).message);}
+ }
+ // Typed entries are the point of the field: directories and not-yet-existing prefixes can
+ // never come back from an openFile dialog, so they are validated here, before location.save.
+ function addWithheldTyped(){
+  const verdict=normalizeWithheldEntry(withheldDraft,withheld);
+  if('error'in verdict){setError(verdict.error);return;}
+  if(!verdict.duplicate)setWithheld(list=>[...list,verdict.entry]);
+  setWithheldDraft('');setError('');
  }
  async function save(){
   setBusy(true);setError('');setNotice('');
@@ -56,7 +86,7 @@ export function ProjectLocationPanel({project,saved,location,onState}:{project:P
   <div className="withheld-editor"><strong>Withheld from planning</strong>
    <p className="muted">Project-relative path prefixes that planning hops never see. Entries may name paths that do not exist yet.</p>
    {withheld.length===0?<p className="muted">Nothing withheld — planning sees the whole shared folder.</p>:withheld.map(entry=><div className="withheld-row" key={entry}><span className="path-text">{entry}</span><button type="button" className="text-button" disabled={busy||project.archived} onClick={()=>setWithheld(list=>list.filter(item=>item!==entry))}>Remove</button></div>)}
-   <div><button type="button" className="secondary" disabled={busy||project.archived||!folder} onClick={()=>void addWithheld()}>Add withheld path</button></div>
+   <div className="withheld-add"><input type="text" value={withheldDraft} spellCheck={false} autoComplete="off" aria-label="Withheld path prefix" placeholder="Type a prefix — e.g. results/ or internal/planned/" disabled={busy||project.archived||!folder} onChange={e=>setWithheldDraft(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();addWithheldTyped();}}}/><button type="button" className="secondary" disabled={busy||project.archived||!folder||!withheldDraft.trim()} onClick={addWithheldTyped}>Add</button><button type="button" className="secondary" disabled={busy||project.archived||!folder} onClick={()=>void addWithheld()}>Pick existing files…</button></div>
   </div>
   {error&&<p className="notice error" role="alert">{error}</p>}
   {notice&&<p className="notice success" role="status">{notice}</p>}

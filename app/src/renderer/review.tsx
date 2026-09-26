@@ -25,12 +25,13 @@ export function PipelineReviews({state,projectId,experiment,busy,setPreview,onEr
  const preview=(jobId:string,path:string)=>{window.office.jobOutputPreview({jobId,path}).then(r=>setPreview({name:path,text:r.text,truncated:r.truncated,binary:false})).catch(onError);};
  return <section>
   <h2>Pipeline reviews</h2>
+  <p className="muted">Each hop shows its latest attempt only — an earlier attempt's stored bytes stay listed under Artifacts, marked superseded.</p>
   {!groups.length?<p className="muted">No pipeline reviews on record for this scope. A request's critique, falsification, response and verification hops appear here once a launched pipeline mints them.</p>
    :groups.map(group=><article key={group.requestId} className="task-card">
     <div className="card-heading"><h3>{group.requestName}</h3></div>
     <ul className="functions">{group.hops.map(hop=><li key={hop.assignmentId}>
      <b>{label(hop.pipelineKey.replaceAll('-',' '))}</b>
-     <span>{hop.agentName}{hop.state?` · ${label(hop.state)}`:' · recorded — no job dispatched yet'}</span>
+     <span>{hop.agentName}{hop.state?` · attempt ${hop.attempt} · ${label(hop.state)}`:' · recorded — no job dispatched yet'}</span>
      {!!hop.outputs.length&&<span className="button-row">{hop.outputs.map(output=><button key={output.path+output.sha256} className="secondary" disabled={busy} onClick={()=>preview(output.jobId,output.path)} title={`${output.path} · ${output.bytes} bytes · sha256 ${output.sha256.slice(0,12)}…`}>Preview {output.path}</button>)}</span>}
     </li>)}</ul>
    </article>)}

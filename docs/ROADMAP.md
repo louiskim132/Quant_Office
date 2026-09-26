@@ -2129,7 +2129,7 @@ Latest C9 qualification (2026-09-21) supersedes the historical C9 row's statemen
 | Current acceptance item | Status | Evidence / next item |
 | --- | --- | --- |
 | C9 automated Director → PM → Worker | VERIFIED_LOCAL for bounded live Claude CLI relay | Three distinct role profiles and real processes; one Director start, two event-driven dependent starts; exact inherited manifests, agent-consumed predecessor hashes, verified durable outputs and replay non-duplication. Two product defects repaired; 689/690 unit tests pass (one existing skip), typecheck/build and three development desktop suites pass. [Acceptance record](../records/reviews/three-agent-acceptance-2026-09-21.md). Next: reproduce output-storage failure recovery and retain process/watch bookkeeping until durable terminal admission. Mixed-provider chains, packaged acceptance and the C8 user-run Colab pilot are not established by this test. |
-| Communication pipeline (comm-pipe-1..3) | VERIFIED_LOCAL including live P3 on a dev build (2026-09-24); packaged live run NOT_STARTED | Planning and result-analysis pipelines mint request-scoped hop sets; the terminal hop seals, AWAITING_DECISION binds the decision to the verified receipt, and `request.pipeline.decide` is idempotent and refuses stale hashes. 2026-09-24: both pipelines ran live end to end with a mixed Claude/Devin roster, and real Approve and Request-revision decisions were bound to verified receipts, after nine defects were fixed ([acceptance record](../records/reviews/office-live-acceptance-2026-09-24.md)). 2026-09-25 round `findings-rev-2` (head `7a4153c`): planning packets now blind `withheldPaths`; REVISE auto-mints a linked revision request whose brief inherits verified prior-round outputs and the decision note; pipeline cards carry a per-hop Observe/Retry/Cancel table with verified output previews and a named cancel confirmation; pre-launch failures settle FAILED with `lastObservation`; stored agent outputs and pipeline reviews are visible in Artifacts/Reviews. 2026-09-25 packaged acceptance round 3 on the taskbar install: planning + result-analysis pipelines ran live on real userData with dead-spawn retry, transient auto-retry, stranded-receipt reconcile and hash-bound decisions all exercised ([acceptance record](../records/reviews/office-live-acceptance-2026-09-25.md)). Open: REVISE, cancel and withheld-paths live coverage; the formal C8 S3 run-package/return pilot; hosted-provider execution remains gated; provider effort/tool claims remain unverified beyond what the session result reports. |
+| Communication pipeline (comm-pipe-1..3) | VERIFIED_LOCAL including live P3 on a dev build (2026-09-24); packaged live run NOT_STARTED | Planning and result-analysis pipelines mint request-scoped hop sets; the terminal hop seals, AWAITING_DECISION binds the decision to the verified receipt, and `request.pipeline.decide` is idempotent and refuses stale hashes. 2026-09-24: both pipelines ran live end to end with a mixed Claude/Devin roster, and real Approve and Request-revision decisions were bound to verified receipts, after nine defects were fixed ([acceptance record](../records/reviews/office-live-acceptance-2026-09-24.md)). 2026-09-25 round `findings-rev-2` (head `7a4153c`): planning packets now blind `withheldPaths`; REVISE auto-mints a linked revision request whose brief inherits verified prior-round outputs and the decision note; pipeline cards carry a per-hop Observe/Retry/Cancel table with verified output previews and a named cancel confirmation; pre-launch failures settle FAILED with `lastObservation`; stored agent outputs and pipeline reviews are visible in Artifacts/Reviews. 2026-09-25 packaged acceptance round 3 on the taskbar install: planning + result-analysis pipelines ran live on real userData with dead-spawn retry, transient auto-retry, stranded-receipt reconcile and hash-bound decisions all exercised ([acceptance record](../records/reviews/office-live-acceptance-2026-09-25.md)). 2026-09-25 (same day): REVISE end-to-end, cancel cascade/dialog and withheld-path blinding all exercised live on the packaged install — verified. Open: the formal C8 S3 run-package/return pilot; hosted-provider execution remains gated; provider effort/tool claims remain unverified beyond what the session result reports. |
 | M-memory workstream (office-mem-1/2) | VERIFIED_LOCAL; external engines NOT_STARTED | Append-only finding/relationship ledgers, per-hop authorized memorySearch and digest mount (plan-synthesis/analysis-finalize only), Memory page graph/search/links, archive export and an evaluation harness with the Office baseline. Merged via PR #8/#9. Memory is office-recorded self-report, not verified fact. 2026-09-24 packaged-app audit: graph overlap, hidden search focus, stale notice and the missing Opus 5.5 option fixed on `fix/memory-page-bugs-20260924`. |
 
 Status vocabulary: NOT_STARTED, IMPLEMENTED_FOUNDATION, IN_PROGRESS, PARTIALLY_VERIFIED_LOCAL, BLOCKED_EXTERNAL, VERIFIED_LOCAL, VERIFIED_HOSTED. PARTIALLY_VERIFIED_LOCAL means some tested code exists but parent acceptance is not met; list exact open subitems. PARTIALLY_IMPLEMENTED means the larger program still has unimplemented contracts/UI/tests. The latter requires actual provider evidence for the exact scope. A local test cannot advance a hosted gate. Keep this table in the same file.
@@ -5707,3 +5707,49 @@ the five decisions; C11.D now states them as rules for the coding model (Devin S
   byte-identical). LR-13 was folded into LR-0.
 Prepared test files: `docs/plans/lr6-capability-compaction.test.ts` (four tests) and
 `docs/plans/lr14-theme-default.test.ts` (three tests); each packet copies and then deletes its file.
+
+### 2026-09-26 — sequencing decision: findings-rev-3 runs before C11/LR-0
+
+Two tracks are open. The desktop batch's `findings-rev-3` round is READY (published from
+base `ffc40c7`, which C11's merged history already contains): workers 1-4 hold CODE packets
+(pipeline card retry/observe/preview polish, typed withheld-path entries, artifacts/review
+attempt semantics, freeze regression tests); workers 5-7 IDLE. Separately, C11 on main names
+SWE-2 Max for LR-0 (Prettier, 120 columns — a whole-tree reformat) and Claude Opus as its
+organizer for the post-LR-0 re-anchor. Order agreed across both organizer sessions: rev-3
+first — it is narrow and mostly additive, so LR-0 then reformats its new code for free; the
+reverse order would strand worker diffs cut against the pre-format layout. SWE-2 Max holds
+LR-0 until rev-3 merges (C11 has no other unblocked step, so the wait costs it nothing).
+Timebox: if rev-3 stalls beyond ~1-2 days, LR-0 proceeds and rev-3's packets get re-cut.
+Install check: the taskbar `App\` build (`app.asar` `0901A8DF`, mirrored 2026-09-25 20:18
+from `3f423d8`) contains the `ffc40c7` freeze and is byte-equal to `origin/main`'s `app/src`
+— no rebuild needed until the next `app/` revision lands. The Codex local route remains
+assigned outside this batch per user direction.
+
+### 2026-09-26 — findings-rev-3 closed: packaged-acceptance follow-ups landed
+
+Round `findings-rev-3` (base `ffc40c7`, same-day live-coverage findings) integrated all four
+CODE packets into `parallel/next-batch-001/organizer` on top of `origin/main` `365ada0`
+(#13/#14/#15 already merged — conflict surface was one preview-type line in
+`pipeline-card.tsx`, resolved keeping both sides):
+- worker-1 `b31db5c` → merge `2a6a943`: the card's Retry now mirrors the store gate (BRIEFING
+  included — a dead brief retries like any hop); Observe disables on INTENT/SUBMITTING/no-job
+  with a visible "nothing dispatched" reason; preview captions read the new `verified` flag.
+- worker-2 `f444c20` → merge `3617702`: withheld paths accept typed entries (directories and
+  not-yet-existing prefixes — the openFile picker could never return them) through
+  `normalizeWithheldEntry`, mirroring the store's 256/1000 caps and the matcher's case-folded
+  prefix rule. First submission `019515a` was rejected on a false "tsc clean" claim
+  (TS5097: a `.tsx`-suffixed test import); the slot was re-opened and the resubmission is the
+  one-line fix only.
+- worker-3 `f8a0d81` → merge `617c63d`: Agent outputs label the attempt that stored each byte;
+  `superseded` marks bytes no later attempt re-stored; canceled requests keep their outputs
+  under a badge; pipeline reviews show latest attempt only.
+- worker-4 `9cf6561` → merge `4c61d4d`: regression pins for the freeze — stranded
+  analysis-brief reconcile, AWAITING_DECISION/DECIDED never relaunch, ad-hoc work stays
+  user-gated, `jobOutputPreview` contract pinned type-level (`verified: true` literal).
+
+Combined verification at the integrated head: 896 tests — 895 pass, 0 fail, 1 pre-existing
+conditional skip; `tsc --noEmit` clean; `node scripts/build.mjs` clean. Note: the unbounded
+per-file test swarm stalls under leftover IDE/MCP processes on this box; rerunning with
+`--test-concurrency=4` completed deterministically.
+Per the sequencing entry, SWE-2 Max may now start C11 LR-0 from merged `main` once this
+round's integration PR lands; the Codex local route remains assigned outside this batch.

@@ -339,6 +339,61 @@ test('a stranded INTENT brief is launched by the startup reconcile', async t => 
   assert.ok(f.store.localSessionForJob(jobFor(f, briefAssignment.id).id), 'the launch wrote the local-session binding');
 });
 
+// The same hole exists on the analysis side: 'analysis-brief' is the dependency-free root hop of
+// a RESULT_ANALYSIS round, and a sweep that only knew the planning key would strand it in BRIEFING.
+test('a stranded INTENT analysis-brief is launched by the startup reconcile', async t => {
+  const f = await fixture(t);
+  f.store.execute({ type: 'request.create', idempotencyKey: key(), projectId: f.project.id, name: 'Stranded analysis', hypothesis: 'h', workType: 'RESULT_ANALYSIS', mode: 'SINGLE', leadAgentId: f.agents.DIRECTOR.id, participantIds: [] });
+  let request = f.store.snapshot({ history: false }).requests!.find(item => item.name === 'Stranded analysis')!;
+  request = f.store.execute({ type: 'request.start', idempotencyKey: key(), requestId: request.id, expectedRevision: request.revision }).requests!.find(item => item.id === request.id)!;
+  const briefed = await mintPipelineBrief(f.ctx, request);
+  assert.equal(briefed.minted, true);
+  const briefAssignment = f.store.snapshot({ history: false }).assignments!.find(item => item.id === requestOf(f, request.id).pipeline!.briefAssignmentId)!;
+  assert.equal(briefAssignment.pipelineKey, 'analysis-brief');
+  assert.equal(jobFor(f, briefAssignment.id).state, 'INTENT', 'the minted brief starts undispatched');
+  assert.equal(briefAssignment.dependsOn?.length ?? 0, 0, 'the brief is the dependency-free root');
+
+  await f.controller.reconcileLocalChain();
+  assert.equal(jobFor(f, briefAssignment.id).state, 'UNKNOWN', 'reconcile launches the stranded analysis brief through the guarded path');
+  assert.ok(f.store.localSessionForJob(jobFor(f, briefAssignment.id).id), 'the launch wrote the local-session binding');
+});
+
+// The sweep's live gate covers the terminal phases too: work attached to a request whose round is
+// awaiting decision — or already decided — is never relaunched, even with its recorded
+// dependencies all settled.
+test('a dependent on an AWAITING_DECISION or DECIDED request is never relaunched', async t => {
+  const f = await fixture(t);
+  const request = await launchedRound(f, 'Plan decided', 'PLANNING');
+  await completeRound(f, request.id);
+  const settled = settlePipelineDecision(f.ctx, requestOf(f, request.id));
+  assert.equal(settled.settled, true);
+  assert.equal(requestOf(f, request.id).pipeline?.phase, 'AWAITING_DECISION');
+
+  // Attached work whose only recorded dependency already settled: with the phase gate removed,
+  // this is exactly what the sweep would launch.
+  const brief = hopsOf(f, request.id).find(item => item.pipelineKey === 'plan-brief')!;
+  const current = requestOf(f, request.id);
+  const snapshot = await prepareInputSnapshot({ store: f.store, objectRoot: f.root, stagingRoot: path.join(f.root, 'staging'), projectId: current.projectId, requestId: current.id, requestRevision: current.revision });
+  const { assignment: extra } = f.controller.prepare({ requestId: request.id, agentId: f.agents.DIRECTOR.id, snapshotId: snapshot.id, dependsOn: [brief.id] });
+  const extraJob = () => jobFor(f, extra.id);
+  assert.equal(extraJob().state, 'INTENT');
+  assert.equal(dependencyStatus(f.store.snapshot({ history: false }), extra).ready, true,
+    'the dependency is settled — only the request phase holds the launch');
+
+  await f.controller.reconcileLocalChain();
+  assert.equal(extraJob().state, 'INTENT', 'a request awaiting decision never relaunches attached work');
+  assert.ok(!f.store.localSessionForJob(extraJob().id), 'no session binding was written');
+
+  // The decided round is sealed identically.
+  const pending = requestOf(f, request.id).pipeline!.pendingDecision!;
+  f.store.execute({ type: 'request.pipeline.decide', idempotencyKey: key(), requestId: request.id, expectedRevision: requestOf(f, request.id).revision,
+    decision: 'APPROVE', expectedSpecHash: pending.specHash, expectedReceiptHash: pending.headReceiptHash });
+  assert.equal(requestOf(f, request.id).pipeline?.phase, 'DECIDED');
+  await f.controller.reconcileLocalChain();
+  assert.equal(extraJob().state, 'INTENT', 'a decided request never relaunches attached work');
+  assert.ok(!f.store.localSessionForJob(extraJob().id));
+});
+
 // The same sweep must never relaunch a hop on a canceled request.
 test('a canceled request keeps its hops canceled through reconcile', async t => {
   const f = await fixture(t);
@@ -369,4 +424,7 @@ test('observing an INTENT job is a no-op that records nothing', async t => {
   const after = jobFor(f, briefId);
   assert.equal(after.state, 'INTENT');
   assert.equal(after.lastObservation, undefined, 'no observation is recorded for undispatched work');
+  assert.ok(!f.store.localSessionForJob(after.id), 'no local-session binding is manufactured');
+  assert.equal((f.store.snapshot({ history: true }).jobEvents ?? []).filter(item => item.jobId === after.id).length, 0,
+    'no diagnostic or observation event is recorded for undispatched work');
 });
