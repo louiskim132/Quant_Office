@@ -5724,3 +5724,32 @@ Install check: the taskbar `App\` build (`app.asar` `0901A8DF`, mirrored 2026-09
 from `3f423d8`) contains the `ffc40c7` freeze and is byte-equal to `origin/main`'s `app/src`
 — no rebuild needed until the next `app/` revision lands. The Codex local route remains
 assigned outside this batch per user direction.
+
+### 2026-09-26 — findings-rev-3 closed: packaged-acceptance follow-ups landed
+
+Round `findings-rev-3` (base `ffc40c7`, same-day live-coverage findings) integrated all four
+CODE packets into `parallel/next-batch-001/organizer` on top of `origin/main` `365ada0`
+(#13/#14/#15 already merged — conflict surface was one preview-type line in
+`pipeline-card.tsx`, resolved keeping both sides):
+- worker-1 `b31db5c` → merge `2a6a943`: the card's Retry now mirrors the store gate (BRIEFING
+  included — a dead brief retries like any hop); Observe disables on INTENT/SUBMITTING/no-job
+  with a visible "nothing dispatched" reason; preview captions read the new `verified` flag.
+- worker-2 `f444c20` → merge `3617702`: withheld paths accept typed entries (directories and
+  not-yet-existing prefixes — the openFile picker could never return them) through
+  `normalizeWithheldEntry`, mirroring the store's 256/1000 caps and the matcher's case-folded
+  prefix rule. First submission `019515a` was rejected on a false "tsc clean" claim
+  (TS5097: a `.tsx`-suffixed test import); the slot was re-opened and the resubmission is the
+  one-line fix only.
+- worker-3 `f8a0d81` → merge `617c63d`: Agent outputs label the attempt that stored each byte;
+  `superseded` marks bytes no later attempt re-stored; canceled requests keep their outputs
+  under a badge; pipeline reviews show latest attempt only.
+- worker-4 `9cf6561` → merge `4c61d4d`: regression pins for the freeze — stranded
+  analysis-brief reconcile, AWAITING_DECISION/DECIDED never relaunch, ad-hoc work stays
+  user-gated, `jobOutputPreview` contract pinned type-level (`verified: true` literal).
+
+Combined verification at the integrated head: 896 tests — 895 pass, 0 fail, 1 pre-existing
+conditional skip; `tsc --noEmit` clean; `node scripts/build.mjs` clean. Note: the unbounded
+per-file test swarm stalls under leftover IDE/MCP processes on this box; rerunning with
+`--test-concurrency=4` completed deterministically.
+Per the sequencing entry, SWE-2 Max may now start C11 LR-0 from merged `main` once this
+round's integration PR lands; the Codex local route remains assigned outside this batch.
