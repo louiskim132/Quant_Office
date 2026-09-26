@@ -252,6 +252,20 @@ export function reject(cwd, id, reason) {
     fresh(join(c.dir, 'decisions', `${id}.json`), out); return out;
   });
 }
+export function reopen(cwd, id, reason) {
+  text(reason, 'reopen reason'); const m = binding(cwd, 'organizer');
+  return lock(join(m.root, 'control.lock'), () => {
+    const c = current(m); must(c?.phase === 'READY', 'Round is not open.');
+    must(taskFor(c, id)?.mode === 'CODE', 'Only a CODE worker can be reopened.');
+    const d = decision(c, id); must(d?.state === 'REJECTED', 'Only a REJECTED worker can be reopened for a fix and resubmission.');
+    const r = result(c, id);
+    const tag = (d.sha ?? 'unknown').slice(0, 7);
+    renameSync(join(c.dir, 'decisions', `${id}.json`), join(c.dir, 'decisions', `${id}-rejected-${tag}.json`));
+    if (r) renameSync(join(c.dir, 'results', `${id}.json`), join(c.dir, 'results', `${id}-superseded-${tag}.json`));
+    return { state: 'RUNNING', worker: id, round: c.id, reason, at: now(),
+      instruction: 'The slot is reopened with the rejection archived; fix, commit and finish with a fresh report.' };
+  });
+}
 export function close(cwd, report) {
   const m = binding(cwd, 'organizer');
   return lock(join(m.root, 'control.lock'), () => {
@@ -289,6 +303,7 @@ function main(args) {
   if (command === 'review') return review(cwd);
   if (command === 'accept') return accept(cwd, a[0], a[1], json(resolve(a[2])));
   if (command === 'reject') return reject(cwd, a[0], a.slice(1).join(' '));
+  if (command === 'reopen') return reopen(cwd, a[0], a.slice(1).join(' '));
   if (command === 'close') return close(cwd, json(resolve(a[0])));
   throw Error('Read docs/DESKTOP-SESSIONS.md for commands.');
 }
