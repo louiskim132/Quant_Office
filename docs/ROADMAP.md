@@ -5753,3 +5753,19 @@ per-file test swarm stalls under leftover IDE/MCP processes on this box; rerunni
 `--test-concurrency=4` completed deterministically.
 Per the sequencing entry, SWE-2 Max may now start C11 LR-0 from merged `main` once this
 round's integration PR lands; the Codex local route remains assigned outside this batch.
+
+**2026-09-26 — packaged live acceptance round 4 (QUICK shapes + restart revisions).**
+On the packaged `findings-rev-3` build (`3781351`/`app.asar` `512025F4…`, which also carries the
+merged PR #13/#14 round-shape work) the packaged UI was driven end to end on real userData:
+QUICK planning ("Write sma5 code") confirmed through the card's Round select minted exactly the
+4-hop quick spec; REVISE with `restartAt: IMPLEMENTATION` minted "— revision 1" carrying the
+decision note verbatim and, on confirm, exactly the 3-hop restart spec (no planner seat); a QUICK
+result-analysis round pre-registered `analysisOf` to the sma5 round minted exactly the 6-hop
+no-cross-response spec. All hops COMPLETED; two real Approve decisions bound to verified receipts;
+the transient OAuth auto-retry and the INTENT-observe freeze fix were exercised live again. No
+functional defects found — details in
+[acceptance record](../records/reviews/office-live-acceptance-2026-09-26.md). Still open: the
+inter-Claude spawn gap has not been observable (no phase launches two Claude hops in the test
+roster), the formal C8 pilot remains user-run, and `npm test` on this box wants
+`--test-concurrency=4`. No worker packet was cut — the findings queue is empty; remaining items
+are external (C8 pilot, R5, custody, plugin installs) or belong to the C11 track.
