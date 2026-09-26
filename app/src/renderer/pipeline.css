@@ -63,7 +63,8 @@
 .pipeline-card .pipeline-hops td{padding:6px 8px;border-bottom:1px solid var(--border);vertical-align:top;color:var(--muted)}
 .pipeline-card .pipeline-hops td:first-child{color:var(--text);font-weight:600}
 .pipeline-card .pipeline-reason{max-width:220px;overflow-wrap:anywhere}
-.pipeline-card .pipeline-hop-actions{display:flex;gap:6px;flex-wrap:wrap}
+.pipeline-card .pipeline-hop-actions{display:flex;gap:6px;flex-wrap:wrap;align-items:baseline}
+.pipeline-card .pipeline-hop-actions .pipeline-hop-note{flex-basis:100%;font-size:10px}
 .pipeline-card .pipeline-hop-actions button{font-size:10px;padding:3px 9px}
 .pipeline-card .pipeline-preview{max-height:220px;overflow:auto;font-size:10px;line-height:1.6;background:var(--input);border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin:0;white-space:pre-wrap;word-break:break-word}
 .pipeline-card .pipeline-card-actions{display:flex;justify-content:flex-end;border-top:1px dashed var(--border);padding-top:9px}
