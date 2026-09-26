@@ -31,3 +31,6 @@
 .withheld-row{display:flex;align-items:center;gap:12px;padding:7px 10px;border:1px solid var(--border);border-radius:6px}
 .withheld-row .path-text{flex:1;min-width:0;margin:0;overflow-wrap:anywhere}
 .withheld-row .text-button{flex-shrink:0;padding:0}
+.withheld-add{display:flex;align-items:center;gap:8px}
+.withheld-add input{flex:1;min-width:0;font-size:11px;padding:7px 10px;font-family:'Cascadia Code',Consolas,monospace}
+.withheld-add .secondary{flex-shrink:0;white-space:nowrap}
