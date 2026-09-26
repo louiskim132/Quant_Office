@@ -109,3 +109,53 @@ test('pipelineReviewHops lists critique/falsify/response/verify hops with state 
   assert.equal(groups[0].hops[1].detail, 'Verifying the candidate');
   assert.equal(groups[0].hops[2].state, null, 'a minted hop with no job is recorded-but-undispatched');
 });
+
+test('a canceled request still lists every durably stored output it produced, marked canceled', () => {
+  const jobs = [
+    job('j1', 'as1', 'p1', 'r1', [out('report.md', sha(1), 100)], {state: 'COMPLETED'}),
+    // Office-terminated mid-run: the file it reported was never fetched or stored.
+    job('j2', 'as2', 'p1', 'r1', [out('draft.md', sha(2), 40, false)], {state: 'CANCEL_ACKNOWLEDGED'}),
+  ];
+  const requests = [{...request('r1', 'p1', 'Round', true), status: 'CANCELED' as const}];
+  const groups = projectJobOutputs(fixture(jobs, [
+    assignment('as1', 'r1', 'p1', 'a1', 'verify'), assignment('as2', 'r1', 'p1', 'a2', 'plan-draft-a'),
+  ], requests), 'p1');
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].requestName, 'Round', 'the record is kept under the request\'s own name');
+  assert.equal(groups[0].requestStatus, 'CANCELED');
+  assert.deepEqual(groups[0].hops.map(h => h.pipelineKey), ['verify'],
+    'the terminated hop contributes nothing it did not durably store');
+  assert.deepEqual(groups[0].hops[0].outputs.map(o => o.path), ['report.md']);
+});
+
+test('a superseded attempt keeps its stored bytes labeled attempt 1; re-stored bytes are not marked', () => {
+  const jobs = [
+    job('j1', 'as1', 'p1', 'r1', [out('report.md', sha(1), 100), out('notes.md', sha(3), 40)], {attempt: 1, state: 'FAILED'}),
+    job('j2', 'as1', 'p1', 'r1', [out('report.md', sha(9), 200), out('notes.md', sha(3), 40)], {attempt: 2, state: 'COMPLETED'}),
+  ];
+  const groups = projectJobOutputs(fixture(jobs, [assignment('as1', 'r1', 'p1', 'a1', 'verify')], [request('r1', 'p1', 'Round', true)]), 'p1');
+  const outputs = groups[0].hops[0].outputs;
+  const report1 = outputs.find(o => o.sha256 === sha(1))!;
+  const report2 = outputs.find(o => o.sha256 === sha(9))!;
+  const notes = outputs.find(o => o.sha256 === sha(3))!;
+  assert.equal(report1.attempt, 1);
+  assert.equal(report1.superseded, true, 'bytes a newer attempt replaced stay listed, marked superseded');
+  assert.equal(report2.attempt, 2);
+  assert.equal(report2.superseded, false);
+  assert.equal(notes.attempt, 1, 'the first storing attempt keeps provenance');
+  assert.equal(notes.superseded, false, 'identical bytes re-stored by attempt 2 are still the current output');
+});
+
+test('pipelineReviewHops reports the latest attempt and only that attempt\'s stored outputs', () => {
+  const requests = [request('r1', 'p1', 'Planning round', true)];
+  const assignments = [assignment('as1', 'r1', 'p1', 'a3', 'plan-critique-a-on-b')];
+  const jobs = [
+    job('j1', 'as1', 'p1', 'r1', [out('critique-v1.md', sha(1), 10)], {attempt: 1, state: 'FAILED'}),
+    job('j2', 'as1', 'p1', 'r1', [out('critique.md', sha(2), 20)], {attempt: 2, state: 'COMPLETED'}),
+  ];
+  const groups = pipelineReviewHops(fixture(jobs, assignments, requests), 'p1');
+  const hop = groups[0].hops[0];
+  assert.equal(hop.attempt, 2);
+  assert.equal(hop.state, 'COMPLETED');
+  assert.deepEqual(hop.outputs.map(o => o.path), ['critique.md'], 'a superseded attempt\'s outputs stay under Artifacts, not here');
+});
