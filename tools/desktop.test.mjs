@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { git, init } from './parallel.mjs';
-import { setup, publish, start, finish, block, review, accept, reject, close, status } from './desktop.mjs';
+import { setup, publish, start, finish, block, review, accept, reject, reopen, close, status } from './desktop.mjs';
 
 function fixture() {
   const temp = mkdtempSync(join(tmpdir(), 'qro-desktop-test-')), repo = join(temp, 'repo'); mkdirSync(repo);
@@ -98,5 +98,28 @@ test('partial publication waits; failed checks and out-of-scope work cannot be s
     assert.equal(review(f.organizer).workers[0].state, 'RUNNING');
     block(f.w(1), 'Needs organizer scope correction.'); reject(f.organizer, 'worker-1', 'Preserve changes and scope a new task.');
     assert.equal(review(f.organizer).workers[0].state, 'REJECTED');
+  } finally { rmSync(f.temp, { recursive: true, force: true }); }
+});
+test('reopen re-arms a rejected worker for a fix and resubmission, archiving the rejection', () => {
+  const f = fixture();
+  try {
+    publish(f.organizer, plan('round-001', 1));
+    assert.throws(() => reopen(f.organizer, 'worker-1', 'not yet submitted'), /Only a REJECTED/);
+    start(f.w(1)); commitFile(f.w(1), 'ui/1.js', 'module.exports = 1;\n');
+    assert.throws(() => finish(f.w(1), { ...report(f.w(1), 1), checks: [{ ...report(f.w(1), 1).checks[0], exitCode: 1 }] }), /failed/);
+    finish(f.w(1), report(f.w(1), 1));
+    const rejectedSha = git(f.w(1), 'rev-parse', 'HEAD');
+    reject(f.organizer, 'worker-1', 'Fix the thing.');
+    assert.equal(review(f.organizer).workers[0].state, 'REJECTED');
+    assert.throws(() => finish(f.w(1), report(f.w(1), 1)), /already submitted|Cannot replace/);
+    const opened = reopen(f.organizer, 'worker-1', 'Accepted after fix expected.');
+    assert.equal(opened.state, 'RUNNING');
+    const archived = join(f.root, 'rounds', 'round-001', 'decisions', `worker-1-rejected-${rejectedSha.slice(0, 7)}.json`);
+    assert.equal(readFileSync(archived, 'utf8').includes('REJECTED'), true, 'rejection evidence preserved');
+    assert.equal(review(f.organizer).workers[0].state, 'RUNNING');
+    commitFile(f.w(1), 'ui/1.js', 'module.exports = 2;\n');
+    finish(f.w(1), report(f.w(1), 1));
+    assert.equal(review(f.organizer).workers[0].state, 'READY_FOR_REVIEW');
+    assert.throws(() => reopen(f.organizer, 'worker-1', 'again'), /Only a REJECTED/);
   } finally { rmSync(f.temp, { recursive: true, force: true }); }
 });
