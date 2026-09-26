@@ -12,7 +12,7 @@ import { removeTreeSync } from '../src/main/fsx';
 // stylesheet for the renderer bundle, and node has no css loader — so the test process stubs
 // css modules before the component module is pulled in.
 register('data:text/javascript,export async function load(u,c,n){if(u.endsWith(".css"))return{format:"module",source:"export default {}",shortCircuit:true};return n(u,c);}', import.meta.url);
-const { normalizeWithheldEntry } = await import('../src/renderer/projects.tsx');
+const { normalizeWithheldEntry } = await import('../src/renderer/projects');
 
 const key = () => randomUUID();
 
