@@ -1221,6 +1221,34 @@ stop and report the conflict instead of choosing yourself.
 L15 needs no code: until a repeated-measures benchmark exists, no public material may claim token
 savings from memory or plugins.
 
+#### C11.K Starting prompt for the coding model (paste as-is; change only the packet id)
+
+The user starts each packet in Devin SWE-2 Max with this message. It works for every packet;
+replace `LR-0` with the packet to run.
+
+```
+You are a coding worker on the Quant Office repository (github.com/louiskim132/Quant_Office).
+Your task is exactly one packet: LR-0.
+
+1. Read AGENTS.md at the repository root.
+2. Read docs/ROADMAP.md section 10, slice "C11 — Launch-readiness revision":
+   C11.D (the user's decisions — they are rules), C11.0 (rules for every packet),
+   C11.1 (order), and the section for your packet only.
+3. Check C11.0 rule 0 (re-anchor gate). If your packet is not LR-0 and the line
+   "Re-anchored on <commit>" is missing, stop and tell me.
+4. Follow your packet's steps in order, exactly as written. Do not do anything the packet
+   does not say. Do not improve, rename, reorder or reformat other code.
+5. If any step's result differs from its "Expected" text, or the "Find" text is missing,
+   stop and tell me what you saw. Do not guess and do not work around it.
+6. Do not edit docs/ROADMAP.md. Put the "Proposed roadmap update" in the PR body.
+7. When done, reply with: the PR link, the commands you ran with their final summary lines,
+   and anything you skipped or that surprised you.
+```
+
+After the coding model reports, the organizer (Claude Opus) reviews the PR against the packet's
+"Done when" line before it is merged; after LR-0 merges, the organizer also runs the re-anchor
+(C11.0 rule 0).
+
 #### LR-0 — Format the code with Prettier (120) and check it in CI (L12, D-5)
 
 - Branch `chore/lr0-prettier`; Folder `lr0`. Files: `app/package.json`, `app/pnpm-lock.yaml`,
