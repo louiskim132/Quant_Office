@@ -10,6 +10,7 @@ import type { Effort } from '../shared/types.js';
 import { MAX_FILE, MAX_TOTAL, safeEntry } from './artifacts.js';
 import type { SubmitContext } from './controller.js';
 import type { LocalFileIO, VerifiedLocalFile } from './local-session-files.js';
+import { EVIDENCE_ARGS } from './evidence-tool.js';
 
 export const PACKET_FILE = 'packet.json';
 export const RESULT_FILE = 'result.json';
@@ -148,12 +149,18 @@ export const resultContractV2 = (options?: { evidenceSurface?: boolean; memoryDi
   'deliverable area, and writing your answer there is required, not a scope violation.',
   ...(options?.evidenceSurface ? [
     '',
-    'This packet mounts the office evidence surface: write `queries/<name>.jsonl` — one',
-    '`{"id":"<label>","op":"queryEvidence|readEvidence|stagePacket|memorySearch","args":{...}}`',
-    'frame per line — then read `answers/<name>.jsonl` for `{id,result}` or `{id,refused}`',
-    'lines. `memorySearch` answers a bounded full-text search over the project\'s office',
-    'memory ledger and the office authorizes it per hop — most seats will be refused. Every',
-    'frame is grant-checked against this session\'s identity before any evidence bytes move.',
+    'This packet mounts the office evidence surface over the project\'s stored evidence objects',
+    '(earlier hops\' outputs are already under `inputs/inherited/` — do not query for them). Write',
+    'a new `queries/<name>.jsonl` in one write — one `{"id":"<label>","op":"<op>","args":{...}}`',
+    'frame per line — and read `answers/<name>.jsonl` once: the office answers within about a',
+    'second with one `{id,result}` or `{id,refused}` line per frame; do not loop on sleep. Args',
+    'per op (`?` marks an optional key; no other keys are accepted):',
+    ...Object.entries(EVIDENCE_ARGS).map(([op, shape]) => `- \`${op}\` ${shape}`),
+    '`queryEvidence` is a literal line match; its hits carry the `objectHash` that `readEvidence`',
+    'takes, and a `nextCursor` continues a page. `memorySearch` searches the project\'s office',
+    'memory ledger and is authorized only at the seats that also receive the memory digest —',
+    'elsewhere it is refused. Every frame is grant-checked against this session\'s identity',
+    'before any evidence bytes move.',
   ] : []),
   ...(options?.memoryDigest ? [
     '',
@@ -545,6 +552,19 @@ export function tabularSummary(relativePath: string, bytes: Uint8Array): string 
 const MAX_LISTED_INPUTS = 40;
 
 /**
+ * The evidence-surface line of the prompt: the frame shape, one working example and every op's
+ * args, since the prompt tells the session not to open CONTRACT.md. memorySearch is listed only
+ * where it is authorized — the digest seats — so no other seat spends a call on a refusal.
+ */
+const evidencePromptLine = (memorySeat: boolean): string => {
+  const ops = Object.entries(EVIDENCE_ARGS).filter(([op]) => memorySeat || op !== 'memorySearch');
+  return '- queries/ → answers/ — the office evidence surface over stored project evidence (not earlier hops; those are listed above). '
+    + 'Write queries/q1.jsonl in one write, one frame per line, e.g. {"id":"q1","op":"queryEvidence","args":{"pattern":"<literal text>"}}; '
+    + 'then read answers/q1.jsonl once — it is answered within about a second, so do not loop on sleep. '
+    + `Args per op (? = optional, no other keys): ${ops.map(([op, shape]) => `${op} ${shape}`).join('; ')}.`;
+};
+
+/**
  * The office-generated context appended to a spawned session's prompt. It carries what every
  * session otherwise spent its first tool calls reading — the receipt identity (including the
  * packet hash, which is not in packet.json), the staged inputs by path and size, tabular shapes
@@ -578,7 +598,7 @@ export function packetPromptBlock(prepared: PreparedLocalPacket, pipelineKey?: s
     ...(listed.length ? listed : ['- (none)']),
     ...(packet.withheld?.length ? [`- ${packet.withheld.length} withheld file${packet.withheld.length === 1 ? '' : 's'} (hash-only; do not compute, estimate or request outcome metrics)`] : []),
     ...(packet.memoryDigest ? [`- ${packet.memoryDigest.path} — office memory digest (${packet.memoryDigest.findings} findings; self-report context, not verified fact)`] : []),
-    ...(mountsEvidenceSurface(packet.toolProfile) ? ['- queries/ → answers/ — the office evidence surface; its frame format is in ' + CONTRACT_FILE] : []),
+    ...(mountsEvidenceSurface(packet.toolProfile) ? [evidencePromptLine(packet.memoryDigest !== undefined)] : []),
     '',
     `Finish: put your deliverable files under ${OUTPUTS_DIR}/ (only deliverables — remove scratch files), then run \`python ${FINISH_FILE} COMPLETED "<one paragraph: what you did and found>"\`. It writes ${RESULT_FILE} with every output's sha256 and byte count and prints them — no separate hashing or re-reading needed. Without Python, write ${RESULT_FILE} yourself (UTF-8, no byte-order mark):`,
     receipt,
