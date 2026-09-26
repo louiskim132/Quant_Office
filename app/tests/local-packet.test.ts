@@ -10,6 +10,8 @@ import { removeTreeSync } from '../src/main/fsx';
 import { buildProviderPayload, type SubmitContext } from '../src/main/controller';
 import { FakeLocalFileIO, GuardedLocalFileIO } from '../src/main/local-session-files';
 import { AGENTS_FILE, CLAUDE_FILE, CONTRACT_FILE, CONTRACT_OPTIONAL_FILE, FINISH_FILE, INPUTS_DIR, PACKET_FILE, PACKET_HASH_FILE, PACKET_READY_FILE, RESULT_FILE, packetPromptBlock, prepareLocalPacket, readLocalResult, readLocalResultV1, resultContractOptional, resultContractV2, tabularSummary } from '../src/main/local-packet';
+import { EVIDENCE_ARGS } from '../src/main/evidence-tool';
+import { EVIDENCE_SURFACE_ID } from '../src/shared/tool-profile';
 import { MEMORY_DIGEST_FILE, localPacketV2Schema, memoryDigestSchema, type LocalSessionRecord } from '../src/shared/local-session';
 import type { Assignment, InputSnapshot } from '../src/shared/types';
 
@@ -219,9 +221,10 @@ test('CONTRACT-OPTIONAL.md documents findings/links with their kinds, bounds and
   assert.match(contract, /never a durable finding id/);
   // The evidence-surface variant names memorySearch and its per-hop authorization.
   const surfaced = resultContractV2({ evidenceSurface: true });
-  assert.match(surfaced, /queryEvidence\|readEvidence\|stagePacket\|memorySearch/);
+  for (const op of ['queryEvidence', 'readEvidence', 'stagePacket', 'memorySearch']) assert.match(surfaced, new RegExp(`- \`${op}\` \{`), `the contract documents ${op} args`);
   assert.match(surfaced, /memory ledger/);
-  assert.match(surfaced, /authorizes it per hop/);
+  assert.match(surfaced, /authorized only at the seats that also receive the memory digest/);
+  assert.match(surfaced, /do not loop on sleep/);
   // The unmounted contract names the optional sections but drops the surface paragraph.
   assert.match(core, /`findings`/);
   assert.doesNotMatch(core, /memorySearch/);
@@ -439,7 +442,7 @@ test('an authorized synthesis seat mounts the bounded memory digest and declares
   ledger.store.proposeMemoryRelationship({ projectId: ledger.project.id, fromFindingId: correction.id, toFindingId: prior.id, kind: 'REFINES', createdBy: { surface: 'OFFICE' } });
   const digest = ledger.store.memoryDigest(ledger.project.id);
   let priorBytes: Buffer | undefined;
-  for (const seat of ['plan-synthesis', 'analysis-finalize']) {
+  for (const seat of ['plan-brief', 'plan-synthesis', 'analysis-finalize']) {
     const f = fixture(t);
     f.assignment.pipelineKey = seat;
     // The digest names this packet's project — bind every id to the ledger's project.
@@ -459,7 +462,8 @@ test('an authorized synthesis seat mounts the bounded memory digest and declares
     assert.equal(prepared.packetHash, canonicalHash(JSON.parse(readFileSync(path.join(f.dir, PACKET_FILE), 'utf8'))), 'the declaration rides inside the hashed packet; the digest bytes do not');
     const contract = readFileSync(path.join(f.dir, CONTRACT_FILE), 'utf8');
     assert.match(contract, /memory-digest\.json` is a bounded, point-in-time projection/);
-    assert.match(contract, /self-report context for synthesis, not verified fact/);
+    assert.match(contract, /self-report context, not verified fact: apply what still holds/);
+    assert.match(packetPromptBlock(prepared), /2 findings from earlier work on this project.*read it before you plan/);
     assert.match(contract, /cite\s+evidenceRefs when your findings draw on it/);
     if (priorBytes) assert.deepEqual(onDisk, priorBytes, 'the digest is deterministic for the same ledger state');
     priorBytes = onDisk;
@@ -469,7 +473,7 @@ test('an authorized synthesis seat mounts the bounded memory digest and declares
 test('no other seat and no plain assignment carries the digest file or the declaration', t => {
   const ledger = digestLedger(t);
   const digest = ledger.store.memoryDigest(ledger.project.id);
-  for (const [label, pipelineKey] of [['a non-synthesis pipeline hop', 'plan-draft-a'], ['a plain assignment', undefined]] as const) {
+  for (const [label, pipelineKey] of [['a non-director pipeline hop', 'plan-draft-a'], ['the analysis brief, whose brief feeds the independent arms', 'analysis-brief'], ['a plain assignment', undefined]] as const) {
     const f = fixture(t);
     if (pipelineKey) f.assignment.pipelineKey = pipelineKey;
     prepareLocalPacket({ dir: f.dir, context: f.context, binding: f.binding, io: f.io, now: at(1), memoryDigest: digest });
@@ -601,4 +605,41 @@ test('the prompt block carries the receipt identity, input shapes and a wide-col
   const wide = tabularSummary('inputs/bars.csv', bytes(`time,close,footprint\n2026-05-05,1.4,"{""1.4"": ${'1'.repeat(200)}}"\n2026-05-06,1.5,"{}"\n`));
   assert.match(wide!, /^2 data rows \(line count\); columns: time, close, footprint; wide columns — select columns instead of printing whole rows: footprint \(~2\d\d chars\)$/);
   assert.equal(tabularSummary('inputs/readme.md', bytes('a,b\n')), null, 'only .csv/.tsv inputs are summarized');
+});
+
+test('the prompt block documents the evidence surface args and lists memorySearch only at digest seats', t => {
+  const f = fixture(t);
+  const prepared = prepare(f);
+  const mounted = { ...prepared, packet: { ...prepared.packet, toolProfile: { ...(prepared.packet.toolProfile ?? {}), mcpServers: [{ id: EVIDENCE_SURFACE_ID }] } as never } };
+  const block = packetPromptBlock(mounted);
+  assert.ok(block.includes('{"id":"q1","op":"queryEvidence","args":{"pattern":"<literal text>"}}'), 'one working example rides the prompt');
+  for (const op of ['queryEvidence', 'readEvidence', 'stagePacket']) assert.ok(block.includes(`${op} ${EVIDENCE_ARGS[op as keyof typeof EVIDENCE_ARGS]}`));
+  assert.doesNotMatch(block, /memorySearch/, 'a seat without the digest is not offered a search it would be refused');
+  assert.doesNotMatch(block, /frame format is in/, 'the prompt no longer defers the format to the contract it says not to open');
+  const digestSeat = packetPromptBlock({ ...mounted, packet: { ...mounted.packet, memoryDigest: { path: 'memory-digest.json', findings: 1, relationships: 0, sha256: 'a'.repeat(64) } } });
+  assert.ok(digestSeat.includes(`memorySearch ${EVIDENCE_ARGS.memorySearch}`));
+  assert.doesNotMatch(packetPromptBlock(prepared), /queries\//, 'an unmounted packet carries no surface line');
+});
+
+test('the prompt asks for at most 3 durable findings in the exact --extra shape the office ingests', async t => {
+  const f = fixture(t);
+  const prepared = prepare(f);
+  const block = packetPromptBlock(prepared);
+  const example = /as (\{"findings":\[.*?\]\}) \(kind:/.exec(block);
+  assert.ok(example, 'the prompt carries a findings example');
+  assert.match(block, /record up to 3/);
+  assert.match(block, /--extra findings\.json/);
+  const { spawnSync } = await import('node:child_process');
+  const python = ['python', 'python3', 'py'].find(bin => spawnSync(bin, ['--version']).status === 0);
+  if (!python) { t.skip('no Python on this machine'); return; }
+  const filled = example[1].replace('<short fact>', 'First CSV row is discontinuous').replace('<what, where, and how you know>', 'row 1 is 16 h before row 2');
+  writeFileSync(path.join(f.dir, 'findings.json'), filled);
+  mkdirSync(path.join(f.dir, 'outputs'), { recursive: true });
+  writeFileSync(path.join(f.dir, 'outputs', 'ema.csv'), 'x\n');
+  const run = spawnSync(python, [FINISH_FILE, 'COMPLETED', 'Done.', '--extra', 'findings.json'], { cwd: f.dir, encoding: 'utf8' });
+  assert.equal(run.status, 0, run.stderr);
+  const read = readLocalResult(f.dir, { ...f.binding, packetHash: prepared.packetHash }, f.io);
+  assert.ok('value' in read, 'defect' in read ? read.defect : '');
+  assert.equal(read.value.result.findings?.[0].kind, 'OBSERVATION');
+  assert.equal(read.value.result.findings?.[0].title, 'First CSV row is discontinuous');
 });

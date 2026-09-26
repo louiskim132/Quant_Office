@@ -30,6 +30,7 @@ import { resolve, isAbsolute } from 'node:path';
 import { DatabaseSync, backup as sqliteBackup } from 'node:sqlite';
 import { z } from 'zod';
 import { independenceClaimBlocker } from '../shared/cooperation.js';
+import { MEMORY_SEATS } from '../shared/local-session.js';
 import { requestJobs, UNRESOLVED } from '../shared/queue.js';
 import type { AccountConnection, ProviderCapabilitySnapshot, ProjectLocation, InputSnapshot, Assignment, ProviderJob, JobEvent, JobEvidence, JobState, Team, TeamMembership, Message, ReviewDecision, RequestGrant, ProbeAttempt, ResearchBranch, FrozenResearchSpec, PredictionRecord, TrialLedgerEntry, StageAttempt, GateReceipt, FunctionAssignment, SealedReviewReport, Agent, AgentLog, WorkLog, Effort, AppState, Artifact, Command, Experiment, LineageEvent, Project, ResearchContract, ResearchTask, Request, Settings, MemoryFinding, MemoryRelationship, MemoryGraph, FindingEvidenceRef, FindingKind, RelationshipStatus } from '../shared/types.js';
 import { canonical, canonicalHash, sha256 } from './canonical.js';
@@ -2685,7 +2686,7 @@ export class OfficeStore {
    * The bounded digest a synthesis packet may mount — the ledger projected at call time,
    * deterministic ordering (createdAt, then id), superseded findings included but marked so
    * the seat reads corrections rather than stale claims. Mounted only where retrieval is
-   * already authorized — plan-synthesis and analysis-finalize.
+   * already authorized — the MEMORY_SEATS (plan-brief, plan-synthesis, analysis-finalize).
    */
   memoryDigest(projectId:string):Pick<import('../shared/local-session.js').MemoryDigest,'findings'|'links'> {
     id.parse(projectId);
@@ -2712,7 +2713,8 @@ export class OfficeStore {
   }
   /**
    * Whether the given assignment's caller may run memory.search — retrieval is director-only
-   * and only at the synthesis/finalize hop of a pipeline round. Every other seat, every other
+   * and only at the MEMORY_SEATS hops of a pipeline round (planning brief, planning synthesis,
+   * analysis finalize). Every other seat, every other
    * phase and every non-pipeline assignment is refused: memory never silently enters an
    * independent research-review arm's context.
    */
@@ -2722,10 +2724,9 @@ export class OfficeStore {
     if(!assignment)return{ok:false,reason:'The caller names no known assignment.'};
     const key=assignment.pipelineKey;
     if(!key)return{ok:false,reason:'Memory retrieval is reserved for pipeline synthesis hops — a manual assignment carries no search authorization.'};
-    const authorized=key==='plan-synthesis'||key==='analysis-finalize';
-    return authorized
+    return MEMORY_SEATS.includes(key)
       ?{ok:true}
-      :{ok:false,reason:`The '${key}' hop is not the director's synthesis seat — memory retrieval is bounded to plan-synthesis and analysis-finalize.`};
+      :{ok:false,reason:`The '${key}' hop is not a director memory seat — memory retrieval is bounded to ${MEMORY_SEATS.join(', ')}.`};
   }
   /** Applies one job transition through the shared reducer. The renderer can never call this. */
   recordJobTransition(input:{jobId:string;expectedRevision:number;to:JobState;evidence:JobEvidence;detail:string;externalId?:string;externalUrl?:string;outputs?:{path:string;sha256:string;bytes:number}[];at?:string}):AppState {

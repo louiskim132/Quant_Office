@@ -8,7 +8,8 @@ import test, { type TestContext } from 'node:test';
 import { strToU8 } from 'fflate';
 import { OfficeStore } from '../src/core/store.js';
 import { EvidenceService } from '../src/main/evidence.js';
-import { handleEvidenceCall, handleEvidenceFrame } from '../src/main/evidence-tool.js';
+import { EVIDENCE_ARGS, handleEvidenceCall, handleEvidenceFrame } from '../src/main/evidence-tool.js';
+import { resultContractV2 } from '../src/main/local-packet.js';
 import type { Agent, InputSnapshot } from '../src/shared/types.js';
 
 const key = () => randomUUID();
@@ -269,4 +270,43 @@ test('a malformed caller or call is refused without inventing a receipt identity
   assert.equal(badArgs.refused.reason, 'MALFORMED');
   // The caller was well-formed, so even the malformed call is recorded as an attempt.
   assert.ok(badArgs.refused.denialReceiptId);
+});
+
+test('a frame written exactly as the contract documents each op is served, not refused MALFORMED', async t => {
+  const f = fixture(t);
+  const object = f.artifact(f.alpha.id, 'run.log', 'row 0 HIT\nrow 1 clean\n');
+  const evidence = service(f);
+  const contract = resultContractV2({ evidenceSurface: true });
+  const documented = [...contract.matchAll(/^- `(\w+)` (\{.*\})$/gm)].map(m => [m[1], m[2]] as const);
+  assert.deepEqual(documented.map(([op]) => op).sort(), Object.keys(EVIDENCE_ARGS).sort(), 'every op is documented');
+  for (const [op, shape] of documented) {
+    // Fill the documented shape the way an agent would: drop the optional keys, then put real values in the placeholders.
+    const args = shape
+      .replace(/,"\w+"\?:(\[[^\]]*\]|"[^"]*"|<[^>]*>)/g, '')
+      .replace(/"<64-hex[^"]*>"/g, `"${object.hash}"`)
+      .replace(/"<uuid>"/g, `"${randomUUID()}"`)
+      .replace(/"S0"\.\."S10"/g, '"S1"')
+      .replace(/"<[^"]*>"/g, '"HIT"');
+    const line = await handleEvidenceFrame(evidence, { ...f.caller, assignmentId: randomUUID() }, `{"id":"${op}","op":"${op}","args":${args}}`);
+    const response = JSON.parse(line);
+    assert.equal(response.id, op);
+    assert.notEqual(response.refused?.reason, 'MALFORMED', `${op} as documented (${args}) must parse: ${line}`);
+  }
+  const hit = JSON.parse(await handleEvidenceFrame(evidence, f.caller, '{"id":"q1","op":"queryEvidence","args":{"pattern":"HIT"}}'));
+  assert.equal(hit.result.returned, 1, 'the prompt example returns the match');
+});
+
+test('a MALFORMED refusal names the expected args, so the next frame can correct a guessed key', async t => {
+  const f = fixture(t);
+  const evidence = service(f);
+  // The exact frames an analyst seat guessed in the 2026-09-25 live round.
+  for (const [line, op] of [
+    ['{"id":"a","op":"queryEvidence","args":{"name":"analysis-falsify"}}', 'queryEvidence'],
+    ['{"id":"b","op":"queryEvidence","args":{"text":"analysis-falsify"}}', 'queryEvidence'],
+    ['{"id":"c","op":"memorySearch","args":{"query":"analysis-falsify"}}', 'memorySearch'],
+  ] as const) {
+    const response = JSON.parse(await handleEvidenceFrame(evidence, f.caller, line));
+    assert.equal(response.refused.reason, 'MALFORMED');
+    assert.ok(response.refused.detail.includes(EVIDENCE_ARGS[op]), `the refusal carries ${op}'s args`);
+  }
 });

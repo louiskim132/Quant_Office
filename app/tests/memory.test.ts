@@ -317,23 +317,25 @@ test('user-proposed links, FINDING refs and the bounded digest projection', asyn
   assert.equal(store.memoryDigest(project.id).findings.find(f => f.id === anchor.id)!.superseded, true);
 });
 
-test('memorySearch is authorized only at the director’s synthesis seats', async t => {
+test('memorySearch is authorized only at the director’s memory seats (brief and synthesis)', async t => {
   const f = await heavy(t);
   const { request, hops } = await mintedRound(f);
   const brief = hops.find(item => item.pipelineKey === 'plan-brief')!;
+  const draft = hops.find(item => item.pipelineKey === 'plan-draft-a')!;
   const synthesis = hops.find(item => item.pipelineKey === 'plan-synthesis')!;
-  // Non-pipeline and non-synthesis seats are refused; only plan-synthesis is authorized.
+  // Non-pipeline and non-director seats are refused; the planning brief and synthesis are authorized.
   assert.equal(f.store.authorizeMemorySearch(randomUUID()).ok, false);
-  const briefAuth = f.store.authorizeMemorySearch(brief.id);
-  assert.equal(briefAuth.ok, false);
-  assert.match((briefAuth as { reason: string }).reason, /plan-brief/);
+  const draftAuth = f.store.authorizeMemorySearch(draft.id);
+  assert.equal(draftAuth.ok, false);
+  assert.match((draftAuth as { reason: string }).reason, /plan-draft-a/);
+  assert.equal(f.store.authorizeMemorySearch(brief.id).ok, true);
   assert.equal(f.store.authorizeMemorySearch(synthesis.id).ok, true);
-  // End-to-end through the evidence drop-box frame: a caller on the brief seat is refused
+  // End-to-end through the evidence drop-box frame: a caller on a draft seat is refused
   // with a recorded denial; the synthesis seat reads the bounded result set.
   const service = new EvidenceService(f.store, f.root);
   const caller = (assignmentId?: string) => ({ agentId: f.agents.DIRECTOR.id, projectId: f.project.id, requestId: request.id, ...(assignmentId ? { assignmentId } : {}) });
   f.store.execute(note(f.project.id, 'momentum caveat'));
-  const denied = await handleEvidenceCall(service, caller(brief.id), { op: 'memorySearch', args: { text: 'momentum' } });
+  const denied = await handleEvidenceCall(service, caller(draft.id), { op: 'memorySearch', args: { text: 'momentum' } });
   assert.ok('refused' in denied);
   assert.ok(denied.refused!.denialReceiptId);
   const noSeat = await handleEvidenceCall(service, caller(), { op: 'memorySearch', args: { text: 'momentum' } });

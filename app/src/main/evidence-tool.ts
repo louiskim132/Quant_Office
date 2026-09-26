@@ -47,6 +47,18 @@ const memorySearchArgs = z.object({
   limit: z.number().int().min(1).max(25).optional(),
 }).strict();
 
+/**
+ * The args shape per op, as agents are told it in the packet contract and in every MALFORMED
+ * refusal — a guessed key is corrected by the very next frame instead of by trial and error.
+ */
+export const EVIDENCE_ARGS: Record<'queryEvidence' | 'readEvidence' | 'stagePacket' | 'memorySearch', string> = {
+  queryEvidence: '{"pattern":"<literal text, matched per line>","objectHashes"?:["<64-hex>"],"limit"?:<n>,"cursor"?:"<nextCursor>"}',
+  readEvidence: '{"objectHash":"<64-hex from a queryEvidence hit>","limit"?:<lines>,"cursor"?:"<nextCursor>"}',
+  stagePacket: `{"subjectId":"<uuid>","stage":"S0".."S10","maxObjects"?:<n>}`,
+  memorySearch: '{"text":"<words to find>","limit"?:<1-25>}',
+};
+const malformed = (op: keyof typeof EVIDENCE_ARGS): string => `${op} arguments are malformed; expected args ${EVIDENCE_ARGS[op]} and no other keys.`;
+
 const callSchema = z.object({
   op: z.enum(['queryEvidence', 'readEvidence', 'stagePacket', 'memorySearch']),
   args: z.unknown(),
@@ -149,7 +161,7 @@ export async function handleEvidenceCall(service: EvidenceService, caller: unkno
 
   if (op === 'queryEvidence') {
     const parsed = queryEvidenceArgs.safeParse(args);
-    if (!parsed.success) return deny(service, me, op, args, 'MALFORMED', 'queryEvidence arguments are malformed.');
+    if (!parsed.success) return deny(service, me, op, args, 'MALFORMED', malformed('queryEvidence'));
     const bind = { pattern: parsed.data.pattern, objectHashes: parsed.data.objectHashes?.slice().sort() ?? null };
     const scope = scopeKey(me, op, bind);
     const resumed = resume(parsed.data.cursor, scope);
@@ -173,7 +185,7 @@ export async function handleEvidenceCall(service: EvidenceService, caller: unkno
 
   if (op === 'readEvidence') {
     const parsed = readEvidenceArgs.safeParse(args);
-    if (!parsed.success) return deny(service, me, op, args, 'MALFORMED', 'readEvidence arguments are malformed.');
+    if (!parsed.success) return deny(service, me, op, args, 'MALFORMED', malformed('readEvidence'));
     const scope = scopeKey(me, op, { objectHash: parsed.data.objectHash });
     const resumed = resume(parsed.data.cursor, scope);
     if (resumed.refusal) return deny(service, me, op, parsed.data, resumed.refusal, cursorDetail[resumed.refusal]);
@@ -194,7 +206,7 @@ export async function handleEvidenceCall(service: EvidenceService, caller: unkno
 
   if (op === 'memorySearch') {
     const parsed = memorySearchArgs.safeParse(args);
-    if (!parsed.success) return deny(service, me, op, args, 'MALFORMED', 'memorySearch arguments are malformed.');
+    if (!parsed.success) return deny(service, me, op, args, 'MALFORMED', malformed('memorySearch'));
     try {
       const result = await service.memorySearch(me, parsed.data);
       return { result: { ...result, nextCursor: null } };
@@ -204,7 +216,7 @@ export async function handleEvidenceCall(service: EvidenceService, caller: unkno
   }
 
   const parsed = stagePacketArgs.safeParse(args);
-  if (!parsed.success) return deny(service, me, op, args, 'MALFORMED', 'stagePacket arguments are malformed.');
+  if (!parsed.success) return deny(service, me, op, args, 'MALFORMED', malformed('stagePacket'));
   try {
     const packet = await service.stagePacket({
       agentId: me.agentId, projectId: me.projectId, subjectId: parsed.data.subjectId, stage: parsed.data.stage,
