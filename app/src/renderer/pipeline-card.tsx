@@ -15,6 +15,30 @@ const elapsed = (job?: ProviderJob) => {
  return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
 };
 
+/**
+ * Mirrors the store's request.pipeline.retryHop gate: the round retries while it is BRIEFING or
+ * LAUNCHED — the store refuses only DECIDED and AWAITING_DECISION — and only when the latest job
+ * is FAILED, or UNKNOWN while its binding carries no verified receipt. A dead brief in BRIEFING
+ * retries like any other hop.
+ */
+export const pipelineHopRetryable=(phase:string,job:ProviderJob|undefined,binding:{lastReceipt:unknown}|undefined):boolean=>
+ phase!=='DECIDED'&&phase!=='AWAITING_DECISION'&&!!job&&(job.state==='FAILED'||(job.state==='UNKNOWN'&&!binding?.lastReceipt));
+
+/**
+ * Observe is a server-side no-op until something dispatched — INTENT and SUBMITTING jobs, and a
+ * hop with no job record, get a disabled control carrying the reason, never a silent dead click.
+ * (Rendered visibly too: a title alone never surfaces on a disabled control in Chromium.)
+ */
+export const observeDisabledReason=(job:ProviderJob|undefined):string|undefined=>
+ !job||job.state==='INTENT'||job.state==='SUBMITTING'?'Nothing dispatched yet — nothing to observe.':undefined;
+
+/**
+ * The preview's verification wording is response-derived: 'verified' appears only when the
+ * handler reported the hash check — an absent flag says nothing, so the label stays plain.
+ */
+export const previewCaption=(preview:{verified?:boolean}|undefined):string=>
+ preview?.verified?'office-verified bytes':'output bytes';
+
 /** The output a decision binds to — a named report file wins, else the first stored text file. */
 function pickPreview(job: ProviderJob | undefined, preferred: string[]) {
  if (!job) return undefined;
@@ -37,7 +61,7 @@ export function PipelineCard({request,state,busy,onAction}:{request:Request;stat
  const [hopBusy,setHopBusy]=useState('');
  const [hopError,setHopError]=useState('');
  const [confirmCancel,setConfirmCancel]=useState(false);
- const [preview,setPreview]=useState<{path:string;sha256:string;bytes:number;text:string;truncated:boolean}|null>(null);
+ const [preview,setPreview]=useState<{path:string;sha256:string;bytes:number;text:string;truncated:boolean;verified?:boolean}|null>(null);
  const [previewError,setPreviewError]=useState('');
  const archived=!!state.projects.find(item=>item.id===request.projectId)?.archived;
  const revision=(state.requests??[]).find(item=>item.revisionOf?.requestId===request.id);
@@ -52,8 +76,7 @@ export function PipelineCard({request,state,busy,onAction}:{request:Request;stat
   setHopBusy(label);setHopError('');
   try{await action();}catch(e){setHopError((e as Error).message);}finally{setHopBusy('');}
  };
- /** Mirrors the store's retry gate: FAILED, or UNKNOWN only while no verified receipt is on record. */
- const retryable=(job:ProviderJob|undefined)=>pipeline.phase==='LAUNCHED'&&!!job&&(job.state==='FAILED'||(job.state==='UNKNOWN'&&!(state.localSessions??[]).find(item=>item.jobId===job.id)?.lastReceipt));
+ const retryable=(job:ProviderJob|undefined)=>pipelineHopRetryable(pipeline.phase,job,(state.localSessions??[]).find(item=>item.jobId===job?.id));
  const previewTarget=pipeline.phase==='BRIEFING'&&briefJob?.state==='COMPLETED'?pickPreview(briefJob,['brief.md','report.md'])
   :pipeline.phase==='AWAITING_DECISION'?pickPreview(headJob,['verification.md','report.md']):undefined;
  useEffect(()=>{
@@ -68,8 +91,8 @@ export function PipelineCard({request,state,busy,onAction}:{request:Request;stat
  const runningHops=hops.filter(hop=>{const job=latestJobFor(state.jobs,hop.id);return job?RUNNING.includes(job.state):false;}).length;
  const queuedHops=hops.filter(hop=>{const job=latestJobFor(state.jobs,hop.id);return !job||job.state==='INTENT';}).length;
  const jumpTo=(id:string)=>document.getElementById(`pipeline-card-${id}`)?.scrollIntoView({behavior:'smooth',block:'center'});
- const previewBlock=(caption:string)=>!preview&&!previewError&&!previewTarget?null:<div className="pipeline-preview-block">
-  {preview?<><pre className="pipeline-preview">{preview.text||'(Empty output)'}</pre><p className="muted">{caption} — sha256 {preview.sha256.slice(0,12)}…{preview.truncated?' · preview truncated to 64KB':''}</p></>
+ const previewBlock=()=>!preview&&!previewError&&!previewTarget?null:<div className="pipeline-preview-block">
+  {preview?<><pre className="pipeline-preview">{preview.text||'(Empty output)'}</pre><p className="muted">{previewCaption(preview)} — sha256 {preview.sha256.slice(0,12)}…{preview.truncated?' · preview truncated to 64KB':''}</p></>
    :previewError?<p className="muted">Preview unavailable: {previewError}</p>
    :<p className="muted">Loading preview…</p>}
  </div>;
@@ -78,7 +101,7 @@ export function PipelineCard({request,state,busy,onAction}:{request:Request;stat
   {pipeline.phase==='BRIEFING'&&<>
    <p className="muted">Director brief{pipeline.briefAssignmentId?`: ${briefJob?briefJob.state.toLowerCase().replaceAll('_',' '):'hop recorded; no job on record yet'}`:' — not minted yet; start the request to brief the director'}</p>
    {!!notes.length&&<ul className="evidence-list">{notes.map(item=><li key={item.id}>{item.text} <span className="muted">— {new Date(item.createdAt).toLocaleString()}</span></li>)}</ul>}
-   {previewBlock('office-verified bytes')}
+   {previewBlock()}
    <form onSubmit={e=>{e.preventDefault();const form=e.currentTarget;const text=String(new FormData(form).get('note')).trim();if(!text)return;onAction({type:'request.pipeline.note',idempotencyKey:crypto.randomUUID(),requestId:request.id,expectedRevision:request.revision,text});form.reset();}}>
     <label className="field">Brief note<input name="note" maxLength={4000} placeholder="Refine the director brief" disabled={busy||!ready}/></label>
     <button className="secondary" disabled={busy||!ready}>Add note</button>
@@ -98,7 +121,8 @@ export function PipelineCard({request,state,busy,onAction}:{request:Request;stat
      <td>{elapsed(job)}</td>
      <td className="pipeline-reason">{job?(job.lastObservation??(job.detail||'—')):'—'}</td>
      <td className="pipeline-hop-actions">
-      <button type="button" className="secondary" disabled={busy||!!hopBusy||!job||job.state==='INTENT'} onClick={()=>void hopAction('observe',()=>window.office.observeJob({assignmentId:hop.id}))}>Observe</button>
+      <button type="button" className="secondary" disabled={busy||!!hopBusy||!!observeDisabledReason(job)} title={observeDisabledReason(job)} onClick={()=>void hopAction('observe',()=>window.office.observeJob({assignmentId:hop.id}))}>Observe</button>
+      {observeDisabledReason(job)&&<div className="muted pipeline-hop-note">{observeDisabledReason(job)}</div>}
       {retryable(job)&&<button type="button" className="secondary" disabled={busy||!!hopBusy} onClick={()=>void hopAction('retry',()=>window.office.retryPipelineHop({requestId:request.id,pipelineKey:hop.pipelineKey!,expectedRevision:request.revision}))}>{hopBusy==='retry'?'Retrying…':'Retry'}</button>}
       {job&&!TERMINAL.includes(job.state)&&<button type="button" className="cancel-request" disabled={busy||!!hopBusy} onClick={()=>void hopAction('cancel',()=>window.office.cancelJob({assignmentId:hop.id}))}>{job.state==='CANCEL_REQUESTED'?'Re-check cancellation':'Cancel hop'}</button>}
      </td></tr>;
@@ -109,7 +133,7 @@ export function PipelineCard({request,state,busy,onAction}:{request:Request;stat
    {pending?<>
     <p className="muted">Terminal hop{headJob?`: job ${headJob.state.toLowerCase().replaceAll('_',' ')}`:' recorded; its job is not on record'}{headJob?.outputs.length?` — ${headJob.outputs.length} recorded output${headJob.outputs.length===1?'':'s'}`:''}</p>
     {!!headJob?.outputs.length&&<ul className="evidence-list">{headJob.outputs.map(output=>{const artifact=state.artifacts.find(item=>item.sha256===output.sha256);return <li key={output.path+output.sha256}>{output.path} · {output.bytes} bytes · sha256 {output.sha256.slice(0,16)}…{artifact?` · stored as ${artifact.name}`:output.stored?' · stored':''}</li>;})}</ul>}
-    {previewBlock('office-verified bytes')}
+    {previewBlock()}
     <label className="field">Decision note<textarea value={decisionNote} onChange={e=>setDecisionNote(e.target.value)} maxLength={4000} placeholder="Required to request a revision; optional otherwise" disabled={busy||!ready}/></label>
     <div className="button-row">
      <button className="primary" disabled={busy||!ready} onClick={()=>decide('APPROVE')}>Approve</button>
