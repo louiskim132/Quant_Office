@@ -327,6 +327,18 @@ test('reconcileLocalChain launches a dependent left parked by a completed predec
   assert.equal(f.calls.length, 2);
 });
 
+// The sweep is bounded to recorded edges — pipeline hops and declared dependsOn — never to ad-hoc
+// prepared work, which stays user-gated even on a live request.
+test('reconcile never auto-launches ad-hoc prepared work carrying no dependency edge', async t => {
+  const f = await fixture(t);
+  const adhoc = await prepared(f);
+  assert.equal(adhoc.job.state, 'INTENT');
+  await f.controller.reconcileLocalChain();
+  assert.equal(jobState(f, adhoc.job.id), 'INTENT', 'prepared ad-hoc work remains user-gated');
+  assert.equal(f.calls.length, 0, 'no process was spawned');
+  assert.ok(!f.store.localSessionForJob(adhoc.job.id), 'no session binding was written');
+});
+
 test('concurrent chain triggers launch once without recording a false blocker', async t => {
   const f = await fixture(t);
   const a = await prepared(f);
