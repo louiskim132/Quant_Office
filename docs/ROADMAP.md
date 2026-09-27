@@ -1,5 +1,7 @@
 # Quant Research Office — single implementation roadmap
 
+Current review, 2026-09-27: findings-rev-3 and findings-rev-4 are CLOSED and merged (PR #16 `3781351`, PR #17 `0cfc1b9`). Organizer 8.2 ended with a completed response asking whether to hold or run targeted acceptance; no worker round is stuck. The installed and organizer-packaged app.asar both hash to `440919823ADF0C11ADA9569C4D0F09BF5265D22B2F94D4A717574BC4F33045D2`. C11 is IN_PROGRESS: LR-0 merged (PR #18, `e0ce5d9`) and C11 was re-anchored on it (2026-09-27); LR-1 is the next packet. See section 17 for remaining defects, coverage gaps and evidence limits. Older opening updates below are historical.
+
 Current status update, 2026-09-24: `origin/main` carries the communication pipeline (comm-pipe-1..3, sealed round plus user decision) and the complete M-memory workstream (office-mem-1/2). A packaged-app audit found and fixed four user-visible defects on branch `fix/memory-page-bugs-20260924` (see the dated entry of that name at the end of this file). **Where status lives:** the section 11 tables, plus the dated progress log in section 17 at the end of this file. The newest entry is last. Open items: the C8 user-run Colab pilot, P3 live acceptance of a real user decision, REVISE re-mint, external memory-engine evaluation, C10 comparisons and every hosted gate.
 
 Current acceptance update, 2026-09-21: the live three-agent Director → PM → Worker local CLI chain passed after correcting the generated packet-hash instructions and a concurrent-trigger false-blocker race. Final regression: 690 tests, 689 passed, one existing privileged-symlink skip; typecheck, build and three development desktop suites passed. See the C9 automated-chain row and dated acceptance entry below. This establishes bounded local synthetic office orchestration, not hosted execution or the user-run Colab milestone.
@@ -1112,10 +1114,10 @@ Ordered implementation packets (organizer owns shared contracts, IPC, dependenci
 
 Exact next local work: implement C10-A attempt preparation/ledger and C10-B contracts on organizer-published packets; retain C9's separate local-session probe and pilot as outstanding. Local fixture work can proceed without changing R5 or waiting for real data. Do not start paid/live provider runs merely because a packet is written.
 
-### C11 — Launch-readiness revision (LR packets) — NOT_STARTED; decisions answered 2026-09-26
+### C11 — Launch-readiness revision (LR packets) — IN_PROGRESS; LR-0 merged, re-anchored on `e0ce5d9`, LR-1 next
 
 Source: the 2026-09-25 commercial launch-readiness review in section 17 (findings L1–L15).
-Base: `origin/main` at or after `3be1a94`. This slice is written so that a coding model
+Base: `origin/main` at or after `e0ce5d9` (rev-3/rev-4 merged; LR-0 merged as PR #18; re-anchored — see C11.0 rule 0). LR-1 is the next packet. New desktop-batch code rounds must branch from this formatted `main`. This slice is written so that a coding model
 (the user runs **Devin SWE-2 Max**) can execute each packet mechanically. Every packet names the
 exact files, the exact text to find, the exact change, the exact test and the exact commands with
 their expected result. The `Model` field says which packets are for the coding model and which
@@ -1152,10 +1154,20 @@ stop and report the conflict instead of choosing yourself.
 #### C11.0 Rules for every packet (read these first, every time)
 
 0. **⚓ Re-anchor gate.** The `Find` texts in LR-1…LR-16 were written against the code layout of
-   `3be1a94`. LR-0 reformats every file, so after LR-0 merges those texts no longer match. The
+   `3be1a94`. Rev-3/rev-4 have since changed store and renderer code; LR-0 will also reformat every file. After LR-0 merges, old exact-text anchors cannot be assumed valid. The
    organizer (Claude Opus) then re-anchors this whole slice against the formatted `main` and
    re-verifies the prototypes, and writes a line `Re-anchored on <commit>` under this rule.
    **Do not start any packet other than LR-0 until that line exists.** If it exists, trust it.
+
+   **Re-anchored on `e0ce5d9`** (LR-0 merged as PR #18) by the organizer (Claude Opus),
+   2026-09-27. Every `Find` text in LR-1…LR-14 now matches the formatted code exactly once. Each
+   code packet (LR-1…LR-7, LR-9, LR-14) was applied as written to a scratch copy of `e0ce5d9`:
+   `pnpm format:check` and `pnpm typecheck` clean; full suite 917 tests, 916 pass, 0 fail,
+   1 skipped (904 + the 13 new tests); `local-cli-exec.test.ts` alone passes 25 and exits in
+   4 s; the packaged desktop e2e passes 3 of 3 with all of them applied. Two packets changed as a
+   result: LR-7 now **awaits** the loading page, and LR-11 is now a regression guard with a
+   corrected check (see each packet). The inserted code in the packets may stay dense;
+   `pnpm format` re-wraps it.
 
 1. **One packet = one branch = one PR.** Never combine packets unless the packet says so.
 2. **Create the worktree** (PowerShell, from any folder):
@@ -1261,7 +1273,7 @@ After the coding model reports, the organizer (Claude Opus) reviews the PR again
 
 Steps:
 1. Create the worktree (C11.0 rule 2) and install (rule 3). Record the unit-test summary line
-   from rule 4 before any change (for example `ℹ pass 871`). You will compare against it.
+   from rule 4 before any change. The rev-4 close record reports 904 tests, 903 pass, zero fail and one conditional skip on `0cfc1b9` code. Rerun on the actual LR-0 base and compare against that measured baseline.
 2. From `lr0\app`: `pnpm add -D --save-exact prettier@3`. Expected: `package.json` gains one
    `devDependencies` entry `"prettier": "3.x.y"` (exact version, no `^`). Record the version.
 3. Create `app/.prettierrc.json` with exactly:
@@ -1343,9 +1355,11 @@ Steps:
      the test to match the new wording (use a shorter regex that matches the new text). Known
      case: in the line containing `Everything in this folder is shared when a request is prepared`,
      replace that regex with `/Everything in this folder is shared/`.
-   - **New bridge keys:** the assertion in the line starting `const keys=await page.evaluate(()=>Object.keys(window.office))`
-     lists every `window.office` key. The error output marks missing keys with `+`. Add each `+`
-     key to the array, keeping the array alphabetically sorted. Verified on `3be1a94`: exactly
+   - **New bridge keys:** the assertion that follows the line
+     `  const keys = await page.evaluate(() => Object.keys(window.office));` lists every
+     `window.office` key, one per line, in an array that ends with `].sort(),`. The error output
+     marks missing keys with `+`. Add each `+` key as one new line `      '<key>',` directly above
+     the `].sort(),` line (the test sorts both sides, so the position does not matter). Re-verified on `e0ce5d9` (formatted main): exactly
      four keys are missing — `jobOutputPreview`, `memoryGraph`, `retryPipelineHop`,
      `searchMemory`. Only add names that exist in `app/src/main/preload.ts`.
    Any other failure (a button missing, a wrong value, a crash) is a real bug: **stop** and
@@ -1354,7 +1368,7 @@ Steps:
    stable. A run that fails with `page.screenshot: Timeout 30000ms exceeded` at the first
    screenshot is a known flake: rerun once. If it fails that way in 2 of 3 runs, stop and report.
    (On 2026-09-25 the suite, with exactly the two fixes above, passed three runs against a
-   prototype of LR-1…LR-9.)
+   prototype of LR-1…LR-9. Re-verified 2026-09-27 on formatted `e0ce5d9`: 3 of 3 runs passed.)
 5. In `.github/workflows/verify.yml`, find the line `      # Desktop/package acceptance is run by the organizer on Windows before release.`
    and replace it with these lines (same 6-space indentation):
    ```
@@ -1423,7 +1437,7 @@ Steps:
 2. In `app/src/main/main.ts`:
    a. Add the import directly after the last line of the file that starts with `import `:
       `import { describeError, writeLog } from './diagnostics.js';`
-   b. Find `const hasLock=app.requestSingleInstanceLock();` and insert **directly above** it:
+   b. Find `const hasLock = app.requestSingleInstanceLock();` and insert **directly above** it:
       ```ts
       const logDir=()=>path.join(app.getPath('userData'),'logs');
       let crashDialogShown=false;
@@ -1432,21 +1446,33 @@ Steps:
       process.on('unhandledRejection',reason=>reportCrash('unhandledRejection',reason));
       app.on('child-process-gone',(_event,details)=>writeLog(logDir(),'WARN',`child-process-gone type=${details.type} reason=${details.reason} exit=${details.exitCode}`));
       ```
-      Check that `dialog` and `path` are already imported in `main.ts` (search `dialog` and
-      `import path`). If either is missing, stop and report.
-   c. Find `async function start(){` and insert this line as the first statement inside it:
+      `dialog` and `path` are already imported (lines 1–2 of `main.ts`).
+   c. Find `async function start() {` and insert this line as the first statement inside it:
       ```ts
        writeLog(logDir(),'INFO',`start version=${app.getVersion()} packaged=${app.isPackaged}`);
       ```
-   d. Find `win.on('closed',()=>{win=null;});` and insert directly after it:
+   d. Find these three lines and insert directly after the third (`  });`):
+      ```ts
+        win.on('closed', () => {
+          win = null;
+        });
+      ```
+      Insert:
       ```ts
       win.webContents.on('render-process-gone',(_event,details)=>{writeLog(logDir(),'ERROR',`render-process-gone reason=${details.reason} exit=${details.exitCode}`);if(details.reason==='clean-exit'||!win)return;void dialog.showMessageBox(win,{type:'error',message:'The office window stopped unexpectedly.',detail:'Your workspace is saved. Reload to continue. Details are in the log folder (Help → Open logs folder).',buttons:['Reload','Quit'],defaultId:0,cancelId:1}).then(({response})=>{if(response===0)win?.reload();else app.quit();});});
       ```
-   e. In the `Menu.buildFromTemplate([...])` call, add this as the last menu entry, after the
-      `View` entry: `,{label:'Help',submenu:[{label:'Open logs folder',click:()=>{void shell.openPath(logDir());}}]}`.
-      Check `shell` is imported (search `shell`). If not, stop and report.
-   f. Find the startup failure handler `app.whenReady().then(start).catch(error=>{` and insert
-      this text directly after the `{` on the same line:
+   e. In the `Menu.buildFromTemplate([` call, find these two lines (the end of the `View` entry):
+      ```ts
+              submenu: [{ role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { role: 'togglefullscreen' }],
+            },
+      ```
+      and insert directly after the second one (`},`):
+      ```ts
+            { label: 'Help', submenu: [{ label: 'Open logs folder', click: () => { void shell.openPath(logDir()); } }] },
+      ```
+      `shell` is already imported on line 1 (`import { app, BrowserWindow, dialog, … shell } from 'electron';`).
+   f. Find the startup failure handler line `    .catch(error => {` (it follows `.then(start)`) and
+      insert this as the next line:
       ```ts
       writeLog(logDir(),'ERROR',`startup ${describeError(error)}`);
       ```
@@ -1525,7 +1551,7 @@ Steps:
        }
    ```
    Do not change the other `const prompt =` line (the one that uses `PROMPT_SUFFIX`).
-3. In `app/tests/local-cli-exec.test.ts`, change the import line
+3. In `app/tests/local-cli-exec.test.ts` (line 10), change the import line
    `import { LocalCliExecAdapter, type CliSpawn, type CliSpawnOptions } from '../src/main/local-cli-exec';`
    to
    `import { LocalCliExecAdapter, MAX_ARGV_PROMPT_CHARS, PROMPT_FILE, PROMPT_POINTER, type CliSpawn, type CliSpawnOptions } from '../src/main/local-cli-exec';`
@@ -1553,11 +1579,12 @@ Steps:
    typecheck says one is missing, add it to the existing `node:fs` / `node:path` import.
 4. Fix a leak that the new tests expose: in the test named
    `consecutive claude launches are spaced so concurrent sessions do not race the OAuth refresh`,
-   find the line
+   find the two lines that close the `new LocalCliExecAdapter(` call
    ```ts
-       undefined, undefined, undefined, undefined, undefined, undefined, undefined, gap);
+       gap,
+     );
    ```
-   and insert directly after it:
+   (they occur once in the file) and insert directly after the second one (`  );`):
    ```ts
      t.after(() => adapter.disposeAll());
    ```
@@ -1576,33 +1603,49 @@ Steps:
   agents act with their Windows account's full permissions.
 
 Steps:
-1. In `app/src/renderer/agents.tsx`, in the line that starts
-   ` const [draft,setDraft]=useState<AgentDraft>(setupDraft??{`, replace
-   `execution:'HOSTED_SETUP_REQUIRED',toolProfile:'STANDARD'}` with
-   `execution:'LOCAL',localRoute:'LOCAL_CLI_EXEC',toolProfile:'STANDARD'}`.
-2. In the line containing `aria-label="Execution environment"`, replace
-   `draft.execution??'HOSTED_SETUP_REQUIRED'` with `draft.execution??'LOCAL'`.
-3. In the line containing `aria-label="Local transport"`, replace **every** occurrence of
-   `draft.localRoute??'LOCAL_MAILBOX'` with `draft.localRoute??'LOCAL_CLI_EXEC'` (there are two).
-4. Directly after the line that starts ` const [ticket,setTicket]=useState<AgentTicket|null>(null)`,
-   insert:
+1. In `app/src/renderer/agents.tsx`, inside `const [draft, setDraft] = useState<AgentDraft>(`, find
+   the line `      execution: 'HOSTED_SETUP_REQUIRED',` (6 spaces; it occurs once) and replace it with
+   these two lines:
    ```tsx
-    const [riskAccepted,setRiskAccepted]=useState(false);
-    const spawnsLocally=(draft.provider==='devin'?'LOCAL':draft.execution)==='LOCAL'&&(draft.localRoute??'LOCAL_CLI_EXEC')==='LOCAL_CLI_EXEC';
+         execution: 'LOCAL',
+         localRoute: 'LOCAL_CLI_EXEC',
    ```
-5. Find the end of the `Local transport` label: the text `</small></label>` that closes the line
-   containing `aria-label="Local transport"`. Directly after that line, add this new line:
+2. Find `value={draft.provider === 'devin' ? 'LOCAL' : (draft.execution ?? 'HOSTED_SETUP_REQUIRED')}`
+   and replace `(draft.execution ?? 'HOSTED_SETUP_REQUIRED')` in it with `(draft.execution ?? 'LOCAL')`.
+3. Find `execution: provider === 'devin' ? 'LOCAL' : 'HOSTED_SETUP_REQUIRED',` (in the provider
+   `onChange`) and replace it with
+   `execution: provider === 'devin' ? 'LOCAL' : (draft.execution ?? 'LOCAL'),`
+   so that switching the provider keeps the chosen environment instead of resetting it to hosted.
+4. Inside the `Local transport` label, replace exactly these two texts (and no others; the
+   `ticket.draft.localRoute` line further down stays as it is):
+   - `value={draft.localRoute ?? 'LOCAL_MAILBOX'}` → `value={draft.localRoute ?? 'LOCAL_CLI_EXEC'}`
+   - `{(draft.localRoute ?? 'LOCAL_MAILBOX') === 'LOCAL_CLI_EXEC'` →
+     `{(draft.localRoute ?? 'LOCAL_CLI_EXEC') === 'LOCAL_CLI_EXEC'`
+5. Find the line `    [error, setError] = useState('');` (the end of the `const [ticket, setTicket]`
+   declaration) and insert directly after it:
+   ```tsx
+     const [riskAccepted, setRiskAccepted] = useState(false);
+     const spawnsLocally = (draft.provider === 'devin' ? 'LOCAL' : draft.execution) === 'LOCAL' && (draft.localRoute ?? 'LOCAL_CLI_EXEC') === 'LOCAL_CLI_EXEC';
+   ```
+6. Find these three lines (the end of the `Local transport` block and the start of the `Model`
+   field):
+   ```tsx
+             )}
+             <label className="field">
+               Model
+   ```
+   and insert this new line between the first (`)}`) and the second:
    ```tsx
     {spawnsLocally&&<label className="field consent"><span><input type="checkbox" checked={riskAccepted} onChange={e=>setRiskAccepted(e.target.checked)}/> I understand that this agent runs unattended on this computer with my Windows account's permissions. It can read, change and delete files my account can reach, and run programs. Files it reads are not a security boundary.</span></label>}
    ```
-6. In the line containing `{ticket?'Confirm':'Add'}`, replace
-   `disabled={busy||(!ticket&&!draft.model.trim())}` with
-   `disabled={busy||(!ticket&&!draft.model.trim())||(!ticket&&spawnsLocally&&!riskAccepted)}`.
+   Replace `<button className="primary" disabled={busy || (!ticket && !draft.model.trim())}>` with
+   `<button className="primary" disabled={busy || (!ticket && !draft.model.trim()) || (!ticket && spawnsLocally && !riskAccepted)}>`.
+   (`pnpm format` at the end re-wraps these long lines; that is expected.)
 7. In `app/src/renderer/main.tsx`, replace the text
-   `<p>Research runs on provider infrastructure.</p>` with
+   `<p>Research runs on provider infrastructure.</p>` (it occurs once) with
    `<p>Agents run on this computer through the official provider CLIs.</p>`.
 8. Run the standard checks, then LR-1's e2e (package first). Expected: it passes unchanged
-   (verified on a 2026-09-25 prototype). If the e2e fails because it expects
+   (verified on a 2026-09-25 prototype and again on the 2026-09-27 re-anchor prototype). If the e2e fails because it expects
    the old default (for example it selects `LOCAL` or `LOCAL_CLI_EXEC` explicitly, or clicks Add
    without the checkbox), update only that step: tick the checkbox with
    `await page.getByRole('checkbox').first().check();` before clicking Add. Any other failure →
@@ -1660,7 +1703,9 @@ storage, staged deployment) and asked for a lighter version. What was kept and w
 | Workspace checkpoints in Git | **Dropped**: workspaces hold private data; Git holds code only (D-2) |
 | Separate versioned checkpoint storage, staged production rollout | **Dropped**: one local app, one file; the automatic copy is the checkpoint |
 
-Verified on 2026-09-26 by prototyping exactly these steps on `3be1a94` (then reverted):
+Re-verified 2026-09-27 by applying these steps as re-anchored to formatted `e0ce5d9` (the four
+step-12 tests and the full suite pass; see C11.0 rule 0). Verified first on 2026-09-26 by
+prototyping exactly these steps on `3be1a94` (then reverted):
 - unit suite 875 pass / 0 fail, including the four tests in step 12;
 - `bench-store.ts 200`: projection 5,855,685 → 168,464 bytes, reopen 7,419 → 539 ms,
   `snapshot()` 131 → 3 ms;
@@ -1677,11 +1722,17 @@ Verified on 2026-09-26 by prototyping exactly these steps on `3be1a94` (then rev
 
 Steps:
 1. Baseline: from `lr6\app` run `pnpm exec tsx scripts/bench-store.ts 200` and keep the JSON line.
-2. **Marker type.** In `app/src/shared/types.ts`, in the line that starts
-   `export interface ProviderCapabilitySnapshot {`, replace
-   `source: string; contentHash: string; observedAt: string; }` with
+2. **Marker type.** In `app/src/shared/types.ts`, inside `export interface ProviderCapabilitySnapshot {`,
+   find these three lines (they occur once in the file):
    ```ts
-   source: string; contentHash: string; observedAt: string; /** Set only in the projection: this older snapshot's model list was omitted (LR-6); the event log still holds it. */ modelsOmitted?: true; }
+     contentHash: string;
+     observedAt: string;
+   }
+   ```
+   and insert these two lines between `  observedAt: string;` and `}`:
+   ```ts
+     /** Set only in the projection: this older snapshot's model list was omitted (LR-6); the event log still holds it. */
+     modelsOmitted?: true;
    ```
 3. **Reducer option.** In `app/src/core/store.ts`, replace the line
    `function applyChanges(current: Projection, changes: Change[]): Projection {` with these two lines:
@@ -1689,11 +1740,14 @@ Steps:
    function applyChanges(current: Projection, changes: Change[], options: { compactCatalogs?: boolean } = {}): Projection {
      const compactCatalogs = options.compactCatalogs ?? true;
    ```
-4. **Compaction.** In the same function, find the line
+4. **Compaction.** In the same function, find these four lines
    ```ts
-         if (index === -1) {lookup.set(change.value.id,items.length);items.push(structuredClone(change.value));} else items[index] = structuredClone(change.value);
+         if (index === -1) {
+           lookup.set(change.value.id, items.length);
+           items.push(structuredClone(change.value));
+         } else items[index] = structuredClone(change.value);
    ```
-   and insert directly after it:
+   and insert directly after the fourth one (`} else items[index] = …`):
    ```ts
          // LR-6: the projection keeps one model catalog per connection — the newest snapshot's. Older
          // snapshots keep every other field and are marked modelsOmitted; the event log keeps them whole.
@@ -1739,23 +1793,25 @@ Steps:
    ```
    `DatabaseSync`, `randomUUID`, `canonical`, `blank`, `applyChanges` and `eventSchema` already
    exist in `store.ts`; if the typecheck says one is missing, stop and report.
-6. **Accept version 4.** Replace
-   `if (version !== 0 && version !== 1 && version !== 2 && version !== 3) throw` with
-   `if (version < 0 || version > SCHEMA_VERSION) throw` (keep the rest of that line).
-7. **Skip the old check before migrating.** Find these three lines (they come right before
-   `if(version<3){`):
+6. **Accept version 4.** Replace the line
+   `      if (version !== 0 && version !== 1 && version !== 2 && version !== 3)` with
+   `      if (version < 0 || version > SCHEMA_VERSION)` (the `throw new Error(…)` on the next line stays).
+7. **Skip the old check before migrating.** Find these four lines:
    ```ts
            this.db.exec('COMMIT');
          }
          this.verifyIntegrity();
+         if (version < 3) {
    ```
    and change only the third line to:
    ```ts
          if (version >= SCHEMA_VERSION) this.verifyIntegrity();
    ```
-8. **The migration.** Find these two consecutive lines:
+8. **The migration.** Find these two consecutive lines (6-space indent; the other
+   `this.researchIndexReady = true;` inside `if (version < 3) {` has 8 spaces and is not followed by
+   the WAL line):
    ```ts
-         this.researchIndexReady=true;
+         this.researchIndexReady = true;
          this.db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;');
    ```
    and insert between them:
@@ -1773,8 +1829,12 @@ Steps:
          }
    ```
 9. **Allow the one-time rewrite.** Replace `  private verifyIntegrity(): void {` with
-   `  private verifyIntegrity(rewriteProjection = false): void {`, and in that method replace
-   `    if (canonical(rebuilt) !== canonical(this.readProjection())) throw new Error('Workspace projection integrity failure');`
+   `  private verifyIntegrity(rewriteProjection = false): void {`, and at the end of that method
+   replace these two lines
+   ```ts
+       if (canonical(rebuilt) !== canonical(this.readProjection()))
+         throw new Error('Workspace projection integrity failure');
+   ```
    with:
    ```ts
        if (canonical(rebuilt) !== canonical(this.readProjection())) {
@@ -1786,7 +1846,7 @@ Steps:
    ```
 10. **Update the one existing test that encoded the old rule.** In `app/tests/connections.test.ts`,
     replace
-    `assert.equal(changed.capabilities![0].models.length,1,'earlier evidence is never rewritten');`
+    `  assert.equal(changed.capabilities![0].models.length, 1, 'earlier evidence is never rewritten');`
     with these two lines:
     ```ts
     assert.equal(changed.capabilities![0].models.length,0,'the projection keeps one catalog per connection (LR-6); the event log keeps the original');
@@ -1832,22 +1892,29 @@ Steps:
 - Why: today nothing appears until the store has opened and verified the whole history.
 
 Steps:
-1. In `app/scripts/build.mjs`, find the line that starts
-   `await writeFile(resolve(root,'dist/renderer/index.html'),` and insert directly after it:
+1. In `app/scripts/build.mjs`, find the `index.html` statement — the four lines that start with
+   `await writeFile(`, then `  resolve(root, 'dist/renderer/index.html'),`, then the long template
+   line, then `);` — and insert directly after its closing `);` line:
    ```js
    await writeFile(resolve(root,'dist/renderer/loading.html'),`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><title>Quant Research Office</title><style>html,body{height:100%;margin:0;background:#101414;color:#d8e2df;font:15px system-ui,sans-serif;display:flex;align-items:center;justify-content:center}</style></head><body><p>Opening your workspace…</p></body></html>`);
    ```
 2. In `app/src/main/main.ts`:
-   a. Find `const html=path.join(__dirname,'../renderer/index.html');` and add directly after it:
-      `const loadingHtml=path.join(__dirname,'../renderer/loading.html');`
-   b. Find the line that starts ` win=new BrowserWindow({` inside `start()`. Cut that whole line
-      (the `new BrowserWindow(...)` statement ending in `});`) and paste it as the first statement
-      of `start()` (after LR-2's `writeLog` line if LR-2 is merged), then add directly after it:
-      ` void win.loadFile(loadingHtml);`
-   c. The line ` const appIcon=path.join(__dirname,...` must come before the moved line, because
-      the window uses `appIcon`. Move the `appIcon` line (and the two comment lines above it) up
-      together with the window line, keeping `appIcon` first.
-   d. Leave every other statement where it is. The existing `await loadWindowWithRetry(win,html);`
+   a. Find `const html = path.join(__dirname, '../renderer/index.html');` and add directly after it:
+      `const loadingHtml = path.join(__dirname, '../renderer/loading.html');`
+   b. Inside `async function start() {`, find the block that begins with the comment line
+      `  // The .ico keeps window and taskbar pinned to the same artwork the packager embeds in the exe;`
+      and ends with the `  });` line that closes `  win = new BrowserWindow({` (the line directly
+      above `  Menu.setApplicationMenu(`). The block is: two comment lines, the
+      `  const appIcon = …` line, and the whole `new BrowserWindow({ … });` statement. Cut that
+      whole block and paste it as the first statements of `start()` (after LR-2's `writeLog` line
+      if LR-2 is merged), then add this line directly after the pasted `  });`:
+      `  await win.loadFile(loadingHtml).catch(() => undefined);`
+      Use `await`, not `void`: re-anchor testing on 2026-09-27 showed that with `void` the loading
+      page is still loading when the real UI loads, and the e2e's first screenshot then timed out
+      in 3 of 4 runs; with `await` it passed 3 of 3.
+   c. Keep the block's order (comments, `appIcon`, then the window), because the window uses
+      `appIcon`.
+   d. Leave every other statement where it is. The existing `await loadWindowWithRetry(win, html);`
       later in `start()` replaces the loading page with the real UI.
 3. Run the standard checks, then package and run LR-1's e2e three times. Expected: all pass.
    If the first screenshot times out in 2 of 3 runs (LR-1 step 4), the loading page is
@@ -1880,19 +1947,26 @@ Steps:
 
 Steps:
 1. In `app/src/renderer/agents.tsx`, find
-   `const readiness=providerReadiness(state,provider,provider==='devin'?{execution:'LOCAL'}:undefined);`
+   `const readiness = providerReadiness(state, provider, provider === 'devin' ? { execution: 'LOCAL' } : undefined);`
    and replace it with
-   `const readiness=providerReadiness(state,provider,{execution:'LOCAL'});`
-2. Find the text `<div className="badge-groups">` in the same provider row. Directly **before**
+   `const readiness = providerReadiness(state, provider, { execution: 'LOCAL' });`
+2. Find the line `              <div className="badge-groups">` (it occurs once). Directly **before**
    it, insert:
    ```tsx
     <p className="provider-summary"><b>This computer (local CLI):</b> {readiness.signedIn?(readiness.ready?'ready.':`signed in; ${readiness.blockers[0]??'not yet verified by a run.'}`):'not signed in — sign in with the provider CLI, then Refresh.'} <b>Provider-hosted:</b> not available in this version.</p>
     <details><summary>Technical details</summary>
    ```
-3. Find the end of that provider row's evidence block: the line
-   `{readiness.blockers.map(blocker=><p className="muted" key={blocker}>{blocker}</p>)}`. Directly
-   **after** it, insert ` </details>` so the badge groups, tool line, capability evidence and
-   blockers are all inside the new `<details>`.
+3. Find the end of that provider row's evidence block, these five lines:
+   ```tsx
+                 {readiness.blockers.map(blocker => (
+                   <p className="muted" key={blocker}>
+                     {blocker}
+                   </p>
+                 ))}
+   ```
+   Directly **after** the fifth (`))}`), insert `</details>` so the badge groups, tool line,
+   capability evidence and blockers are all inside the new `<details>`. (An inner `<details>`
+   already exists in that block; nesting is intended.)
 4. Run the standard checks and LR-1's e2e. If the e2e looks for text that is now inside the
    closed `<details>`, open it first in the test with
    `await page.getByText('Technical details').first().click();`. Other failures → stop.
@@ -1935,24 +2009,39 @@ Steps:
 
 #### LR-11 — Accessible names for icon buttons (L13)
 
-- Branch `fix/lr11-a11y-names`; Folder `lr11`. Files: renderer files that contain the unnamed
-  buttons; `app/tests/desktop.e2e.ts`.
+- Branch `fix/lr11-a11y-names`; Folder `lr11`. Files: `app/tests/desktop.e2e.ts`; renderer files
+  only if step 2 reports a button.
+- Re-anchor finding (2026-09-27, on `e0ce5d9` with LR-1's two fixes): every visible button on the
+  nine sidebar pages already has an accessible name — rev-3/rev-4 named the remaining ones. This
+  packet therefore adds the check as a **regression guard**; expect step 2 to report nothing.
 
 Steps:
-1. Package the app (LR-1 step 1). In `app/tests/desktop.e2e.ts`, find the **first** line that
-   contains `await application!.close();application=undefined;` and insert directly above it
+1. Package the app (LR-1 step 1). In `app/tests/desktop.e2e.ts`, find the **last** pair of lines
+   ```ts
+     await application!.close();
+     application = undefined;
+   ```
+   (the pair occurs twice; use the second) and insert directly above the first of those two lines
    this check, which visits each sidebar page and fails on any visible button without a name:
    ```ts
-    for(const name of ['Office','Agents','Projects','Reviews','Artifacts','Memory','History','Usage','Settings']){
-     await page.getByRole('button',{name,exact:true}).first().click();
-     const unnamed=await page.evaluate(()=>[...document.querySelectorAll('button')].filter(b=>b.offsetParent!==null&&!b.innerText.trim()&&!b.getAttribute('aria-label')&&!b.getAttribute('title')).map(b=>b.outerHTML.slice(0,160)));
-     assert.deepEqual(unnamed,[],`${name} page has buttons without an accessible name`);
-    }
+     for (const name of ['Office', 'Agents', 'Projects', 'Reviews', 'Artifacts', 'Memory', 'History', 'Usage', 'Settings']) {
+       await page.getByRole('button', { name, exact: true }).first().click();
+       const unnamed = await page.evaluate(() => [...document.querySelectorAll('button')].filter(b => b.offsetParent !== null && !(b.textContent ?? '').trim() && !b.getAttribute('aria-label') && !b.getAttribute('title')).map(b => b.outerHTML.slice(0, 160)));
+       assert.deepEqual(unnamed, [], `${name} page has buttons without an accessible name`);
+     }
    ```
-2. Run the e2e. For each reported `outerHTML`, find the button in `app/src/renderer` (search for
+   Two details matter and were verified: use `textContent`, not `innerText` (`innerText` is empty
+   for some labelled buttons, such as "Save request revision", and gives false failures); and
+   insert at the **last** close, not the first (visiting the pages before the first close breaks
+   the later backup step with `Backup lineage tip does not match its manifest`).
+2. Run the e2e. If it reports an `outerHTML`, find that button in `app/src/renderer` (search for
    a distinctive part of it, such as its icon name or className) and add
    `aria-label="<what the button does>" title="<same text>"`. Use short verb phrases such as
    "Refresh office chat", "Open folder for project", "Dismiss error".
+   Do **not** change the `aria-label`s that findings-rev-4 put on the dialog and pipeline-card
+   form controls (`Request name`, `Director`, `Pre-registered analysis plan`, `Round shape`, …).
+   Every name you add must be unique on its screen: two controls with the same name break
+   `getByLabel` in the e2e (that collision was the rev-4 bug). Repeated cards may share a name.
 3. Repeat until the e2e passes. Run the standard checks.
 - Done when: the e2e passes with the new check.
 
@@ -1968,14 +2057,15 @@ Steps:
   history is replayed onto. Changing it changes what replay produces, so the stored quick-access
   copy must be rebuilt once — exactly the mechanism LR-6 added. Users who explicitly chose a theme
   keep it (their choice is in the history); users who never chose become light.
-- Verified on 2026-09-26 by prototyping steps 1–5 on top of LR-6 (then reverted): unit tests pass,
+- Re-verified 2026-09-27 on formatted `e0ce5d9` (steps 1–5 and all 40 rows of the step 6 table
+  match the formatted code). Verified on 2026-09-26 by prototyping steps 1–5 on top of LR-6 (then reverted): unit tests pass,
   and the real test workspace round-trip (upgrade → downgrade) again produced a byte-identical
   old-format copy.
 
 Steps:
-1. In `app/src/core/store.ts`, in `function blank()`, replace
-   `settings: { theme: 'dark', reducedMotion: false, globalBudgetCents: 0 } }; }` with
-   `settings: { theme: 'light', reducedMotion: false, globalBudgetCents: 0 } }; }`.
+1. In `app/src/core/store.ts`, in `function blank()`, replace the line
+   `    settings: { theme: 'dark', reducedMotion: false, globalBudgetCents: 0 },` with
+   `    settings: { theme: 'light', reducedMotion: false, globalBudgetCents: 0 },`.
 2. Replace the two lines
    ```ts
    /** Workspace schema version. 4 = LR-6 projection (one model catalog per connection). */
@@ -1999,8 +2089,9 @@ Steps:
    ```
 4. In `app/tests/core.test.ts`, in the test
    `fresh workspace has no agents, spend, approvals, reviews, projects, or synthetic work`, replace
-   `settings: { theme: 'dark', reducedMotion: false, globalBudgetCents: 0 }, spend` with
-   `settings: { theme: 'light', reducedMotion: false, globalBudgetCents: 0 }, spend`.
+   the line `    settings: { theme: 'dark', reducedMotion: false, globalBudgetCents: 0 },` with
+   `    settings: { theme: 'light', reducedMotion: false, globalBudgetCents: 0 },`. (Another test
+   further down has `…, agent: 'ADMIN' }` on its settings line; leave that one.)
 5. From `lr14\app` in PowerShell:
    ```
    Copy-Item ..\docs\plans\lr14-theme-default.test.ts tests\theme-default.test.ts
@@ -2012,7 +2103,7 @@ Steps:
 
    | Selector | Property | Old value | New value |
    | --- | --- | --- | --- |
-   | `.office-chat` | `border` | `1px solid var(--border,#d0dcd7)` | `1px solid var(--border)` |
+   | `.office-chat` | `border` | `1px solid var(--border, #d0dcd7)` | `1px solid var(--border)` |
    | `.office-chat` | `background` | `#eeeae1` | `var(--panel-2)` |
    | `.office-chat` | `color` | `#253d37` | `var(--text)` |
    | `.office-chat-filters` | `background` | `#f8faf7` | `var(--panel)` |
@@ -2048,14 +2139,16 @@ Steps:
    | `.office-chat-error` | `color` | `#854630` | `var(--text)` |
    | `.office-chat-history-notice` | `background` | `#e3eeed` | `var(--panel-2)` |
    | `.office-chat-history-notice` | `color` | `#476660` | `var(--muted)` |
-   | `.office-chat-older,.office-chat-latest` | `border` | `1px solid #cbded3!important` | `1px solid var(--border)!important` |
-   | `.office-chat-older,.office-chat-latest` | `background` | `#f9fffb!important` | `var(--panel)!important` |
-   | `.office-chat-older,.office-chat-latest` | `color` | `#276955!important` | `var(--teal)!important` |
+   | `.office-chat-older,.office-chat-latest` | `border` | `1px solid #cbded3 !important` | `1px solid var(--border) !important` |
+   | `.office-chat-older,.office-chat-latest` | `background` | `#f9fffb !important` | `var(--panel) !important` |
+   | `.office-chat-older,.office-chat-latest` | `color` | `#276955 !important` | `var(--teal) !important` |
    | `.office-chat :focus-visible` | `outline` | `2px solid #1a987b` | `2px solid var(--teal)` |
 
    Keep unchanged: the green header (`.office-chat-heading`, `.office-chat-icon`,
    `.office-chat-refresh`, `.office-chat-heading p`) — it is the chat's brand bar — and all
-   `box-shadow` values. After formatting (LR-0) a selector may be split over lines; match by
+   `box-shadow` values. The old values above are written as Prettier formats them (for example
+   `var(--border, #d0dcd7)` and ` !important` with a space). A selector list may be split over
+   several lines (for example `.office-chat-older,` then `.office-chat-latest {`); match by
    selector and property, not by line.
 7. Run `pnpm format`, the standard checks (expected: 3 more passing tests) and LR-1's e2e.
 8. User-level check: fresh `QRO_USER_DATA_DIR` → the app opens light. Settings → Theme → Dark →
@@ -2129,7 +2222,7 @@ Latest C9 qualification (2026-09-21) supersedes the historical C9 row's statemen
 | Current acceptance item | Status | Evidence / next item |
 | --- | --- | --- |
 | C9 automated Director → PM → Worker | VERIFIED_LOCAL for bounded live Claude CLI relay | Three distinct role profiles and real processes; one Director start, two event-driven dependent starts; exact inherited manifests, agent-consumed predecessor hashes, verified durable outputs and replay non-duplication. Two product defects repaired; 689/690 unit tests pass (one existing skip), typecheck/build and three development desktop suites pass. [Acceptance record](../records/reviews/three-agent-acceptance-2026-09-21.md). Next: reproduce output-storage failure recovery and retain process/watch bookkeeping until durable terminal admission. Mixed-provider chains, packaged acceptance and the C8 user-run Colab pilot are not established by this test. |
-| Communication pipeline (comm-pipe-1..3) | VERIFIED_LOCAL including live P3 on a dev build (2026-09-24); packaged live run NOT_STARTED | Planning and result-analysis pipelines mint request-scoped hop sets; the terminal hop seals, AWAITING_DECISION binds the decision to the verified receipt, and `request.pipeline.decide` is idempotent and refuses stale hashes. 2026-09-24: both pipelines ran live end to end with a mixed Claude/Devin roster, and real Approve and Request-revision decisions were bound to verified receipts, after nine defects were fixed ([acceptance record](../records/reviews/office-live-acceptance-2026-09-24.md)). 2026-09-25 round `findings-rev-2` (head `7a4153c`): planning packets now blind `withheldPaths`; REVISE auto-mints a linked revision request whose brief inherits verified prior-round outputs and the decision note; pipeline cards carry a per-hop Observe/Retry/Cancel table with verified output previews and a named cancel confirmation; pre-launch failures settle FAILED with `lastObservation`; stored agent outputs and pipeline reviews are visible in Artifacts/Reviews. 2026-09-25 packaged acceptance round 3 on the taskbar install: planning + result-analysis pipelines ran live on real userData with dead-spawn retry, transient auto-retry, stranded-receipt reconcile and hash-bound decisions all exercised ([acceptance record](../records/reviews/office-live-acceptance-2026-09-25.md)). 2026-09-25 (same day): REVISE end-to-end, cancel cascade/dialog and withheld-path blinding all exercised live on the packaged install — verified. 2026-09-26 round `findings-rev-4` (head `4c113ad`, packaged acceptance round 4): request-form `analysisOf` no longer silently binds the newest plan — the select defaults to an explicit "None" and the link is emitted only on a real pick; dialog/card controls carry unique accessible names (label-wrapping collision fixed); `request.create` rejects a CANCELED `analysisOf` target; `npm test` bounded to `--test-concurrency=4`; `desktop.mjs` gained `reopen` for rejected slots. 904 tests — 903 pass/0 fail/1 skip; tsc + build clean; packaged check on `App\` (`app.asar` `44091982…`) verified all three behaviors live. Open: the formal C8 S3 run-package/return pilot; hosted-provider execution remains gated; provider effort/tool claims remain unverified beyond what the session result reports. |
+| Communication pipeline (comm-pipe-1..3) | VERIFIED_LOCAL on dev and packaged builds through rev-4 (2026-09-26); two targeted coverage gaps remain | Planning and result-analysis pipelines mint request-scoped hop sets; the terminal hop seals, AWAITING_DECISION binds the decision to the verified receipt, and `request.pipeline.decide` is idempotent and refuses stale hashes. 2026-09-24: both pipelines ran live end to end with a mixed Claude/Devin roster, and real Approve and Request-revision decisions were bound to verified receipts, after nine defects were fixed ([acceptance record](../records/reviews/office-live-acceptance-2026-09-24.md)). 2026-09-25 round `findings-rev-2` (head `7a4153c`): planning packets now blind `withheldPaths`; REVISE auto-mints a linked revision request whose brief inherits verified prior-round outputs and the decision note; pipeline cards carry a per-hop Observe/Retry/Cancel table with verified output previews and a named cancel confirmation; pre-launch failures settle FAILED with `lastObservation`; stored agent outputs and pipeline reviews are visible in Artifacts/Reviews. 2026-09-25 packaged acceptance round 3 on the taskbar install: planning + result-analysis pipelines ran live on real userData with dead-spawn retry, transient auto-retry, stranded-receipt reconcile and hash-bound decisions all exercised ([acceptance record](../records/reviews/office-live-acceptance-2026-09-25.md)). 2026-09-25 (same day): REVISE end-to-end, cancel cascade/dialog and withheld-path blinding all exercised live on the packaged install — verified. 2026-09-26 round `findings-rev-4` (head `4c113ad`, packaged acceptance round 4): request-form `analysisOf` no longer silently binds the newest plan — the select defaults to an explicit "None" and the link is emitted only on a real pick; dialog/card controls carry unique accessible names (label-wrapping collision fixed); `request.create` rejects a CANCELED `analysisOf` target; `npm test` bounded to `--test-concurrency=4`; `desktop.mjs` gained `reopen` for rejected slots. 904 tests — 903 pass/0 fail/1 skip; tsc + build clean; packaged check on `App\` (`app.asar` `44091982…`) verified all three behaviors live. Open: the formal C8 S3 run-package/return pilot; hosted-provider execution remains gated; provider effort/tool claims remain unverified beyond what the session result reports. |
 | M-memory workstream (office-mem-1/2) | VERIFIED_LOCAL; external engines NOT_STARTED | Append-only finding/relationship ledgers, per-hop authorized memorySearch and digest mount (plan-synthesis/analysis-finalize only), Memory page graph/search/links, archive export and an evaluation harness with the Office baseline. Merged via PR #8/#9. Memory is office-recorded self-report, not verified fact. 2026-09-24 packaged-app audit: graph overlap, hidden search focus, stale notice and the missing Opus 5.5 option fixed on `fix/memory-page-bugs-20260924`. |
 
 Status vocabulary: NOT_STARTED, IMPLEMENTED_FOUNDATION, IN_PROGRESS, PARTIALLY_VERIFIED_LOCAL, BLOCKED_EXTERNAL, VERIFIED_LOCAL, VERIFIED_HOSTED. PARTIALLY_VERIFIED_LOCAL means some tested code exists but parent acceptance is not met; list exact open subitems. PARTIALLY_IMPLEMENTED means the larger program still has unimplemented contracts/UI/tests. The latter requires actual provider evidence for the exact scope. A local test cannot advance a hosted gate. Keep this table in the same file.
@@ -2143,8 +2236,8 @@ Status vocabulary: NOT_STARTED, IMPLEMENTED_FOUNDATION, IN_PROGRESS, PARTIALLY_V
 | D2 parallel coding setup | VERIFIED_LOCAL tooling; desktop/provider sessions NOT_STARTED | 2026-09-13: the fixed local desktop state machine and detailed Session 1–7/Session 8 manual supplement the general worktree protocol. Four coordination tests pass, including seven simultaneous starts, atomic publication, role/path binding, immutable round hashes, stale review/head refusal, exact-SHA submission, scope enforcement, rejection, integration, close and next-round preservation. The eight prepared local worktrees under `quant-team-sessions/prepared-20260912` were fast-forwarded to setup commit `236ccda4817fcf5320e4ee95389af34bcb92dd46`; setup was run twice, all role/status checks returned the correct clean checkout and `NOT_READY`, and no product round was published. Installing ignored role files does not launch or authenticate a session. The merge policy now authorizes Session 8 to merge only its closed-round integration PR after current-main ancestry, exact-head `verify` success and conversation-resolution checks; direct main pushes and raw-token workarounds remain prohibited. The prior fresh locked install, typecheck, 382/382 application units and build passed in the setup worktree. GitHub main protection requires a strict `verify` check, PR, resolved conversations and admin enforcement, with no force-push/deletion. CI results are on [setup PR #1](https://github.com/louiskim132/Quant_Office/pull/1). Claude Code 2.1.270 reported a signed-in subscription; Codex saved-project path remains the parent folder; Devin browser was signed out and its repository grant/model choice remain unverified. Update 2026-09-14: the desktop workflow has since run two product rounds (list-views-001, ui-refresh-001) in batch prepared-20260912, integrated and merged through PR #2; a fresh batch (next-batch-001) is provisioned on the merged base for the next round. |
 | D1 optional Serena trial | PARTIALLY_IMPLEMENTED, nonblocking | Project-local AGENTS.md and CLAUDE.md pointers plus the Git/worktree policy were added during repository setup on 2026-09-12. The optional Serena comparison and client configuration remain NOT_STARTED; no navigation plugin was installed. |
 | C10 four-plugin office evaluation | MEASURED_LOCAL 2026-09-25 (CLI A/B, scratch installs); no plugin enabled by default | 2026-09-16: section 3.2 and C10 define the trials and `app/benchmarks/plugin-evaluation/`. 2026-09-25: Serena 1.7.0, Ponytail v4.10.0, Graphify 0.9.68 and LightRAG 1.5.7 (Ollama local) trialled alone and stacked on an office implement packet and a 7-item code-navigation task. No plugin or pair saved tokens beyond run-to-run noise; Serena adds ~8.7k tokens per call and is unused unless hinted; stacking adds context and lowered accuracy; LightRAG local indexing failed (5 of 11 files timed out in 2 h). Recommended set: office memory ledger only. See section 17 entry "plugin trials" of this date. |
-| Token diet (pipeline token consumption) | VERIFIED_LOCAL on dev + packaged build 2026-09-25; not yet merged | Branch `fix/token-diet-20260925` (base organizer `9356c2e`). Lean Claude/Codex launches, per-hop deliverables, hop-keyed inherited inputs, worker slices, packet essentials + `finish.py`, split contract, pre-registered analysis plan (`analysisOf`), QUICK round shape, implementation-only REVISE, claude launch spacing. Live: quick ema5 round 574k input tokens (was 2.50M), implementation-only revision 345k (was 3.10M), Codex implement 147k (was 374k). App\ `app.asar` `642139F3…`. Plugin trials done (C10 row). Follow-ups done on `fix/evidence-and-memory-20260925` (PR #14): evidence-surface args documented; memory capture restored and digest mounted at `plan-brief`. App\ `app.asar` `0901A8DF…` — see section 17 entries of this date. |
-| Commercial launch readiness | NOT_STARTED — C11 plan with user decisions D-1…D-5 answered 2026-09-26 | Private/internal beta only. Next: LR-0 (Prettier, 120 columns) by the coding model, then the organizer re-anchors C11 on the formatted main (C11.0 rule 0), then LR-1…LR-11 and LR-14 in the C11.1 order. LR-6 approved in a lighter form (history untouched, one catalog per account in the quick-access copy, automatic backup, lossless downgrade tool). Launch gate: LR-15 API-key mode, LR-16 separate Windows user, legal review. Signing/installer/updates/fuses deferred to the very last step (free-first). |
+| Token diet (pipeline token consumption) | VERIFIED_LOCAL on dev + packaged build; merged via PR #13/#14 (2026-09-25 local) | Branch `fix/token-diet-20260925` (base organizer `9356c2e`). Lean Claude/Codex launches, per-hop deliverables, hop-keyed inherited inputs, worker slices, packet essentials + `finish.py`, split contract, pre-registered analysis plan (`analysisOf`), QUICK round shape, implementation-only REVISE, claude launch spacing. Live: quick ema5 round 574k input tokens (was 2.50M), implementation-only revision 345k (was 3.10M), Codex implement 147k (was 374k). App\ `app.asar` `642139F3…`. Plugin trials done (C10 row). Follow-ups done on `fix/evidence-and-memory-20260925` (PR #14): evidence-surface args documented; memory capture restored and digest mounted at `plan-brief`. App\ `app.asar` `0901A8DF…` — see section 17 entries of this date. |
+| Commercial launch readiness | IN_PROGRESS — LR-0 merged (`e0ce5d9`); C11 re-anchored 2026-09-27; LR-1 next | Private/internal beta only. Next: LR-0 (Prettier, 120 columns) by the coding model, then the organizer re-anchors C11 on the formatted main (C11.0 rule 0), then LR-1…LR-11 and LR-14 in the C11.1 order. LR-6 approved in a lighter form (history untouched, one catalog per account in the quick-access copy, automatic backup, lossless downgrade tool). Launch gate: LR-15 API-key mode, LR-16 separate Windows user, legal review. Signing/installer/updates/fuses deferred to the very last step (free-first). |
 | OmniRoute routing extension | NOT_STARTED implementation; architecture reviewed 2026-09-11 | Section 3.1 proposes operation-specific model/session/research contracts and an optional bounded free-worker route. Current subscription-only runtime policy remains unchanged; no gateway installation, provider transfer or live compatibility test occurred. Integrate with C2/C4/C7 and retain R5/custody requirements. |
 | R2 | VERIFIED_LOCAL within documented limits | Snapshot/output inventory is shared by backup and restore; both formats restore actual bytes into a new root. OutputService reserves real destinations on prepare/launch and stores versioned verified bytes. Required missing objects refuse backup. Snapshot identity rejects null/wrong request revisions. Remaining constraints: source swap races, recorded-platform Git reconstruction and R5 transport limits. |
 | R3 | VERIFIED_LOCAL | Preserve exact per-operation scope, durable evidence order, independent confinement and frozen account context. No new live capability evidence in this pass. |
@@ -5801,3 +5894,79 @@ userData): `Director` and `Pre-registered analysis plan` each resolve exactly on
 the plan select defaults to the explicit None, saving untouched persists no `analysisOf`,
 an explicit pick persists the id verbatim, and `Round` resolves only `Round shape` selects
 — no restart-point collision remains.
+
+
+### 2026-09-27 — Organizer 8.2 progress audit and revision-plan correction
+
+Scope: read-only inspection of Devin session `glowing-thunder` (title `Quant_Office - Organizer (8.2)`), batch close records, fetched `origin/main`, GitHub PR/CI state, source and package hashes. Documentation changes only, on `docs/organizer-review-20260927`, base `0cfc1b9739d59e5118d2191c8b31f7a37347f947`. This is a review date, not an implementation completion date.
+
+**Why progress appeared stopped.** The last saved Organizer response (2026-09-26 16:34 PDT) ends normally and asks whether to hold or do another targeted acceptance pass. `current.json` says findings-rev-4 CLOSED; its close record names organizer head `2c175f9`. PR #16 and #17 are MERGED, and the inspected PR #17 verify checks passed. No worker or merge blocker is evidenced. The session database contains 7,381 message nodes (including duplicate records); this is not 7,381 user turns and does not by itself prove a UI performance cause. No session restart, message dispatch or process termination was performed.
+
+**Completed and checked.** Rev-3 fixed the briefing retry/Observe controls, typed withheld paths, attempt/superseded-output labels and regression coverage. Rev-4 fixed silent newest-plan selection in the request form, accessible-name collisions and the canceled-plan create guard. Its close record reports 904 tests / 903 pass / 0 fail / 1 conditional skip, clean typecheck/build, and packaged form checks. The installed App and organizer release app.asar hashes were independently recomputed and match `440919823ADF0C11ADA9569C4D0F09BF5265D22B2F94D4A717574BC4F33045D2`. These tests were reported by the organizer and corroborated by CI; this audit did not rerun the unit suite or live acceptance.
+
+**Open issues and revised order.** An empty findings-rev queue does not mean the C11 defect backlog is empty.
+
+| Priority / owner | Next action | Completion evidence |
+| --- | --- | --- |
+| Next implementation — coding worker | Run LR-0 alone from current main; then organizer RA re-anchors every remaining packet on the merged formatted commit. | Fresh before/after unit baseline, typecheck/build, format CI, then an actual `Re-anchored on <commit>` line. Do not write that line before RA happens. |
+| First functional follow-up — LR-1 | Repair desktop e2e copy/bridge expectations and enable Windows desktop CI. The current source still has bridge keys absent from the test snapshot. | Packaged e2e passes and runs in CI; passing unit CI alone does not close this. |
+| Reliability — LR-2 / LR-3 | Add crash diagnostics and handle long Windows CLI prompts according to the existing packets after RA. | Crash/recovery and long-prompt regression evidence, plus standard checks. No new runtime reproduction is claimed here. |
+| Startup — LR-6 → LR-7 → LR-8 | Compact the disposable catalog projection without altering history; show the loading window before store work; measure startup. Source still constructs OfficeStore before BrowserWindow. | Scratch-workspace round-trip/downgrade tests and repeated startup measurements. The reported 166-second launch may include host contention; it does not rule out the separately measured store/startup defect. Never reset live data to improve timing. |
+| Coverage — desktop organizer | Exercise typed withheld-path entry in the packaged UI against scratch data: save a directory prefix, reload, verify persistence, remove it, and confirm BLIND excludes / FULL includes the expected files. | Exact build hash, UI actions, saved state and packet-path evidence. Existing packet-blinding checks do not prove this new editor was exercised. |
+| Coverage — desktop organizer | When a live provider test is explicitly authorized, exercise two Claude test agents launching in one phase. | Record agent/model/effort, actual spawn timestamps, at least the configured four-second spacing and completion/recovery results. The one-Claude QUICK roster cannot close this gap. |
+| Remaining C11 packets | Continue LR-5/LR-4, LR-9…LR-11 and LR-14 in C11.1 dependency order, preserving rev-4 form behavior and accessible names. | Each packet's existing acceptance criteria, including packaged UI checks. Accessible names must be unambiguous in the intended card/dialog scope; repeated cards may have the same labels. |
+| External/user gates | Keep C8 manual Colab return, R5 hosted evidence and launch-only LR-15/LR-16/legal review separately tracked. | Their own evidence; none is closed by local tests. Signing/installer/updates/fuses remain deferred under D-3. |
+
+Do not publish findings-rev-5 without a reproducible new defect. Scratch acceptance can proceed independently of formatting, but it writes scratch state and may launch agents: it is not literally read-only and does not authorize live-data mutation or paid/provider runs. Any resulting code packet should be based on the formatted main after RA.
+
+**Planning defects corrected.** Section 11 incorrectly said packaged live acceptance was NOT_STARTED and token-diet work was not merged. Both are now reconciled with the dated evidence. Organizer's last response also described C10 trials as still requiring installs, but the C10 row records completed local trials on 2026-09-25; do not repeat those installations merely to clear an obsolete checklist. An existing uncommitted C11 draft in `Worktrees/c11-after-rev4/docs/ROADMAP.md` was inspected and left intact. Useful sequencing/base updates are reflected here, but its unverified claim of an independent full-suite run and its assertion that chat length caused slowness are not adopted. This branch is a proposed canonical-roadmap update pending integration; it does not change the live desktop batch's state or start an LR worker.
+
+
+### 2026-09-27 — LR-0 implementation and targeted acceptance follow-up
+
+User requested remaining work. LR-0 is implemented on `chore/lr0-prettier` in `Worktrees/lr0`, based on `0cfc1b9`; [PR #18](https://github.com/louiskim132/Quant_Office/pull/18) targets main. Status is IN_PROGRESS, not merged or released. Setup commit `f2c6195` pins Prettier 3.9.9, formatting commit `1a1a55f` reformats 212 source/test/script files, `333a400` adds format CI and blame-ignore metadata, and `97d1d58` adds LF checkout attributes after CI exposed Windows CRLF restoration. The formatting pass preserves one existing untyped-import suppression using `prettier-ignore`; no runtime logic was changed. A second format pass was needed for stable output.
+
+Fresh local validation: unformatted and formatted suites both report **904 tests, 903 pass, 0 fail, 1 existing conditional skip** (397.8 s and 563.4 s respectively). Frozen-lockfile install, typecheck, format check, build and package passed. Packaged sidebar acceptance visited Office, Agents, Projects, Reviews, Artifacts, Memory, History, Usage and Settings in a fresh scratch workspace with zero renderer errors. Package app.asar SHA-256: `12AC44C80B93DEE38C02BCFBB0E83F99ACDAC69A92AB1E87289BA39A85B94F8D`. The installed App and live workspace were not changed. The first CI run failed format due to CRLF checkout; the LF-attribute follow-up is awaiting CI. Do not mark LR-0 complete until the exact latest PR head passes and is reviewed/merged.
+
+Targeted acceptance:
+- **Typed withheld-path editor: UI gap closed locally.** In the packaged build, created a synthetic project, selected a scratch folder, typed `results/`, added/saved it, observed normalized `results` in state, reloaded/reopened the project and verified the visible entry, then removed/saved it and verified an empty withheld set. Zero renderer errors. The first driver attempt omitted reopening the project after reload; the corrected run passed. The full unit run independently passed BLIND/FULL packet tests; no new end-to-end provider blinding run is claimed.
+- **Two-Claude launch spacing: production-adapter live evidence now available.** Claude Code 2.1.280; agents Test PM A and Test PM B; requested model alias `opus`, effort `low` (requested settings, not an independently verified model identity). Concurrent handoffs through the production LocalCliExecAdapter spawned 4,005 ms apart, exceeding its 4,000 ms setting. Both completed and their synthetic role/nonce reports were stored and hash-verified. This was two independent assignments in a scratch OfficeStore, not a full packaged pipeline DAG; retain that narrower remaining UI/DAG coverage distinction. No paid API fallback or research execution.
+
+Evidence retained locally under `Worktrees/lr0/app/`: `baseline-lr0.log`, `formatted-lr0.log`, `test-output/lr0-sidebar.json`, `test-output/withheld-ui.json`, corresponding screenshots/drivers, and `test-output/claude-gap-live-2026-09-27T18-49-47-555Z/acceptance.json`. Scratch data remained outside the live office workspace.
+
+Next: exact-head CI and independent review/merge of PR #18, then organizer RA on the actual merged commit, then LR-1 onward. C11.0 prohibits a coding worker from merging its own PR and gates later LR packets on the merged re-anchor. This review has not bypassed those gates or started unrelated packets.
+
+### 2026-09-27 — LR-0 merged; C11 re-anchored (RA) and prototypes re-verified
+
+Organizer (Claude Opus) reviewed PR #18 against LR-0's "Done when": the format commit `1a1a55f`
+touches only `.ts/.tsx/.css/.mjs` files under `app/src`, `app/tests` and `app/scripts`;
+`.git-blame-ignore-revs` names exactly that commit; Prettier is pinned to `3.9.9`; the one
+`prettier-ignore` keeps an existing `@ts-expect-error` on its diagnostic; `.gitattributes` forces
+LF only on formatter-covered paths; CI `verify` (including `Format check`) passed on head
+`97d1d58`. Merged as `e0ce5d9`. PR #19 (this roadmap reconciliation) was brought up to date with
+`main` and carries this entry.
+
+RA (C11.0 rule 0), on `e0ce5d9`:
+- Rewrote every stale `Find` text in LR-1…LR-14 to the formatted code (LR-2 `main.ts`, LR-3 test
+  adapter call, LR-4 `agents.tsx`, LR-6 `store.ts`/`types.ts`/`connections.test.ts`, LR-7
+  `build.mjs`/`main.ts`, LR-9 Settings row, LR-11 e2e, LR-14 `blank()`, `core.test.ts` and the
+  40-row CSS table with Prettier's value spelling). A script applied each code packet exactly as
+  written to a scratch copy; every anchor matched once.
+- Results with LR-1…LR-7, LR-9 and LR-14 applied together: format check and typecheck clean;
+  full suite **917 tests, 916 pass, 0 fail, 1 skipped** (904 + 13 new); packaged desktop e2e
+  3 of 3 after the LR-7 fix below. LR-1 alone on `e0ce5d9`: e2e 3 of 3; the missing bridge keys
+  are still exactly the four listed.
+- **Defects found in the plan and fixed:** (1) LR-7's `void win.loadFile(loadingHtml)` raced the
+  real UI load — the e2e's first screenshot timed out in 3 of 4 runs; `await …catch(() =>
+  undefined)` passed 3 of 3, and without the loading page 3 of 3. (2) LR-11's check used
+  `innerText`, which is empty for some labelled buttons ("Save request revision", "Prepare Claude
+  handoff") and gave false failures, and was inserted before the first app close, which broke the
+  later backup step. It now uses `textContent` at the last close; with that, no visible button on
+  the nine pages lacks a name, so LR-11 is a regression guard. (3) LR-4 now also stops a provider
+  switch from resetting the environment to hosted (new step 3).
+- Earlier acceptance recorded above (withheld-path editor UI, two-Claude spawn gap of 4,005 ms)
+  stands; RA did not repeat live provider runs.
+
+Next: LR-1 by the coding model (C11.K prompt with `LR-1`), then the C11.1 order. The desktop
+batch stays on hold unless a new reproducible finding appears; any new round branches from
+formatted `main`.
