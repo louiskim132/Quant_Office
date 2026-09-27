@@ -9,9 +9,15 @@ import type { OfficeStore } from '../core/store.js';
 import { currentConnection, latestCapability } from '../shared/readiness.js';
 import type { AccountObservation } from './subscriptions.js';
 
-export interface ProbeResult { verified: boolean; detail: string; externalId: string; externalUrl: string }
+export interface ProbeResult {
+  verified: boolean;
+  detail: string;
+  externalId: string;
+  externalUrl: string;
+}
 
-const PROBE_OBJECTIVE = 'Read README.md, reply with its first line, and stop. Do not delegate, install packages, or use the network.';
+const PROBE_OBJECTIVE =
+  'Read README.md, reply with its first line, and stop. Do not delegate, install packages, or use the network.';
 const PROBE_CRITERIA = 'The first line of README.md is reported and nothing else is done.';
 
 /**
@@ -37,25 +43,47 @@ const PROBE_CRITERIA = 'The first line of README.md is reported and nothing else
  * unrecognised failure is recorded as unclassified rather than pasted through verbatim.
  */
 const FAILURE_CLASSES: { code: string; match: RegExp; detail: string }[] = [
-  { code: 'INTERACTIVE_TERMINAL_REQUIRED', match: /requires an interactive terminal/i,
-    detail: 'the official tool refused cloud creation without an interactive terminal' },
-  { code: 'NO_RECEIPT_BEFORE_TIMEOUT', match: /did not report a session within/i,
-    detail: 'the official terminal reported no session before the office stopped waiting' },
-  { code: 'EXITED_WITHOUT_RECEIPT', match: /exited with code/i,
-    detail: 'the official terminal exited without printing a creation receipt' },
-  { code: 'OUTPUT_LIMIT_EXCEEDED', match: /more output than the office will read/i,
-    detail: 'the official terminal produced more output than the office will read' },
-  { code: 'NO_SESSION_IDENTIFIER', match: /no session identifier/i,
-    detail: 'the official tool returned no session identifier' },
-  { code: 'TRANSPORT_MODULE_MISSING', match: /terminal transport module/i,
-    detail: 'the terminal transport module is not available in this build' },
+  {
+    code: 'INTERACTIVE_TERMINAL_REQUIRED',
+    match: /requires an interactive terminal/i,
+    detail: 'the official tool refused cloud creation without an interactive terminal',
+  },
+  {
+    code: 'NO_RECEIPT_BEFORE_TIMEOUT',
+    match: /did not report a session within/i,
+    detail: 'the official terminal reported no session before the office stopped waiting',
+  },
+  {
+    code: 'EXITED_WITHOUT_RECEIPT',
+    match: /exited with code/i,
+    detail: 'the official terminal exited without printing a creation receipt',
+  },
+  {
+    code: 'OUTPUT_LIMIT_EXCEEDED',
+    match: /more output than the office will read/i,
+    detail: 'the official terminal produced more output than the office will read',
+  },
+  {
+    code: 'NO_SESSION_IDENTIFIER',
+    match: /no session identifier/i,
+    detail: 'the official tool returned no session identifier',
+  },
+  {
+    code: 'TRANSPORT_MODULE_MISSING',
+    match: /terminal transport module/i,
+    detail: 'the terminal transport module is not available in this build',
+  },
 ];
 
 /** Classifies a probe failure without persisting the raw text it came from. */
 export function classifyProbeFailure(message: string): { code: string; detail: string } {
   const found = FAILURE_CLASSES.find(item => item.match.test(message));
-  return found ? { code: found.code, detail: found.detail }
-    : { code: 'UNCLASSIFIED', detail: 'the route failed for a reason the office does not recognise; the raw tool output was not stored' };
+  return found
+    ? { code: found.code, detail: found.detail }
+    : {
+        code: 'UNCLASSIFIED',
+        detail: 'the route failed for a reason the office does not recognise; the raw tool output was not stored',
+      };
 }
 
 /**
@@ -96,38 +124,69 @@ function submittedModel(adapter: ProviderAdapter, context: SubmitContext): strin
  * evidence that the route works. R1-B repaired the implementation; it did not re-enable the action.
  */
 export async function probeCloudTransport(input: {
-  store: OfficeStore; adapter: ProviderAdapter; stagingRoot: string; model: string;
-  observation: AccountObservation; now?: () => string; objectRoot?: string; gitExecutable?: string;
+  store: OfficeStore;
+  adapter: ProviderAdapter;
+  stagingRoot: string;
+  model: string;
+  observation: AccountObservation;
+  now?: () => string;
+  objectRoot?: string;
+  gitExecutable?: string;
 }): Promise<ProbeResult> {
   const now = input.now ?? (() => new Date().toISOString());
-  const state = input.store.snapshot({history:false});
+  const state = input.store.snapshot({ history: false });
   const connection: AccountConnection | undefined = currentConnection(state, input.observation.provider);
-  if (input.observation.state !== 'SIGNED_IN') throw new Error('Sign in to the provider before verifying the transport.');
+  if (input.observation.state !== 'SIGNED_IN')
+    throw new Error('Sign in to the provider before verifying the transport.');
   if (!connection) throw new Error('Check the account before verifying the transport.');
   const capability = latestCapability(state, connection.id);
   if (!capability) throw new Error('Check the account before verifying the transport.');
 
   // A real one-commit fixture through the ordinary preparation route. Nothing about the commit or
   // the manifest hash is invented, so the snapshot satisfies the same contract user work does.
-  const project = input.store.execute({
-    type: 'project.create', idempotencyKey: randomUUID(),
-    name: `Transport probe ${now()}`, mandate: 'Generated fixture for one transport verification. No research data.', budgetCents: 0,
-  }).projects.at(-1)!;
+  const project = input.store
+    .execute({
+      type: 'project.create',
+      idempotencyKey: randomUUID(),
+      name: `Transport probe ${now()}`,
+      mandate: 'Generated fixture for one transport verification. No research data.',
+      budgetCents: 0,
+    })
+    .projects.at(-1)!;
   const snapshot = await prepareInputSnapshot({
-    store: input.store, stagingRoot: input.stagingRoot, projectId: project.id,
-    objective: PROBE_OBJECTIVE, gitExecutable: input.gitExecutable, now,
+    store: input.store,
+    stagingRoot: input.stagingRoot,
+    projectId: project.id,
+    objective: PROBE_OBJECTIVE,
+    gitExecutable: input.gitExecutable,
+    now,
     ...(input.objectRoot ? { objectRoot: input.objectRoot } : {}),
   });
   if (!snapshot.stagingCommit)
-    throw new Error(`The probe fixture could not be committed: ${snapshot.warnings[0] ?? 'git is unavailable'}. Nothing was submitted.`);
+    throw new Error(
+      `The probe fixture could not be committed: ${snapshot.warnings[0] ?? 'git is unavailable'}. Nothing was submitted.`,
+    );
 
   const id = randomUUID();
   const context: SubmitContext = {
     assignment: {
-      id, projectId: project.id, requestId: id, requestRevision: 0, agentId: id, agentRevision: 0, connectionId: connection.id,
-      capabilitySnapshotId: capability.id, snapshotId: snapshot.id, route: input.adapter.route, requestedModel: input.model, resolvedModel: '',
-      requestedEffort: 'default', appliedEffort: 'UNVERIFIED', delegation: false,
-      objectiveHash: canonicalHash({ objective: PROBE_OBJECTIVE, criteria: PROBE_CRITERIA }), createdAt: now(),
+      id,
+      projectId: project.id,
+      requestId: id,
+      requestRevision: 0,
+      agentId: id,
+      agentRevision: 0,
+      connectionId: connection.id,
+      capabilitySnapshotId: capability.id,
+      snapshotId: snapshot.id,
+      route: input.adapter.route,
+      requestedModel: input.model,
+      resolvedModel: '',
+      requestedEffort: 'default',
+      appliedEffort: 'UNVERIFIED',
+      delegation: false,
+      objectiveHash: canonicalHash({ objective: PROBE_OBJECTIVE, criteria: PROBE_CRITERIA }),
+      createdAt: now(),
     },
     snapshot,
     objective: PROBE_OBJECTIVE,
@@ -135,23 +194,43 @@ export async function probeCloudTransport(input: {
     // A probe has no ProviderJob; the persisted attempt ID is the equivalent durable identity.
     jobId: id,
     payload: buildProviderPayload({
-      requestName: 'Office transport probe', objective: PROBE_OBJECTIVE, acceptanceCriteria: PROBE_CRITERIA,
-      instructions: '', model: input.model, effort: 'default', delegation: false,
+      requestName: 'Office transport probe',
+      objective: PROBE_OBJECTIVE,
+      acceptanceCriteria: PROBE_CRITERIA,
+      instructions: '',
+      model: input.model,
+      effort: 'default',
+      delegation: false,
     }),
   };
 
   const scopedModel = submittedModel(input.adapter, context);
   const scope = scopedModel ? { model: scopedModel } : {};
-  const unscoped = scopedModel ? '' : ' The route selected no model, so this does not verify which model a job would use.';
+  const unscoped = scopedModel
+    ? ''
+    : ' The route selected no model, so this does not verify which model a job would use.';
 
   // Durable intent, written and committed before any provider contact. Everything after this point
   // is reconcilable: the attempt exists whether or not the office survives the call.
   const attempt = {
-    id, provider: input.observation.provider, connectionId: connection.id, identity: connection.identity,
-    credentialContext: connection.credentialContext, toolVersion: capability.toolVersion, environment: capability.environment,
-    route: input.adapter.route, model: scopedModel, state: 'INTENT' as const,
-    externalId: '', externalUrl: '', detail: 'Preparing to create one verification session.', failureCode: '',
-    stagingPath: snapshot.stagingPath, snapshotId: snapshot.id, startedAt: now(), settledAt: '',
+    id,
+    provider: input.observation.provider,
+    connectionId: connection.id,
+    identity: connection.identity,
+    credentialContext: connection.credentialContext,
+    toolVersion: capability.toolVersion,
+    environment: capability.environment,
+    route: input.adapter.route,
+    model: scopedModel,
+    state: 'INTENT' as const,
+    externalId: '',
+    externalUrl: '',
+    detail: 'Preparing to create one verification session.',
+    failureCode: '',
+    stagingPath: snapshot.stagingPath,
+    snapshotId: snapshot.id,
+    startedAt: now(),
+    settledAt: '',
   };
   input.store.recordProbeIntent(attempt);
 
@@ -162,29 +241,61 @@ export async function probeCloudTransport(input: {
     const submitted = await input.adapter.submit(context);
     if (!submitted.externalId) throw new Error('The official tool returned no session identifier.');
     // The receipt is persisted immediately, before any further work can fail.
-    settled = { ...attempt, state: 'ACCEPTED' as const, externalId: submitted.externalId, externalUrl: submitted.externalUrl,
-      detail: submitted.detail, settledAt: now() };
+    settled = {
+      ...attempt,
+      state: 'ACCEPTED' as const,
+      externalId: submitted.externalId,
+      externalUrl: submitted.externalUrl,
+      detail: submitted.detail,
+      settledAt: now(),
+    };
     input.store.recordProbeOutcome(settled);
     evidence = {
-      operation: 'CLOUD_SUBMIT', level: 'ACCOUNT_VERIFIED', evidence: 'OBSERVED', verifiedAt: now(), ...scope,
-      route: input.adapter.route, environment: capability.environment,
+      operation: 'CLOUD_SUBMIT',
+      level: 'ACCOUNT_VERIFIED',
+      evidence: 'OBSERVED',
+      verifiedAt: now(),
+      ...scope,
+      route: input.adapter.route,
+      environment: capability.environment,
       detail: `A real cloud session was created for this account: ${submitted.externalId}.${unscoped}`,
       source: `office transport probe via ${input.adapter.route}`,
     };
-    result = { verified: true, detail: submitted.detail, externalId: submitted.externalId, externalUrl: submitted.externalUrl };
+    result = {
+      verified: true,
+      detail: submitted.detail,
+      externalId: submitted.externalId,
+      externalUrl: submitted.externalUrl,
+    };
   } catch (error) {
     const failure = classifyProbeFailure(error instanceof Error ? error.message : '');
     // The call started, so the provider's view is unknown. This is never recorded as "not submitted",
     // and the fixture is kept so the attempt can be reconciled later.
-    settled = { ...attempt, state: 'UNKNOWN' as const, detail: failure.detail, failureCode: failure.code, settledAt: now() };
+    settled = {
+      ...attempt,
+      state: 'UNKNOWN' as const,
+      detail: failure.detail,
+      failureCode: failure.code,
+      settledAt: now(),
+    };
     input.store.recordProbeOutcome(settled);
     evidence = {
-      operation: 'CLOUD_SUBMIT', level: 'UNAVAILABLE', evidence: 'OBSERVED', verifiedAt: now(), ...scope,
-      route: input.adapter.route, environment: capability.environment,
+      operation: 'CLOUD_SUBMIT',
+      level: 'UNAVAILABLE',
+      evidence: 'OBSERVED',
+      verifiedAt: now(),
+      ...scope,
+      route: input.adapter.route,
+      environment: capability.environment,
       detail: `The route did not produce a session for this account (${failure.code}): ${failure.detail}.`,
       source: `office transport probe via ${input.adapter.route}`,
     };
-    result = { verified: false, detail: `The route did not produce a session (${failure.code}): ${failure.detail}.`, externalId: '', externalUrl: '' };
+    result = {
+      verified: false,
+      detail: `The route did not produce a session (${failure.code}): ${failure.detail}.`,
+      externalId: '',
+      externalUrl: '',
+    };
   }
   // Staging is retained deliberately while an attempt is unresolved: deleting it would destroy the
   // only local record of exactly what was sent.

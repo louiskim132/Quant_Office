@@ -8,16 +8,24 @@ export interface PtyLike {
   write(data: string): void;
   kill(): void;
 }
-export interface PtySpawn { (executable: string, args: string[], options: { cwd: string; cols: number; rows: number; env: NodeJS.ProcessEnv }): PtyLike }
+export interface PtySpawn {
+  (
+    executable: string,
+    args: string[],
+    options: { cwd: string; cols: number; rows: number; env: NodeJS.ProcessEnv },
+  ): PtyLike;
+}
 
 /** Terminal control sequences carry no evidence; only the visible text is kept. */
 export function stripAnsi(value: string): string {
-  return value
-    // OSC sequences (title changes), then single-character and CSI escapes.
-    .replace(/\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/g, '')
-    .replace(/\u001b[@-Z\\-_]/g, '')
-    .replace(/\u001b\[[0-?]*[ -\/]*[@-~]/g, '')
-    .replace(/\r(?!\n)/g, '\n');
+  return (
+    value
+      // OSC sequences (title changes), then single-character and CSI escapes.
+      .replace(/\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/g, '')
+      .replace(/\u001b[@-Z\\-_]/g, '')
+      .replace(/\u001b\[[0-?]*[ -\/]*[@-~]/g, '')
+      .replace(/\r(?!\n)/g, '\n')
+  );
 }
 
 /**
@@ -35,7 +43,8 @@ export function stripAnsi(value: string): string {
  * An identifier echoed anywhere else, an unrelated host or path, an arbitrary URL and a truncated
  * identifier all fail, because none of them is evidence that the provider created a session.
  */
-const RECEIPT = /^[ \t]*Created cloud session:[^\n]*\r?\n[ \t]*View:[ \t]*https:\/\/claude\.ai\/code\/(session_[A-Za-z0-9]{16,64})(?![A-Za-z0-9])[^\s]*[ \t]*\r?\n/m;
+const RECEIPT =
+  /^[ \t]*Created cloud session:[^\n]*\r?\n[ \t]*View:[ \t]*https:\/\/claude\.ai\/code\/(session_[A-Za-z0-9]{16,64})(?![A-Za-z0-9])[^\s]*[ \t]*\r?\n/m;
 
 /** Reads a creation receipt out of accumulated terminal text. Partial chunks simply do not match yet. */
 export function readReceipt(text: string): { externalId: string; externalUrl: string } | null {
@@ -76,40 +85,106 @@ export class PtyCloudAdapter implements ProviderAdapter {
 
   plan(context: SubmitContext): { executable: string; args: string[]; cwd: string } {
     if (!context.snapshot.stagingPath) throw new Error('Prepare the request inputs before dispatching.');
-    if (!context.snapshot.stagingCommit) throw new Error('The prepared snapshot has no commit, which the official cloud route requires.');
+    if (!context.snapshot.stagingCommit)
+      throw new Error('The prepared snapshot has no commit, which the official cloud route requires.');
     // This route has no verified way to select a model or an effort. Rather than dropping the
     // request silently and letting whatever the account defaults to run, it is refused.
     if (context.payload.effort !== 'default')
-      throw new Error(`This route cannot select an effort, so ${context.payload.effort} cannot be enforced. Use the default, or wait for a route that verifies applied effort.`);
+      throw new Error(
+        `This route cannot select an effort, so ${context.payload.effort} cannot be enforced. Use the default, or wait for a route that verifies applied effort.`,
+      );
     const hardening = this.options.hardeningArgs ?? ['--safe-mode', '--no-chrome'];
     // Never --teleport, never --environment, never a local background run, and never without --cloud.
-    return { executable: this.options.executable(), args: [...hardening, '--cloud', context.requestName.slice(0, 120)], cwd: context.snapshot.stagingPath };
+    return {
+      executable: this.options.executable(),
+      args: [...hardening, '--cloud', context.requestName.slice(0, 120)],
+      cwd: context.snapshot.stagingPath,
+    };
   }
 
   async submit(context: SubmitContext): Promise<SubmitResult> {
     const plan = this.plan(context);
     const spawn = this.spawner();
     const timeoutMs = this.options.timeoutMs ?? 180000;
-    const terminal = spawn(plan.executable, plan.args, { cwd: plan.cwd, cols: 120, rows: 40, env: this.options.environment?.() ?? process.env });
+    const terminal = spawn(plan.executable, plan.args, {
+      cwd: plan.cwd,
+      cols: 120,
+      rows: 40,
+      env: this.options.environment?.() ?? process.env,
+    });
     let transcript = '';
     let settled = false;
     let exited = false;
     return await new Promise<SubmitResult>((resolve, reject) => {
       // Killing a terminal that already exited makes ConPTY complain on Windows, so only kill a live one.
-      const finish = (outcome: () => void) => { if (settled) return; settled = true; clearTimeout(timer); if (!exited) { try { terminal.kill(); } catch { /* the terminal may already be gone */ } } this.lastTranscript = stripAnsi(transcript); outcome(); };
-      const timer = setTimeout(() => finish(() => reject(new Error(`The official terminal did not report a session within ${Math.round(timeoutMs / 1000)}s. Whether the provider accepted this work is unknown.`))), timeoutMs);
+      const finish = (outcome: () => void) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (!exited) {
+          try {
+            terminal.kill();
+          } catch {
+            /* the terminal may already be gone */
+          }
+        }
+        this.lastTranscript = stripAnsi(transcript);
+        outcome();
+      };
+      const timer = setTimeout(
+        () =>
+          finish(() =>
+            reject(
+              new Error(
+                `The official terminal did not report a session within ${Math.round(timeoutMs / 1000)}s. Whether the provider accepted this work is unknown.`,
+              ),
+            ),
+          ),
+        timeoutMs,
+      );
       terminal.onData(chunk => {
         transcript += chunk;
-        if (transcript.length > 2 * 1024 * 1024) { finish(() => reject(new Error('The official terminal produced more output than the office will read. The submission outcome is unknown.'))); return; }
+        if (transcript.length > 2 * 1024 * 1024) {
+          finish(() =>
+            reject(
+              new Error(
+                'The official terminal produced more output than the office will read. The submission outcome is unknown.',
+              ),
+            ),
+          );
+          return;
+        }
         const receipt = readReceipt(transcript);
-        if (receipt) finish(() => resolve({ externalId: receipt.externalId, externalUrl: receipt.externalUrl, detail: 'The official CLI reported a created cloud session in a real terminal.' }));
+        if (receipt)
+          finish(() =>
+            resolve({
+              externalId: receipt.externalId,
+              externalUrl: receipt.externalUrl,
+              detail: 'The official CLI reported a created cloud session in a real terminal.',
+            }),
+          );
       });
       terminal.onExit(({ exitCode }) => {
         exited = true;
         const receipt = readReceipt(transcript);
-        if (receipt) { finish(() => resolve({ externalId: receipt.externalId, externalUrl: receipt.externalUrl, detail: `The official CLI reported a created cloud session and exited with code ${exitCode}.` })); return; }
+        if (receipt) {
+          finish(() =>
+            resolve({
+              externalId: receipt.externalId,
+              externalUrl: receipt.externalUrl,
+              detail: `The official CLI reported a created cloud session and exited with code ${exitCode}.`,
+            }),
+          );
+          return;
+        }
         // An exit code is not a provider outcome; without a receipt the submission stays unknown.
-        finish(() => reject(new Error(`The official terminal exited with code ${exitCode} without reporting a session. Whether the provider accepted this work is unknown.`)));
+        finish(() =>
+          reject(
+            new Error(
+              `The official terminal exited with code ${exitCode} without reporting a session. Whether the provider accepted this work is unknown.`,
+            ),
+          ),
+        );
       });
       // The whole prepared payload, not just the objective. Newlines would submit the prompt early
       // in a terminal, so they are flattened; the transmitted text is retained for comparison with
@@ -120,11 +195,19 @@ export class PtyCloudAdapter implements ProviderAdapter {
   }
 
   async observe(_job: ProviderJob): Promise<ObserveResult> {
-    return { state: 'UNKNOWN', detail: 'No supported programmatic observation of a cloud session has been established for this account. Open the session in the provider UI.' };
+    return {
+      state: 'UNKNOWN',
+      detail:
+        'No supported programmatic observation of a cloud session has been established for this account. Open the session in the provider UI.',
+    };
   }
 
   async cancel(_job: ProviderJob): Promise<{ acknowledged: boolean; detail: string }> {
-    return { acknowledged: false, detail: 'No supported cloud cancellation route has been established for this account. Killing a local terminal does not cancel provider work.' };
+    return {
+      acknowledged: false,
+      detail:
+        'No supported cloud cancellation route has been established for this account. Killing a local terminal does not cancel provider work.',
+    };
   }
 }
 
@@ -136,6 +219,9 @@ export function transportModuleStatus(): { available: boolean; detail: string } 
       ? { available: true, detail: 'The terminal transport module is available in this build.' }
       : { available: false, detail: 'The terminal transport module loaded without a spawn function.' };
   } catch (error) {
-    return { available: false, detail: `The terminal transport module is not available: ${error instanceof Error ? error.message.split('\n')[0] : 'unknown error'}` };
+    return {
+      available: false,
+      detail: `The terminal transport module is not available: ${error instanceof Error ? error.message.split('\n')[0] : 'unknown error'}`,
+    };
   }
 }

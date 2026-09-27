@@ -16,23 +16,42 @@ const bound = { lastReceipt: { sequence: 1, hash: 'a'.repeat(64), observedAt: '2
 
 test('a dead brief in BRIEFING shows Retry; DECIDED and AWAITING_DECISION never do', () => {
   // The store's gate refuses only the two decision phases — BRIEFING retries like LAUNCHED.
-  assert.equal(pipelineHopRetryable('BRIEFING', job('FAILED'), undefined), true, 'the stranded-brief case from acceptance');
+  assert.equal(
+    pipelineHopRetryable('BRIEFING', job('FAILED'), undefined),
+    true,
+    'the stranded-brief case from acceptance',
+  );
   assert.equal(pipelineHopRetryable('LAUNCHED', job('FAILED'), undefined), true);
   for (const phase of ['DECIDED', 'AWAITING_DECISION'] as const)
-    assert.equal(pipelineHopRetryable(phase, job('FAILED'), undefined), false, `${phase} is past the point where hops retry`);
+    assert.equal(
+      pipelineHopRetryable(phase, job('FAILED'), undefined),
+      false,
+      `${phase} is past the point where hops retry`,
+    );
 });
 
 test('an UNKNOWN hop retries only while its binding carries no verified receipt', () => {
   assert.equal(pipelineHopRetryable('BRIEFING', job('UNKNOWN'), undefined), true);
   assert.equal(pipelineHopRetryable('LAUNCHED', job('UNKNOWN'), { lastReceipt: null }), true);
-  assert.equal(pipelineHopRetryable('BRIEFING', job('UNKNOWN'), bound), false,
-    'a verified receipt means an outcome exists — observe it, never rerun past it');
+  assert.equal(
+    pipelineHopRetryable('BRIEFING', job('UNKNOWN'), bound),
+    false,
+    'a verified receipt means an outcome exists — observe it, never rerun past it',
+  );
   assert.equal(pipelineHopRetryable('DECIDED', job('UNKNOWN'), undefined), false);
 });
 
 test('live, settled and missing jobs never offer Retry', () => {
   for (const phase of ['BRIEFING', 'LAUNCHED'] as const)
-    for (const state of ['INTENT', 'SUBMITTING', 'ACCEPTED', 'RUNNING', 'COMPLETED', 'CANCEL_ACKNOWLEDGED', 'CANCEL_REQUESTED'] as const)
+    for (const state of [
+      'INTENT',
+      'SUBMITTING',
+      'ACCEPTED',
+      'RUNNING',
+      'COMPLETED',
+      'CANCEL_ACKNOWLEDGED',
+      'CANCEL_REQUESTED',
+    ] as const)
       assert.equal(pipelineHopRetryable(phase, job(state), undefined), false, `${phase}/${state}`);
   assert.equal(pipelineHopRetryable('BRIEFING', undefined, undefined), false, 'no job — nothing to retry');
 });
@@ -41,7 +60,15 @@ test('observe is disabled with the honest reason for INTENT, SUBMITTING and no j
   for (const state of ['INTENT', 'SUBMITTING'] as const)
     assert.match(observeDisabledReason(job(state))!, /nothing dispatched/i, `${state} names why`);
   assert.match(observeDisabledReason(undefined)!, /nothing dispatched/i, 'a hop with no job record says so');
-  for (const state of ['ACCEPTED', 'RUNNING', 'UNKNOWN', 'FAILED', 'COMPLETED', 'CANCEL_REQUESTED', 'CANCEL_ACKNOWLEDGED'] as const)
+  for (const state of [
+    'ACCEPTED',
+    'RUNNING',
+    'UNKNOWN',
+    'FAILED',
+    'COMPLETED',
+    'CANCEL_REQUESTED',
+    'CANCEL_ACKNOWLEDGED',
+  ] as const)
     assert.equal(observeDisabledReason(job(state)), undefined, `${state} is observable`);
 });
 

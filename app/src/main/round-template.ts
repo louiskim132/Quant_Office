@@ -22,7 +22,8 @@ import { EVIDENCE_SURFACE_ID, type ToolProfile } from '../shared/tool-profile.js
  */
 
 /** The hop roles a round can carry, in the order the spec emits them. The seal is a wait state, not a hop — no phase names it. */
-export type CommRoundPhase = 'BRIEF' | 'PLAN_DRAFT' | 'PLAN_CRITIQUE' | 'PLAN_SYNTHESIS' | 'DIGEST' | 'IMPLEMENT' | 'VERIFY' | 'REPORT';
+export type CommRoundPhase =
+  'BRIEF' | 'PLAN_DRAFT' | 'PLAN_CRITIQUE' | 'PLAN_SYNTHESIS' | 'DIGEST' | 'IMPLEMENT' | 'VERIFY' | 'REPORT';
 
 /**
  * The roster role filling a hop. The executor resolves agents by role against the declaration's
@@ -32,66 +33,66 @@ export type CommRoundPhase = 'BRIEF' | 'PLAN_DRAFT' | 'PLAN_CRITIQUE' | 'PLAN_SY
 export type CommRoundArmRole = 'DIRECTOR' | 'PM_A' | 'PM_B' | 'PM_C' | 'PM_D' | 'WORKER';
 
 export interface CommRoundDeclaration {
- projectId: string;
- brief: string;
- directorAgentId: string;
- /** Exactly two planner arms — the diverge pair whose isolation makes the critique meaningful. */
- planners: [string, string];
- /** Optional second pair running the phase-2 mirror against the synthesized plan. */
- analysts?: [string, string];
- workerAgentIds: string[];
- /** The packet contract version every hop in this round rides. */
- packetVersion: number;
+  projectId: string;
+  brief: string;
+  directorAgentId: string;
+  /** Exactly two planner arms — the diverge pair whose isolation makes the critique meaningful. */
+  planners: [string, string];
+  /** Optional second pair running the phase-2 mirror against the synthesized plan. */
+  analysts?: [string, string];
+  workerAgentIds: string[];
+  /** The packet contract version every hop in this round rides. */
+  packetVersion: number;
 }
 
 /** The declaration for a standalone RESULT_ANALYSIS round — no planner arms, one worker. */
 export interface AnalysisRoundDeclaration {
- projectId: string;
- brief: string;
- directorAgentId: string;
- /** Exactly two analyst arms — the interpret/falsify diverge pair. */
- analysts: [string, string];
- /** The worker arm that digests the delivered result and writes the closing report. */
- workerAgentId: string;
- /** The packet contract version every hop in this round rides. */
- packetVersion: number;
+  projectId: string;
+  brief: string;
+  directorAgentId: string;
+  /** Exactly two analyst arms — the interpret/falsify diverge pair. */
+  analysts: [string, string];
+  /** The worker arm that digests the delivered result and writes the closing report. */
+  workerAgentId: string;
+  /** The packet contract version every hop in this round rides. */
+  packetVersion: number;
 }
 
 export interface CommRoundEntry {
- /** Positional key, deterministic for a given declaration — never derived from run time. */
- key: string;
- phase: CommRoundPhase;
- /** The roster role this hop is filled by — the executor binds agents by role, not position. */
- armRole: CommRoundArmRole;
- agentId: string;
- /**
-  * Scheduling prerequisites — keys of earlier entries that must verify COMPLETED before this
-  * hop may launch. This is the barrier set: a hop waits on every key here whether or not it
-  * is allowed to read that artifact. Never transcripts.
-  */
- dependsOnKeys: string[];
- /**
-  * Disclosed inputs — the artifact refs this hop may actually stage and read. An ordinary hop
-  * stages exactly its declared predecessors' verified outputs; the terminal hop is the seal and
-  * reads the whole round, so its list names every other entry in declaration order. Waiting and
-  * disclosure are deliberately different fields so a barrier never silently widens what a hop
-  * receives. Absent on pre-@2 specs: treat as dependsOnKeys — earlier semantics disclosed
-  * everything the hop waited on.
-  */
- inputKeys?: string[];
- /** BLIND stages the packet without the project's withheld paths (hash-only manifest entries);
-  *  absent means FULL — the staged snapshot is disclosed as staged. */
- inputScope?: 'BLIND' | 'FULL';
- toolProfile: ToolProfile;
- /** The declared input manifest: the packet version, the brief, and named artifact refs. */
- inputManifestNote: string;
+  /** Positional key, deterministic for a given declaration — never derived from run time. */
+  key: string;
+  phase: CommRoundPhase;
+  /** The roster role this hop is filled by — the executor binds agents by role, not position. */
+  armRole: CommRoundArmRole;
+  agentId: string;
+  /**
+   * Scheduling prerequisites — keys of earlier entries that must verify COMPLETED before this
+   * hop may launch. This is the barrier set: a hop waits on every key here whether or not it
+   * is allowed to read that artifact. Never transcripts.
+   */
+  dependsOnKeys: string[];
+  /**
+   * Disclosed inputs — the artifact refs this hop may actually stage and read. An ordinary hop
+   * stages exactly its declared predecessors' verified outputs; the terminal hop is the seal and
+   * reads the whole round, so its list names every other entry in declaration order. Waiting and
+   * disclosure are deliberately different fields so a barrier never silently widens what a hop
+   * receives. Absent on pre-@2 specs: treat as dependsOnKeys — earlier semantics disclosed
+   * everything the hop waited on.
+   */
+  inputKeys?: string[];
+  /** BLIND stages the packet without the project's withheld paths (hash-only manifest entries);
+   *  absent means FULL — the staged snapshot is disclosed as staged. */
+  inputScope?: 'BLIND' | 'FULL';
+  toolProfile: ToolProfile;
+  /** The declared input manifest: the packet version, the brief, and named artifact refs. */
+  inputManifestNote: string;
 }
 
 export interface CommRoundSpec {
- schema: 'office-comm-round@1';
- projectId: string;
- packetVersion: number;
- entries: CommRoundEntry[];
+  schema: 'office-comm-round@1';
+  projectId: string;
+  packetVersion: number;
+  entries: CommRoundEntry[];
 }
 
 /**
@@ -101,14 +102,14 @@ export interface CommRoundSpec {
  * all — their answer rides the result contract like every other receipt.
  */
 export const PLANNER_TOOL_PROFILE: ToolProfile = {
- mcpServers: [{ id: 'serena', command: 'serena start-mcp-server', args: ['--project', '.'], readOnly: true }],
- filesystem: 'READ_PROJECT',
- canWrite: false,
+  mcpServers: [{ id: 'serena', command: 'serena start-mcp-server', args: ['--project', '.'], readOnly: true }],
+  filesystem: 'READ_PROJECT',
+  canWrite: false,
 };
 export const ANALYST_TOOL_PROFILE: ToolProfile = {
- mcpServers: [{ id: EVIDENCE_SURFACE_ID, command: 'office evidence-surface', readOnly: true }],
- filesystem: 'PACKET_ONLY',
- canWrite: false,
+  mcpServers: [{ id: EVIDENCE_SURFACE_ID, command: 'office evidence-surface', readOnly: true }],
+  filesystem: 'PACKET_ONLY',
+  canWrite: false,
 };
 export const WORKER_TOOL_PROFILE: ToolProfile = { canWrite: true };
 export const DIRECTOR_TOOL_PROFILE: ToolProfile = { canWrite: false };
@@ -117,52 +118,82 @@ const nonEmpty = (value: unknown): value is string => typeof value === 'string' 
 
 /** Every input manifest names the packet version, the declaration brief and only artifact refs. */
 function manifestNote(declaration: { packetVersion: number }, dependsOnKeys: string[]): string {
- return [`packet-v${declaration.packetVersion}`, 'declaration.brief', ...dependsOnKeys.map(key => `artifact:${key}`)].join(' + ');
+  return [
+    `packet-v${declaration.packetVersion}`,
+    'declaration.brief',
+    ...dependsOnKeys.map(key => `artifact:${key}`),
+  ].join(' + ');
 }
 
-function entry(declaration: { packetVersion: number }, key: string, phase: CommRoundPhase, armRole: CommRoundArmRole, agentId: string, toolProfile: ToolProfile, dependsOnKeys: string[], inputScope: 'BLIND' | 'FULL'): CommRoundEntry {
- // An ordinary hop stages exactly the predecessors it was declared against — nothing more.
- return { key, phase, armRole, agentId, dependsOnKeys, inputKeys: [...dependsOnKeys], inputScope, toolProfile, inputManifestNote: manifestNote(declaration, dependsOnKeys) };
+function entry(
+  declaration: { packetVersion: number },
+  key: string,
+  phase: CommRoundPhase,
+  armRole: CommRoundArmRole,
+  agentId: string,
+  toolProfile: ToolProfile,
+  dependsOnKeys: string[],
+  inputScope: 'BLIND' | 'FULL',
+): CommRoundEntry {
+  // An ordinary hop stages exactly the predecessors it was declared against — nothing more.
+  return {
+    key,
+    phase,
+    armRole,
+    agentId,
+    dependsOnKeys,
+    inputKeys: [...dependsOnKeys],
+    inputScope,
+    toolProfile,
+    inputManifestNote: manifestNote(declaration, dependsOnKeys),
+  };
 }
 
 /** A diverge pair is exactly two distinct agents — a critique of oneself is not a second opinion. */
 function requirePair(name: string, pair: unknown): void {
- if (!Array.isArray(pair) || pair.length !== 2 || !pair.every(nonEmpty))
-  throw new Error(`The ${name} arm must be exactly two distinct agents.`);
- if (pair[0] === pair[1]) throw new Error(`The ${name} arms must be two different agents — a diverge pair cannot be one agent twice.`);
+  if (!Array.isArray(pair) || pair.length !== 2 || !pair.every(nonEmpty))
+    throw new Error(`The ${name} arm must be exactly two distinct agents.`);
+  if (pair[0] === pair[1])
+    throw new Error(`The ${name} arms must be two different agents — a diverge pair cannot be one agent twice.`);
 }
 
 function requirePacketVersion(packetVersion: unknown): void {
- if (!Number.isSafeInteger(packetVersion) || (packetVersion as number) < 1)
-  throw new Error('packetVersion must be a positive integer naming the packet contract every hop rides.');
+  if (!Number.isSafeInteger(packetVersion) || (packetVersion as number) < 1)
+    throw new Error('packetVersion must be a positive integer naming the packet contract every hop rides.');
 }
 
 function validate(declaration: CommRoundDeclaration): void {
- if (!declaration || typeof declaration !== 'object') throw new Error('A comm-round declaration is required.');
- if (!nonEmpty(declaration.projectId)) throw new Error('The declaration must name the office project this round belongs to.');
- if (!nonEmpty(declaration.brief)) throw new Error('The declaration must carry the round brief.');
- if (!nonEmpty(declaration.directorAgentId)) throw new Error('The declaration must name the director arm.');
- // Each diverge pair needs exactly two distinct arms: a pair that is one agent twice cannot
- // diverge, and a critique between identical arms would pretend to be a second opinion.
- if (declaration.planners !== undefined) requirePair('planners', declaration.planners);
- if (declaration.analysts !== undefined) requirePair('analysts', declaration.analysts);
- if (!Array.isArray(declaration.planners)) throw new Error('The planners arm is required.');
- if (!Array.isArray(declaration.workerAgentIds) || declaration.workerAgentIds.length === 0 || !declaration.workerAgentIds.every(nonEmpty))
-  throw new Error('The round needs at least one worker arm for the implement hop.');
- if (new Set(declaration.workerAgentIds).size !== declaration.workerAgentIds.length)
-  throw new Error('Worker arms must be distinct — a duplicated worker would own two identical implement keys.');
- requirePacketVersion(declaration.packetVersion);
+  if (!declaration || typeof declaration !== 'object') throw new Error('A comm-round declaration is required.');
+  if (!nonEmpty(declaration.projectId))
+    throw new Error('The declaration must name the office project this round belongs to.');
+  if (!nonEmpty(declaration.brief)) throw new Error('The declaration must carry the round brief.');
+  if (!nonEmpty(declaration.directorAgentId)) throw new Error('The declaration must name the director arm.');
+  // Each diverge pair needs exactly two distinct arms: a pair that is one agent twice cannot
+  // diverge, and a critique between identical arms would pretend to be a second opinion.
+  if (declaration.planners !== undefined) requirePair('planners', declaration.planners);
+  if (declaration.analysts !== undefined) requirePair('analysts', declaration.analysts);
+  if (!Array.isArray(declaration.planners)) throw new Error('The planners arm is required.');
+  if (
+    !Array.isArray(declaration.workerAgentIds) ||
+    declaration.workerAgentIds.length === 0 ||
+    !declaration.workerAgentIds.every(nonEmpty)
+  )
+    throw new Error('The round needs at least one worker arm for the implement hop.');
+  if (new Set(declaration.workerAgentIds).size !== declaration.workerAgentIds.length)
+    throw new Error('Worker arms must be distinct — a duplicated worker would own two identical implement keys.');
+  requirePacketVersion(declaration.packetVersion);
 }
 
 function validateAnalysis(declaration: AnalysisRoundDeclaration): void {
- if (!declaration || typeof declaration !== 'object') throw new Error('An analysis-round declaration is required.');
- if (!nonEmpty(declaration.projectId)) throw new Error('The declaration must name the office project this round belongs to.');
- if (!nonEmpty(declaration.brief)) throw new Error('The declaration must carry the round brief.');
- if (!nonEmpty(declaration.directorAgentId)) throw new Error('The declaration must name the director arm.');
- requirePair('analysts', declaration.analysts);
- if (!nonEmpty(declaration.workerAgentId))
-  throw new Error('The round needs a worker arm for the digest and report hops.');
- requirePacketVersion(declaration.packetVersion);
+  if (!declaration || typeof declaration !== 'object') throw new Error('An analysis-round declaration is required.');
+  if (!nonEmpty(declaration.projectId))
+    throw new Error('The declaration must name the office project this round belongs to.');
+  if (!nonEmpty(declaration.brief)) throw new Error('The declaration must carry the round brief.');
+  if (!nonEmpty(declaration.directorAgentId)) throw new Error('The declaration must name the director arm.');
+  requirePair('analysts', declaration.analysts);
+  if (!nonEmpty(declaration.workerAgentId))
+    throw new Error('The round needs a worker arm for the digest and report hops.');
+  requirePacketVersion(declaration.packetVersion);
 }
 
 /**
@@ -176,65 +207,192 @@ function validateAnalysis(declaration: AnalysisRoundDeclaration): void {
  * than its scheduling barrier by design.
  */
 function sealTerminal(entries: CommRoundEntry[]): void {
- const terminal = entries[entries.length - 1];
- terminal.inputKeys = entries.slice(0, -1).map(item => item.key);
+  const terminal = entries[entries.length - 1];
+  terminal.inputKeys = entries.slice(0, -1).map(item => item.key);
 }
 
 function assertDag(entries: CommRoundEntry[]): void {
- const seen = new Set<string>();
- for (const item of entries) {
-  if (seen.has(item.key)) throw new Error(`Duplicate spec key ${item.key}.`);
-  for (const dep of item.dependsOnKeys) {
-   if (!seen.has(dep)) throw new Error(`Entry ${item.key} depends on ${dep}, which no earlier entry produced — forward or unknown dependencies are refused.`);
+  const seen = new Set<string>();
+  for (const item of entries) {
+    if (seen.has(item.key)) throw new Error(`Duplicate spec key ${item.key}.`);
+    for (const dep of item.dependsOnKeys) {
+      if (!seen.has(dep))
+        throw new Error(
+          `Entry ${item.key} depends on ${dep}, which no earlier entry produced — forward or unknown dependencies are refused.`,
+        );
+    }
+    for (const input of item.inputKeys ?? []) {
+      if (!seen.has(input))
+        throw new Error(
+          `Entry ${item.key} stages ${input}, which no earlier entry produced — disclosed inputs must already exist.`,
+        );
+    }
+    seen.add(item.key);
   }
-  for (const input of item.inputKeys ?? []) {
-   if (!seen.has(input)) throw new Error(`Entry ${item.key} stages ${input}, which no earlier entry produced — disclosed inputs must already exist.`);
-  }
-  seen.add(item.key);
- }
 }
 
 export function buildCommRound(declaration: CommRoundDeclaration): CommRoundSpec {
- validate(declaration);
- const [plannerA, plannerB] = declaration.planners;
- const entries: CommRoundEntry[] = [];
- // The user-facing first hop: the director takes the brief before either arm diverges on it.
- // Planning hops mint BLIND: their packets withhold the project's withheldPaths as hash-only
- // declarations and their contracts forbid outcome metrics. That includes the phase-2 mirror —
- // its hops analyze the synthesized plan, not delivered results, so they stay blind like every
- // other hop ahead of implementation.
- const brief = entry(declaration, 'plan-brief', 'BRIEF', 'DIRECTOR', declaration.directorAgentId, DIRECTOR_TOOL_PROFILE, [], 'BLIND');
- // Phase 1: two isolated first positions on identical inputs — the draft arms carry the same
- // manifest by construction, so neither draft is privileged by what it was shown.
- const draftA = entry(declaration, 'plan-draft-a', 'PLAN_DRAFT', 'PM_A', plannerA, PLANNER_TOOL_PROFILE, [brief.key], 'BLIND');
- const draftB = entry(declaration, 'plan-draft-b', 'PLAN_DRAFT', 'PM_B', plannerB, PLANNER_TOOL_PROFILE, [brief.key], 'BLIND');
- // One bounded cross-response each: a critique names only the opposite draft's artifact.
- const critiqueA = entry(declaration, 'plan-critique-a-on-b', 'PLAN_CRITIQUE', 'PM_A', plannerA, PLANNER_TOOL_PROFILE, [draftB.key], 'BLIND');
- const critiqueB = entry(declaration, 'plan-critique-b-on-a', 'PLAN_CRITIQUE', 'PM_B', plannerB, PLANNER_TOOL_PROFILE, [draftA.key], 'BLIND');
- const synthesis = entry(declaration, 'plan-synthesis', 'PLAN_SYNTHESIS', 'DIRECTOR', declaration.directorAgentId, DIRECTOR_TOOL_PROFILE,
-  [draftA.key, draftB.key, critiqueA.key, critiqueB.key], 'BLIND');
- entries.push(brief, draftA, draftB, critiqueA, critiqueB, synthesis);
- // Phase 2 mirrors phase 1 against the synthesized plan: interpret ∥ falsify, one bounded
- // cross-response each, then the director finalizes. Same roles, same phase labels.
- let head = synthesis;
- if (declaration.analysts) {
-  const [analystC, analystD] = declaration.analysts;
-  const interpret = entry(declaration, 'analysis-interpret', 'PLAN_DRAFT', 'PM_C', analystC, ANALYST_TOOL_PROFILE, [synthesis.key], 'BLIND');
-  const falsify = entry(declaration, 'analysis-falsify', 'PLAN_DRAFT', 'PM_D', analystD, ANALYST_TOOL_PROFILE, [synthesis.key], 'BLIND');
-  const responseC = entry(declaration, 'analysis-response-interpret', 'PLAN_CRITIQUE', 'PM_C', analystC, ANALYST_TOOL_PROFILE, [falsify.key], 'BLIND');
-  const responseD = entry(declaration, 'analysis-response-falsify', 'PLAN_CRITIQUE', 'PM_D', analystD, ANALYST_TOOL_PROFILE, [interpret.key], 'BLIND');
-  const finalize = entry(declaration, 'analysis-finalize', 'PLAN_SYNTHESIS', 'DIRECTOR', declaration.directorAgentId, DIRECTOR_TOOL_PROFILE,
-   [interpret.key, falsify.key, responseC.key, responseD.key], 'BLIND');
-  entries.push(interpret, falsify, responseC, responseD, finalize);
-  head = finalize;
- }
- const implements_ = declaration.workerAgentIds.map((agentId, index) =>
-  entry(declaration, `implement-${index + 1}`, 'IMPLEMENT', 'WORKER', agentId, WORKER_TOOL_PROFILE, [head.key], 'FULL'));
- const verify = entry(declaration, 'verify', 'VERIFY', 'DIRECTOR', declaration.directorAgentId, DIRECTOR_TOOL_PROFILE, implements_.map(item => item.key), 'FULL');
- entries.push(...implements_, verify);
- sealTerminal(entries);
- assertDag(entries);
- return { schema: 'office-comm-round@1', projectId: declaration.projectId, packetVersion: declaration.packetVersion, entries };
+  validate(declaration);
+  const [plannerA, plannerB] = declaration.planners;
+  const entries: CommRoundEntry[] = [];
+  // The user-facing first hop: the director takes the brief before either arm diverges on it.
+  // Planning hops mint BLIND: their packets withhold the project's withheldPaths as hash-only
+  // declarations and their contracts forbid outcome metrics. That includes the phase-2 mirror —
+  // its hops analyze the synthesized plan, not delivered results, so they stay blind like every
+  // other hop ahead of implementation.
+  const brief = entry(
+    declaration,
+    'plan-brief',
+    'BRIEF',
+    'DIRECTOR',
+    declaration.directorAgentId,
+    DIRECTOR_TOOL_PROFILE,
+    [],
+    'BLIND',
+  );
+  // Phase 1: two isolated first positions on identical inputs — the draft arms carry the same
+  // manifest by construction, so neither draft is privileged by what it was shown.
+  const draftA = entry(
+    declaration,
+    'plan-draft-a',
+    'PLAN_DRAFT',
+    'PM_A',
+    plannerA,
+    PLANNER_TOOL_PROFILE,
+    [brief.key],
+    'BLIND',
+  );
+  const draftB = entry(
+    declaration,
+    'plan-draft-b',
+    'PLAN_DRAFT',
+    'PM_B',
+    plannerB,
+    PLANNER_TOOL_PROFILE,
+    [brief.key],
+    'BLIND',
+  );
+  // One bounded cross-response each: a critique names only the opposite draft's artifact.
+  const critiqueA = entry(
+    declaration,
+    'plan-critique-a-on-b',
+    'PLAN_CRITIQUE',
+    'PM_A',
+    plannerA,
+    PLANNER_TOOL_PROFILE,
+    [draftB.key],
+    'BLIND',
+  );
+  const critiqueB = entry(
+    declaration,
+    'plan-critique-b-on-a',
+    'PLAN_CRITIQUE',
+    'PM_B',
+    plannerB,
+    PLANNER_TOOL_PROFILE,
+    [draftA.key],
+    'BLIND',
+  );
+  const synthesis = entry(
+    declaration,
+    'plan-synthesis',
+    'PLAN_SYNTHESIS',
+    'DIRECTOR',
+    declaration.directorAgentId,
+    DIRECTOR_TOOL_PROFILE,
+    [draftA.key, draftB.key, critiqueA.key, critiqueB.key],
+    'BLIND',
+  );
+  entries.push(brief, draftA, draftB, critiqueA, critiqueB, synthesis);
+  // Phase 2 mirrors phase 1 against the synthesized plan: interpret ∥ falsify, one bounded
+  // cross-response each, then the director finalizes. Same roles, same phase labels.
+  let head = synthesis;
+  if (declaration.analysts) {
+    const [analystC, analystD] = declaration.analysts;
+    const interpret = entry(
+      declaration,
+      'analysis-interpret',
+      'PLAN_DRAFT',
+      'PM_C',
+      analystC,
+      ANALYST_TOOL_PROFILE,
+      [synthesis.key],
+      'BLIND',
+    );
+    const falsify = entry(
+      declaration,
+      'analysis-falsify',
+      'PLAN_DRAFT',
+      'PM_D',
+      analystD,
+      ANALYST_TOOL_PROFILE,
+      [synthesis.key],
+      'BLIND',
+    );
+    const responseC = entry(
+      declaration,
+      'analysis-response-interpret',
+      'PLAN_CRITIQUE',
+      'PM_C',
+      analystC,
+      ANALYST_TOOL_PROFILE,
+      [falsify.key],
+      'BLIND',
+    );
+    const responseD = entry(
+      declaration,
+      'analysis-response-falsify',
+      'PLAN_CRITIQUE',
+      'PM_D',
+      analystD,
+      ANALYST_TOOL_PROFILE,
+      [interpret.key],
+      'BLIND',
+    );
+    const finalize = entry(
+      declaration,
+      'analysis-finalize',
+      'PLAN_SYNTHESIS',
+      'DIRECTOR',
+      declaration.directorAgentId,
+      DIRECTOR_TOOL_PROFILE,
+      [interpret.key, falsify.key, responseC.key, responseD.key],
+      'BLIND',
+    );
+    entries.push(interpret, falsify, responseC, responseD, finalize);
+    head = finalize;
+  }
+  const implements_ = declaration.workerAgentIds.map((agentId, index) =>
+    entry(
+      declaration,
+      `implement-${index + 1}`,
+      'IMPLEMENT',
+      'WORKER',
+      agentId,
+      WORKER_TOOL_PROFILE,
+      [head.key],
+      'FULL',
+    ),
+  );
+  const verify = entry(
+    declaration,
+    'verify',
+    'VERIFY',
+    'DIRECTOR',
+    declaration.directorAgentId,
+    DIRECTOR_TOOL_PROFILE,
+    implements_.map(item => item.key),
+    'FULL',
+  );
+  entries.push(...implements_, verify);
+  sealTerminal(entries);
+  assertDag(entries);
+  return {
+    schema: 'office-comm-round@1',
+    projectId: declaration.projectId,
+    packetVersion: declaration.packetVersion,
+    entries,
+  };
 }
 
 /**
@@ -244,23 +402,99 @@ export function buildCommRound(declaration: CommRoundDeclaration): CommRoundSpec
  * writes the report, and the user gate closes the round.
  */
 export function buildAnalysisRound(declaration: AnalysisRoundDeclaration): CommRoundSpec {
- validateAnalysis(declaration);
- const [analystC, analystD] = declaration.analysts;
- // Every hop FULL — a RESULT_ANALYSIS round exists to read the delivered results; withholding
- // outcome files here would blind the very seats the analysis is for.
- const brief = entry(declaration, 'analysis-brief', 'BRIEF', 'DIRECTOR', declaration.directorAgentId, DIRECTOR_TOOL_PROFILE, [], 'FULL');
- const digest = entry(declaration, 'analysis-digest', 'DIGEST', 'WORKER', declaration.workerAgentId, WORKER_TOOL_PROFILE, [brief.key], 'FULL');
- const interpret = entry(declaration, 'analysis-interpret', 'PLAN_DRAFT', 'PM_C', analystC, ANALYST_TOOL_PROFILE, [digest.key], 'FULL');
- const falsify = entry(declaration, 'analysis-falsify', 'PLAN_DRAFT', 'PM_D', analystD, ANALYST_TOOL_PROFILE, [digest.key], 'FULL');
- const responseC = entry(declaration, 'analysis-response-interpret', 'PLAN_CRITIQUE', 'PM_C', analystC, ANALYST_TOOL_PROFILE, [falsify.key], 'FULL');
- const responseD = entry(declaration, 'analysis-response-falsify', 'PLAN_CRITIQUE', 'PM_D', analystD, ANALYST_TOOL_PROFILE, [interpret.key], 'FULL');
- const finalize = entry(declaration, 'analysis-finalize', 'PLAN_SYNTHESIS', 'DIRECTOR', declaration.directorAgentId, DIRECTOR_TOOL_PROFILE,
-  [interpret.key, falsify.key, responseC.key, responseD.key], 'FULL');
- const report = entry(declaration, 'analysis-report', 'REPORT', 'WORKER', declaration.workerAgentId, WORKER_TOOL_PROFILE, [finalize.key], 'FULL');
- const entries = [brief, digest, interpret, falsify, responseC, responseD, finalize, report];
- sealTerminal(entries);
- assertDag(entries);
- return { schema: 'office-comm-round@1', projectId: declaration.projectId, packetVersion: declaration.packetVersion, entries };
+  validateAnalysis(declaration);
+  const [analystC, analystD] = declaration.analysts;
+  // Every hop FULL — a RESULT_ANALYSIS round exists to read the delivered results; withholding
+  // outcome files here would blind the very seats the analysis is for.
+  const brief = entry(
+    declaration,
+    'analysis-brief',
+    'BRIEF',
+    'DIRECTOR',
+    declaration.directorAgentId,
+    DIRECTOR_TOOL_PROFILE,
+    [],
+    'FULL',
+  );
+  const digest = entry(
+    declaration,
+    'analysis-digest',
+    'DIGEST',
+    'WORKER',
+    declaration.workerAgentId,
+    WORKER_TOOL_PROFILE,
+    [brief.key],
+    'FULL',
+  );
+  const interpret = entry(
+    declaration,
+    'analysis-interpret',
+    'PLAN_DRAFT',
+    'PM_C',
+    analystC,
+    ANALYST_TOOL_PROFILE,
+    [digest.key],
+    'FULL',
+  );
+  const falsify = entry(
+    declaration,
+    'analysis-falsify',
+    'PLAN_DRAFT',
+    'PM_D',
+    analystD,
+    ANALYST_TOOL_PROFILE,
+    [digest.key],
+    'FULL',
+  );
+  const responseC = entry(
+    declaration,
+    'analysis-response-interpret',
+    'PLAN_CRITIQUE',
+    'PM_C',
+    analystC,
+    ANALYST_TOOL_PROFILE,
+    [falsify.key],
+    'FULL',
+  );
+  const responseD = entry(
+    declaration,
+    'analysis-response-falsify',
+    'PLAN_CRITIQUE',
+    'PM_D',
+    analystD,
+    ANALYST_TOOL_PROFILE,
+    [interpret.key],
+    'FULL',
+  );
+  const finalize = entry(
+    declaration,
+    'analysis-finalize',
+    'PLAN_SYNTHESIS',
+    'DIRECTOR',
+    declaration.directorAgentId,
+    DIRECTOR_TOOL_PROFILE,
+    [interpret.key, falsify.key, responseC.key, responseD.key],
+    'FULL',
+  );
+  const report = entry(
+    declaration,
+    'analysis-report',
+    'REPORT',
+    'WORKER',
+    declaration.workerAgentId,
+    WORKER_TOOL_PROFILE,
+    [finalize.key],
+    'FULL',
+  );
+  const entries = [brief, digest, interpret, falsify, responseC, responseD, finalize, report];
+  sealTerminal(entries);
+  assertDag(entries);
+  return {
+    schema: 'office-comm-round@1',
+    projectId: declaration.projectId,
+    packetVersion: declaration.packetVersion,
+    entries,
+  };
 }
 
 /**
@@ -269,12 +503,12 @@ export function buildAnalysisRound(declaration: AnalysisRoundDeclaration): CommR
  * single worker executes; the director still briefs first and verifies last.
  */
 export interface QuickRoundDeclaration {
- projectId: string;
- brief: string;
- directorAgentId: string;
- planner: string;
- workerAgentId: string;
- packetVersion: number;
+  projectId: string;
+  brief: string;
+  directorAgentId: string;
+  planner: string;
+  workerAgentId: string;
+  packetVersion: number;
 }
 
 /**
@@ -283,18 +517,65 @@ export interface QuickRoundDeclaration {
  * resolves hops by key (settle, revision inheritance, the analysis-plan link) keeps working.
  */
 export function buildQuickCommRound(declaration: QuickRoundDeclaration): CommRoundSpec {
- if (!declaration || typeof declaration !== 'object') throw new Error('A quick-round declaration is required.');
- for (const [name, value] of [['projectId', declaration.projectId], ['brief', declaration.brief], ['director', declaration.directorAgentId], ['planner', declaration.planner], ['worker', declaration.workerAgentId]] as const)
-  if (!nonEmpty(value)) throw new Error(`The quick-round declaration must name its ${name}.`);
- requirePacketVersion(declaration.packetVersion);
- const brief = entry(declaration, 'plan-brief', 'BRIEF', 'DIRECTOR', declaration.directorAgentId, DIRECTOR_TOOL_PROFILE, [], 'BLIND');
- const plan = entry(declaration, 'plan-draft-a', 'PLAN_DRAFT', 'PM_A', declaration.planner, PLANNER_TOOL_PROFILE, [brief.key], 'BLIND');
- const implement = entry(declaration, 'implement-1', 'IMPLEMENT', 'WORKER', declaration.workerAgentId, WORKER_TOOL_PROFILE, [plan.key], 'FULL');
- const verify = entry(declaration, 'verify', 'VERIFY', 'DIRECTOR', declaration.directorAgentId, DIRECTOR_TOOL_PROFILE, [implement.key], 'FULL');
- const entries = [brief, plan, implement, verify];
- sealTerminal(entries);
- assertDag(entries);
- return { schema: 'office-comm-round@1', projectId: declaration.projectId, packetVersion: declaration.packetVersion, entries };
+  if (!declaration || typeof declaration !== 'object') throw new Error('A quick-round declaration is required.');
+  for (const [name, value] of [
+    ['projectId', declaration.projectId],
+    ['brief', declaration.brief],
+    ['director', declaration.directorAgentId],
+    ['planner', declaration.planner],
+    ['worker', declaration.workerAgentId],
+  ] as const)
+    if (!nonEmpty(value)) throw new Error(`The quick-round declaration must name its ${name}.`);
+  requirePacketVersion(declaration.packetVersion);
+  const brief = entry(
+    declaration,
+    'plan-brief',
+    'BRIEF',
+    'DIRECTOR',
+    declaration.directorAgentId,
+    DIRECTOR_TOOL_PROFILE,
+    [],
+    'BLIND',
+  );
+  const plan = entry(
+    declaration,
+    'plan-draft-a',
+    'PLAN_DRAFT',
+    'PM_A',
+    declaration.planner,
+    PLANNER_TOOL_PROFILE,
+    [brief.key],
+    'BLIND',
+  );
+  const implement = entry(
+    declaration,
+    'implement-1',
+    'IMPLEMENT',
+    'WORKER',
+    declaration.workerAgentId,
+    WORKER_TOOL_PROFILE,
+    [plan.key],
+    'FULL',
+  );
+  const verify = entry(
+    declaration,
+    'verify',
+    'VERIFY',
+    'DIRECTOR',
+    declaration.directorAgentId,
+    DIRECTOR_TOOL_PROFILE,
+    [implement.key],
+    'FULL',
+  );
+  const entries = [brief, plan, implement, verify];
+  sealTerminal(entries);
+  assertDag(entries);
+  return {
+    schema: 'office-comm-round@1',
+    projectId: declaration.projectId,
+    packetVersion: declaration.packetVersion,
+    entries,
+  };
 }
 
 /**
@@ -302,18 +583,77 @@ export function buildQuickCommRound(declaration: QuickRoundDeclaration): CommRou
  * falsify still diverge on the digest, and the director finalizes both directly.
  */
 export function buildQuickAnalysisRound(declaration: AnalysisRoundDeclaration): CommRoundSpec {
- validateAnalysis(declaration);
- const [analystC, analystD] = declaration.analysts;
- const brief = entry(declaration, 'analysis-brief', 'BRIEF', 'DIRECTOR', declaration.directorAgentId, DIRECTOR_TOOL_PROFILE, [], 'FULL');
- const digest = entry(declaration, 'analysis-digest', 'DIGEST', 'WORKER', declaration.workerAgentId, WORKER_TOOL_PROFILE, [brief.key], 'FULL');
- const interpret = entry(declaration, 'analysis-interpret', 'PLAN_DRAFT', 'PM_C', analystC, ANALYST_TOOL_PROFILE, [digest.key], 'FULL');
- const falsify = entry(declaration, 'analysis-falsify', 'PLAN_DRAFT', 'PM_D', analystD, ANALYST_TOOL_PROFILE, [digest.key], 'FULL');
- const finalize = entry(declaration, 'analysis-finalize', 'PLAN_SYNTHESIS', 'DIRECTOR', declaration.directorAgentId, DIRECTOR_TOOL_PROFILE, [interpret.key, falsify.key], 'FULL');
- const report = entry(declaration, 'analysis-report', 'REPORT', 'WORKER', declaration.workerAgentId, WORKER_TOOL_PROFILE, [finalize.key], 'FULL');
- const entries = [brief, digest, interpret, falsify, finalize, report];
- sealTerminal(entries);
- assertDag(entries);
- return { schema: 'office-comm-round@1', projectId: declaration.projectId, packetVersion: declaration.packetVersion, entries };
+  validateAnalysis(declaration);
+  const [analystC, analystD] = declaration.analysts;
+  const brief = entry(
+    declaration,
+    'analysis-brief',
+    'BRIEF',
+    'DIRECTOR',
+    declaration.directorAgentId,
+    DIRECTOR_TOOL_PROFILE,
+    [],
+    'FULL',
+  );
+  const digest = entry(
+    declaration,
+    'analysis-digest',
+    'DIGEST',
+    'WORKER',
+    declaration.workerAgentId,
+    WORKER_TOOL_PROFILE,
+    [brief.key],
+    'FULL',
+  );
+  const interpret = entry(
+    declaration,
+    'analysis-interpret',
+    'PLAN_DRAFT',
+    'PM_C',
+    analystC,
+    ANALYST_TOOL_PROFILE,
+    [digest.key],
+    'FULL',
+  );
+  const falsify = entry(
+    declaration,
+    'analysis-falsify',
+    'PLAN_DRAFT',
+    'PM_D',
+    analystD,
+    ANALYST_TOOL_PROFILE,
+    [digest.key],
+    'FULL',
+  );
+  const finalize = entry(
+    declaration,
+    'analysis-finalize',
+    'PLAN_SYNTHESIS',
+    'DIRECTOR',
+    declaration.directorAgentId,
+    DIRECTOR_TOOL_PROFILE,
+    [interpret.key, falsify.key],
+    'FULL',
+  );
+  const report = entry(
+    declaration,
+    'analysis-report',
+    'REPORT',
+    'WORKER',
+    declaration.workerAgentId,
+    WORKER_TOOL_PROFILE,
+    [finalize.key],
+    'FULL',
+  );
+  const entries = [brief, digest, interpret, falsify, finalize, report];
+  sealTerminal(entries);
+  assertDag(entries);
+  return {
+    schema: 'office-comm-round@1',
+    projectId: declaration.projectId,
+    packetVersion: declaration.packetVersion,
+    entries,
+  };
 }
 
 /**
@@ -322,16 +662,59 @@ export function buildQuickAnalysisRound(declaration: AnalysisRoundDeclaration): 
  * previous deliverables, and the director verifies. No planner debate is re-run — a revision
  * note about the code should not cost a second full planning round.
  */
-export function buildRestartRound(declaration: { projectId: string; brief: string; directorAgentId: string; workerAgentId: string; packetVersion: number }): CommRoundSpec {
- if (!declaration || typeof declaration !== 'object') throw new Error('A restart-round declaration is required.');
- for (const [name, value] of [['projectId', declaration.projectId], ['brief', declaration.brief], ['director', declaration.directorAgentId], ['worker', declaration.workerAgentId]] as const)
-  if (!nonEmpty(value)) throw new Error(`The restart-round declaration must name its ${name}.`);
- requirePacketVersion(declaration.packetVersion);
- const brief = entry(declaration, 'plan-brief', 'BRIEF', 'DIRECTOR', declaration.directorAgentId, DIRECTOR_TOOL_PROFILE, [], 'BLIND');
- const implement = entry(declaration, 'implement-1', 'IMPLEMENT', 'WORKER', declaration.workerAgentId, WORKER_TOOL_PROFILE, [brief.key], 'FULL');
- const verify = entry(declaration, 'verify', 'VERIFY', 'DIRECTOR', declaration.directorAgentId, DIRECTOR_TOOL_PROFILE, [implement.key], 'FULL');
- const entries = [brief, implement, verify];
- sealTerminal(entries);
- assertDag(entries);
- return { schema: 'office-comm-round@1', projectId: declaration.projectId, packetVersion: declaration.packetVersion, entries };
+export function buildRestartRound(declaration: {
+  projectId: string;
+  brief: string;
+  directorAgentId: string;
+  workerAgentId: string;
+  packetVersion: number;
+}): CommRoundSpec {
+  if (!declaration || typeof declaration !== 'object') throw new Error('A restart-round declaration is required.');
+  for (const [name, value] of [
+    ['projectId', declaration.projectId],
+    ['brief', declaration.brief],
+    ['director', declaration.directorAgentId],
+    ['worker', declaration.workerAgentId],
+  ] as const)
+    if (!nonEmpty(value)) throw new Error(`The restart-round declaration must name its ${name}.`);
+  requirePacketVersion(declaration.packetVersion);
+  const brief = entry(
+    declaration,
+    'plan-brief',
+    'BRIEF',
+    'DIRECTOR',
+    declaration.directorAgentId,
+    DIRECTOR_TOOL_PROFILE,
+    [],
+    'BLIND',
+  );
+  const implement = entry(
+    declaration,
+    'implement-1',
+    'IMPLEMENT',
+    'WORKER',
+    declaration.workerAgentId,
+    WORKER_TOOL_PROFILE,
+    [brief.key],
+    'FULL',
+  );
+  const verify = entry(
+    declaration,
+    'verify',
+    'VERIFY',
+    'DIRECTOR',
+    declaration.directorAgentId,
+    DIRECTOR_TOOL_PROFILE,
+    [implement.key],
+    'FULL',
+  );
+  const entries = [brief, implement, verify];
+  sealTerminal(entries);
+  assertDag(entries);
+  return {
+    schema: 'office-comm-round@1',
+    projectId: declaration.projectId,
+    packetVersion: declaration.packetVersion,
+    entries,
+  };
 }

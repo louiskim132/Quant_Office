@@ -4,8 +4,10 @@ import { PassThrough } from 'node:stream';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import {
-  spawnSerenaSession, SERENA_READ_ONLY_ARG,
-  type SerenaSpawn, type SerenaSpawnOptions,
+  spawnSerenaSession,
+  SERENA_READ_ONLY_ARG,
+  type SerenaSpawn,
+  type SerenaSpawnOptions,
 } from '../src/main/serena-session';
 import type { ToolProfile } from '../src/shared/tool-profile';
 
@@ -23,19 +25,32 @@ class FakeChild {
     error: [] as ((error: Error) => void)[],
   };
   constructor(readonly pid: number | undefined = 5150) {}
-  kill(signal?: NodeJS.Signals | number) { this.kills.push(signal); return true; }
+  kill(signal?: NodeJS.Signals | number) {
+    this.kills.push(signal);
+    return true;
+  }
   on(event: 'exit', listener: (code: number | null, signal: NodeJS.Signals | null) => void): unknown;
   on(event: 'error', listener: (error: Error) => void): unknown;
   on(event: 'exit' | 'error', listener: unknown) {
-    if (event === 'exit') this.listeners.exit.push(listener as (code: number | null, signal: NodeJS.Signals | null) => void);
+    if (event === 'exit')
+      this.listeners.exit.push(listener as (code: number | null, signal: NodeJS.Signals | null) => void);
     else this.listeners.error.push(listener as (error: Error) => void);
     return this;
   }
-  emitExit(code: number | null = 0, signal: NodeJS.Signals | null = null) { for (const listener of this.listeners.exit) listener(code, signal); }
-  emitError(error: Error) { for (const listener of this.listeners.error) listener(error); }
+  emitExit(code: number | null = 0, signal: NodeJS.Signals | null = null) {
+    for (const listener of this.listeners.exit) listener(code, signal);
+  }
+  emitError(error: Error) {
+    for (const listener of this.listeners.error) listener(error);
+  }
 }
 
-interface SpawnCall { executable: string; args: string[]; options: SerenaSpawnOptions; child: FakeChild }
+interface SpawnCall {
+  executable: string;
+  args: string[];
+  options: SerenaSpawnOptions;
+  child: FakeChild;
+}
 
 function spawnLog() {
   const calls: SpawnCall[] = [];
@@ -52,7 +67,8 @@ const serenaProfile = (readOnly: boolean, extra?: Partial<ToolProfile>): ToolPro
   ...extra,
 });
 const binding = { jobId: 'job-serena-1' };
-const initializeResult = '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{},"serverInfo":{"name":"serena","version":"1.7.0"}}}\n';
+const initializeResult =
+  '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{},"serverInfo":{"name":"serena","version":"1.7.0"}}}\n';
 
 test('a profile without a serena mcpServers entry spawns nothing and reports not ready', async () => {
   const { calls, spawn } = spawnLog();
@@ -96,9 +112,13 @@ test('readiness resolves ok:true only after an observed handshake response, neve
   const session = spawnSerenaSession({ binding, profile: serenaProfile(false), packetDir }, { spawn });
   const child = calls[0].child;
   let settled = false;
-  session.ready.then(() => { settled = true; });
+  session.ready.then(() => {
+    settled = true;
+  });
   // A spawned process alone is not ready — noise on stdout must not resolve it.
-  child.stdout.write('not json\n{"jsonrpc":"2.0","id":99,"result":{}}\n{"jsonrpc":"2.0","method":"notifications/progress","params":{}}\n');
+  child.stdout.write(
+    'not json\n{"jsonrpc":"2.0","id":99,"result":{}}\n{"jsonrpc":"2.0","method":"notifications/progress","params":{}}\n',
+  );
   await sleep(20);
   assert.equal(settled, false);
   child.stdout.write(initializeResult);
@@ -133,7 +153,9 @@ test('a spawn error resolves ok:false with a reason, not a crash', async () => {
 });
 
 test('a spawn that throws synchronously resolves ok:false, never rejects', async () => {
-  const spawn: SerenaSpawn = () => { throw new Error('not a spawnable command'); };
+  const spawn: SerenaSpawn = () => {
+    throw new Error('not a spawnable command');
+  };
   const session = spawnSerenaSession({ binding, profile: serenaProfile(false), packetDir }, { spawn });
   const outcome = await session.ready;
   assert.equal(outcome.ok, false);
@@ -153,7 +175,10 @@ test('a child that exits before the handshake resolves ok:false naming the exit'
 
 test('a non-responsive child resolves ok:false on the handshake deadline and is killed', async () => {
   const { calls, spawn } = spawnLog();
-  const session = spawnSerenaSession({ binding, profile: serenaProfile(false), packetDir }, { spawn, readyTimeoutMs: 5 });
+  const session = spawnSerenaSession(
+    { binding, profile: serenaProfile(false), packetDir },
+    { spawn, readyTimeoutMs: 5 },
+  );
   const outcome = await session.ready;
   assert.equal(outcome.ok, false);
   assert.match((outcome as { reason: string }).reason, /within 5ms/);

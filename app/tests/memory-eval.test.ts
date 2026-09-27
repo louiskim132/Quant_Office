@@ -10,7 +10,11 @@ import { fileURLToPath } from 'node:url';
 import type { TestContext } from 'node:test';
 import { OfficeStore } from '../src/core/store';
 import {
-  evaluateAdapter, fixtureCorpus, fixtureQueries, loadExternalAdapter, officeBaselineAdapter,
+  evaluateAdapter,
+  fixtureCorpus,
+  fixtureQueries,
+  loadExternalAdapter,
+  officeBaselineAdapter,
 } from '../src/main/memory-eval';
 
 const key = () => randomUUID();
@@ -18,8 +22,20 @@ const key = () => randomUUID();
 /** In-memory store + one project — the baseline adapter only needs a project scope. */
 function light(t: TestContext) {
   const store = new OfficeStore(':memory:');
-  t.after(() => { try { store.close(); } catch { /* already closed */ } });
-  const project = store.execute({ type: 'project.create', idempotencyKey: key(), name: 'Alpha', mandate: 'm', budgetCents: 0 }).projects[0];
+  t.after(() => {
+    try {
+      store.close();
+    } catch {
+      /* already closed */
+    }
+  });
+  const project = store.execute({
+    type: 'project.create',
+    idempotencyKey: key(),
+    name: 'Alpha',
+    mandate: 'm',
+    budgetCents: 0,
+  }).projects[0];
   return { store, project };
 }
 
@@ -29,11 +45,15 @@ test('the adapter contract, fixture corpus and query set exist exactly as specif
   assert.equal(corpus.findings.length, 12);
   assert.equal(new Set(corpus.findings.map(f => f.kind)).size, 6, 'all six finding kinds covered');
   assert.equal(corpus.links.length, 10);
-  assert.ok(corpus.links.every(l => corpus.findings.some(f => f.id === l.from)
-    && corpus.findings.some(f => f.id === l.to)), 'every link endpoint exists in the corpus');
+  assert.ok(
+    corpus.links.every(l => corpus.findings.some(f => f.id === l.from) && corpus.findings.some(f => f.id === l.to)),
+    'every link endpoint exists in the corpus',
+  );
   assert.ok(queries.length >= 8, 'at least 8 queries with known gold findings');
-  assert.ok(queries.every(q => q.expectedIds.every(id => corpus.findings.some(f => f.id === id))),
-    'every gold id resolves to a corpus finding');
+  assert.ok(
+    queries.every(q => q.expectedIds.every(id => corpus.findings.some(f => f.id === id))),
+    'every gold id resolves to a corpus finding',
+  );
 });
 
 test('the baseline evaluates the fixture deterministically', t => {
@@ -63,8 +83,10 @@ test('gold answers score correctly — expected findings rank present at the des
   assert.equal(equalWeight.recallAt5, 1, 'both gold findings land inside the top five');
   assert.ok(equalWeight.hitRanks.every(r => r.rank !== null && r.rank <= 5));
 
-  assert.ok(report.queries.every(q => q.hitRanks.every(r => r.rank !== null)),
-    'every gold finding is retrievable by the baseline — the fixture must not ship an unreachable gold');
+  assert.ok(
+    report.queries.every(q => q.hitRanks.every(r => r.rank !== null)),
+    'every gold finding is retrievable by the baseline — the fixture must not ship an unreachable gold',
+  );
   assert.equal(report.recallAt5, 1);
   assert.ok(report.meanReciprocalRank > 0.9);
 });
@@ -99,7 +121,9 @@ test('a caller-supplied adapter evaluates through the same scoring path', async 
   const root = mkdtempSync(path.join(tmpdir(), 'qro-mem-eval-'));
   t.after(() => removeTreeSync(root));
   const adapterFile = path.join(root, 'echo-adapter.mjs');
-  writeFileSync(adapterFile, `
+  writeFileSync(
+    adapterFile,
+    `
     export function create() {
       const docs = new Map();
       return {
@@ -114,14 +138,17 @@ test('a caller-supplied adapter evaluates through the same scoring path', async 
         },
       };
     }
-  `);
+  `,
+  );
   const loaded = await loadExternalAdapter(adapterFile);
   assert.ok('adapter' in loaded);
   if (!('adapter' in loaded)) return;
   const report = evaluateAdapter(loaded.adapter, fixtureCorpus(), fixtureQueries());
   assert.equal(report.engine, 'echo-fixture');
-  assert.ok(report.queries.every(q => q.hitRanks.every(r => r.rank !== null)),
-    'the exact-match fixture adapter finds every gold id');
+  assert.ok(
+    report.queries.every(q => q.hitRanks.every(r => r.rank !== null)),
+    'the exact-match fixture adapter finds every gold id',
+  );
 });
 
 test('the report is JSON-safe end to end', t => {
@@ -133,8 +160,14 @@ test('the report is JSON-safe end to end', t => {
 test('the store-backed baseline returns real findings recorded outside ingest', t => {
   const { store, project } = light(t);
   const { finding } = store.recordMemoryFinding({
-    projectId: project.id, requestId: null, assignmentId: null, kind: 'RESULT',
-    title: 'alpha beats beta', body: 'under the fixture', evidenceRefs: [], createdBy: { surface: 'OFFICE' },
+    projectId: project.id,
+    requestId: null,
+    assignmentId: null,
+    kind: 'RESULT',
+    title: 'alpha beats beta',
+    body: 'under the fixture',
+    evidenceRefs: [],
+    createdBy: { surface: 'OFFICE' },
   });
   const adapter = officeBaselineAdapter(store, project.id);
   const hits = adapter.search('alpha beats', 5);

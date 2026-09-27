@@ -7,7 +7,12 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { strFromU8, unzipSync } from 'fflate';
-import { runPackageHash, runPackageId, runReturnManifestSchema, type RunPackageManifest } from '../src/shared/run-package.js';
+import {
+  runPackageHash,
+  runPackageId,
+  runReturnManifestSchema,
+  type RunPackageManifest,
+} from '../src/shared/run-package.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const templates = path.join(here, '..', 'research-templates');
@@ -34,9 +39,31 @@ test('launcher.v1.py exists and declares TEMPLATE_VERSION 1.0.0 matching its fil
 
 test('the launcher opens no outbound channel: no network, shell, credential or remote-control tokens', () => {
   const forbidden = [
-    'http://', 'https://', 'urllib', 'requests', 'socket', 'subprocess', 'os.system', 'popen',
-    'eval(', 'exec(', '__import__', 'pickle', 'ctypes', 'paramiko', 'ftplib', 'telnetlib',
-    'smtplib', 'websocket', 'grpc', 'xmlrpc', 'boto3', 'googleapiclient', 'curl', 'wget', 'base64',
+    'http://',
+    'https://',
+    'urllib',
+    'requests',
+    'socket',
+    'subprocess',
+    'os.system',
+    'popen',
+    'eval(',
+    'exec(',
+    '__import__',
+    'pickle',
+    'ctypes',
+    'paramiko',
+    'ftplib',
+    'telnetlib',
+    'smtplib',
+    'websocket',
+    'grpc',
+    'xmlrpc',
+    'boto3',
+    'googleapiclient',
+    'curl',
+    'wget',
+    'base64',
   ];
   for (const token of forbidden)
     assert.ok(!source().includes(token), `launcher.v1.py must not contain ${JSON.stringify(token)}`);
@@ -44,22 +71,50 @@ test('the launcher opens no outbound channel: no network, shell, credential or r
 
 test('the launcher emits every field the RUN_RETURN manifest schema binds', () => {
   const required = [
-    'schemaVersion', 'RUN_RETURN', 'packageId', 'packageHash', 'branchId', 'specId', 'specHash',
-    'subjectHash', 'runId', 'startedAt', 'finishedAt', 'status', 'COMPLETED', 'EXECUTION_FAILED',
-    'INCONCLUSIVE', 'artifacts', 'sha256', 'bytes', 'gates', 'stage', 'outcome', 'detail',
-    'rationale', 'failedRuns', 'MANIFEST.json', 'return-manifest.json',
+    'schemaVersion',
+    'RUN_RETURN',
+    'packageId',
+    'packageHash',
+    'branchId',
+    'specId',
+    'specHash',
+    'subjectHash',
+    'runId',
+    'startedAt',
+    'finishedAt',
+    'status',
+    'COMPLETED',
+    'EXECUTION_FAILED',
+    'INCONCLUSIVE',
+    'artifacts',
+    'sha256',
+    'bytes',
+    'gates',
+    'stage',
+    'outcome',
+    'detail',
+    'rationale',
+    'failedRuns',
+    'MANIFEST.json',
+    'return-manifest.json',
   ];
-  for (const field of required)
-    assert.ok(source().includes(field), `launcher.v1.py must emit ${field}`);
+  for (const field of required) assert.ok(source().includes(field), `launcher.v1.py must emit ${field}`);
 });
 
 test('python -m py_compile accepts the launcher when a python binary is on PATH', t => {
   const binary = python();
   if (!binary) return t.skip('no python binary on PATH');
   const scratch = mkdtempSync(path.join(tmpdir(), 'qro-launcher-compile-'));
-  const compiled = spawnSync(binary, ['-c',
-    'import py_compile,sys; py_compile.compile(sys.argv[1], cfile=sys.argv[2], doraise=True)',
-    launcher, path.join(scratch, 'launcher.pyc')], { encoding: 'utf8' });
+  const compiled = spawnSync(
+    binary,
+    [
+      '-c',
+      'import py_compile,sys; py_compile.compile(sys.argv[1], cfile=sys.argv[2], doraise=True)',
+      launcher,
+      path.join(scratch, 'launcher.pyc'),
+    ],
+    { encoding: 'utf8' },
+  );
   assert.equal(compiled.status, 0, compiled.stderr);
 });
 
@@ -70,26 +125,59 @@ function syntheticPackage() {
     cpSync(path.join(templates, name), path.join(root, name));
   const spec = {
     id: randomUUID(),
-    costs: { schemaVersion: 1, commissionBps: 2, halfSpreadBps: 3, slippageBps: 5, borrowBpsPerPeriod: 4, financingBpsPerPeriod: 1 },
-    portfolioContract: { schemaVersion: 1, maxGrossExposure: 2, maxNetExposure: 1, maxPositionWeight: 0.6, maxTurnoverPerPeriod: 2 },
+    costs: {
+      schemaVersion: 1,
+      commissionBps: 2,
+      halfSpreadBps: 3,
+      slippageBps: 5,
+      borrowBpsPerPeriod: 4,
+      financingBpsPerPeriod: 1,
+    },
+    portfolioContract: {
+      schemaVersion: 1,
+      maxGrossExposure: 2,
+      maxNetExposure: 1,
+      maxPositionWeight: 0.6,
+      maxTurnoverPerPeriod: 2,
+    },
   };
   writeFileSync(path.join(root, 'spec.json'), JSON.stringify(spec));
   writeFileSync(path.join(root, 'INSTRUCTIONS.md'), '# Run\nRun the experiment, then the launcher.\n');
-  const entries = ['launcher.v1.py', 'data.v1.py', 'diagnostics.v1.py', 'portfolio.v1.py', 'cost.v1.py', 'spec.json', 'INSTRUCTIONS.md']
-    .map(name => {
-      const bytes = readFileSync(path.join(root, name));
-      return { path: name, sha256: sha256(bytes), bytes: bytes.length };
-    });
+  const entries = [
+    'launcher.v1.py',
+    'data.v1.py',
+    'diagnostics.v1.py',
+    'portfolio.v1.py',
+    'cost.v1.py',
+    'spec.json',
+    'INSTRUCTIONS.md',
+  ].map(name => {
+    const bytes = readFileSync(path.join(root, name));
+    return { path: name, sha256: sha256(bytes), bytes: bytes.length };
+  });
   const base: Omit<RunPackageManifest, 'packageId' | 'packageHash' | 'exportedAt'> = {
-    schemaVersion: 1, kind: 'RUN_PACKAGE', projectId: randomUUID(), branchId: randomUUID(), branchRevision: 0,
-    specId: spec.id, specHash: sha256('frozen spec'), subjectHash: sha256('candidate'),
-    requestId: randomUUID(), requestRevision: 0, entries,
+    schemaVersion: 1,
+    kind: 'RUN_PACKAGE',
+    projectId: randomUUID(),
+    branchId: randomUUID(),
+    branchRevision: 0,
+    specId: spec.id,
+    specHash: sha256('frozen spec'),
+    subjectHash: sha256('candidate'),
+    requestId: randomUUID(),
+    requestRevision: 0,
+    entries,
     environment: { runtime: 'COLAB_USER_RUN', detail: 'Synthetic package assembled by the guard test.' },
     expectedReturn: { files: ['result.json'], requiredGates: ['G-PORTFOLIO', 'G-COST', 'G-ECON'] },
     instructions: 'Run the experiment, then run launcher.v1.py and return run-return.zip.',
   };
   const packageHash = runPackageHash(base);
-  const manifest: RunPackageManifest = { ...base, packageId: runPackageId(packageHash), packageHash, exportedAt: new Date().toISOString() };
+  const manifest: RunPackageManifest = {
+    ...base,
+    packageId: runPackageId(packageHash),
+    packageHash,
+    exportedAt: new Date().toISOString(),
+  };
   writeFileSync(path.join(root, 'MANIFEST.json'), JSON.stringify(manifest, null, 2));
   return { root, manifest };
 }
@@ -97,8 +185,18 @@ function syntheticPackage() {
 /** The produced side of a synthetic run: the declared output plus the two check inputs. */
 function produceRun(root: string) {
   const periods = [
-    { period: '2024-01', weightsBefore: { AAA: 0, BBB: 0 }, weightsAfter: { AAA: 0.6, BBB: 0.4 }, assetReturns: { AAA: 0.02, BBB: -0.01 } },
-    { period: '2024-02', weightsBefore: { AAA: 0.5, BBB: -0.5 }, weightsAfter: { AAA: 0.5, BBB: -0.5 }, assetReturns: { AAA: 0.04, BBB: 0.01 } },
+    {
+      period: '2024-01',
+      weightsBefore: { AAA: 0, BBB: 0 },
+      weightsAfter: { AAA: 0.6, BBB: 0.4 },
+      assetReturns: { AAA: 0.02, BBB: -0.01 },
+    },
+    {
+      period: '2024-02',
+      weightsBefore: { AAA: 0.5, BBB: -0.5 },
+      weightsAfter: { AAA: 0.5, BBB: -0.5 },
+      assetReturns: { AAA: 0.04, BBB: 0.01 },
+    },
   ];
   writeFileSync(path.join(root, 'result.json'), JSON.stringify({ periods }));
   writeFileSync(path.join(root, 'portfolio.input.json'), JSON.stringify({ periods }));
@@ -131,7 +229,9 @@ test('a verified package with check inputs produces a schema-valid COMPLETED bou
 
   // The bundle carries exactly the declared produced file plus the manifest, each hash-verified.
   assert.deepEqual(Object.keys(bundle).sort(), ['result.json', 'return-manifest.json']);
-  assert.deepEqual(returned.artifacts, [{ path: 'result.json', sha256: sha256(bundle['result.json']), bytes: bundle['result.json'].length }]);
+  assert.deepEqual(returned.artifacts, [
+    { path: 'result.json', sha256: sha256(bundle['result.json']), bytes: bundle['result.json'].length },
+  ]);
 
   // Every required gate is answered at the stage that owns it, plus the launcher's transfer check.
   const byGate = new Map(returned.gates.map(row => [row.gate, row]));

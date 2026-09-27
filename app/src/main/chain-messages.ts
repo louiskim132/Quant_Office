@@ -45,23 +45,33 @@ export function recordChainHandoff(input: {
     .filter((item): item is Assignment => Boolean(item))
     .map(assignment => ({ assignment, job: (state.jobs ?? []).find(item => item.assignmentId === assignment.id) }))
     .filter((pair): pair is { assignment: Assignment; job: ProviderJob } => pair.job?.state === 'COMPLETED');
-  const predecessor = predecessors.find(pair => pair.assignment.id === settledAssignmentId)
-    ?? [...predecessors].sort((a, b) => b.job.settledAt.localeCompare(a.job.settledAt))[0];
+  const predecessor =
+    predecessors.find(pair => pair.assignment.id === settledAssignmentId) ??
+    [...predecessors].sort((a, b) => b.job.settledAt.localeCompare(a.job.settledAt))[0];
   if (!predecessor) return { recorded: false, reason: 'no completed predecessor exists to name as the sender' };
   if (predecessor.assignment.agentId === dependent.agentId)
-    return { recorded: false, reason: 'the predecessor and the dependent name the same agent — the message contract refuses self-addressed records, and the verified packet delivery stands as the hop record' };
+    return {
+      recorded: false,
+      reason:
+        'the predecessor and the dependent name the same agent — the message contract refuses self-addressed records, and the verified packet delivery stands as the hop record',
+    };
   // Exactly the set the launch re-verified: every stored predecessor output the packet carries.
   const objectHashes = predecessors.flatMap(pair =>
-    (pair.job.outputs ?? []).filter(output => output.stored).map(output => output.sha256));
+    (pair.job.outputs ?? []).filter(output => output.stored).map(output => output.sha256),
+  );
   const packetHash = binding.packetHash;
   const scopeOutputHashes = objectHashes.length ? objectHashes : packetHash ? [packetHash] : [];
   if (!scopeOutputHashes.length)
-    return { recorded: false, reason: 'no verified delivery identity exists — neither inherited output objects nor a packet hash' };
+    return {
+      recorded: false,
+      reason: 'no verified delivery identity exists — neither inherited output objects nor a packet hash',
+    };
   // The receipt must fit its contract: a small set names every hash; a large one names its count
   // and the canonical digest of the whole verified set, which is the same fact in one name.
-  const namedHashes = objectHashes.length <= 8
-    ? objectHashes.join(', ')
-    : `${objectHashes.length} objects, set digest ${canonicalHash([...objectHashes].sort())}`;
+  const namedHashes =
+    objectHashes.length <= 8
+      ? objectHashes.join(', ')
+      : `${objectHashes.length} objects, set digest ${canonicalHash([...objectHashes].sort())}`;
   const handoff: Message = {
     id: randomUUID(),
     projectId: dependent.projectId,

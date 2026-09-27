@@ -101,13 +101,27 @@ test('mixed separators resolve inside the root; absolute, device and ADS forms a
   assert.equal(io.read(root, 'data\\input.csv', 1024).sha256, sha('a,b\n1,2\n'));
   assert.equal(io.read(root, 'data/input.csv', 1024).sha256, sha('a,b\n1,2\n'));
   for (const hostile of [
-    '..', '../outside/canary.txt', 'data/../outside/canary.txt', 'data/../../etc/passwd',
-    path.join(outside, 'canary.txt'), 'C:/outside/canary.txt', 'C:canary.txt',
-    '\\\\?\\C:\\outside\\canary.txt', '\\\\.\\C:\\outside\\canary.txt',
-    'NUL', 'con.txt', 'com1', 'lpt9.dat',
-    'input.csv:canary', 'outputs:canary.txt',
-    'data/input.csv ', 'data /input.csv', 'trailing.',
-    '', '/data/input.csv', '\\\\server\\share\\canary.txt',
+    '..',
+    '../outside/canary.txt',
+    'data/../outside/canary.txt',
+    'data/../../etc/passwd',
+    path.join(outside, 'canary.txt'),
+    'C:/outside/canary.txt',
+    'C:canary.txt',
+    '\\\\?\\C:\\outside\\canary.txt',
+    '\\\\.\\C:\\outside\\canary.txt',
+    'NUL',
+    'con.txt',
+    'com1',
+    'lpt9.dat',
+    'input.csv:canary',
+    'outputs:canary.txt',
+    'data/input.csv ',
+    'data /input.csv',
+    'trailing.',
+    '',
+    '/data/input.csv',
+    '\\\\server\\share\\canary.txt',
   ]) {
     assert.throws(() => io.read(root, hostile, 1024), Error, `${JSON.stringify(hostile)} must be refused`);
   }
@@ -143,5 +157,8 @@ test('FakeLocalFileIO honors the same contract and records every call', () => {
   assert.throws(() => io.writeNew('root', 'a/b.txt', new Uint8Array([0])), /never replaces|exists/);
   assert.throws(() => io.read('root', 'missing.txt', 1024), /not present/);
   assert.throws(() => io.read('root', 'a/b.txt', 3), /limit/);
-  assert.deepEqual(io.calls.map(c => c.method), ['writeNew', 'read', 'writeNew', 'read', 'read']);
+  assert.deepEqual(
+    io.calls.map(c => c.method),
+    ['writeNew', 'read', 'writeNew', 'read', 'read'],
+  );
 });

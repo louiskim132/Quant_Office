@@ -7,20 +7,36 @@ import path from 'node:path';
 import test, { type TestContext } from 'node:test';
 import { strToU8 } from 'fflate';
 import { HoldoutCustody, type CustodyPaths } from '../src/main/holdout.js';
-import { UNSEAL_REQUIRED_GATES, type CustodyCapability, type EvaluatorInput, type Holdout, type IsolatedEvaluator } from '../src/shared/holdout.js';
+import {
+  UNSEAL_REQUIRED_GATES,
+  type CustodyCapability,
+  type EvaluatorInput,
+  type Holdout,
+  type IsolatedEvaluator,
+} from '../src/shared/holdout.js';
 import { OfficeStore } from '../src/core/store.js';
 import { ArtifactService } from '../src/main/artifacts.js';
 import { EvidenceService } from '../src/main/evidence.js';
 
 const sha256 = (value: Uint8Array | string) => createHash('sha256').update(value).digest('hex');
 const at = (minutes: number) => new Date(Date.UTC(2024, 0, 15, 0, minutes)).toISOString();
-const SUPPORTED: CustodyCapability = { sealedStorageSupported: true, isolatedEvaluatorSupported: true, detail: 'fake isolated custody' };
+const SUPPORTED: CustodyCapability = {
+  sealedStorageSupported: true,
+  isolatedEvaluatorSupported: true,
+  detail: 'fake isolated custody',
+};
 const passingGates = () => UNSEAL_REQUIRED_GATES.map(gate => ({ gate, outcome: 'PASS' as const }));
 
 class FakeEvaluator implements IsolatedEvaluator {
   readonly isolated = true as const;
   async evaluate(input: EvaluatorInput) {
-    return { reportHash: sha256('report:' + input.candidateHash), metric: 'RANK_IC', value: 0.01, samples: input.predictions.length, detail: 'fixture' };
+    return {
+      reportHash: sha256('report:' + input.candidateHash),
+      metric: 'RANK_IC',
+      value: 0.01,
+      samples: input.predictions.length,
+      detail: 'fixture',
+    };
   }
 }
 
@@ -28,19 +44,37 @@ function fixture(t: TestContext) {
   const root = mkdtempSync(path.join(tmpdir(), 'qro-holdout-recovery-'));
   const workspace = path.join(root, 'workspace');
   mkdirSync(workspace, { recursive: true });
-  const paths: CustodyPaths = { sealedRoot: path.join(root, 'holdout-sealed'), journalFile: path.join(root, 'exposure-journal.jsonl') };
+  const paths: CustodyPaths = {
+    sealedRoot: path.join(root, 'holdout-sealed'),
+    journalFile: path.join(root, 'exposure-journal.jsonl'),
+  };
   t.after(() => removeTreeSync(root));
   let tick = 0;
   const custody = () => new HoldoutCustody(paths, SUPPORTED, new FakeEvaluator(), () => at(++tick));
   const first = custody();
   const sealed = first.seal(strToU8('rowId,target\nh1,0.02\n'));
-  const holdout: Holdout = { id: randomUUID(), projectId: randomUUID(), name: 'Final holdout',
-    sealedHash: sealed.sealedHash, sealedBytes: sealed.sealedBytes, periodPolicy: 'CALENDAR_QUARTER',
-    timezoneOffsetMinutes: 0, allowancePerPeriod: 1, createdAt: at(0) };
+  const holdout: Holdout = {
+    id: randomUUID(),
+    projectId: randomUUID(),
+    name: 'Final holdout',
+    sealedHash: sealed.sealedHash,
+    sealedBytes: sealed.sealedBytes,
+    periodPolicy: 'CALENDAR_QUARTER',
+    timezoneOffsetMinutes: 0,
+    allowancePerPeriod: 1,
+    createdAt: at(0),
+  };
   return { root, workspace, paths, custody, first, holdout };
 }
-const reserveRequest = (holdout: Holdout) => ({ holdout, lineageId: randomUUID(), branchId: randomUUID(),
-  candidateHash: sha256('candidate'), refitHash: sha256('refit'), gates: passingGates(), adjudication: 'UPHELD' as const });
+const reserveRequest = (holdout: Holdout) => ({
+  holdout,
+  lineageId: randomUUID(),
+  branchId: randomUUID(),
+  candidateHash: sha256('candidate'),
+  refitHash: sha256('refit'),
+  gates: passingGates(),
+  adjudication: 'UPHELD' as const,
+});
 
 test('restoring an older workspace cannot un-spend a holdout', t => {
   const f = fixture(t);
@@ -57,8 +91,10 @@ test('restoring an older workspace cannot un-spend a holdout', t => {
   const after = f.custody().spent(f.holdout.id, reservation.period);
   assert.equal(after.used, 1);
   assert.equal(after.unknown, 1);
-  assert.throws(() => f.custody().reserve(reserveRequest(f.holdout)),
-    /unknown exposure after a restore. Reuse is blocked until a person settles them/);
+  assert.throws(
+    () => f.custody().reserve(reserveRequest(f.holdout)),
+    /unknown exposure after a restore. Reuse is blocked until a person settles them/,
+  );
 });
 
 test('a workspace that still knows its reservations reconciles to nothing', t => {
@@ -72,7 +108,10 @@ test('a workspace that still knows its reservations reconciles to nothing', t =>
 test('a released reservation stays released across a restore rather than becoming unknown', t => {
   const f = fixture(t);
   const { reservation } = f.first.reserve(reserveRequest(f.holdout));
-  f.first.release(reservation, { verifiedNonExposure: true, detail: 'Withdrawn before export; the sealed bytes were never opened.' });
+  f.first.release(reservation, {
+    verifiedNonExposure: true,
+    detail: 'Withdrawn before export; the sealed bytes were never opened.',
+  });
   const reconciled = f.custody().reconcileAfterRestore([]);
   assert.deepEqual(reconciled.unknown, []);
   assert.equal(f.custody().spent(f.holdout.id, reservation.period).used, 0);
@@ -84,7 +123,10 @@ test('a crash after export is still exposure when the journal is read back by a 
   f.first.exportPackage(reservation, f.holdout);
   // Nothing in memory survives; a fresh custody object reads only the file on disk.
   const restarted = f.custody();
-  assert.deepEqual(restarted.journal().map(entry => entry.kind), ['RESERVED', 'EXPORTED']);
+  assert.deepEqual(
+    restarted.journal().map(entry => entry.kind),
+    ['RESERVED', 'EXPORTED'],
+  );
   assert.equal(restarted.spent(f.holdout.id, reservation.period).used, 1);
   assert.throws(() => restarted.reserve(reserveRequest(f.holdout)), /allowance of 1 is already spent/);
 });
@@ -101,9 +143,9 @@ test('a journal rolled back to an earlier copy is detected rather than believed'
   // journal live outside the restore path at all, and reconciliation is what catches the difference.
   copyFileSync(snapshot, f.paths.journalFile);
   const rolledBack = f.custody();
-  assert.throws(()=>rolledBack.journal(),/truncated|checkpoint/);
-  assert.throws(()=>rolledBack.reconcileAfterRestore([]),/truncated|checkpoint/);
-  assert.throws(()=>rolledBack.spent(f.holdout.id,first.period),/truncated|checkpoint/);
+  assert.throws(() => rolledBack.journal(), /truncated|checkpoint/);
+  assert.throws(() => rolledBack.reconcileAfterRestore([]), /truncated|checkpoint/);
+  assert.throws(() => rolledBack.spent(f.holdout.id, first.period), /truncated|checkpoint/);
 });
 
 test('sealed holdout bytes never enter a workspace backup, an export or the evidence index', async t => {
@@ -112,8 +154,21 @@ test('sealed holdout bytes never enter a workspace backup, an export or the evid
   // handle inside it would make that removal fail on Windows.
   const database = mkdtempSync(path.join(tmpdir(), 'qro-holdout-db-'));
   const store = new OfficeStore(path.join(database, 'workspace.sqlite'));
-  t.after(() => { try { store.close(); } catch { /* already closed */ } removeTreeSync(database); });
-  const project = store.execute({ type: 'project.create', idempotencyKey: randomUUID(), name: 'Alpha', mandate: 'm', budgetCents: 0 }).projects[0];
+  t.after(() => {
+    try {
+      store.close();
+    } catch {
+      /* already closed */
+    }
+    removeTreeSync(database);
+  });
+  const project = store.execute({
+    type: 'project.create',
+    idempotencyKey: randomUUID(),
+    name: 'Alpha',
+    mandate: 'm',
+    budgetCents: 0,
+  }).projects[0];
   const artifacts = new ArtifactService(store, f.workspace);
   const evidence = new EvidenceService(store, f.workspace);
 
@@ -123,14 +178,29 @@ test('sealed holdout bytes never enter a workspace backup, an export or the evid
   const objectFile = path.join(f.workspace, 'objects', hash.slice(0, 2), hash);
   mkdirSync(path.dirname(objectFile), { recursive: true });
   writeFileSync(objectFile, strToU8(body));
-  store.addArtifact({ id: randomUUID(), projectId: project.id, experimentId: null, name: 'notes.log', sha256: hash, size: body.length,
-    kind: 'RESULT', classification: 'USER_ATTESTED', status: 'QUARANTINED', createdAt: at(0), mediaType: 'text/plain', note: 'fixture' });
+  store.addArtifact({
+    id: randomUUID(),
+    projectId: project.id,
+    experimentId: null,
+    name: 'notes.log',
+    sha256: hash,
+    size: body.length,
+    kind: 'RESULT',
+    classification: 'USER_ATTESTED',
+    status: 'QUARANTINED',
+    createdAt: at(0),
+    mediaType: 'text/plain',
+    note: 'fixture',
+  });
 
   const backup = path.join(f.root, 'backup.zip');
   await artifacts.backup(backup);
   const archive = readFileSync(backup).toString('latin1');
   assert.equal(archive.includes(f.holdout.sealedHash), false, 'the sealed holdout is not named anywhere in a backup');
-  assert.equal(existsSync(path.join(f.workspace, 'objects', f.holdout.sealedHash.slice(0, 2), f.holdout.sealedHash)), false);
+  assert.equal(
+    existsSync(path.join(f.workspace, 'objects', f.holdout.sealedHash.slice(0, 2), f.holdout.sealedHash)),
+    false,
+  );
 
   // The evidence layer addresses only the workspace object store, so the sealed hash resolves to
   // nothing there however it is asked for.

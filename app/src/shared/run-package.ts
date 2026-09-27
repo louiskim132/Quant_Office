@@ -20,30 +20,44 @@ const text = (n: number) => z.string().trim().min(1).max(n);
 
 /** How a gate receipt was produced. The label is the claim; nothing promotes a receipt past it. */
 export const GATE_PROVENANCE = ['OFFICE', 'REVIEWER_ASSERTED', 'USER_RUN', 'SIGNED_HARNESS'] as const;
-export type GateProvenance = typeof GATE_PROVENANCE[number];
+export type GateProvenance = (typeof GATE_PROVENANCE)[number];
 
 /**
  * The frozen package manifest. `packageHash` covers every field that determines what the user runs;
  * `packageId` derives from it, so re-exporting unchanged content is idempotent and a changed package
  * is a different identity rather than an edit.
  */
-export const runPackageManifestSchema = z.object({
-  schemaVersion: z.literal(1), kind: z.literal('RUN_PACKAGE'),
-  packageId: id, packageHash: hash,
-  projectId: id, branchId: id, branchRevision: z.number().int().nonnegative(),
-  specId: id, specHash: hash, subjectHash: hash,
-  requestId: id, requestRevision: z.number().int().nonnegative(),
-  /** Package contents: fixed launcher, frozen code/config/data identities and check definitions. */
-  entries: z.array(z.object({ path: text(240), sha256: hash, bytes: z.number().int().nonnegative() }).strict()).min(1).max(512),
-  environment: z.object({ runtime: z.literal('COLAB_USER_RUN'), detail: text(2000) }).strict(),
-  expectedReturn: z.object({
-    files: z.array(text(240)).min(1).max(256),
-    /** Gates the package's shipped check code must answer for the return to be complete. */
-    requiredGates: z.array(z.enum(GATES)).max(32),
-  }).strict(),
-  instructions: text(8000),
-  exportedAt: at,
-}).strict();
+export const runPackageManifestSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    kind: z.literal('RUN_PACKAGE'),
+    packageId: id,
+    packageHash: hash,
+    projectId: id,
+    branchId: id,
+    branchRevision: z.number().int().nonnegative(),
+    specId: id,
+    specHash: hash,
+    subjectHash: hash,
+    requestId: id,
+    requestRevision: z.number().int().nonnegative(),
+    /** Package contents: fixed launcher, frozen code/config/data identities and check definitions. */
+    entries: z
+      .array(z.object({ path: text(240), sha256: hash, bytes: z.number().int().nonnegative() }).strict())
+      .min(1)
+      .max(512),
+    environment: z.object({ runtime: z.literal('COLAB_USER_RUN'), detail: text(2000) }).strict(),
+    expectedReturn: z
+      .object({
+        files: z.array(text(240)).min(1).max(256),
+        /** Gates the package's shipped check code must answer for the return to be complete. */
+        requiredGates: z.array(z.enum(GATES)).max(32),
+      })
+      .strict(),
+    instructions: text(8000),
+    exportedAt: at,
+  })
+  .strict();
 export type RunPackageManifest = z.infer<typeof runPackageManifestSchema>;
 
 /** The content identity a package is named by: everything except the export timestamp. */
@@ -60,21 +74,43 @@ export function runPackageId(packageHash: string): string {
  * The returned bundle's manifest. It answers the package it names — a return naming any other
  * package, subject, spec or request revision is a wrong-package return, not a partial success.
  */
-export const runReturnManifestSchema = z.object({
-  schemaVersion: z.literal(1), kind: z.literal('RUN_RETURN'),
-  packageId: id, packageHash: hash,
-  branchId: id, specId: id, specHash: hash, subjectHash: hash,
-  runId: text(120), startedAt: at, finishedAt: at,
-  status: z.enum(['COMPLETED', 'EXECUTION_FAILED', 'INCONCLUSIVE']),
-  /** Every returned artifact with its byte identity. Undeclared files make the return invalid. */
-  artifacts: z.array(z.object({ path: text(240), sha256: hash, bytes: z.number().int().nonnegative() }).strict()).max(512),
-  /** Outcomes the package's check code reports, each tagged with the stage it answers. */
-  gates: z.array(z.object({ gate: z.enum(GATES), stage: z.enum(['S3', 'S4', 'S5', 'S6', 'S8'] as const),
-    outcome: z.enum(['PASS', 'FAIL', 'BLOCKED', 'NOT_APPLICABLE']), detail: z.string().max(4000), rationale: z.string().max(4000) }).strict()).max(64),
-  /** Attempts the user ran that failed, so a selected ledger cannot be returned. */
-  failedRuns: z.array(z.object({ reason: z.string().trim().min(1).max(1000), failedAt: at }).strict()).max(500),
-  detail: z.string().max(4000),
-}).strict();
+export const runReturnManifestSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    kind: z.literal('RUN_RETURN'),
+    packageId: id,
+    packageHash: hash,
+    branchId: id,
+    specId: id,
+    specHash: hash,
+    subjectHash: hash,
+    runId: text(120),
+    startedAt: at,
+    finishedAt: at,
+    status: z.enum(['COMPLETED', 'EXECUTION_FAILED', 'INCONCLUSIVE']),
+    /** Every returned artifact with its byte identity. Undeclared files make the return invalid. */
+    artifacts: z
+      .array(z.object({ path: text(240), sha256: hash, bytes: z.number().int().nonnegative() }).strict())
+      .max(512),
+    /** Outcomes the package's check code reports, each tagged with the stage it answers. */
+    gates: z
+      .array(
+        z
+          .object({
+            gate: z.enum(GATES),
+            stage: z.enum(['S3', 'S4', 'S5', 'S6', 'S8'] as const),
+            outcome: z.enum(['PASS', 'FAIL', 'BLOCKED', 'NOT_APPLICABLE']),
+            detail: z.string().max(4000),
+            rationale: z.string().max(4000),
+          })
+          .strict(),
+      )
+      .max(64),
+    /** Attempts the user ran that failed, so a selected ledger cannot be returned. */
+    failedRuns: z.array(z.object({ reason: z.string().trim().min(1).max(1000), failedAt: at }).strict()).max(500),
+    detail: z.string().max(4000),
+  })
+  .strict();
 export type RunReturnManifest = z.infer<typeof runReturnManifestSchema>;
 
 // ---- service seams ------------------------------------------------------------------------------
@@ -88,7 +124,10 @@ export interface RunPackageBuild {
 
 export interface RunPackageBuilder {
   build(input: {
-    state: AppState; branch: ResearchBranch; link: BranchLink; spec: FrozenResearchSpec;
+    state: AppState;
+    branch: ResearchBranch;
+    link: BranchLink;
+    spec: FrozenResearchSpec;
     readObject: (sha256: string) => Promise<Uint8Array | null>;
   }): Promise<RunPackageBuild>;
 }
@@ -130,11 +169,24 @@ export interface ManualRunReadiness {
 
 /** How each stage's work is delivered under the corrected contract. */
 export const STAGE_DELIVERY: Record<Stage, 'AGENT' | 'USER_RUN' | 'OFFICE'> = {
-  S0: 'AGENT', S1: 'AGENT', S2: 'AGENT', S3: 'USER_RUN', S4: 'AGENT',
-  S5: 'OFFICE', S6: 'OFFICE', S7: 'AGENT', S8: 'OFFICE', S9: 'OFFICE', S10: 'OFFICE',
+  S0: 'AGENT',
+  S1: 'AGENT',
+  S2: 'AGENT',
+  S3: 'USER_RUN',
+  S4: 'AGENT',
+  S5: 'OFFICE',
+  S6: 'OFFICE',
+  S7: 'AGENT',
+  S8: 'OFFICE',
+  S9: 'OFFICE',
+  S10: 'OFFICE',
 };
 
 /** Snapshot builders used by the separated-review path; one packet object per reviewer. */
 export interface SeparatedReviewPacket {
-  agentId: string; contextId: string; snapshot: InputSnapshot; evidenceHash: string; objectHashes: string[];
+  agentId: string;
+  contextId: string;
+  snapshot: InputSnapshot;
+  evidenceHash: string;
+  objectHashes: string[];
 }
