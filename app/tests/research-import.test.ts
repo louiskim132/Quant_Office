@@ -18,8 +18,26 @@ const SPEC = { id: '00000000-0000-4000-8000-000000000001', hash: sha256('frozen 
 
 function predictions(): PredictionRow[] {
   return [
-    { rowId: 'r1', foldId: 'fold-1', timestamp: iso(23), decisionAt: iso(23, 1), tradeAt: iso(23, 2), scope: 'OOF', prediction: 0.4, target: 0.01 },
-    { rowId: 'r2', foldId: 'fold-1', timestamp: iso(24), decisionAt: iso(24, 1), tradeAt: iso(24, 2), scope: 'OOF', prediction: -0.2, target: -0.02 },
+    {
+      rowId: 'r1',
+      foldId: 'fold-1',
+      timestamp: iso(23),
+      decisionAt: iso(23, 1),
+      tradeAt: iso(23, 2),
+      scope: 'OOF',
+      prediction: 0.4,
+      target: 0.01,
+    },
+    {
+      rowId: 'r2',
+      foldId: 'fold-1',
+      timestamp: iso(24),
+      decisionAt: iso(24, 1),
+      tradeAt: iso(24, 2),
+      scope: 'OOF',
+      prediction: -0.2,
+      target: -0.02,
+    },
   ];
 }
 const predictionBytes = (rows: PredictionRow[]) => strToU8(rows.map(row => JSON.stringify(row)).join('\n') + '\n');
@@ -27,13 +45,32 @@ const predictionBytes = (rows: PredictionRow[]) => strToU8(rows.map(row => JSON.
 function packageDocument(rows: PredictionRow[], overrides: Partial<CatBoostPackage> = {}): CatBoostPackage {
   const bytes = predictionBytes(rows);
   return {
-    schemaVersion: 1, runId: randomUUID(), projectId: PROJECT, registration: 'PROSPECTIVE',
-    specId: SPEC.id, specHash: SPEC.hash, registeredAt: iso(2),
+    schemaVersion: 1,
+    runId: randomUUID(),
+    projectId: PROJECT,
+    registration: 'PROSPECTIVE',
+    specId: SPEC.id,
+    specHash: SPEC.hash,
+    registeredAt: iso(2),
     source: { repository: 'research', commit: 'abc123', sourceHash: sha256('source') },
-    model: { library: 'catboost', version: '1.2.5', lossFunction: 'RMSE', iterations: 500, configHash: sha256('config'), seed: 7 },
+    model: {
+      library: 'catboost',
+      version: '1.2.5',
+      lossFunction: 'RMSE',
+      iterations: 500,
+      configHash: sha256('config'),
+      seed: 7,
+    },
     dataset: {
-      schemaVersion: 1, datasetId: randomUUID(), sourceHash: sha256('data'), rows: 10_000, timezone: 'UTC',
-      timestampColumn: 'ts', targetColumn: 'forward_return', firstTimestamp: iso(1), lastTimestamp: iso(60),
+      schemaVersion: 1,
+      datasetId: randomUUID(),
+      sourceHash: sha256('data'),
+      rows: 10_000,
+      timezone: 'UTC',
+      timestampColumn: 'ts',
+      targetColumn: 'forward_return',
+      firstTimestamp: iso(1),
+      lastTimestamp: iso(60),
       columns: [
         { name: 'ts', dtype: 'TIMESTAMP', role: 'TIMESTAMP', availableAfterSeconds: 0, group: 'index' },
         { name: 'momentum_20', dtype: 'FLOAT', role: 'FEATURE', availableAfterSeconds: 0, group: 'price' },
@@ -41,10 +78,23 @@ function packageDocument(rows: PredictionRow[], overrides: Partial<CatBoostPacka
       ],
     },
     split: {
-      schemaVersion: 1, scheme: 'PURGED_WALK_FORWARD', labelHorizonSeconds: 24 * HOUR, purgeSeconds: 24 * HOUR, embargoSeconds: 12 * HOUR,
+      schemaVersion: 1,
+      scheme: 'PURGED_WALK_FORWARD',
+      labelHorizonSeconds: 24 * HOUR,
+      purgeSeconds: 24 * HOUR,
+      embargoSeconds: 12 * HOUR,
       folds: [{ id: 'fold-1', trainStart: iso(1), trainEnd: iso(20), testStart: iso(22), testEnd: iso(30) }],
     },
-    fitScopes: [{ foldId: 'fold-1', fittedFrom: iso(1), fittedTo: iso(20), rowsFitted: 4000, earlyStoppingOn: 'INNER_VALIDATION', selectionOn: 'TRAIN_ONLY' }],
+    fitScopes: [
+      {
+        foldId: 'fold-1',
+        fittedFrom: iso(1),
+        fittedTo: iso(20),
+        rowsFitted: 4000,
+        earlyStoppingOn: 'INNER_VALIDATION',
+        selectionOn: 'TRAIN_ONLY',
+      },
+    ],
     predictionInventory: [{ path: 'predictions/oof.jsonl', sha256: sha256(bytes), rows: rows.length }],
     failedRuns: [{ runId: randomUUID(), reason: 'The first configuration diverged.', failedAt: iso(3) }],
     receipts: [],
@@ -53,7 +103,11 @@ function packageDocument(rows: PredictionRow[], overrides: Partial<CatBoostPacka
 }
 
 function archive(document: CatBoostPackage, rows: PredictionRow[], extra: Record<string, Uint8Array> = {}) {
-  return zipSync({ 'research-package.json': strToU8(JSON.stringify(document)), 'predictions/oof.jsonl': predictionBytes(rows), ...extra });
+  return zipSync({
+    'research-package.json': strToU8(JSON.stringify(document)),
+    'predictions/oof.jsonl': predictionBytes(rows),
+    ...extra,
+  });
 }
 
 test('a prospective package is imported with its gate verdicts and its failed-run ledger intact', () => {
@@ -65,13 +119,27 @@ test('a prospective package is imported with its gate verdicts and its failed-ru
   assert.match(result.summary, /No approved run package or provider verification is implied/);
   // The economic gates have no evidence at import time, so the package is not advanceable yet.
   assert.equal(result.canAdvance, false);
-  assert.deepEqual(result.evaluations.filter(item => item.outcome === 'FAIL'), []);
-  assert.deepEqual(result.evaluations.filter(item => item.outcome === 'BLOCKED').map(item => item.gate).sort(), ['G-COST', 'G-PORTFOLIO']);
+  assert.deepEqual(
+    result.evaluations.filter(item => item.outcome === 'FAIL'),
+    [],
+  );
+  assert.deepEqual(
+    result.evaluations
+      .filter(item => item.outcome === 'BLOCKED')
+      .map(item => item.gate)
+      .sort(),
+    ['G-COST', 'G-PORTFOLIO'],
+  );
 });
 
 test('an exploratory submission is kept and searchable but cannot claim a preregistration', () => {
   const rows = predictions();
-  const document = packageDocument(rows, { registration: 'EXPLORATORY', specId: null, specHash: null, registeredAt: null });
+  const document = packageDocument(rows, {
+    registration: 'EXPLORATORY',
+    specId: null,
+    specHash: null,
+    registeredAt: null,
+  });
   const result = inspectResearchPackage(archive(document, rows), PROJECT, SPEC);
   assert.equal(result.package.registration, 'EXPLORATORY');
   assert.match(result.summary, /cannot satisfy S0 registration or an S8 holdout evaluation/);
@@ -86,17 +154,26 @@ test('a prospective claim without a registration, or against a different project
   const result = inspectResearchPackage(archive(unregistered, rows), PROJECT, SPEC);
   assert.equal(result.evaluations.find(item => item.gate === 'G-SPEC')!.outcome, 'FAIL');
 
-  assert.throws(() => inspectResearchPackage(archive(packageDocument(rows), rows), randomUUID(), SPEC),
-    /belongs to a different project/);
+  assert.throws(
+    () => inspectResearchPackage(archive(packageDocument(rows), rows), randomUUID(), SPEC),
+    /belongs to a different project/,
+  );
 });
 
 test('a malformed or undeclared archive is refused rather than partially trusted', () => {
   const rows = predictions();
-  assert.throws(() => inspectResearchPackage(zipSync({ 'notes.txt': strToU8('hello') }), PROJECT, SPEC),
-    /needs a research-package.json/);
-  assert.throws(() => inspectResearchPackage(zipSync({ 'research-package.json': strToU8('{"schemaVersion":1}') }), PROJECT, SPEC));
-  assert.throws(() => inspectResearchPackage(archive(packageDocument(rows), rows, { 'extra.csv': strToU8('a,b\n') }), PROJECT, SPEC),
-    /contains files it does not declare/);
+  assert.throws(
+    () => inspectResearchPackage(zipSync({ 'notes.txt': strToU8('hello') }), PROJECT, SPEC),
+    /needs a research-package.json/,
+  );
+  assert.throws(() =>
+    inspectResearchPackage(zipSync({ 'research-package.json': strToU8('{"schemaVersion":1}') }), PROJECT, SPEC),
+  );
+  assert.throws(
+    () =>
+      inspectResearchPackage(archive(packageDocument(rows), rows, { 'extra.csv': strToU8('a,b\n') }), PROJECT, SPEC),
+    /contains files it does not declare/,
+  );
 
   // A manifest whose declared bytes do not match what was delivered fails the artifact gate rather
   // than being repaired from what happens to be in the archive.
@@ -121,10 +198,21 @@ test('a receipt is checked against the authored template versions this build act
   assert.deepEqual(templates.map(item => item.id).sort(), ['cost', 'data', 'diagnostics', 'portfolio']);
   const diagnostics = templates.find(item => item.id === 'diagnostics')!;
 
-  const receipt: TemplateReceipt = { schemaVersion: 1, templateId: 'diagnostics', templateVersion: diagnostics.version,
-    templateHash: diagnostics.sha256, dependencies: [{ name: 'catboost', version: '1.2.5' }], kind: 'DIAGNOSTIC', seed: 7,
-    environment: 'anthropic-managed', startedAt: iso(5), finishedAt: iso(5, 1), inputHashes: [sha256('data')], outputHashes: [],
-    provenance: 'HOSTED_TEMPLATE_RUN' };
+  const receipt: TemplateReceipt = {
+    schemaVersion: 1,
+    templateId: 'diagnostics',
+    templateVersion: diagnostics.version,
+    templateHash: diagnostics.sha256,
+    dependencies: [{ name: 'catboost', version: '1.2.5' }],
+    kind: 'DIAGNOSTIC',
+    seed: 7,
+    environment: 'anthropic-managed',
+    startedAt: iso(5),
+    finishedAt: iso(5, 1),
+    inputHashes: [sha256('data')],
+    outputHashes: [],
+    provenance: 'HOSTED_TEMPLATE_RUN',
+  };
   const parsed = parseReceipt(receipt, templates, [sha256('data')]);
   assert.equal(parsed.hosted, true);
 
@@ -133,7 +221,10 @@ test('a receipt is checked against the authored template versions this build act
   // The right version naming the wrong bytes is a different script under a familiar name.
   assert.throws(() => parseReceipt({ ...receipt, templateHash: sha256('other') }, templates), /names different bytes/);
   // An input the run was supposed to read but does not name.
-  assert.throws(() => parseReceipt(receipt, templates, [sha256('data'), sha256('other input')]), /does not name 1 of the inputs/);
+  assert.throws(
+    () => parseReceipt(receipt, templates, [sha256('data'), sha256('other input')]),
+    /does not name 1 of the inputs/,
+  );
   // A user-supplied receipt is a document about a run, never evidence the office arranged one.
   const supplied = parseReceipt({ ...receipt, provenance: 'USER_SUPPLIED' }, templates);
   assert.equal(supplied.hosted, false);

@@ -25,11 +25,17 @@ export interface MemoryIngestReport {
   linksSkipped: { index: number; reason: string }[];
 }
 
-const reason = (error: unknown) => error instanceof Error ? error.message : 'unknown ingest failure';
+const reason = (error: unknown) => (error instanceof Error ? error.message : 'unknown ingest failure');
 
 export function ingestReceiptMemory(
   store: OfficeStore,
-  ctx: { projectId: string; requestId: string | null; assignmentId: string | null; agentId: string; receiptHash: string },
+  ctx: {
+    projectId: string;
+    requestId: string | null;
+    assignmentId: string | null;
+    agentId: string;
+    receiptHash: string;
+  },
   result: Pick<LocalResultV2, 'findings' | 'links'>,
 ): MemoryIngestReport {
   const report: MemoryIngestReport = { findings: [], findingsSkipped: [], links: [], linksSkipped: [] };
@@ -40,7 +46,11 @@ export function ingestReceiptMemory(
   const refMap = new Map<string, string>();
   /** A finding id that already exists in this project, checked against live state. */
   const existingFindingId = (value: string) =>
-    (store.snapshot({ history: false }).findings ?? []).some(item => item.id === value && item.projectId === ctx.projectId) ? value : undefined;
+    (store.snapshot({ history: false }).findings ?? []).some(
+      item => item.id === value && item.projectId === ctx.projectId,
+    )
+      ? value
+      : undefined;
   const resolveEndpoint = (value: string) => refMap.get(value) ?? existingFindingId(value);
 
   for (const [index, entry] of (result.findings ?? []).entries()) {
@@ -49,7 +59,9 @@ export function ingestReceiptMemory(
       if (entry.supersedes !== undefined) {
         supersedesFindingId = resolveEndpoint(entry.supersedes);
         if (!supersedesFindingId)
-          throw new Error('The supersedes target names neither a ref in this receipt nor an existing finding in this project.');
+          throw new Error(
+            'The supersedes target names neither a ref in this receipt nor an existing finding in this project.',
+          );
       }
       const { finding, created } = store.recordMemoryFinding({
         projectId: ctx.projectId,
@@ -72,9 +84,11 @@ export function ingestReceiptMemory(
   for (const [index, link] of (result.links ?? []).entries()) {
     try {
       const from = resolveEndpoint(link.from);
-      if (!from) throw new Error('The link source names neither a ref in this receipt nor an existing finding in this project.');
+      if (!from)
+        throw new Error('The link source names neither a ref in this receipt nor an existing finding in this project.');
       const to = resolveEndpoint(link.to);
-      if (!to) throw new Error('The link target names neither a ref in this receipt nor an existing finding in this project.');
+      if (!to)
+        throw new Error('The link target names neither a ref in this receipt nor an existing finding in this project.');
       const { relationship, created } = store.proposeMemoryRelationship({
         projectId: ctx.projectId,
         fromFindingId: from,

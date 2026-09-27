@@ -111,7 +111,9 @@ export function spawnSerenaSession(request: SerenaSessionRequest, deps: SerenaSe
   let stderrTail = '';
 
   let resolveReady: (outcome: { ok: true } | { ok: false; reason: string }) => void;
-  const ready = new Promise<{ ok: true } | { ok: false; reason: string }>(resolve => { resolveReady = resolve; });
+  const ready = new Promise<{ ok: true } | { ok: false; reason: string }>(resolve => {
+    resolveReady = resolve;
+  });
 
   const settle = (outcome: { ok: true } | { ok: false; reason: string }) => {
     if (settled) return;
@@ -120,16 +122,26 @@ export function spawnSerenaSession(request: SerenaSessionRequest, deps: SerenaSe
     timer = undefined;
     resolveReady(outcome);
   };
-  const fail = (reason: string) => settle({ ok: false, reason: stderrTail ? `${reason} (stderr: ${stderrTail})` : reason });
+  const fail = (reason: string) =>
+    settle({ ok: false, reason: stderrTail ? `${reason} (stderr: ${stderrTail})` : reason });
 
   if (!entry) {
-    settle({ ok: false, reason: `the tool profile declares no 'serena' mcpServers entry; nothing was spawned for job ${request.binding.jobId}` });
-    return { ready, dispose() { /* nothing was ever spawned */ } };
+    settle({
+      ok: false,
+      reason: `the tool profile declares no 'serena' mcpServers entry; nothing was spawned for job ${request.binding.jobId}`,
+    });
+    return {
+      ready,
+      dispose() {
+        /* nothing was ever spawned */
+      },
+    };
   }
 
   const args = [
     ...(entry.args ?? []),
-    '--project', request.packetDir,
+    '--project',
+    request.packetDir,
     ...(entry.readOnly ? [SERENA_READ_ONLY_ARG] : []),
   ];
 
@@ -138,27 +150,51 @@ export function spawnSerenaSession(request: SerenaSessionRequest, deps: SerenaSe
   const [executable, ...leading] = splitCommand(entry.command);
   try {
     child = deps.spawn(executable, [...leading, ...args], {
-      cwd: request.packetDir, env: process.env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
+      cwd: request.packetDir,
+      env: process.env,
+      windowsHide: true,
+      stdio: ['pipe', 'pipe', 'pipe'],
     });
   } catch (error) {
-    settle({ ok: false, reason: `serena spawn threw before a child existed: ${error instanceof Error ? error.message : String(error)}` });
-    return { ready, dispose() { /* spawn threw; nothing to kill */ } };
+    settle({
+      ok: false,
+      reason: `serena spawn threw before a child existed: ${error instanceof Error ? error.message : String(error)}`,
+    });
+    return {
+      ready,
+      dispose() {
+        /* spawn threw; nothing to kill */
+      },
+    };
   }
 
   if (!child.stdin) {
-    settle({ ok: false, reason: 'the spawned serena child has no writable stdin; the initialize handshake cannot be sent' });
+    settle({
+      ok: false,
+      reason: 'the spawned serena child has no writable stdin; the initialize handshake cannot be sent',
+    });
     return { ready, dispose: makeDispose() };
   }
 
   const writeHandshake = () => {
     try {
-      child!.stdin!.write(`${JSON.stringify({
-        jsonrpc: '2.0', id: INITIALIZE_ID, method: 'initialize',
-        params: { protocolVersion: MCP_PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: 'quant-office-serena-binding', version: SERENA_EXPECTED_VERSION } },
-      })}\n`);
+      child!.stdin!.write(
+        `${JSON.stringify({
+          jsonrpc: '2.0',
+          id: INITIALIZE_ID,
+          method: 'initialize',
+          params: {
+            protocolVersion: MCP_PROTOCOL_VERSION,
+            capabilities: {},
+            clientInfo: { name: 'quant-office-serena-binding', version: SERENA_EXPECTED_VERSION },
+          },
+        })}\n`,
+      );
       return true;
     } catch (error) {
-      fail(`could not write the initialize request to serena's stdin: ${error instanceof Error ? error.message : String(error)}`);
+      fail(
+        `could not write the initialize request to serena's stdin: ${error instanceof Error ? error.message : String(error)}`,
+      );
       return false;
     }
   };
@@ -167,7 +203,9 @@ export function spawnSerenaSession(request: SerenaSessionRequest, deps: SerenaSe
     if (settled) return;
     pending += String(chunk);
     if (pending.length > MAX_PENDING_BYTES) {
-      fail(`serena emitted ${pending.length} stdout bytes without a handshake response; treating the stream as malformed`);
+      fail(
+        `serena emitted ${pending.length} stdout bytes without a handshake response; treating the stream as malformed`,
+      );
       return;
     }
     let index;
@@ -176,16 +214,25 @@ export function spawnSerenaSession(request: SerenaSessionRequest, deps: SerenaSe
       pending = pending.slice(index + 1);
       if (!line) continue;
       let message: { id?: unknown; result?: unknown; error?: { message?: string } | unknown };
-      try { message = JSON.parse(line); } catch { continue; }
+      try {
+        message = JSON.parse(line);
+      } catch {
+        continue;
+      }
       if (message.id !== INITIALIZE_ID) continue;
       if ('result' in message) {
         // Proper MCP etiquette — the client acknowledges the negotiated session.
-        try { child!.stdin!.write('{"jsonrpc":"2.0","method":"notifications/initialized"}\n'); } catch { /* readiness already established */ }
+        try {
+          child!.stdin!.write('{"jsonrpc":"2.0","method":"notifications/initialized"}\n');
+        } catch {
+          /* readiness already established */
+        }
         settle({ ok: true });
       } else if (message.error) {
-        const detail = message.error && typeof message.error === 'object'
-          ? String((message.error as { message?: unknown }).message ?? JSON.stringify(message.error))
-          : JSON.stringify(message.error);
+        const detail =
+          message.error && typeof message.error === 'object'
+            ? String((message.error as { message?: unknown }).message ?? JSON.stringify(message.error))
+            : JSON.stringify(message.error);
         fail(`serena answered initialize with a JSON-RPC error: ${detail}`);
       }
     }
@@ -198,7 +245,11 @@ export function spawnSerenaSession(request: SerenaSessionRequest, deps: SerenaSe
       if (timer) clearTimeout(timer);
       timer = undefined;
       if (!settled) settle({ ok: false, reason: 'the session was disposed before the handshake completed' });
-      try { child?.kill(); } catch { /* a dead child reports nothing */ }
+      try {
+        child?.kill();
+      } catch {
+        /* a dead child reports nothing */
+      }
     };
   }
 
@@ -209,8 +260,16 @@ export function spawnSerenaSession(request: SerenaSessionRequest, deps: SerenaSe
   });
   child.on('error', error => fail(`the spawned serena process reported an error: ${error.message}`));
   child.on('exit', (code, signal) => {
-    if (disposed) { settle({ ok: false, reason: `serena exited after dispose (code ${code ?? 'null'}${signal ? `, signal ${signal}` : ''})` }); return; }
-    fail(`serena exited (code ${code ?? 'null'}${signal ? `, signal ${signal}` : ''}) before answering the initialize handshake after ${elapsed()}ms`);
+    if (disposed) {
+      settle({
+        ok: false,
+        reason: `serena exited after dispose (code ${code ?? 'null'}${signal ? `, signal ${signal}` : ''})`,
+      });
+      return;
+    }
+    fail(
+      `serena exited (code ${code ?? 'null'}${signal ? `, signal ${signal}` : ''}) before answering the initialize handshake after ${elapsed()}ms`,
+    );
   });
 
   if (!writeHandshake()) return { ready, dispose: makeDispose() };
@@ -219,7 +278,11 @@ export function spawnSerenaSession(request: SerenaSessionRequest, deps: SerenaSe
   timer = setTimeout(() => {
     timer = undefined;
     fail(`no handshake response from serena within ${timeoutMs}ms; killing the unresponsive child`);
-    try { child?.kill(); } catch { /* the failure reason already stands */ }
+    try {
+      child?.kill();
+    } catch {
+      /* the failure reason already stands */
+    }
   }, timeoutMs);
   // A readiness deadline is bookkeeping, not work — it must never hold the process open.
   timer.unref?.();

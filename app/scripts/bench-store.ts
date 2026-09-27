@@ -10,15 +10,39 @@ import { OfficeStore } from '../src/core/store';
 
 const count = Number(process.argv[2] ?? 500);
 const at = (minutes: number) => new Date(Date.UTC(2026, 8, 7, 12, 0, 0) + minutes * 60000).toISOString();
-const models = Array.from({ length: 400 }, (_, i) => ({ id: `model-${i}`, name: `Model ${i} with a long display name for size` }));
+const models = Array.from({ length: 400 }, (_, i) => ({
+  id: `model-${i}`,
+  name: `Model ${i} with a long display name for size`,
+}));
 const observation = (i: number) => ({
-  provider: 'claude' as const, identity: 'researcher@example.com', credentialContext: 'claude-code-cli', state: 'SIGNED_IN' as const,
-  allowance: [], note: 'Account sign-in verified.', toolVersion: '2.1.236', transport: 'NONE' as const, environment: '', models,
+  provider: 'claude' as const,
+  identity: 'researcher@example.com',
+  credentialContext: 'claude-code-cli',
+  state: 'SIGNED_IN' as const,
+  allowance: [],
+  note: 'Account sign-in verified.',
+  toolVersion: '2.1.236',
+  transport: 'NONE' as const,
+  environment: '',
+  models,
   operations: [
-    { operation: 'ACCOUNT_STATUS' as const, level: 'ACCOUNT_VERIFIED' as const, detail: 'Signed in.', evidence: 'OBSERVED' as const, verifiedAt: at(i * 10) },
-    { operation: 'CLOUD_SUBMIT' as const, level: 'DOCUMENTED' as const, detail: 'Not verified for this account.', evidence: 'DOCUMENTED' as const, verifiedAt: at(i * 10) },
+    {
+      operation: 'ACCOUNT_STATUS' as const,
+      level: 'ACCOUNT_VERIFIED' as const,
+      detail: 'Signed in.',
+      evidence: 'OBSERVED' as const,
+      verifiedAt: at(i * 10),
+    },
+    {
+      operation: 'CLOUD_SUBMIT' as const,
+      level: 'DOCUMENTED' as const,
+      detail: 'Not verified for this account.',
+      evidence: 'DOCUMENTED' as const,
+      verifiedAt: at(i * 10),
+    },
   ],
-  source: i % 2 ? 'claude auth status' : 'claude auth status (recheck)', observedAt: at(i * 10),
+  source: i % 2 ? 'claude auth status' : 'claude auth status (recheck)',
+  observedAt: at(i * 10),
 });
 
 const root = mkdtempSync(path.join(tmpdir(), 'qro-bench-'));

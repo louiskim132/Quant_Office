@@ -8,7 +8,13 @@ import { PassThrough } from 'node:stream';
 import { removeTreeSync } from '../src/main/fsx';
 import { buildProviderPayload, NotLaunchedError, type SubmitContext } from '../src/main/controller';
 import { LocalCliExecAdapter, type CliSpawn, type CliSpawnOptions } from '../src/main/local-cli-exec';
-import { ANSWERS_DIR, QUERIES_DIR, isQueryFile, prepareEvidenceDropbox, serveEvidenceQuery } from '../src/main/evidence-dropbox';
+import {
+  ANSWERS_DIR,
+  QUERIES_DIR,
+  isQueryFile,
+  prepareEvidenceDropbox,
+  serveEvidenceQuery,
+} from '../src/main/evidence-dropbox';
 import { GuardedLocalFileIO } from '../src/main/local-session-files';
 import { mapToolFlags } from '../src/main/tool-flags';
 import { EVIDENCE_SURFACE_ID, mountsEvidenceSurface, type ToolProfile } from '../src/shared/tool-profile';
@@ -24,8 +30,16 @@ const CALLER: EvidenceCaller = { agentId: randomUUID(), projectId: randomUUID(),
 
 test('mountsEvidenceSurface detects only the reserved office id', () => {
   assert.equal(mountsEvidenceSurface(undefined), false);
-  assert.equal(mountsEvidenceSurface({ mcpServers: [{ id: 'serena', command: 'serena start-mcp-server', readOnly: true }] }), false);
-  assert.equal(mountsEvidenceSurface({ mcpServers: [{ id: EVIDENCE_SURFACE_ID, command: 'office evidence-surface', readOnly: true }] }), true);
+  assert.equal(
+    mountsEvidenceSurface({ mcpServers: [{ id: 'serena', command: 'serena start-mcp-server', readOnly: true }] }),
+    false,
+  );
+  assert.equal(
+    mountsEvidenceSurface({
+      mcpServers: [{ id: EVIDENCE_SURFACE_ID, command: 'office evidence-surface', readOnly: true }],
+    }),
+    true,
+  );
   assert.equal(isQueryFile('q-1.jsonl'), true);
   assert.equal(isQueryFile('nested/q-1.jsonl'), false);
   assert.equal(isQueryFile('note.txt'), false);
@@ -38,19 +52,33 @@ test('a query file is served under the office-bound caller, never the file bytes
   mkdirSync(dir, { recursive: true });
   prepareEvidenceDropbox(dir, io);
   const seen: { caller: EvidenceCaller; line: string }[] = [];
-  writeFileSync(path.join(dir, QUERIES_DIR, 'q-1.jsonl'), [
-    '{"id":"a","op":"queryEvidence","args":{"pattern":"x"}}',
-    '{"id":"b","op":"readEvidence","args":{"objectHash":"abc"}}',
-    '',
-  ].join('\n'));
+  writeFileSync(
+    path.join(dir, QUERIES_DIR, 'q-1.jsonl'),
+    [
+      '{"id":"a","op":"queryEvidence","args":{"pattern":"x"}}',
+      '{"id":"b","op":"readEvidence","args":{"objectHash":"abc"}}',
+      '',
+    ].join('\n'),
+  );
   await serveEvidenceQuery({
-    dir, io, name: 'q-1.jsonl', caller: CALLER,
-    frames: async (caller, line) => { seen.push({ caller, line }); return JSON.stringify({ id: JSON.parse(line).id, result: { echo: true } }); },
+    dir,
+    io,
+    name: 'q-1.jsonl',
+    caller: CALLER,
+    frames: async (caller, line) => {
+      seen.push({ caller, line });
+      return JSON.stringify({ id: JSON.parse(line).id, result: { echo: true } });
+    },
   });
   assert.equal(seen.length, 2);
   assert.deepEqual(seen[0].caller, CALLER);
-  const answer = readFileSync(path.join(dir, ANSWERS_DIR, 'q-1.jsonl'), 'utf8').trim().split('\n');
-  assert.deepEqual(answer.map(line => JSON.parse(line).id), ['a', 'b']);
+  const answer = readFileSync(path.join(dir, ANSWERS_DIR, 'q-1.jsonl'), 'utf8')
+    .trim()
+    .split('\n');
+  assert.deepEqual(
+    answer.map(line => JSON.parse(line).id),
+    ['a', 'b'],
+  );
   assert.ok(answer.every(line => 'result' in JSON.parse(line)));
 });
 
@@ -61,7 +89,10 @@ test('a repeated serve is a no-op — answers are never rewritten', async t => {
   prepareEvidenceDropbox(dir, io);
   writeFileSync(path.join(dir, QUERIES_DIR, 'q-2.jsonl'), '{"id":"a","op":"queryEvidence","args":{"pattern":"x"}}\n');
   let calls = 0;
-  const frames = async () => { calls += 1; return JSON.stringify({ id: 'a', result: { n: calls } }); };
+  const frames = async () => {
+    calls += 1;
+    return JSON.stringify({ id: 'a', result: { n: calls } });
+  };
   await serveEvidenceQuery({ dir, io, name: 'q-2.jsonl', caller: CALLER, frames });
   await serveEvidenceQuery({ dir, io, name: 'q-2.jsonl', caller: CALLER, frames });
   const answer = readFileSync(path.join(dir, ANSWERS_DIR, 'q-2.jsonl'), 'utf8');
@@ -107,42 +138,82 @@ class FakeSerenaChild {
   readonly stderr = new PassThrough();
   readonly stdin = new PassThrough();
   readonly kills: unknown[] = [];
-  constructor(readonly pid = 7777, private readonly handshake = true) {
+  constructor(
+    readonly pid = 7777,
+    private readonly handshake = true,
+  ) {
     if (handshake)
       this.stdin.on('data', () => {
-        this.stdout.write('{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{},"serverInfo":{"name":"serena","version":"1.7.0"}}}\n');
+        this.stdout.write(
+          '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{},"serverInfo":{"name":"serena","version":"1.7.0"}}}\n',
+        );
       });
   }
-  kill(signal?: unknown) { this.kills.push(signal); return true; }
-  on(event: string, listener: (...args: never[]) => void) { return this; }
+  kill(signal?: unknown) {
+    this.kills.push(signal);
+    return true;
+  }
+  on(event: string, listener: (...args: never[]) => void) {
+    return this;
+  }
 }
 
 interface ExecFixture {
-  adapter: LocalCliExecAdapter; dir: string; context: SubmitContext; spawnCalls: SpawnCall[];
+  adapter: LocalCliExecAdapter;
+  dir: string;
+  context: SubmitContext;
+  spawnCalls: SpawnCall[];
   serenaCalls: { executable: string; args: string[] }[];
 }
-interface SpawnCall { executable: string; args: string[]; options: CliSpawnOptions; child: FakeChild }
+interface SpawnCall {
+  executable: string;
+  args: string[];
+  options: CliSpawnOptions;
+  child: FakeChild;
+}
 
 class FakeChild {
   readonly stdout = new PassThrough();
   readonly stderr = new PassThrough();
   readonly kills: unknown[] = [];
   constructor(readonly pid: number | undefined = 4321) {}
-  kill(signal?: unknown) { this.kills.push(signal); return true; }
-  on() { return this; }
+  kill(signal?: unknown) {
+    this.kills.push(signal);
+    return true;
+  }
+  on() {
+    return this;
+  }
 }
 
-function fixture(t: test.TestContext, options: { profile?: ToolProfile; serenaAnswers?: boolean; serenaMissing?: boolean; frames?: (caller: EvidenceCaller, line: string) => Promise<string> } = {}): ExecFixture {
+function fixture(
+  t: test.TestContext,
+  options: {
+    profile?: ToolProfile;
+    serenaAnswers?: boolean;
+    serenaMissing?: boolean;
+    frames?: (caller: EvidenceCaller, line: string) => Promise<string>;
+  } = {},
+): ExecFixture {
   const root = mkdtempSync(path.join(tmpdir(), 'qro-surface-'));
   const staging = path.join(root, 'staging');
   mkdirSync(path.join(staging, 'data'), { recursive: true });
   writeFileSync(path.join(staging, 'data', 'input.csv'), 'a,b\n1,2\n');
   const snapshot: InputSnapshot = {
-    id: randomUUID(), projectId: randomUUID(), requestId: randomUUID(), locationRevision: 0, requestRevision: 1,
+    id: randomUUID(),
+    projectId: randomUUID(),
+    requestId: randomUUID(),
+    locationRevision: 0,
+    requestRevision: 1,
     route: 'SELECTED_FILES_GIT_SNAPSHOT',
     files: [{ path: 'data/input.csv', bytes: Buffer.byteLength('a,b\n1,2\n'), sha256: sha('a,b\n1,2\n') }],
-    totalBytes: Buffer.byteLength('a,b\n1,2\n'), manifestHash: sha('manifest'), stagingCommit: 'fixture-commit', stagingPath: staging,
-    warnings: [], provenance: 'OFFICE_STAGED', createdAt: at(0),
+    totalBytes: Buffer.byteLength('a,b\n1,2\n'),
+    manifestHash: sha('manifest'),
+    stagingCommit: 'fixture-commit',
+    stagingPath: staging,
+    warnings: [],
+    provenance: 'OFFICE_STAGED',
+    createdAt: at(0),
   };
   const sessions = path.join(root, 'sessions');
   mkdirSync(sessions, { recursive: true });
@@ -165,40 +236,95 @@ function fixture(t: test.TestContext, options: { profile?: ToolProfile; serenaAn
     undefined,
     spawn,
     () => ({ TEST_ENV: 'scrubbed' }),
-    undefined, undefined, undefined, undefined,
-    serenaSpawn, 60, options.frames,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    serenaSpawn,
+    60,
+    options.frames,
   );
-  t.after(() => { adapter.disposeAll(); removeTreeSync(root); });
+  t.after(() => {
+    adapter.disposeAll();
+    removeTreeSync(root);
+  });
   const assignment: Assignment = {
-    id: randomUUID(), projectId: snapshot.projectId, requestId: snapshot.requestId!, requestRevision: 1,
-    agentId: randomUUID(), agentRevision: 0, connectionId: randomUUID(), capabilitySnapshotId: randomUUID(),
-    snapshotId: snapshot.id, route: 'LOCAL_CLI_EXEC', requestedModel: 'm', resolvedModel: '',
-    requestedEffort: 'default', appliedEffort: 'UNVERIFIED', delegation: false, objectiveHash: sha('objective'),
+    id: randomUUID(),
+    projectId: snapshot.projectId,
+    requestId: snapshot.requestId!,
+    requestRevision: 1,
+    agentId: randomUUID(),
+    agentRevision: 0,
+    connectionId: randomUUID(),
+    capabilitySnapshotId: randomUUID(),
+    snapshotId: snapshot.id,
+    route: 'LOCAL_CLI_EXEC',
+    requestedModel: 'm',
+    resolvedModel: '',
+    requestedEffort: 'default',
+    appliedEffort: 'UNVERIFIED',
+    delegation: false,
+    objectiveHash: sha('objective'),
     createdAt: at(0),
   };
   const binding: LocalSessionRecord = {
-    schemaVersion: 1, id: randomUUID(), jobId: randomUUID(), assignmentId: assignment.id,
-    projectId: assignment.projectId, attemptId: randomUUID(), revision: 0,
-    provider: 'claude', surface: 'DEVIN_CLI', layout: 'FLAT_PACKET', packetVersion: 2,
-    packetHash: null, storageRelativePath: 'exec-session', originalCwd: null,
-    repoRelativePath: null, seedCommit: null, worktreeOwner: 'NONE',
-    providerSessionId: null, providerProjectId: null, bindingEvidence: 'UNBOUND',
-    groupingStatus: 'UNKNOWN', requirement: 'SCOPED_DELIVERY', confinementStatus: 'UNVERIFIED',
-    confinementEvidenceId: null, lifecycle: 'READY', archiveRelativePath: null,
-    lastReceipt: null, cancelRequestId: null, stopStatus: 'NOT_REQUESTED',
+    schemaVersion: 1,
+    id: randomUUID(),
+    jobId: randomUUID(),
+    assignmentId: assignment.id,
+    projectId: assignment.projectId,
+    attemptId: randomUUID(),
+    revision: 0,
+    provider: 'claude',
+    surface: 'DEVIN_CLI',
+    layout: 'FLAT_PACKET',
+    packetVersion: 2,
+    packetHash: null,
+    storageRelativePath: 'exec-session',
+    originalCwd: null,
+    repoRelativePath: null,
+    seedCommit: null,
+    worktreeOwner: 'NONE',
+    providerSessionId: null,
+    providerProjectId: null,
+    bindingEvidence: 'UNBOUND',
+    groupingStatus: 'UNKNOWN',
+    requirement: 'SCOPED_DELIVERY',
+    confinementStatus: 'UNVERIFIED',
+    confinementEvidenceId: null,
+    lifecycle: 'READY',
+    archiveRelativePath: null,
+    lastReceipt: null,
+    cancelRequestId: null,
+    stopStatus: 'NOT_REQUESTED',
     ...(options.profile ? { toolProfile: options.profile } : {}),
-    createdAt: at(0), updatedAt: at(0),
+    createdAt: at(0),
+    updatedAt: at(0),
   };
   const context: SubmitContext = {
-    assignment, snapshot, objective: 'Summarize the fixture input.', requestName: 'Tiny exec task',
-    payload: buildProviderPayload({ requestName: 'Tiny exec task', objective: 'Summarize the fixture input.', acceptanceCriteria: 'A summary file.', instructions: '', model: 'm', effort: 'default', delegation: false }),
-    jobId: binding.jobId, localSession: binding,
+    assignment,
+    snapshot,
+    objective: 'Summarize the fixture input.',
+    requestName: 'Tiny exec task',
+    payload: buildProviderPayload({
+      requestName: 'Tiny exec task',
+      objective: 'Summarize the fixture input.',
+      acceptanceCriteria: 'A summary file.',
+      instructions: '',
+      model: 'm',
+      effort: 'default',
+      delegation: false,
+    }),
+    jobId: binding.jobId,
+    localSession: binding,
   };
   return { adapter, dir: path.resolve(sessions, binding.storageRelativePath), context, spawnCalls, serenaCalls };
 }
 
 test('a declared serena profile is gated on an observed initialize handshake before launch', async t => {
-  const f = fixture(t, { profile: { mcpServers: [{ id: 'serena', command: 'serena start-mcp-server', readOnly: true }] } });
+  const f = fixture(t, {
+    profile: { mcpServers: [{ id: 'serena', command: 'serena start-mcp-server', readOnly: true }] },
+  });
   const result = await f.adapter.submit(f.context);
   assert.equal(f.serenaCalls.length, 1);
   assert.equal(f.serenaCalls[0].executable, 'serena', 'spawn runs without a shell, so the sub-command is an argument');
@@ -212,13 +338,22 @@ test('a declared serena profile is gated on an observed initialize handshake bef
 });
 
 test('a serena probe that never answers refuses the launch — no provider spawn', async t => {
-  const f = fixture(t, { profile: { mcpServers: [{ id: 'serena', command: 'serena start-mcp-server', readOnly: true }] }, serenaAnswers: false });
-  await assert.rejects(f.adapter.submit(f.context), (error: unknown) => error instanceof NotLaunchedError && /readiness probe/.test(error.message));
+  const f = fixture(t, {
+    profile: { mcpServers: [{ id: 'serena', command: 'serena start-mcp-server', readOnly: true }] },
+    serenaAnswers: false,
+  });
+  await assert.rejects(
+    f.adapter.submit(f.context),
+    (error: unknown) => error instanceof NotLaunchedError && /readiness probe/.test(error.message),
+  );
   assert.equal(f.spawnCalls.length, 0);
 });
 
 test('an uninstalled serena is optional — the arm launches without it and the record says so', async t => {
-  const f = fixture(t, { profile: { canWrite: false, mcpServers: [{ id: 'serena', command: 'serena start-mcp-server', readOnly: true }] }, serenaMissing: true });
+  const f = fixture(t, {
+    profile: { canWrite: false, mcpServers: [{ id: 'serena', command: 'serena start-mcp-server', readOnly: true }] },
+    serenaMissing: true,
+  });
   const result = await f.adapter.submit(f.context);
   assert.equal(f.spawnCalls.length, 1, 'the provider CLI still launched');
   assert.ok(!f.spawnCalls[0].args.includes('--mcp-config'), 'no --mcp-config names a server that is not installed');
@@ -226,23 +361,34 @@ test('an uninstalled serena is optional — the arm launches without it and the 
 });
 
 test('a declared evidence surface mounts the drop-box and serves a written query', async t => {
-  const profile: ToolProfile = { mcpServers: [{ id: EVIDENCE_SURFACE_ID, command: 'office evidence-surface', readOnly: true }] };
+  const profile: ToolProfile = {
+    mcpServers: [{ id: EVIDENCE_SURFACE_ID, command: 'office evidence-surface', readOnly: true }],
+  };
   const answered: { caller: EvidenceCaller; line: string }[] = [];
   const f = fixture(t, {
     profile,
-    frames: async (caller, line) => { answered.push({ caller, line }); return JSON.stringify({ id: JSON.parse(line).id, result: { ok: true } }); },
+    frames: async (caller, line) => {
+      answered.push({ caller, line });
+      return JSON.stringify({ id: JSON.parse(line).id, result: { ok: true } });
+    },
   });
   const result = await f.adapter.submit(f.context);
   assert.ok(existsSync(path.join(f.dir, QUERIES_DIR)) && existsSync(path.join(f.dir, ANSWERS_DIR)));
   assert.match(readFileSync(path.join(f.dir, 'CONTRACT.md'), 'utf8'), /queries\/<name>\.jsonl/);
   assert.match(result.detail, /evidence surface mounted/);
   // The agent writes a query file; the watcher serves it under the assignment's identity.
-  writeFileSync(path.join(f.dir, QUERIES_DIR, 'q-9.jsonl'), '{"id":"one","op":"queryEvidence","args":{"pattern":"x"}}\n');
+  writeFileSync(
+    path.join(f.dir, QUERIES_DIR, 'q-9.jsonl'),
+    '{"id":"one","op":"queryEvidence","args":{"pattern":"x"}}\n',
+  );
   const deadline = Date.now() + 5000;
   let answer = '';
   while (Date.now() < deadline) {
     const file = path.join(f.dir, ANSWERS_DIR, 'q-9.jsonl');
-    if (existsSync(file)) { answer = readFileSync(file, 'utf8'); break; }
+    if (existsSync(file)) {
+      answer = readFileSync(file, 'utf8');
+      break;
+    }
     await new Promise(resolve => setTimeout(resolve, 50));
   }
   assert.match(answer, /"id":"one".*"result"/);
@@ -252,8 +398,13 @@ test('a declared evidence surface mounts the drop-box and serves a written query
 });
 
 test('a declared evidence surface with no frame handler refuses the launch', async t => {
-  const f = fixture(t, { profile: { mcpServers: [{ id: EVIDENCE_SURFACE_ID, command: 'office evidence-surface', readOnly: true }] } });
-  await assert.rejects(f.adapter.submit(f.context), (error: unknown) => error instanceof NotLaunchedError && /evidence frame handler/.test(error.message));
+  const f = fixture(t, {
+    profile: { mcpServers: [{ id: EVIDENCE_SURFACE_ID, command: 'office evidence-surface', readOnly: true }] },
+  });
+  await assert.rejects(
+    f.adapter.submit(f.context),
+    (error: unknown) => error instanceof NotLaunchedError && /evidence frame handler/.test(error.message),
+  );
   assert.equal(f.spawnCalls.length, 0);
 });
 

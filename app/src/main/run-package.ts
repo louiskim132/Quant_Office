@@ -6,9 +6,15 @@ import { parseStrictJson } from '../core/strict-json.js';
 import { authoredTemplates } from './research-templates.js';
 import { MAX_FILE, MAX_TOTAL, safeEntry, validateZipHeaders } from './artifacts.js';
 import {
-  runPackageHash, runPackageId, runPackageManifestSchema, runReturnManifestSchema,
-  type RunPackageBuilder, type RunPackageManifest, type RunPackageBuild,
-  type RunReturnInspector, type RunReturnInspection,
+  runPackageHash,
+  runPackageId,
+  runPackageManifestSchema,
+  runReturnManifestSchema,
+  type RunPackageBuilder,
+  type RunPackageManifest,
+  type RunPackageBuild,
+  type RunReturnInspector,
+  type RunReturnInspection,
 } from '../shared/run-package.js';
 import type { GateId, Stage } from '../shared/research.js';
 
@@ -100,7 +106,7 @@ function packageInstructions(templates: { file: string }[]): string {
     `   ${RETURN_MANIFEST} plus run-return.zip.`,
     '3. Record every attempt, including failures. A return that reports only its successful run is',
     '   a selected ledger and cannot be admitted.',
-    '4. Import run-return.zip back into the office. Its manifest binds this package\'s packageId',
+    "4. Import run-return.zip back into the office. Its manifest binds this package's packageId",
     `   and packageHash from ${PACKAGE_MANIFEST}, and the bundle carries ${RETURN_MANIFEST} plus`,
     '   exactly these produced files:',
     ...EXPECTED_RETURN_FILES.map(file => `   - ${file}`),
@@ -147,8 +153,9 @@ export function createRunPackageCodec(options: RunPackageCodecOptions): RunPacka
       // declared object the store cannot produce fails the export loudly rather than shipping a
       // package whose recorded contents are incomplete.
       const bound = new Map<string, { path: string; sha256: string; bytes: number }>();
-      for (const snapshot of (state.snapshots ?? [])
-        .filter(item => item.requestId === link.requestId && item.requestRevision === link.requestRevision))
+      for (const snapshot of (state.snapshots ?? []).filter(
+        item => item.requestId === link.requestId && item.requestRevision === link.requestRevision,
+      ))
         for (const file of [...snapshot.files, ...(snapshot.generated ?? [])])
           bound.set(`${snapshot.id}/${file.path}`, file);
       for (const [key, file] of [...bound.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
@@ -163,16 +170,25 @@ export function createRunPackageCodec(options: RunPackageCodecOptions): RunPacka
       const instructions = packageInstructions(templates);
       add(PACKAGE_INSTRUCTIONS, strToU8(instructions));
 
-      const entries = [...members.entries()].sort((a, b) => a[0].localeCompare(b[0]))
+      const entries = [...members.entries()]
+        .sort((a, b) => a[0].localeCompare(b[0]))
         .map(([entryPath, bytes]) => ({ path: entryPath, sha256: sha256(bytes), bytes: bytes.byteLength }));
       const base: Omit<RunPackageManifest, 'packageId' | 'packageHash' | 'exportedAt'> = {
-        schemaVersion: 1, kind: 'RUN_PACKAGE', projectId: branch.projectId, branchId: branch.id,
-        branchRevision: branch.revision, specId: spec.id, specHash: spec.contentHash,
-        subjectHash: link.subjectHash, requestId: link.requestId, requestRevision: link.requestRevision,
+        schemaVersion: 1,
+        kind: 'RUN_PACKAGE',
+        projectId: branch.projectId,
+        branchId: branch.id,
+        branchRevision: branch.revision,
+        specId: spec.id,
+        specHash: spec.contentHash,
+        subjectHash: link.subjectHash,
+        requestId: link.requestId,
+        requestRevision: link.requestRevision,
         entries,
         environment: {
           runtime: 'COLAB_USER_RUN',
-          detail: 'The user runs this package manually in Google Colab: upload the archive, run the shipped templates against the frozen inputs and return the declared bundle. The office exports and later validates; it never connects to, polls or controls the runtime.',
+          detail:
+            'The user runs this package manually in Google Colab: upload the archive, run the shipped templates against the frozen inputs and return the declared bundle. The office exports and later validates; it never connects to, polls or controls the runtime.',
         },
         expectedReturn: {
           files: [...EXPECTED_RETURN_FILES],
@@ -182,7 +198,10 @@ export function createRunPackageCodec(options: RunPackageCodecOptions): RunPacka
       };
       const packageHash = runPackageHash(base);
       const manifest: RunPackageManifest = {
-        ...base, packageId: runPackageId(packageHash), packageHash, exportedAt: now(),
+        ...base,
+        packageId: runPackageId(packageHash),
+        packageHash,
+        exportedAt: now(),
       };
       // A manifest that fails its own schema must not leave the build.
       runPackageManifestSchema.parse(manifest);
@@ -200,15 +219,19 @@ export function createRunPackageCodec(options: RunPackageCodecOptions): RunPacka
       const { bytes, expect } = input;
       if (bytes.length > MAX_ARCHIVE) throw new Error('Archive exceeds the 64 MiB limit.');
       validateZipHeaders(bytes);
-      const seen = new Set<string>(); let total = 0;
-      const files = unzipSync(bytes, { filter: entry => {
-        if (!safeEntry(entry.name) || seen.has(entry.name.toLowerCase()) || seen.size >= MAX_ENTRIES)
-          throw new Error('Archive contains unsafe, duplicate, or too many entries.');
-        seen.add(entry.name.toLowerCase()); total += entry.originalSize;
-        if (entry.originalSize > MAX_MEMBER || total > MAX_EXPANDED)
-          throw new Error('Archive expands beyond the permitted size.');
-        return true;
-      }});
+      const seen = new Set<string>();
+      let total = 0;
+      const files = unzipSync(bytes, {
+        filter: entry => {
+          if (!safeEntry(entry.name) || seen.has(entry.name.toLowerCase()) || seen.size >= MAX_ENTRIES)
+            throw new Error('Archive contains unsafe, duplicate, or too many entries.');
+          seen.add(entry.name.toLowerCase());
+          total += entry.originalSize;
+          if (entry.originalSize > MAX_MEMBER || total > MAX_EXPANDED)
+            throw new Error('Archive expands beyond the permitted size.');
+          return true;
+        },
+      });
 
       const data = files[RETURN_MANIFEST];
       if (!data || data.length > MAX_RETURN_MANIFEST)
@@ -235,7 +258,9 @@ export function createRunPackageCodec(options: RunPackageCodecOptions): RunPacka
         throw new Error('Returned bundle carries files its manifest does not declare.');
 
       return {
-        manifest, objects, manifestHash,
+        manifest,
+        objects,
+        manifestHash,
         summary: `Bound return admitted for package ${manifest.packageId}: ${manifest.status}, ${objects.length} declared artifact${objects.length === 1 ? '' : 's'} verified byte-for-byte, ${manifest.failedRuns.length} failed attempt${manifest.failedRuns.length === 1 ? '' : 's'} on the ledger. User-run provenance retained; no hosted or independent verification is implied.`,
       };
     },

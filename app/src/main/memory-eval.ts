@@ -20,15 +20,32 @@ export interface MemoryEngineAdapter {
    * One finding plus the corpus links whose `from` is this finding — each link is delivered once,
    * with its source node. Targets may arrive earlier or later in corpus order.
    */
-  ingest(finding: { id: string; kind: string; title: string; body: string },
-    links: { from: string; to: string; kind: string }[]): void;
+  ingest(
+    finding: { id: string; kind: string; title: string; body: string },
+    links: { from: string; to: string; kind: string }[],
+  ): void;
   search(query: string, limit: number): { id: string }[];
 }
 
-export interface EvalFinding { id: string; kind: string; title: string; body: string }
-export interface EvalLink { from: string; to: string; kind: string }
-export interface EvalCorpus { findings: EvalFinding[]; links: EvalLink[] }
-export interface EvalQuery { query: string; expectedIds: string[] }
+export interface EvalFinding {
+  id: string;
+  kind: string;
+  title: string;
+  body: string;
+}
+export interface EvalLink {
+  from: string;
+  to: string;
+  kind: string;
+}
+export interface EvalCorpus {
+  findings: EvalFinding[];
+  links: EvalLink[];
+}
+export interface EvalQuery {
+  query: string;
+  expectedIds: string[];
+}
 
 export interface QueryEval {
   query: string;
@@ -60,13 +77,20 @@ export function officeBaselineAdapter(store: OfficeStore, projectId: string): Me
     name: 'office-baseline',
     ingest(finding) {
       const { finding: created } = store.recordMemoryFinding({
-        projectId, requestId: null, assignmentId: null, kind: finding.kind as FindingKind,
-        title: finding.title, body: finding.body, evidenceRefs: [], createdBy: { surface: 'OFFICE' },
+        projectId,
+        requestId: null,
+        assignmentId: null,
+        kind: finding.kind as FindingKind,
+        title: finding.title,
+        body: finding.body,
+        evidenceRefs: [],
+        createdBy: { surface: 'OFFICE' },
       });
       corpusIds.set(created.id, finding.id);
     },
     search(query, limit) {
-      return store.searchMemoryFindings(projectId, query, limit)
+      return store
+        .searchMemoryFindings(projectId, query, limit)
         .map(item => ({ id: corpusIds.get(item.id) ?? item.id }));
     },
   };
@@ -79,18 +103,78 @@ export function officeBaselineAdapter(store: OfficeStore, projectId: string): Me
 export function fixtureCorpus(): EvalCorpus {
   return {
     findings: [
-      { id: 'mem-obs-1', kind: 'OBSERVATION', title: 'Leakage scan found no look-ahead in momentum run', body: 'All twelve folds passed the leakage audit; no future data reached the feature builder.' },
-      { id: 'mem-obs-2', kind: 'OBSERVATION', title: 'Slippage estimate widened during volatile sessions', body: 'The execution cost proxy rose on high-volatility days inside the replay window.' },
-      { id: 'mem-hyp-1', kind: 'HYPOTHESIS', title: 'Momentum decays faster in small-cap universes', body: 'The decay half-life is hypothesized shorter below the median market-cap cutoff.' },
-      { id: 'mem-hyp-2', kind: 'HYPOTHESIS', title: 'Volatility clustering improves drawdown timing', body: 'Clustered volatility may sharpen entry timing for the drawdown-controlled sleeve.' },
-      { id: 'mem-res-1', kind: 'RESULT', title: 'Baseline backtest beat the equal-weight control', body: 'The primary backtest outperformed the equal-weight benchmark after costs.' },
-      { id: 'mem-res-2', kind: 'RESULT', title: 'Ablation showed the signal survives fee haircut', body: 'Removing the fee haircut assumption still left positive net returns.' },
-      { id: 'mem-def-1', kind: 'DEFECT', title: 'Survivorship bias found in the equity universe', body: 'Delisted tickers were missing from the historical universe snapshot.' },
-      { id: 'mem-def-2', kind: 'DEFECT', title: 'Timezone shift misaligned futures settlement', body: 'Settlement timestamps landed a day late for the Asian session contracts.' },
-      { id: 'mem-dec-1', kind: 'DECISION', title: 'Holdout fold reserved for final validation', body: 'The 2023 fold is sealed until the director signs the preflight gate.' },
-      { id: 'mem-dec-2', kind: 'DECISION', title: 'Equal-weight control kept as the benchmark', body: 'The team kept equal-weighting to stay comparable with the prior study.' },
-      { id: 'mem-not-1', kind: 'NOTE', title: 'Replay window extended to cover the rate shock', body: 'Coverage now includes the rate-shock weeks for stress review.' },
-      { id: 'mem-not-2', kind: 'NOTE', title: 'Data vendor switched dividend adjustment method', body: 'The vendor changelog notes a new total-return adjustment from March onward.' },
+      {
+        id: 'mem-obs-1',
+        kind: 'OBSERVATION',
+        title: 'Leakage scan found no look-ahead in momentum run',
+        body: 'All twelve folds passed the leakage audit; no future data reached the feature builder.',
+      },
+      {
+        id: 'mem-obs-2',
+        kind: 'OBSERVATION',
+        title: 'Slippage estimate widened during volatile sessions',
+        body: 'The execution cost proxy rose on high-volatility days inside the replay window.',
+      },
+      {
+        id: 'mem-hyp-1',
+        kind: 'HYPOTHESIS',
+        title: 'Momentum decays faster in small-cap universes',
+        body: 'The decay half-life is hypothesized shorter below the median market-cap cutoff.',
+      },
+      {
+        id: 'mem-hyp-2',
+        kind: 'HYPOTHESIS',
+        title: 'Volatility clustering improves drawdown timing',
+        body: 'Clustered volatility may sharpen entry timing for the drawdown-controlled sleeve.',
+      },
+      {
+        id: 'mem-res-1',
+        kind: 'RESULT',
+        title: 'Baseline backtest beat the equal-weight control',
+        body: 'The primary backtest outperformed the equal-weight benchmark after costs.',
+      },
+      {
+        id: 'mem-res-2',
+        kind: 'RESULT',
+        title: 'Ablation showed the signal survives fee haircut',
+        body: 'Removing the fee haircut assumption still left positive net returns.',
+      },
+      {
+        id: 'mem-def-1',
+        kind: 'DEFECT',
+        title: 'Survivorship bias found in the equity universe',
+        body: 'Delisted tickers were missing from the historical universe snapshot.',
+      },
+      {
+        id: 'mem-def-2',
+        kind: 'DEFECT',
+        title: 'Timezone shift misaligned futures settlement',
+        body: 'Settlement timestamps landed a day late for the Asian session contracts.',
+      },
+      {
+        id: 'mem-dec-1',
+        kind: 'DECISION',
+        title: 'Holdout fold reserved for final validation',
+        body: 'The 2023 fold is sealed until the director signs the preflight gate.',
+      },
+      {
+        id: 'mem-dec-2',
+        kind: 'DECISION',
+        title: 'Equal-weight control kept as the benchmark',
+        body: 'The team kept equal-weighting to stay comparable with the prior study.',
+      },
+      {
+        id: 'mem-not-1',
+        kind: 'NOTE',
+        title: 'Replay window extended to cover the rate shock',
+        body: 'Coverage now includes the rate-shock weeks for stress review.',
+      },
+      {
+        id: 'mem-not-2',
+        kind: 'NOTE',
+        title: 'Data vendor switched dividend adjustment method',
+        body: 'The vendor changelog notes a new total-return adjustment from March onward.',
+      },
     ],
     links: [
       { from: 'mem-res-1', to: 'mem-hyp-1', kind: 'SUPPORTS' },
@@ -131,9 +215,16 @@ export function fixtureQueries(): EvalQuery[] {
  * expected hit, and recall within the top five. A query declaring no expected ids is excluded from
  * the averages — it measures noise, not recall.
  */
-export function evaluateAdapter(adapter: MemoryEngineAdapter, corpus: EvalCorpus, queries: EvalQuery[]): AdapterEvalReport {
+export function evaluateAdapter(
+  adapter: MemoryEngineAdapter,
+  corpus: EvalCorpus,
+  queries: EvalQuery[],
+): AdapterEvalReport {
   for (const finding of corpus.findings)
-    adapter.ingest(finding, corpus.links.filter(link => link.from === finding.id));
+    adapter.ingest(
+      finding,
+      corpus.links.filter(link => link.from === finding.id),
+    );
   const perQuery: QueryEval[] = queries.map(({ query, expectedIds }) => {
     const hits = adapter.search(query, EVAL_LIMIT).map(hit => hit.id);
     const hitRanks = expectedIds.map(id => {
@@ -141,7 +232,9 @@ export function evaluateAdapter(adapter: MemoryEngineAdapter, corpus: EvalCorpus
       return { id, rank: index >= 0 ? index + 1 : null };
     });
     const bestRank = hitRanks.reduce<number | null>(
-      (best, item) => item.rank !== null && (best === null || item.rank < best) ? item.rank : best, null);
+      (best, item) => (item.rank !== null && (best === null || item.rank < best) ? item.rank : best),
+      null,
+    );
     const recallAt5 = expectedIds.length
       ? expectedIds.filter(id => hits.slice(0, 5).includes(id)).length / expectedIds.length
       : null;
@@ -149,9 +242,9 @@ export function evaluateAdapter(adapter: MemoryEngineAdapter, corpus: EvalCorpus
   });
   const scored = perQuery.filter(item => item.expectedIds.length > 0);
   const meanReciprocalRank = scored.length
-    ? scored.reduce((sum, item) => sum + item.reciprocalRank, 0) / scored.length : 0;
-  const recallAt5 = scored.length
-    ? scored.reduce((sum, item) => sum + (item.recallAt5 ?? 0), 0) / scored.length : 0;
+    ? scored.reduce((sum, item) => sum + item.reciprocalRank, 0) / scored.length
+    : 0;
+  const recallAt5 = scored.length ? scored.reduce((sum, item) => sum + (item.recallAt5 ?? 0), 0) / scored.length : 0;
   return { engine: adapter.name, queries: perQuery, meanReciprocalRank, recallAt5 };
 }
 
@@ -159,18 +252,27 @@ export function evaluateAdapter(adapter: MemoryEngineAdapter, corpus: EvalCorpus
  * Loads a caller-supplied adapter module. The module must export `create()`; anything that throws,
  * fails to load, or returns a malformed adapter reports its reason rather than failing the run.
  */
-export async function loadExternalAdapter(specifier: string): Promise<{ adapter: MemoryEngineAdapter } | { unavailable: string }> {
+export async function loadExternalAdapter(
+  specifier: string,
+): Promise<{ adapter: MemoryEngineAdapter } | { unavailable: string }> {
   let loaded: Record<string, unknown>;
-  try { loaded = await import(pathToFileURL(resolve(specifier)).href); }
-  catch (error) { return { unavailable: `The adapter module could not be loaded: ${error instanceof Error ? error.message : String(error)}` }; }
-  if (typeof loaded.create !== 'function')
-    return { unavailable: 'The adapter module does not export create().' };
+  try {
+    loaded = await import(pathToFileURL(resolve(specifier)).href);
+  } catch (error) {
+    return {
+      unavailable: `The adapter module could not be loaded: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+  if (typeof loaded.create !== 'function') return { unavailable: 'The adapter module does not export create().' };
   try {
     const adapter = await (loaded.create as () => unknown)();
-    if (!adapter || typeof adapter !== 'object'
-      || typeof (adapter as MemoryEngineAdapter).name !== 'string'
-      || typeof (adapter as MemoryEngineAdapter).ingest !== 'function'
-      || typeof (adapter as MemoryEngineAdapter).search !== 'function')
+    if (
+      !adapter ||
+      typeof adapter !== 'object' ||
+      typeof (adapter as MemoryEngineAdapter).name !== 'string' ||
+      typeof (adapter as MemoryEngineAdapter).ingest !== 'function' ||
+      typeof (adapter as MemoryEngineAdapter).search !== 'function'
+    )
       return { unavailable: 'create() did not return a memory engine adapter (name, ingest and search are required).' };
     return { adapter: adapter as MemoryEngineAdapter };
   } catch (error) {

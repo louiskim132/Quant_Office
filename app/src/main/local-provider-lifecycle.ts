@@ -29,12 +29,18 @@ export interface ProviderSessionBinding {
 }
 
 export const INSPECT_STATUSES = ['FOUND', 'MISSING', 'BUSY', 'UNSUPPORTED', 'UNKNOWN'] as const;
-export type InspectStatus = typeof INSPECT_STATUSES[number];
-export interface InspectOutcome { status: InspectStatus; detail: string }
+export type InspectStatus = (typeof INSPECT_STATUSES)[number];
+export interface InspectOutcome {
+  status: InspectStatus;
+  detail: string;
+}
 
 export const ARCHIVE_STATUSES = ['ARCHIVED', 'ALREADY_ARCHIVED', 'BUSY', 'UNSUPPORTED', 'UNKNOWN'] as const;
-export type ArchiveStatus = typeof ARCHIVE_STATUSES[number];
-export interface ArchiveOutcome { status: ArchiveStatus; detail: string }
+export type ArchiveStatus = (typeof ARCHIVE_STATUSES)[number];
+export interface ArchiveOutcome {
+  status: ArchiveStatus;
+  detail: string;
+}
 
 export interface ProviderLifecycle {
   inspect(binding: ProviderSessionBinding): Promise<InspectOutcome>;
@@ -62,14 +68,24 @@ const NOT_FOUND_WORDING = /not found|no such|does not exist|doesn't exist|unknow
 
 /** `devin rm <id> --force` against the resolved executable: arg array, bounded output, no shell. */
 export function createDevinRmRunner(executable: string): DevinRmRunner {
-  return (sessionId) => new Promise((resolve) => {
-    execFile(executable, ['rm', sessionId, '--force'], { timeout: 30000, windowsHide: true, maxBuffer: 256 * 1024 },
-      (error, stdout, stderr) => {
-        if (!error) { resolve({ ok: true, report: String(stdout).trim().slice(0, 400) || 'devin rm reported success' }); return; }
-        const report = [stderr, stdout, error.message].map(text => String(text ?? '').trim()).find(text => text) ?? 'unknown failure';
-        resolve({ ok: false, report: report.slice(0, 400) });
-      });
-  });
+  return sessionId =>
+    new Promise(resolve => {
+      execFile(
+        executable,
+        ['rm', sessionId, '--force'],
+        { timeout: 30000, windowsHide: true, maxBuffer: 256 * 1024 },
+        (error, stdout, stderr) => {
+          if (!error) {
+            resolve({ ok: true, report: String(stdout).trim().slice(0, 400) || 'devin rm reported success' });
+            return;
+          }
+          const report =
+            [stderr, stdout, error.message].map(text => String(text ?? '').trim()).find(text => text) ??
+            'unknown failure';
+          resolve({ ok: false, report: report.slice(0, 400) });
+        },
+      );
+    });
 }
 
 /** The production wiring: real record roots and the real devin.exe, resolved exactly once here. */
@@ -88,66 +104,137 @@ export function createProviderLifecycle(deps: ProviderLifecycleDeps): ProviderLi
   const devinRows = deps.devinRows ?? findDevinSessionRows;
 
   function inspectDevin(sessionId: string): InspectOutcome {
-    if (!deps.sessionsDb) return { status: 'UNKNOWN', detail: 'No APPDATA is set; the Devin sessions store cannot be located, so the binding cannot be inspected.' };
-    if (!existsSync(deps.sessionsDb)) return { status: 'MISSING', detail: `No Devin sessions store at ${deps.sessionsDb}; no provider-side session record can exist.` };
+    if (!deps.sessionsDb)
+      return {
+        status: 'UNKNOWN',
+        detail: 'No APPDATA is set; the Devin sessions store cannot be located, so the binding cannot be inspected.',
+      };
+    if (!existsSync(deps.sessionsDb))
+      return {
+        status: 'MISSING',
+        detail: `No Devin sessions store at ${deps.sessionsDb}; no provider-side session record can exist.`,
+      };
     const { records, notes } = devinRows(deps.sessionsDb, sessionId);
     if (notes.length > 0) {
       const detail = notes.join(' ');
       return { status: BUSY_WORDING.test(detail) ? 'BUSY' : 'UNKNOWN', detail };
     }
-    if (records.length === 0) return { status: 'MISSING', detail: `No sessions.db row carries the exact session id ${JSON.stringify(sessionId)}.` };
-    if (records.length > 1) return { status: 'UNKNOWN', detail: `${records.length} sessions.db rows carry the exact session id ${JSON.stringify(sessionId)}; the binding is ambiguous and nothing was distinguished.` };
+    if (records.length === 0)
+      return {
+        status: 'MISSING',
+        detail: `No sessions.db row carries the exact session id ${JSON.stringify(sessionId)}.`,
+      };
+    if (records.length > 1)
+      return {
+        status: 'UNKNOWN',
+        detail: `${records.length} sessions.db rows carry the exact session id ${JSON.stringify(sessionId)}; the binding is ambiguous and nothing was distinguished.`,
+      };
     const record = records[0];
-    return { status: 'FOUND', detail: `sessions.db row ${record.id} (${record.detail || 'untitled'}) present at ${record.location}.` };
+    return {
+      status: 'FOUND',
+      detail: `sessions.db row ${record.id} (${record.detail || 'untitled'}) present at ${record.location}.`,
+    };
   }
 
   function inspectClaude(projectKey: string): InspectOutcome {
-    if (!deps.claudeProjects) return { status: 'UNKNOWN', detail: 'No user profile directory is set; the Claude Code projects store cannot be located, so the binding cannot be inspected.' };
-    if (!existsSync(deps.claudeProjects)) return { status: 'MISSING', detail: `No Claude Code projects store at ${deps.claudeProjects}; no provider-side project record can exist.` };
+    if (!deps.claudeProjects)
+      return {
+        status: 'UNKNOWN',
+        detail:
+          'No user profile directory is set; the Claude Code projects store cannot be located, so the binding cannot be inspected.',
+      };
+    if (!existsSync(deps.claudeProjects))
+      return {
+        status: 'MISSING',
+        detail: `No Claude Code projects store at ${deps.claudeProjects}; no provider-side project record can exist.`,
+      };
     const { records, notes } = findClaudeProject(deps.claudeProjects, projectKey);
     if (notes.length > 0) return { status: 'UNKNOWN', detail: notes.join(' ') };
-    if (records.length === 0) return { status: 'MISSING', detail: `No project directory under ${deps.claudeProjects} carries the exact key ${JSON.stringify(projectKey)}.` };
-    if (records.length > 1) return { status: 'UNKNOWN', detail: `${records.length} project directories match the key ${JSON.stringify(projectKey)} (${records.map(r => r.id).join(', ')}); the binding is ambiguous and nothing was distinguished.` };
+    if (records.length === 0)
+      return {
+        status: 'MISSING',
+        detail: `No project directory under ${deps.claudeProjects} carries the exact key ${JSON.stringify(projectKey)}.`,
+      };
+    if (records.length > 1)
+      return {
+        status: 'UNKNOWN',
+        detail: `${records.length} project directories match the key ${JSON.stringify(projectKey)} (${records.map(r => r.id).join(', ')}); the binding is ambiguous and nothing was distinguished.`,
+      };
     return { status: 'FOUND', detail: `Claude project ${records[0].id} present at ${records[0].location}.` };
   }
 
   function inspectCodex(fileName: string): InspectOutcome {
-    if (!deps.codexHome) return { status: 'UNKNOWN', detail: 'No Codex home is set; the sessions store cannot be located, so the binding cannot be inspected.' };
-    if (!existsSync(deps.codexHome)) return { status: 'MISSING', detail: `No Codex sessions store at ${deps.codexHome}; no provider-side rollout can exist.` };
+    if (!deps.codexHome)
+      return {
+        status: 'UNKNOWN',
+        detail: 'No Codex home is set; the sessions store cannot be located, so the binding cannot be inspected.',
+      };
+    if (!existsSync(deps.codexHome))
+      return {
+        status: 'MISSING',
+        detail: `No Codex sessions store at ${deps.codexHome}; no provider-side rollout can exist.`,
+      };
     const { records, notes } = findCodexRollout(deps.codexHome, fileName);
     if (notes.length > 0) return { status: 'UNKNOWN', detail: notes.join(' ') };
-    if (records.length === 0) return { status: 'MISSING', detail: `No rollout file named ${JSON.stringify(fileName)} under ${deps.codexHome} sessions/ or archived_sessions/.` };
-    if (records.length > 1) return { status: 'UNKNOWN', detail: `${records.length} rollout files carry the name ${JSON.stringify(fileName)} (${records.map(r => r.location).join(', ')}); the binding is ambiguous and nothing was distinguished.` };
+    if (records.length === 0)
+      return {
+        status: 'MISSING',
+        detail: `No rollout file named ${JSON.stringify(fileName)} under ${deps.codexHome} sessions/ or archived_sessions/.`,
+      };
+    if (records.length > 1)
+      return {
+        status: 'UNKNOWN',
+        detail: `${records.length} rollout files carry the name ${JSON.stringify(fileName)} (${records.map(r => r.location).join(', ')}); the binding is ambiguous and nothing was distinguished.`,
+      };
     return { status: 'FOUND', detail: `Codex rollout ${records[0].id} present at ${records[0].location}.` };
   }
 
   async function archiveDevin(sessionId: string, operationId: string): Promise<ArchiveOutcome> {
     const runner = deps.devinRm;
-    if (!runner) return { status: 'UNKNOWN', detail: `operation ${operationId}: devin.exe could not be located; the provider-side record was not touched.` };
+    if (!runner)
+      return {
+        status: 'UNKNOWN',
+        detail: `operation ${operationId}: devin.exe could not be located; the provider-side record was not touched.`,
+      };
     const { ok, report } = await runner(sessionId);
     if (ok) return { status: 'ARCHIVED', detail: `operation ${operationId}: ${report}` };
     // Order matters: a live session is the dangerous misclassification, so busy wording wins over
     // not-found wording if a tool report ever matched both.
-    if (BUSY_WORDING.test(report)) return { status: 'BUSY', detail: `operation ${operationId}: devin rm refused — ${report}` };
-    if (NOT_FOUND_WORDING.test(report)) return { status: 'ALREADY_ARCHIVED', detail: `operation ${operationId}: devin rm reported no such session (${report}); the provider-side record is already absent — archived earlier or never present.` };
+    if (BUSY_WORDING.test(report))
+      return { status: 'BUSY', detail: `operation ${operationId}: devin rm refused — ${report}` };
+    if (NOT_FOUND_WORDING.test(report))
+      return {
+        status: 'ALREADY_ARCHIVED',
+        detail: `operation ${operationId}: devin rm reported no such session (${report}); the provider-side record is already absent — archived earlier or never present.`,
+      };
     return { status: 'UNKNOWN', detail: `operation ${operationId}: devin rm failed — ${report}` };
   }
 
   return {
     async inspect(binding) {
       switch (binding.provider) {
-        case 'devin': return inspectDevin(binding.providerSessionId);
-        case 'claude': return inspectClaude(binding.providerSessionId);
-        case 'openai': return inspectCodex(binding.providerSessionId);
+        case 'devin':
+          return inspectDevin(binding.providerSessionId);
+        case 'claude':
+          return inspectClaude(binding.providerSessionId);
+        case 'openai':
+          return inspectCodex(binding.providerSessionId);
       }
     },
     async archive(binding, operationId) {
       switch (binding.provider) {
-        case 'devin': return archiveDevin(binding.providerSessionId, operationId);
+        case 'devin':
+          return archiveDevin(binding.providerSessionId, operationId);
         case 'claude':
-          return { status: 'UNSUPPORTED', detail: `operation ${operationId}: Claude Code carries no supported per-session archive verb in the installed CLI; provider history at ${deps.claudeProjects ?? '~/.claude/projects'} is preserved. Archiving would require an official claude archive/remove command; the office never deletes project directories.` };
+          return {
+            status: 'UNSUPPORTED',
+            detail: `operation ${operationId}: Claude Code carries no supported per-session archive verb in the installed CLI; provider history at ${deps.claudeProjects ?? '~/.claude/projects'} is preserved. Archiving would require an official claude archive/remove command; the office never deletes project directories.`,
+          };
         case 'openai':
-          return { status: 'UNSUPPORTED', detail: `operation ${operationId}: Codex carries no supported per-session archive verb in the installed CLI; provider history under ${deps.codexHome ?? '~/.codex'} is preserved. Archiving would require an official codex archive/remove command; the office never deletes rollout files.` };
+          return {
+            status: 'UNSUPPORTED',
+            detail: `operation ${operationId}: Codex carries no supported per-session archive verb in the installed CLI; provider history under ${deps.codexHome ?? '~/.codex'} is preserved. Archiving would require an official codex archive/remove command; the office never deletes rollout files.`,
+          };
       }
     },
   };

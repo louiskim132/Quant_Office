@@ -49,7 +49,10 @@ test('an explicitly chosen plan id lands on the command verbatim', () => {
 
 test('a stale plan value on a non-analysis request is refused by the workType gate', () => {
   // The field only renders for RESULT_ANALYSIS, but a stale or crafted form still can't bind it.
-  const payload = requestCreatePayload(form({ ...base, workType: 'PLANNING', analysisOfRequestId: 'req-96f3deed' }), 'SINGLE');
+  const payload = requestCreatePayload(
+    form({ ...base, workType: 'PLANNING', analysisOfRequestId: 'req-96f3deed' }),
+    'SINGLE',
+  );
   assert.ok(payload.type === 'request.create');
   assert.equal(payload.analysisOfRequestId, undefined);
 });
@@ -67,7 +70,14 @@ test('mode follows the work type — OTHER keeps the grouping, the rest are SING
 
 test('the remaining fields are the form values, trimmed where the handler trimmed', () => {
   const payload = requestCreatePayload(
-    form({ ...base, workType: 'OTHER', name: '  Padded name  ', leadAgentId: 'agent-1', participantIds: ['agent-1', 'agent-2'], acceptanceCriteria: 'sharpe > 0' }),
+    form({
+      ...base,
+      workType: 'OTHER',
+      name: '  Padded name  ',
+      leadAgentId: 'agent-1',
+      participantIds: ['agent-1', 'agent-2'],
+      acceptanceCriteria: 'sharpe > 0',
+    }),
     'GROUP',
   );
   assert.ok(payload.type === 'request.create');

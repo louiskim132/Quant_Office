@@ -6,9 +6,26 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { removeTreeSync } from '../src/main/fsx';
 import { buildProviderPayload, type SubmitContext } from '../src/main/controller';
-import { AGENTS_FILE, CANCEL_FILE, CONTRACT_FILE, INPUTS_DIR, LocalMailboxAdapter, PACKET_FILE, RESULT_FILE, RESULT_OPTIONAL_KEYS, RESULT_REQUIRED_KEYS, RESULT_STATES } from '../src/main/local-session';
+import {
+  AGENTS_FILE,
+  CANCEL_FILE,
+  CONTRACT_FILE,
+  INPUTS_DIR,
+  LocalMailboxAdapter,
+  PACKET_FILE,
+  RESULT_FILE,
+  RESULT_OPTIONAL_KEYS,
+  RESULT_REQUIRED_KEYS,
+  RESULT_STATES,
+} from '../src/main/local-session';
 import { CLAUDE_FILE, PACKET_HASH_FILE, PACKET_READY_FILE } from '../src/main/local-packet';
-import { MEMORY_DIGEST_FILE, cancelRequestV1Schema, localPacketV2Schema, memoryDigestSchema, type LocalSessionRecord } from '../src/shared/local-session';
+import {
+  MEMORY_DIGEST_FILE,
+  cancelRequestV1Schema,
+  localPacketV2Schema,
+  memoryDigestSchema,
+  type LocalSessionRecord,
+} from '../src/shared/local-session';
 import type { Assignment, InputSnapshot, ProviderJob } from '../src/shared/types';
 
 const at = (minutes: number) => new Date(Date.UTC(2026, 8, 8, 10, 0, 0) + minutes * 60000).toISOString();
@@ -23,40 +40,99 @@ function fixture(t: test.TestContext) {
   writeFileSync(path.join(staging, 'data', 'input.csv'), 'a,b\n1,2\n');
   writeFileSync(path.join(staging, 'notes.txt'), 'fixture notes');
   const snapshot: InputSnapshot = {
-    id: randomUUID(), projectId: randomUUID(), requestId: randomUUID(), locationRevision: 0, requestRevision: 1,
+    id: randomUUID(),
+    projectId: randomUUID(),
+    requestId: randomUUID(),
+    locationRevision: 0,
+    requestRevision: 1,
     route: 'SELECTED_FILES_GIT_SNAPSHOT',
     files: [
       { path: 'data/input.csv', bytes: Buffer.byteLength('a,b\n1,2\n'), sha256: sha('a,b\n1,2\n') },
       { path: 'notes.txt', bytes: Buffer.byteLength('fixture notes'), sha256: sha('fixture notes') },
     ],
     totalBytes: Buffer.byteLength('a,b\n1,2\n') + Buffer.byteLength('fixture notes'),
-    manifestHash: sha('manifest'), stagingCommit: 'fixture-commit', stagingPath: staging,
-    warnings: [], provenance: 'OFFICE_STAGED', createdAt: at(0),
+    manifestHash: sha('manifest'),
+    stagingCommit: 'fixture-commit',
+    stagingPath: staging,
+    warnings: [],
+    provenance: 'OFFICE_STAGED',
+    createdAt: at(0),
   };
   const sessions = path.join(root, 'sessions');
-  const adapter = new LocalMailboxAdapter(() => sessions, () => at(1));
+  const adapter = new LocalMailboxAdapter(
+    () => sessions,
+    () => at(1),
+  );
   const assignment: Assignment = {
-    id: randomUUID(), projectId: snapshot.projectId, requestId: snapshot.requestId!, requestRevision: 1,
-    agentId: randomUUID(), agentRevision: 0, connectionId: randomUUID(), capabilitySnapshotId: randomUUID(),
-    snapshotId: snapshot.id, route: 'LOCAL_MAILBOX', requestedModel: 'devin-local', resolvedModel: '',
-    requestedEffort: 'default', appliedEffort: 'UNVERIFIED', delegation: false, objectiveHash: sha('objective'),
+    id: randomUUID(),
+    projectId: snapshot.projectId,
+    requestId: snapshot.requestId!,
+    requestRevision: 1,
+    agentId: randomUUID(),
+    agentRevision: 0,
+    connectionId: randomUUID(),
+    capabilitySnapshotId: randomUUID(),
+    snapshotId: snapshot.id,
+    route: 'LOCAL_MAILBOX',
+    requestedModel: 'devin-local',
+    resolvedModel: '',
+    requestedEffort: 'default',
+    appliedEffort: 'UNVERIFIED',
+    delegation: false,
+    objectiveHash: sha('objective'),
     createdAt: at(0),
   };
   const context: SubmitContext = {
-    assignment, snapshot, objective: 'Summarize the fixture input.', requestName: 'Tiny local task',
-    payload: buildProviderPayload({ requestName: 'Tiny local task', objective: 'Summarize the fixture input.', acceptanceCriteria: 'A summary file.', instructions: '', model: 'devin-local', effort: 'default', delegation: false }),
+    assignment,
+    snapshot,
+    objective: 'Summarize the fixture input.',
+    requestName: 'Tiny local task',
+    payload: buildProviderPayload({
+      requestName: 'Tiny local task',
+      objective: 'Summarize the fixture input.',
+      acceptanceCriteria: 'A summary file.',
+      instructions: '',
+      model: 'devin-local',
+      effort: 'default',
+      delegation: false,
+    }),
     jobId: randomUUID(),
   };
   const job = (externalId: string): ProviderJob => ({
-    id: randomUUID(), assignmentId: assignment.id, projectId: assignment.projectId, requestId: assignment.requestId,
-    provider: 'devin', route: 'LOCAL_MAILBOX', state: 'ACCEPTED', evidence: 'PROVIDER_REPORTED', detail: '',
-    externalId, externalUrl: '', outputs: [], revision: 0, createdAt: at(0), updatedAt: at(0), dispatchedAt: at(0), settledAt: '',
+    id: randomUUID(),
+    assignmentId: assignment.id,
+    projectId: assignment.projectId,
+    requestId: assignment.requestId,
+    provider: 'devin',
+    route: 'LOCAL_MAILBOX',
+    state: 'ACCEPTED',
+    evidence: 'PROVIDER_REPORTED',
+    detail: '',
+    externalId,
+    externalUrl: '',
+    outputs: [],
+    revision: 0,
+    createdAt: at(0),
+    updatedAt: at(0),
+    dispatchedAt: at(0),
+    settledAt: '',
   });
   return { root, staging, sessions, snapshot, adapter, assignment, context, job };
 }
 
 /** Simulates the user-launched session: write the declared output bytes, then the result receipt. */
-function report(dir: string, result: { state: string; detail: string; outputs: { path: string; sha256: string; bytes: number }[]; appliedModel?: string; appliedEffort?: string; delegation?: boolean }, files: Record<string, string>) {
+function report(
+  dir: string,
+  result: {
+    state: string;
+    detail: string;
+    outputs: { path: string; sha256: string; bytes: number }[];
+    appliedModel?: string;
+    appliedEffort?: string;
+    delegation?: boolean;
+  },
+  files: Record<string, string>,
+) {
   for (const [name, text] of Object.entries(files)) {
     const target = path.join(dir, name);
     mkdirSync(path.dirname(target), { recursive: true });
@@ -68,8 +144,11 @@ function report(dir: string, result: { state: string; detail: string; outputs: {
 test('the adapter declares the LOCAL_MAILBOX route and carries every local provider', async t => {
   const f = fixture(t);
   assert.equal(f.adapter.route, 'LOCAL_MAILBOX');
-  assert.deepEqual([...f.adapter.providers!].sort(), ['claude', 'devin', 'openai'],
-    'the packet contract is provider-agnostic — the user runs whichever CLI on the directory');
+  assert.deepEqual(
+    [...f.adapter.providers!].sort(),
+    ['claude', 'devin', 'openai'],
+    'the packet contract is provider-agnostic — the user runs whichever CLI on the directory',
+  );
 });
 
 test('a non-devin job writes a packet and round-trips a verified result with office-local evidence', async t => {
@@ -79,13 +158,30 @@ test('a non-devin job writes a packet and round-trips a verified result with off
   assert.ok(existsSync(path.join(dir, PACKET_FILE)), 'the packet directory is identical for a non-devin assignment');
   // The job's provider field is a durable record, never a branch the mailbox consults.
   const claudeJob: ProviderJob = { ...f.job(submitted.externalId), provider: 'claude' };
-  report(dir, { state: 'COMPLETED', detail: 'Claude session finished the bounded work.', outputs: [{ path: 'out.txt', sha256: sha('result bytes'), bytes: Buffer.byteLength('result bytes') }] }, { 'out.txt': 'result bytes' });
+  report(
+    dir,
+    {
+      state: 'COMPLETED',
+      detail: 'Claude session finished the bounded work.',
+      outputs: [{ path: 'out.txt', sha256: sha('result bytes'), bytes: Buffer.byteLength('result bytes') }],
+    },
+    { 'out.txt': 'result bytes' },
+  );
   const observed = await f.adapter.observe(claudeJob);
   assert.equal(observed.state, 'COMPLETED');
   assert.equal(observed.provenance, 'PROVIDER_REPORTED');
   const evidence = f.adapter.observeEvidence(claudeJob, observed);
-  assert.ok(evidence.length > 0 && evidence.every(item => item.evidence === 'OBSERVED' && item.route === 'LOCAL_MAILBOX' && item.environment === 'LOCAL_MACHINE' && item.source === 'office-local-mailbox@1'),
-    'evidence stays office-observed whichever provider ran the session');
+  assert.ok(
+    evidence.length > 0 &&
+      evidence.every(
+        item =>
+          item.evidence === 'OBSERVED' &&
+          item.route === 'LOCAL_MAILBOX' &&
+          item.environment === 'LOCAL_MACHINE' &&
+          item.source === 'office-local-mailbox@1',
+      ),
+    'evidence stays office-observed whichever provider ran the session',
+  );
 });
 
 test('submit writes a hash-manifested packet under the sessions root', async t => {
@@ -106,7 +202,10 @@ test('submit writes a hash-manifested packet under the sessions root', async t =
     const bytes = readFileSync(path.join(dir, file.path));
     assert.equal(createHash('sha256').update(bytes).digest('hex'), file.sha256);
     assert.equal(bytes.byteLength, file.bytes);
-    assert.equal(readFileSync(path.join(f.staging, file.path.slice(INPUTS_DIR.length + 1)), 'utf8'), bytes.toString('utf8'));
+    assert.equal(
+      readFileSync(path.join(f.staging, file.path.slice(INPUTS_DIR.length + 1)), 'utf8'),
+      bytes.toString('utf8'),
+    );
   }
   assert.match(result.detail, /awaits a local session/);
 });
@@ -158,7 +257,10 @@ test('an oversized result receipt is refused, not parsed', async t => {
   const f = fixture(t);
   const { externalId } = await f.adapter.submit(f.context);
   const dir = path.join(f.sessions, externalId);
-  writeFileSync(path.join(dir, RESULT_FILE), JSON.stringify({ state: 'COMPLETED', detail: 'x'.repeat(4 * 1024 * 1024), outputs: [] }));
+  writeFileSync(
+    path.join(dir, RESULT_FILE),
+    JSON.stringify({ state: 'COMPLETED', detail: 'x'.repeat(4 * 1024 * 1024), outputs: [] }),
+  );
   const result = await f.adapter.observe(f.job(externalId));
   assert.equal(result.state, 'UNKNOWN');
   assert.equal(result.provenance, 'OFFICE_LOCAL');
@@ -199,8 +301,16 @@ test('a well-formed result with matching artifact bytes surfaces the declared ou
   const f = fixture(t);
   const { externalId } = await f.adapter.submit(f.context);
   const dir = path.join(f.sessions, externalId);
-  const output = { path: 'out/summary.json', sha256: sha('{"summary":"done"}'), bytes: Buffer.byteLength('{"summary":"done"}') };
-  report(dir, { state: 'COMPLETED', detail: 'The local session finished.', outputs: [output] }, { 'out/summary.json': '{"summary":"done"}' });
+  const output = {
+    path: 'out/summary.json',
+    sha256: sha('{"summary":"done"}'),
+    bytes: Buffer.byteLength('{"summary":"done"}'),
+  };
+  report(
+    dir,
+    { state: 'COMPLETED', detail: 'The local session finished.', outputs: [output] },
+    { 'out/summary.json': '{"summary":"done"}' },
+  );
   const result = await f.adapter.observe(f.job(externalId));
   assert.equal(result.state, 'COMPLETED');
   assert.equal(result.detail, 'The local session finished.');
@@ -211,8 +321,16 @@ test('a tampered declared artifact never becomes a reported output', async t => 
   const f = fixture(t);
   const { externalId } = await f.adapter.submit(f.context);
   const dir = path.join(f.sessions, externalId);
-  const forged = { path: 'out/summary.json', sha256: sha('{"summary":"done"}'), bytes: Buffer.byteLength('{"summary":"altered"}') };
-  report(dir, { state: 'COMPLETED', detail: 'Claimed.', outputs: [forged] }, { 'out/summary.json': '{"summary":"altered"}' });
+  const forged = {
+    path: 'out/summary.json',
+    sha256: sha('{"summary":"done"}'),
+    bytes: Buffer.byteLength('{"summary":"altered"}'),
+  };
+  report(
+    dir,
+    { state: 'COMPLETED', detail: 'Claimed.', outputs: [forged] },
+    { 'out/summary.json': '{"summary":"altered"}' },
+  );
   const result = await f.adapter.observe(f.job(externalId));
   assert.equal(result.state, 'UNKNOWN');
   assert.equal(result.provenance, 'OFFICE_LOCAL');
@@ -224,7 +342,11 @@ test('a declared output missing from the session directory is a defect, not a co
   const f = fixture(t);
   const { externalId } = await f.adapter.submit(f.context);
   const dir = path.join(f.sessions, externalId);
-  report(dir, { state: 'COMPLETED', detail: 'Claimed.', outputs: [{ path: 'out/ghost.json', sha256: sha('x'), bytes: 1 }] }, {});
+  report(
+    dir,
+    { state: 'COMPLETED', detail: 'Claimed.', outputs: [{ path: 'out/ghost.json', sha256: sha('x'), bytes: 1 }] },
+    {},
+  );
   const result = await f.adapter.observe(f.job(externalId));
   assert.equal(result.state, 'UNKNOWN');
   assert.equal(result.provenance, 'OFFICE_LOCAL');
@@ -239,11 +361,22 @@ test('malformed and mis-shaped results report UNKNOWN naming the defect', async 
   let result = await f.adapter.observe(f.job(externalId));
   assert.equal(result.state, 'UNKNOWN');
   assert.match(result.detail, /not valid JSON/);
-  writeFileSync(path.join(dir, RESULT_FILE), JSON.stringify({ state: 'COMPLETED', detail: 'No inventory.', outputs: [{ path: 'x', sha256: sha('x'), bytes: 1 }], extra: true }));
+  writeFileSync(
+    path.join(dir, RESULT_FILE),
+    JSON.stringify({
+      state: 'COMPLETED',
+      detail: 'No inventory.',
+      outputs: [{ path: 'x', sha256: sha('x'), bytes: 1 }],
+      extra: true,
+    }),
+  );
   result = await f.adapter.observe(f.job(externalId));
   assert.equal(result.state, 'UNKNOWN');
   assert.match(result.detail, /exactly state, detail and outputs/);
-  writeFileSync(path.join(dir, RESULT_FILE), JSON.stringify({ state: 'SUCCEEDED', detail: 'Invented state.', outputs: [] }));
+  writeFileSync(
+    path.join(dir, RESULT_FILE),
+    JSON.stringify({ state: 'SUCCEEDED', detail: 'Invented state.', outputs: [] }),
+  );
   result = await f.adapter.observe(f.job(externalId));
   assert.equal(result.state, 'UNKNOWN');
   assert.match(result.detail, /not one of/);
@@ -253,7 +386,14 @@ test('an unsafe declared output path is refused before it is ever read', async t
   const f = fixture(t);
   const { externalId } = await f.adapter.submit(f.context);
   const dir = path.join(f.sessions, externalId);
-  writeFileSync(path.join(dir, RESULT_FILE), JSON.stringify({ state: 'COMPLETED', detail: 'Traversal.', outputs: [{ path: '../packet.json', sha256: sha('x'), bytes: 1 }] }));
+  writeFileSync(
+    path.join(dir, RESULT_FILE),
+    JSON.stringify({
+      state: 'COMPLETED',
+      detail: 'Traversal.',
+      outputs: [{ path: '../packet.json', sha256: sha('x'), bytes: 1 }],
+    }),
+  );
   const result = await f.adapter.observe(f.job(externalId));
   assert.equal(result.state, 'UNKNOWN');
   assert.equal(result.provenance, 'OFFICE_LOCAL');
@@ -292,8 +432,23 @@ test('a session self-report of applied model, effort and delegation surfaces thr
   const f = fixture(t);
   const { externalId } = await f.adapter.submit(f.context);
   const dir = path.join(f.sessions, externalId);
-  const output = { path: 'out/summary.json', sha256: sha('{"summary":"done"}'), bytes: Buffer.byteLength('{"summary":"done"}') };
-  report(dir, { state: 'COMPLETED', detail: 'The local session finished.', outputs: [output], appliedModel: 'devin-local-7', appliedEffort: 'high', delegation: false }, { 'out/summary.json': '{"summary":"done"}' });
+  const output = {
+    path: 'out/summary.json',
+    sha256: sha('{"summary":"done"}'),
+    bytes: Buffer.byteLength('{"summary":"done"}'),
+  };
+  report(
+    dir,
+    {
+      state: 'COMPLETED',
+      detail: 'The local session finished.',
+      outputs: [output],
+      appliedModel: 'devin-local-7',
+      appliedEffort: 'high',
+      delegation: false,
+    },
+    { 'out/summary.json': '{"summary":"done"}' },
+  );
   const result = await f.adapter.observe(f.job(externalId));
   assert.equal(result.state, 'COMPLETED');
   assert.equal(result.provenance, 'PROVIDER_REPORTED');
@@ -317,7 +472,16 @@ test('a receipt carrying any key outside the contract is still a defect', async 
   const f = fixture(t);
   const { externalId } = await f.adapter.submit(f.context);
   const dir = path.join(f.sessions, externalId);
-  writeFileSync(path.join(dir, RESULT_FILE), JSON.stringify({ state: 'COMPLETED', detail: 'Claimed.', outputs: [], appliedModel: 'devin-local-7', sneaky: true }));
+  writeFileSync(
+    path.join(dir, RESULT_FILE),
+    JSON.stringify({
+      state: 'COMPLETED',
+      detail: 'Claimed.',
+      outputs: [],
+      appliedModel: 'devin-local-7',
+      sneaky: true,
+    }),
+  );
   const result = await f.adapter.observe(f.job(externalId));
   assert.equal(result.state, 'UNKNOWN');
   assert.equal(result.provenance, 'OFFICE_LOCAL');
@@ -329,7 +493,10 @@ test('a malformed self-report is a defect, not a value to carry', async t => {
   const { externalId } = await f.adapter.submit(f.context);
   const dir = path.join(f.sessions, externalId);
   const resultPath = path.join(dir, RESULT_FILE);
-  writeFileSync(resultPath, JSON.stringify({ state: 'COMPLETED', detail: 'x', outputs: [], appliedEffort: 'ludicrous' }));
+  writeFileSync(
+    resultPath,
+    JSON.stringify({ state: 'COMPLETED', detail: 'x', outputs: [], appliedEffort: 'ludicrous' }),
+  );
   let result = await f.adapter.observe(f.job(externalId));
   assert.equal(result.state, 'UNKNOWN');
   assert.match(result.detail, /appliedEffort .*not one of/);
@@ -347,7 +514,10 @@ test('submitEvidence records office-observed packet delivery, scoped confinement
   const f = fixture(t);
   const submitted = await f.adapter.submit(f.context);
   const entries = f.adapter.submitEvidence(f.context, submitted);
-  assert.deepEqual(entries.map(entry => entry.operation), ['LOCAL_SUBMIT', 'TOOL_CONFINEMENT', 'DELEGATION_CONTROL']);
+  assert.deepEqual(
+    entries.map(entry => entry.operation),
+    ['LOCAL_SUBMIT', 'TOOL_CONFINEMENT', 'DELEGATION_CONTROL'],
+  );
   for (const entry of entries) {
     assert.equal(entry.level, 'TOOL_SUPPORTED');
     assert.equal(entry.evidence, 'OBSERVED');
@@ -362,7 +532,9 @@ test('submitEvidence records office-observed packet delivery, scoped confinement
   assert.match(confinement.network, /not restricted/);
   assert.equal(entries[2].delegation, false);
   // The packet declares what was requested; nothing about what was applied is claimed at submit.
-  assert.ok(entries.every(entry => entry.operation !== 'MODEL_APPLICATION' && entry.operation !== 'EFFORT_APPLICATION'));
+  assert.ok(
+    entries.every(entry => entry.operation !== 'MODEL_APPLICATION' && entry.operation !== 'EFFORT_APPLICATION'),
+  );
   assert.ok(entries.every(entry => entry.model === undefined && entry.effort === undefined));
 });
 
@@ -370,11 +542,29 @@ test('observeEvidence records the verified read and only the self-reports the re
   const f = fixture(t);
   const { externalId } = await f.adapter.submit(f.context);
   const dir = path.join(f.sessions, externalId);
-  const output = { path: 'out/summary.json', sha256: sha('{"summary":"done"}'), bytes: Buffer.byteLength('{"summary":"done"}') };
-  report(dir, { state: 'COMPLETED', detail: 'Done.', outputs: [output], appliedModel: 'devin-local-7', appliedEffort: 'high', delegation: false }, { 'out/summary.json': '{"summary":"done"}' });
+  const output = {
+    path: 'out/summary.json',
+    sha256: sha('{"summary":"done"}'),
+    bytes: Buffer.byteLength('{"summary":"done"}'),
+  };
+  report(
+    dir,
+    {
+      state: 'COMPLETED',
+      detail: 'Done.',
+      outputs: [output],
+      appliedModel: 'devin-local-7',
+      appliedEffort: 'high',
+      delegation: false,
+    },
+    { 'out/summary.json': '{"summary":"done"}' },
+  );
   const job = f.job(externalId);
   const entries = f.adapter.observeEvidence(job, await f.adapter.observe(job));
-  assert.deepEqual(entries.map(entry => entry.operation), ['LOCAL_OBSERVE', 'LOCAL_OUTPUT_FETCH', 'MODEL_APPLICATION', 'EFFORT_APPLICATION', 'DELEGATION_CONTROL']);
+  assert.deepEqual(
+    entries.map(entry => entry.operation),
+    ['LOCAL_OBSERVE', 'LOCAL_OUTPUT_FETCH', 'MODEL_APPLICATION', 'EFFORT_APPLICATION', 'DELEGATION_CONTROL'],
+  );
   for (const entry of entries) {
     assert.equal(entry.level, 'TOOL_SUPPORTED');
     assert.equal(entry.evidence, 'OBSERVED');
@@ -402,7 +592,10 @@ test('observeEvidence without declared self-reports carries no model, effort or 
   report(dir, { state: 'RUNNING', detail: 'Working.', outputs: [] }, {});
   const job = f.job(externalId);
   const entries = f.adapter.observeEvidence(job, await f.adapter.observe(job));
-  assert.deepEqual(entries.map(entry => entry.operation), ['LOCAL_OBSERVE']);
+  assert.deepEqual(
+    entries.map(entry => entry.operation),
+    ['LOCAL_OBSERVE'],
+  );
 });
 
 test('observeEvidence produces nothing for an unverified or silent session', async t => {
@@ -414,7 +607,10 @@ test('observeEvidence produces nothing for an unverified or silent session', asy
   assert.deepEqual(f.adapter.observeEvidence(job, silent), []);
   // A receipt the office could not trust is not a session observation either.
   const dir = path.join(f.sessions, externalId);
-  writeFileSync(path.join(dir, RESULT_FILE), JSON.stringify({ state: 'COMPLETED', detail: 'x', outputs: [{ path: 'ghost', sha256: sha('y'), bytes: 1 }] }));
+  writeFileSync(
+    path.join(dir, RESULT_FILE),
+    JSON.stringify({ state: 'COMPLETED', detail: 'x', outputs: [{ path: 'ghost', sha256: sha('y'), bytes: 1 }] }),
+  );
   const untrusted = await f.adapter.observe(job);
   assert.equal(untrusted.state, 'UNKNOWN');
   assert.deepEqual(f.adapter.observeEvidence(job, untrusted), []);
@@ -546,24 +742,47 @@ test('the confinement record names delivery scope honestly and still describes e
   assert.match(policy.environment, /user-launched/);
   // confinementDescribed (readiness.ts) is not exported; mirror its check — every axis must say
   // what was and wasn't restricted, which the honest record still satisfies.
-  assert.ok([policy.tools, policy.filesystem, policy.network, policy.environment].every(field => field.trim()),
-    'every confinement axis is described');
+  assert.ok(
+    [policy.tools, policy.filesystem, policy.network, policy.environment].every(field => field.trim()),
+    'every confinement axis is described',
+  );
 });
 
 function boundFixture(t: test.TestContext, storageRelativePath = 'bound-session') {
   const f = fixture(t);
   mkdirSync(f.sessions, { recursive: true });
   const binding: LocalSessionRecord = {
-    schemaVersion: 1, id: randomUUID(), jobId: f.context.jobId, assignmentId: f.assignment.id,
-    projectId: f.assignment.projectId, attemptId: randomUUID(), revision: 0,
-    provider: 'devin', surface: 'DEVIN_CLI', layout: 'FLAT_PACKET', packetVersion: 2,
-    packetHash: null, storageRelativePath, originalCwd: null,
-    repoRelativePath: null, seedCommit: null, worktreeOwner: 'NONE',
-    providerSessionId: null, providerProjectId: null, bindingEvidence: 'UNBOUND',
-    groupingStatus: 'UNKNOWN', requirement: 'SCOPED_DELIVERY', confinementStatus: 'UNVERIFIED',
-    confinementEvidenceId: null, lifecycle: 'READY', archiveRelativePath: null,
-    lastReceipt: null, cancelRequestId: null, stopStatus: 'NOT_REQUESTED',
-    createdAt: at(0), updatedAt: at(0),
+    schemaVersion: 1,
+    id: randomUUID(),
+    jobId: f.context.jobId,
+    assignmentId: f.assignment.id,
+    projectId: f.assignment.projectId,
+    attemptId: randomUUID(),
+    revision: 0,
+    provider: 'devin',
+    surface: 'DEVIN_CLI',
+    layout: 'FLAT_PACKET',
+    packetVersion: 2,
+    packetHash: null,
+    storageRelativePath,
+    originalCwd: null,
+    repoRelativePath: null,
+    seedCommit: null,
+    worktreeOwner: 'NONE',
+    providerSessionId: null,
+    providerProjectId: null,
+    bindingEvidence: 'UNBOUND',
+    groupingStatus: 'UNKNOWN',
+    requirement: 'SCOPED_DELIVERY',
+    confinementStatus: 'UNVERIFIED',
+    confinementEvidenceId: null,
+    lifecycle: 'READY',
+    archiveRelativePath: null,
+    lastReceipt: null,
+    cancelRequestId: null,
+    stopStatus: 'NOT_REQUESTED',
+    createdAt: at(0),
+    updatedAt: at(0),
   };
   const context: SubmitContext = { ...f.context, localSession: binding };
   const dir = path.resolve(f.sessions, storageRelativePath);
@@ -573,9 +792,16 @@ function boundFixture(t: test.TestContext, storageRelativePath = 'bound-session'
 /** A well-formed v2 receipt for a bound fixture — callers override what they attack. */
 function v2Receipt(binding: LocalSessionRecord, overrides: Record<string, unknown> = {}) {
   return {
-    schema: 'office-local-result@2', jobId: binding.jobId, assignmentId: binding.assignmentId,
-    attemptId: binding.attemptId, packetHash: binding.packetHash, sequence: 1,
-    state: 'COMPLETED', detail: 'Done.', outputs: [], ...overrides,
+    schema: 'office-local-result@2',
+    jobId: binding.jobId,
+    assignmentId: binding.assignmentId,
+    attemptId: binding.attemptId,
+    packetHash: binding.packetHash,
+    sequence: 1,
+    state: 'COMPLETED',
+    detail: 'Done.',
+    outputs: [],
+    ...overrides,
   };
 }
 
@@ -609,7 +835,17 @@ test('a bound submit writes a v2 packet under the binding storage path and repor
 test('a bound submit mounts the memory digest only for the authorized synthesis seats', async t => {
   const f = boundFixture(t);
   const digest = {
-    findings: [{ id: randomUUID(), kind: 'RESULT' as const, title: 'alpha holds', body: 'seen twice', evidenceRefs: [], superseded: false, createdAt: at(0) }],
+    findings: [
+      {
+        id: randomUUID(),
+        kind: 'RESULT' as const,
+        title: 'alpha holds',
+        body: 'seen twice',
+        evidenceRefs: [],
+        superseded: false,
+        createdAt: at(0),
+      },
+    ],
     links: [],
   };
   // An authorized seat: the controller supplies the projection and the packet mounts it.
@@ -636,7 +872,11 @@ test('a bound submit mounts the memory digest only for the authorized synthesis 
   };
   const plain = await f2.adapter.submit(review);
   const dir2 = path.join(f2.sessions, plain.externalId);
-  assert.equal(existsSync(path.join(dir2, MEMORY_DIGEST_FILE)), false, 'an unauthorized seat never receives the digest file');
+  assert.equal(
+    existsSync(path.join(dir2, MEMORY_DIGEST_FILE)),
+    false,
+    'an unauthorized seat never receives the digest file',
+  );
   const packet2 = localPacketV2Schema.parse(JSON.parse(readFileSync(path.join(dir2, PACKET_FILE), 'utf8')));
   assert.equal(packet2.memoryDigest, undefined, 'an unauthorized seat never carries the declaration');
 });
@@ -656,14 +896,24 @@ test('observe on a v2 binding validates the receipt through the v2 reader', asyn
   const output = { path: 'outputs/summary.txt', sha256: sha('done bytes'), bytes: Buffer.byteLength('done bytes') };
   mkdirSync(path.join(f.dir, 'outputs'), { recursive: true });
   writeFileSync(path.join(f.dir, 'outputs', 'summary.txt'), 'done bytes');
-  writeFileSync(path.join(f.dir, RESULT_FILE), JSON.stringify(v2Receipt(bound, {
-    outputs: [output], applied: { model: 'devin-local-9', effort: 'high', delegation: false },
-  })));
+  writeFileSync(
+    path.join(f.dir, RESULT_FILE),
+    JSON.stringify(
+      v2Receipt(bound, {
+        outputs: [output],
+        applied: { model: 'devin-local-9', effort: 'high', delegation: false },
+      }),
+    ),
+  );
   const observed = await f.adapter.observe(f.job(result.externalId), bound);
   assert.equal(observed.state, 'COMPLETED');
   assert.equal(observed.provenance, 'PROVIDER_REPORTED');
   assert.deepEqual(observed.outputs, [output]);
-  assert.deepEqual((observed as { applied?: unknown }).applied, { model: 'devin-local-9', effort: 'high', delegation: false });
+  assert.deepEqual((observed as { applied?: unknown }).applied, {
+    model: 'devin-local-9',
+    effort: 'high',
+    delegation: false,
+  });
 });
 
 test('a v1-shaped receipt on a v2 binding is UNKNOWN, never a fallback', async t => {
@@ -684,7 +934,10 @@ test('a receipt bound to another attempt is refused even with matching output ha
   const output = { path: 'outputs/summary.txt', sha256: sha('done bytes'), bytes: Buffer.byteLength('done bytes') };
   mkdirSync(path.join(f.dir, 'outputs'), { recursive: true });
   writeFileSync(path.join(f.dir, 'outputs', 'summary.txt'), 'done bytes');
-  writeFileSync(path.join(f.dir, RESULT_FILE), JSON.stringify(v2Receipt(bound, { attemptId: randomUUID(), outputs: [output] })));
+  writeFileSync(
+    path.join(f.dir, RESULT_FILE),
+    JSON.stringify(v2Receipt(bound, { attemptId: randomUUID(), outputs: [output] })),
+  );
   const observed = await f.adapter.observe(f.job(result.externalId), bound);
   assert.equal(observed.state, 'UNKNOWN');
   assert.match(observed.detail, /attemptId/);
@@ -693,7 +946,11 @@ test('a receipt bound to another attempt is refused even with matching output ha
 test('a receipt that does not advance past the recorded last receipt is refused', async t => {
   const f = boundFixture(t);
   const result = await f.adapter.submit(f.context);
-  const bound = { ...f.binding, packetHash: result.localPacket!.packetHash, lastReceipt: { sequence: 1, hash: sha('first'), observedAt: at(0) } };
+  const bound = {
+    ...f.binding,
+    packetHash: result.localPacket!.packetHash,
+    lastReceipt: { sequence: 1, hash: sha('first'), observedAt: at(0) },
+  };
   writeFileSync(path.join(f.dir, RESULT_FILE), JSON.stringify(v2Receipt(bound, { sequence: 1 })));
   const observed = await f.adapter.observe(f.job(result.externalId), bound);
   assert.equal(observed.state, 'UNKNOWN');
@@ -774,13 +1031,24 @@ test('a malformed or differently-bound existing request file is refused, never o
   let cancelled = await f.adapter.cancel(job, bound);
   assert.equal(cancelled.acknowledged, false);
   assert.match(cancelled.detail, /malformed|not valid JSON|cannot be trusted/i);
-  assert.equal(readFileSync(path.join(f.dir, 'cancel.requested'), 'utf8'), 'not json {', 'the malformed file was left untouched');
+  assert.equal(
+    readFileSync(path.join(f.dir, 'cancel.requested'), 'utf8'),
+    'not json {',
+    'the malformed file was left untouched',
+  );
   // A schema-valid request bound to a different attempt is a defect, not an idempotent hit.
-  writeFileSync(path.join(f.dir, 'cancel.requested'), JSON.stringify({
-    schema: 'office-local-cancel-request@1', requestId: randomUUID(), jobId: bound.jobId,
-    assignmentId: bound.assignmentId, attemptId: randomUUID(), packetHash: bound.packetHash,
-    requestedAt: at(0),
-  }));
+  writeFileSync(
+    path.join(f.dir, 'cancel.requested'),
+    JSON.stringify({
+      schema: 'office-local-cancel-request@1',
+      requestId: randomUUID(),
+      jobId: bound.jobId,
+      assignmentId: bound.assignmentId,
+      attemptId: randomUUID(),
+      packetHash: bound.packetHash,
+      requestedAt: at(0),
+    }),
+  );
   cancelled = await f.adapter.cancel(job, bound);
   assert.equal(cancelled.acknowledged, false);
   assert.match(cancelled.detail, /attemptId/);
@@ -797,16 +1065,28 @@ test('observe surfaces a valid cancel acknowledgement bound to the recorded requ
   mkdirSync(path.join(f.dir, 'outputs'), { recursive: true });
   writeFileSync(path.join(f.dir, 'outputs', 'summary.txt'), 'done bytes');
   writeFileSync(path.join(f.dir, RESULT_FILE), JSON.stringify(v2Receipt(requested, { outputs: [output] })));
-  writeFileSync(path.join(f.dir, 'cancel.ack.json'), JSON.stringify({
-    schema: 'office-local-cancel-ack@1', requestId: cancelled.requestId, jobId: bound.jobId,
-    assignmentId: bound.assignmentId, attemptId: bound.attemptId, packetHash: bound.packetHash,
-    outcome: 'STOPPED', detail: 'Stopped after the request.',
-  }));
+  writeFileSync(
+    path.join(f.dir, 'cancel.ack.json'),
+    JSON.stringify({
+      schema: 'office-local-cancel-ack@1',
+      requestId: cancelled.requestId,
+      jobId: bound.jobId,
+      assignmentId: bound.assignmentId,
+      attemptId: bound.attemptId,
+      packetHash: bound.packetHash,
+      outcome: 'STOPPED',
+      detail: 'Stopped after the request.',
+    }),
+  );
   const observed = await f.adapter.observe(job, requested);
   assert.equal(observed.state, 'COMPLETED');
   assert.equal(observed.provenance, 'PROVIDER_REPORTED');
   assert.deepEqual(observed.outputs, [output]);
-  assert.deepEqual(observed.cancelAck, { requestId: cancelled.requestId, outcome: 'STOPPED', detail: 'Stopped after the request.' });
+  assert.deepEqual(observed.cancelAck, {
+    requestId: cancelled.requestId,
+    outcome: 'STOPPED',
+    detail: 'Stopped after the request.',
+  });
 });
 
 test('observe on a v2 binding defects an ack for a request the office never recorded', async t => {
@@ -815,11 +1095,19 @@ test('observe on a v2 binding defects an ack for a request the office never reco
   const bound = { ...f.binding, packetHash: result.localPacket!.packetHash };
   const job = f.job(result.externalId);
   writeFileSync(path.join(f.dir, RESULT_FILE), JSON.stringify(v2Receipt(bound)));
-  writeFileSync(path.join(f.dir, 'cancel.ack.json'), JSON.stringify({
-    schema: 'office-local-cancel-ack@1', requestId: randomUUID(), jobId: bound.jobId,
-    assignmentId: bound.assignmentId, attemptId: bound.attemptId, packetHash: bound.packetHash,
-    outcome: 'STOPPED', detail: 'Claimed stop.',
-  }));
+  writeFileSync(
+    path.join(f.dir, 'cancel.ack.json'),
+    JSON.stringify({
+      schema: 'office-local-cancel-ack@1',
+      requestId: randomUUID(),
+      jobId: bound.jobId,
+      assignmentId: bound.assignmentId,
+      attemptId: bound.attemptId,
+      packetHash: bound.packetHash,
+      outcome: 'STOPPED',
+      detail: 'Claimed stop.',
+    }),
+  );
   const observed = await f.adapter.observe(job, bound);
   assert.equal(observed.state, 'UNKNOWN');
   assert.equal(observed.provenance, 'OFFICE_LOCAL');
@@ -840,11 +1128,19 @@ test('observe defects a malformed or misbound ack even beside a valid receipt', 
   assert.equal(observed.state, 'UNKNOWN');
   assert.match(observed.detail, /cancel\.ack\.json/);
   // A schema-valid ack naming a different request is still a defect — the receipt stays untrusted.
-  writeFileSync(path.join(f.dir, 'cancel.ack.json'), JSON.stringify({
-    schema: 'office-local-cancel-ack@1', requestId: randomUUID(), jobId: requested.jobId,
-    assignmentId: requested.assignmentId, attemptId: requested.attemptId, packetHash: requested.packetHash,
-    outcome: 'STOPPED', detail: 'Wrong request.',
-  }));
+  writeFileSync(
+    path.join(f.dir, 'cancel.ack.json'),
+    JSON.stringify({
+      schema: 'office-local-cancel-ack@1',
+      requestId: randomUUID(),
+      jobId: requested.jobId,
+      assignmentId: requested.assignmentId,
+      attemptId: requested.attemptId,
+      packetHash: requested.packetHash,
+      outcome: 'STOPPED',
+      detail: 'Wrong request.',
+    }),
+  );
   observed = await f.adapter.observe(job, requested);
   assert.equal(observed.state, 'UNKNOWN');
   assert.match(observed.detail, /requestId/);

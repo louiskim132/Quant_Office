@@ -1,10 +1,114 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {randomUUID} from 'node:crypto';
-import {replayShadow} from '../src/core/shadow-ledger';
-import {canonicalHash} from '../src/core/canonical';
-const before='2026-09-01T00:00:00.000Z',forecast='2026-09-01T00:01:00.000Z',after='2026-09-01T00:02:00.000Z';
-function fixture(){const branchId=randomUUID(),specId=randomUUID(),candidateHash='a'.repeat(64),id=randomUUID();const scope={schemaVersion:1,branchId,specId,candidateHash};const prediction={id,branchId,specId,candidateHash,symbol:'X',recordedAt:before,forecastFor:forecast,prediction:1,horizonSeconds:60};const policy={minimumElapsedSeconds:60,minimumObservationTimes:1,minimumSamples:1,maximumMissingShare:0.1,retireBelowMetric:-0.1,qualifyAtOrAboveMetric:0.1,driftAlarmMetric:0,killBelowMetric:-0.5,thresholdHash:canonicalHash('policy')};const first={body:{...scope,kind:'PREDICTIONS',predictions:[prediction]},receivedAt:before};const obs={body:{...scope,kind:'OBSERVATIONS',quotes:[{symbol:'X',at:forecast,bid:1,ask:2,source:'synthetic'}],fills:[],outcomes:{[id]:0.5}},receivedAt:after};return {id,scope,prediction,policy,first,obs};}
-test('shadow admission rejects retrospective forecasts and conflicting immutable observations',()=>{const f=fixture();assert.throws(()=>replayShadow([{...f.first,receivedAt:after}],f.policy,after),/before their forecast/);assert.throws(()=>replayShadow([f.first,f.obs,{...f.obs,body:{...f.obs.body,outcomes:{[f.id]:-2}}}],f.policy,after),/cannot be silently revised/);assert.throws(()=>replayShadow([f.first,{...f.obs,body:{...f.obs.body,quotes:[{...f.obs.body.quotes[0],ask:0}]}}],f.policy,after),/spread/);});
-test('actual execution imports stay separate and cannot masquerade as simulated observations',()=>{const f=fixture(),fill={predictionId:f.id,symbol:'X',at:forecast,quantity:1,price:1.5,kind:'EXECUTED',provenance:'User statement row 1'};assert.throws(()=>replayShadow([f.first,{...f.obs,body:{...f.obs.body,fills:[fill]}}],f.policy,after),/separately provenanced/);const result=replayShadow([f.first,f.obs,{body:{...f.scope,kind:'EXECUTIONS',sourceDocumentHash:'b'.repeat(64),fills:[fill]},receivedAt:after}],f.policy,after);assert.equal(result.actual.length,1);assert.equal(result.fills.length,0);assert.equal(result.verdict.outcome,'SHADOW_QUALIFIED');});
-test('frozen elapsed time, missing coverage and kill conditions produce distinct standing',()=>{const f=fixture();assert.equal(replayShadow([f.first],f.policy,before).verdict.outcome,'INCONCLUSIVE');assert.equal(replayShadow([f.first,{...f.obs,body:{...f.obs.body,quotes:[]}}],f.policy,after).verdict.outcome,'SUSPENDED');const result=replayShadow([f.first,{...f.obs,body:{...f.obs.body,outcomes:{[f.id]:-1}}}],f.policy,after);assert.equal(result.verdict.outcome,'RETIRED');assert.equal(result.verdict.killed,true);assert.equal(result.verdict.alarm,false);});
+import { randomUUID } from 'node:crypto';
+import { replayShadow } from '../src/core/shadow-ledger';
+import { canonicalHash } from '../src/core/canonical';
+const before = '2026-09-01T00:00:00.000Z',
+  forecast = '2026-09-01T00:01:00.000Z',
+  after = '2026-09-01T00:02:00.000Z';
+function fixture() {
+  const branchId = randomUUID(),
+    specId = randomUUID(),
+    candidateHash = 'a'.repeat(64),
+    id = randomUUID();
+  const scope = { schemaVersion: 1, branchId, specId, candidateHash };
+  const prediction = {
+    id,
+    branchId,
+    specId,
+    candidateHash,
+    symbol: 'X',
+    recordedAt: before,
+    forecastFor: forecast,
+    prediction: 1,
+    horizonSeconds: 60,
+  };
+  const policy = {
+    minimumElapsedSeconds: 60,
+    minimumObservationTimes: 1,
+    minimumSamples: 1,
+    maximumMissingShare: 0.1,
+    retireBelowMetric: -0.1,
+    qualifyAtOrAboveMetric: 0.1,
+    driftAlarmMetric: 0,
+    killBelowMetric: -0.5,
+    thresholdHash: canonicalHash('policy'),
+  };
+  const first = { body: { ...scope, kind: 'PREDICTIONS', predictions: [prediction] }, receivedAt: before };
+  const obs = {
+    body: {
+      ...scope,
+      kind: 'OBSERVATIONS',
+      quotes: [{ symbol: 'X', at: forecast, bid: 1, ask: 2, source: 'synthetic' }],
+      fills: [],
+      outcomes: { [id]: 0.5 },
+    },
+    receivedAt: after,
+  };
+  return { id, scope, prediction, policy, first, obs };
+}
+test('shadow admission rejects retrospective forecasts and conflicting immutable observations', () => {
+  const f = fixture();
+  assert.throws(() => replayShadow([{ ...f.first, receivedAt: after }], f.policy, after), /before their forecast/);
+  assert.throws(
+    () =>
+      replayShadow([f.first, f.obs, { ...f.obs, body: { ...f.obs.body, outcomes: { [f.id]: -2 } } }], f.policy, after),
+    /cannot be silently revised/,
+  );
+  assert.throws(
+    () =>
+      replayShadow(
+        [f.first, { ...f.obs, body: { ...f.obs.body, quotes: [{ ...f.obs.body.quotes[0], ask: 0 }] } }],
+        f.policy,
+        after,
+      ),
+    /spread/,
+  );
+});
+test('actual execution imports stay separate and cannot masquerade as simulated observations', () => {
+  const f = fixture(),
+    fill = {
+      predictionId: f.id,
+      symbol: 'X',
+      at: forecast,
+      quantity: 1,
+      price: 1.5,
+      kind: 'EXECUTED',
+      provenance: 'User statement row 1',
+    };
+  assert.throws(
+    () => replayShadow([f.first, { ...f.obs, body: { ...f.obs.body, fills: [fill] } }], f.policy, after),
+    /separately provenanced/,
+  );
+  const result = replayShadow(
+    [
+      f.first,
+      f.obs,
+      {
+        body: { ...f.scope, kind: 'EXECUTIONS', sourceDocumentHash: 'b'.repeat(64), fills: [fill] },
+        receivedAt: after,
+      },
+    ],
+    f.policy,
+    after,
+  );
+  assert.equal(result.actual.length, 1);
+  assert.equal(result.fills.length, 0);
+  assert.equal(result.verdict.outcome, 'SHADOW_QUALIFIED');
+});
+test('frozen elapsed time, missing coverage and kill conditions produce distinct standing', () => {
+  const f = fixture();
+  assert.equal(replayShadow([f.first], f.policy, before).verdict.outcome, 'INCONCLUSIVE');
+  assert.equal(
+    replayShadow([f.first, { ...f.obs, body: { ...f.obs.body, quotes: [] } }], f.policy, after).verdict.outcome,
+    'SUSPENDED',
+  );
+  const result = replayShadow(
+    [f.first, { ...f.obs, body: { ...f.obs.body, outcomes: { [f.id]: -1 } } }],
+    f.policy,
+    after,
+  );
+  assert.equal(result.verdict.outcome, 'RETIRED');
+  assert.equal(result.verdict.killed, true);
+  assert.equal(result.verdict.alarm, false);
+});

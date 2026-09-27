@@ -10,10 +10,20 @@
  * is the one that prompted the retry, and reporting the retry's error would describe a different
  * boot than the one that failed.
  */
-export interface LoadableWindow { loadFile(path: string): Promise<unknown> }
-export interface BootLoadOptions { retries?: number; delayMs?: number; sleep?: (ms: number) => Promise<void> }
+export interface LoadableWindow {
+  loadFile(path: string): Promise<unknown>;
+}
+export interface BootLoadOptions {
+  retries?: number;
+  delayMs?: number;
+  sleep?: (ms: number) => Promise<void>;
+}
 
-export async function loadWindowWithRetry(win: LoadableWindow, file: string, opts: BootLoadOptions = {}): Promise<void> {
+export async function loadWindowWithRetry(
+  win: LoadableWindow,
+  file: string,
+  opts: BootLoadOptions = {},
+): Promise<void> {
   const retries = opts.retries ?? 1;
   const delayMs = opts.delayMs ?? 400;
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)));

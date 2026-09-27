@@ -41,9 +41,12 @@ export interface ProviderRecord {
 }
 
 /** What a discovery pass found, plus anything it could see but not honestly classify. */
-export interface Discovery { records: ProviderRecord[]; notes: string[] }
+export interface Discovery {
+  records: ProviderRecord[];
+  notes: string[];
+}
 
-const msg = (error: unknown): string => error instanceof Error ? error.message : 'unknown error';
+const msg = (error: unknown): string => (error instanceof Error ? error.message : 'unknown error');
 /** Absolute, separator-stable, case-insensitive comparison key for recorded working directories. */
 const normDir = (dir: string): string => path.resolve(dir).replace(/\\/g, '/').toLowerCase();
 
@@ -72,8 +75,11 @@ export function discoverDevinSessions(sessionsDbPath: string, packetDir: string)
   // Windows path spellings vary; match both the raw form and path-normalized forms.
   const forms = [...new Set([packetDir, path.resolve(packetDir), path.resolve(packetDir).replaceAll('\\', '/')])];
   let db: DatabaseSync;
-  try { db = new DatabaseSync(sessionsDbPath, { readOnly: true }); }
-  catch (error) { return { records: [], notes: [`The Devin sessions store could not be opened read-only: ${msg(error)}`] }; }
+  try {
+    db = new DatabaseSync(sessionsDbPath, { readOnly: true });
+  } catch (error) {
+    return { records: [], notes: [`The Devin sessions store could not be opened read-only: ${msg(error)}`] };
+  }
   try {
     const stmt = db.prepare('SELECT id, title, working_directory FROM sessions WHERE working_directory = ?');
     const seen = new Set<string>();
@@ -82,13 +88,21 @@ export function discoverDevinSessions(sessionsDbPath: string, packetDir: string)
       for (const row of stmt.all(form) as { id: string; title: string; working_directory: string }[]) {
         if (seen.has(row.id)) continue;
         seen.add(row.id);
-        records.push({ provider: 'devin', kind: 'devin-session', id: row.id, detail: row.title ?? '', location: sessionsDbPath });
+        records.push({
+          provider: 'devin',
+          kind: 'devin-session',
+          id: row.id,
+          detail: row.title ?? '',
+          location: sessionsDbPath,
+        });
       }
     }
     return { records, notes: [] };
   } catch (error) {
     return { records: [], notes: [`The Devin sessions store could not be read: ${msg(error)}`] };
-  } finally { db.close(); }
+  } finally {
+    db.close();
+  }
 }
 
 /** The .claude/projects directory whose name equals the derived key — nothing else is ever named. */
@@ -96,15 +110,27 @@ export function discoverClaudeProject(projectsRoot: string, packetDir: string): 
   if (!existsSync(projectsRoot)) return { records: [], notes: [`No Claude Code projects store at ${projectsRoot}.`] };
   const key = claudeProjectKey(packetDir);
   if (!key || key === '.' || key === '..' || key.includes('/') || key.includes('\\'))
-    return { records: [], notes: [`The derived project key ${JSON.stringify(key)} is not a safe directory name; nothing was matched.`] };
+    return {
+      records: [],
+      notes: [`The derived project key ${JSON.stringify(key)} is not a safe directory name; nothing was matched.`],
+    };
   let entries: string[];
-  try { entries = readdirSync(projectsRoot); }
-  catch (error) { return { records: [], notes: [`The Claude Code projects store could not be listed: ${msg(error)}`] }; }
+  try {
+    entries = readdirSync(projectsRoot);
+  } catch (error) {
+    return { records: [], notes: [`The Claude Code projects store could not be listed: ${msg(error)}`] };
+  }
   // Case-insensitive name equality: Windows directory names compare without case, and the stored
   // key keeps the case of whatever cwd the tool recorded.
   const matched = entries.filter(entry => entry.toLowerCase() === key.toLowerCase());
   return {
-    records: matched.map(entry => ({ provider: 'claude', kind: 'claude-project', id: entry, detail: path.resolve(packetDir), location: path.join(projectsRoot, entry) })),
+    records: matched.map(entry => ({
+      provider: 'claude',
+      kind: 'claude-project',
+      id: entry,
+      detail: path.resolve(packetDir),
+      location: path.join(projectsRoot, entry),
+    })),
     notes: [],
   };
 }
@@ -112,8 +138,11 @@ export function discoverClaudeProject(projectsRoot: string, packetDir: string): 
 function collectRollouts(dir: string, depth: number, files: string[], cap: number): void {
   if (files.length >= cap || depth > MAX_SCAN_DEPTH) return;
   let entries: Dirent[];
-  try { entries = readdirSync(dir, { withFileTypes: true }); }
-  catch { return; }
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
   for (const entry of entries) {
     if (files.length >= cap) return;
     const full = path.join(dir, entry.name);
@@ -131,16 +160,25 @@ function rolloutCwd(file: string, headBytes: number): string | null {
       const buffer = Buffer.alloc(headBytes);
       const read = readSync(fd, buffer, 0, headBytes, 0);
       head = buffer.subarray(0, read).toString('utf8');
-    } finally { closeSync(fd); }
-  } catch { return null; }
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    return null;
+  }
   for (const line of head.split('\n')) {
     const text = line.trim();
     if (!text) continue;
     let parsed: unknown;
-    try { parsed = JSON.parse(text); } catch { continue; }
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      continue;
+    }
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) continue;
     const record = parsed as Record<string, unknown>;
-    const payload = record.payload && typeof record.payload === 'object' ? record.payload as Record<string, unknown> : undefined;
+    const payload =
+      record.payload && typeof record.payload === 'object' ? (record.payload as Record<string, unknown>) : undefined;
     const cwd = payload?.cwd ?? record.cwd;
     if (typeof cwd === 'string' && cwd) return cwd;
   }
@@ -148,7 +186,11 @@ function rolloutCwd(file: string, headBytes: number): string | null {
 }
 
 /** Rollout files under sessions/ and archived_sessions/ whose recorded cwd is the packet dir. */
-export function discoverCodexRollouts(codexRoot: string, packetDir: string, bounds: { maxFiles?: number; headBytes?: number } = {}): Discovery {
+export function discoverCodexRollouts(
+  codexRoot: string,
+  packetDir: string,
+  bounds: { maxFiles?: number; headBytes?: number } = {},
+): Discovery {
   const maxFiles = bounds.maxFiles ?? MAX_ROLLOUT_FILES;
   const headBytes = bounds.headBytes ?? MAX_ROLLOUT_HEAD;
   const target = normDir(packetDir);
@@ -160,12 +202,15 @@ export function discoverCodexRollouts(codexRoot: string, packetDir: string, boun
     if (existsSync(base)) collectRollouts(base, 0, files, maxFiles);
   }
   if (!existsSync(codexRoot)) notes.push(`No Codex sessions store at ${codexRoot}.`);
-  else if (files.length >= maxFiles) notes.push(`The rollout scan stopped at the ${maxFiles}-file bound; records beyond it were not inspected.`);
+  else if (files.length >= maxFiles)
+    notes.push(`The rollout scan stopped at the ${maxFiles}-file bound; records beyond it were not inspected.`);
   const records: ProviderRecord[] = [];
   for (const file of files) {
     const cwd = rolloutCwd(file, headBytes);
     if (cwd === null) {
-      notes.push(`rollout ${path.basename(file)} carries no readable session cwd in its first ${headBytes} bytes; left alone rather than guessed`);
+      notes.push(
+        `rollout ${path.basename(file)} carries no readable session cwd in its first ${headBytes} bytes; left alone rather than guessed`,
+      );
       continue;
     }
     if (normDir(cwd) !== target) continue;
@@ -182,31 +227,57 @@ export function discoverCodexRollouts(codexRoot: string, packetDir: string, boun
 export function findDevinSessionRows(sessionsDbPath: string, sessionId: string): Discovery {
   if (!existsSync(sessionsDbPath)) return { records: [], notes: [`No Devin sessions store at ${sessionsDbPath}.`] };
   let db: DatabaseSync;
-  try { db = new DatabaseSync(sessionsDbPath, { readOnly: true }); }
-  catch (error) { return { records: [], notes: [`The Devin sessions store could not be opened read-only: ${msg(error)}`] }; }
   try {
-    const rows = db.prepare('SELECT id, title, working_directory FROM sessions WHERE id = ?')
-      .all(sessionId) as { id: string; title: string; working_directory: string }[];
+    db = new DatabaseSync(sessionsDbPath, { readOnly: true });
+  } catch (error) {
+    return { records: [], notes: [`The Devin sessions store could not be opened read-only: ${msg(error)}`] };
+  }
+  try {
+    const rows = db.prepare('SELECT id, title, working_directory FROM sessions WHERE id = ?').all(sessionId) as {
+      id: string;
+      title: string;
+      working_directory: string;
+    }[];
     return {
-      records: rows.map(row => ({ provider: 'devin', kind: 'devin-session', id: row.id, detail: row.title ?? '', location: sessionsDbPath })),
+      records: rows.map(row => ({
+        provider: 'devin',
+        kind: 'devin-session',
+        id: row.id,
+        detail: row.title ?? '',
+        location: sessionsDbPath,
+      })),
       notes: [],
     };
   } catch (error) {
     return { records: [], notes: [`The Devin sessions store could not be read: ${msg(error)}`] };
-  } finally { db.close(); }
+  } finally {
+    db.close();
+  }
 }
 
 /** The .claude/projects directory whose name equals the given key exactly — no derivation here. */
 export function findClaudeProject(projectsRoot: string, projectKey: string): Discovery {
   if (!existsSync(projectsRoot)) return { records: [], notes: [`No Claude Code projects store at ${projectsRoot}.`] };
   if (!projectKey || projectKey === '.' || projectKey === '..' || projectKey.includes('/') || projectKey.includes('\\'))
-    return { records: [], notes: [`The project key ${JSON.stringify(projectKey)} is not a safe directory name; nothing was matched.`] };
+    return {
+      records: [],
+      notes: [`The project key ${JSON.stringify(projectKey)} is not a safe directory name; nothing was matched.`],
+    };
   let entries: string[];
-  try { entries = readdirSync(projectsRoot); }
-  catch (error) { return { records: [], notes: [`The Claude Code projects store could not be listed: ${msg(error)}`] }; }
+  try {
+    entries = readdirSync(projectsRoot);
+  } catch (error) {
+    return { records: [], notes: [`The Claude Code projects store could not be listed: ${msg(error)}`] };
+  }
   const matched = entries.filter(entry => entry.toLowerCase() === projectKey.toLowerCase());
   return {
-    records: matched.map(entry => ({ provider: 'claude', kind: 'claude-project', id: entry, detail: entry, location: path.join(projectsRoot, entry) })),
+    records: matched.map(entry => ({
+      provider: 'claude',
+      kind: 'claude-project',
+      id: entry,
+      detail: entry,
+      location: path.join(projectsRoot, entry),
+    })),
     notes: [],
   };
 }
@@ -224,12 +295,19 @@ export function findCodexRollout(codexRoot: string, fileName: string, bounds: { 
     if (existsSync(base)) collectRollouts(base, 0, files, maxFiles);
   }
   if (!existsSync(codexRoot)) notes.push(`No Codex sessions store at ${codexRoot}.`);
-  else if (files.length >= maxFiles) notes.push(`The rollout scan stopped at the ${maxFiles}-file bound; files beyond it were not inspected.`);
+  else if (files.length >= maxFiles)
+    notes.push(`The rollout scan stopped at the ${maxFiles}-file bound; files beyond it were not inspected.`);
   const wanted = fileName.toLowerCase();
   return {
     records: files
       .filter(file => path.basename(file).toLowerCase() === wanted)
-      .map(file => ({ provider: 'openai', kind: 'codex-rollout', id: path.basename(file), detail: file, location: file })),
+      .map(file => ({
+        provider: 'openai',
+        kind: 'codex-rollout',
+        id: path.basename(file),
+        detail: file,
+        location: file,
+      })),
     notes,
   };
 }
@@ -240,14 +318,21 @@ export function findCodexRollout(codexRoot: string, fileName: string, bounds: { 
  */
 export function resolveDevinExecutable(env: NodeJS.ProcessEnv = process.env): string | null {
   const name = 'devin.exe';
-  const candidates = (env.PATH ?? '').split(path.delimiter).filter(Boolean).map(dir => path.join(dir, name));
+  const candidates = (env.PATH ?? '')
+    .split(path.delimiter)
+    .filter(Boolean)
+    .map(dir => path.join(dir, name));
   if (env.USERPROFILE) candidates.push(path.join(env.USERPROFILE, '.local', 'bin', name));
   if (env.LOCALAPPDATA) candidates.push(path.join(env.LOCALAPPDATA, 'Programs', 'Devin', name));
   return candidates.find(candidate => existsSync(candidate)) ?? null;
 }
 
 /** The real per-provider record roots, resolved from the user's environment. */
-export function providerRecordRoots(env: NodeJS.ProcessEnv = process.env): { sessionsDb: string | null; claudeProjects: string | null; codexHome: string | null } {
+export function providerRecordRoots(env: NodeJS.ProcessEnv = process.env): {
+  sessionsDb: string | null;
+  claudeProjects: string | null;
+  codexHome: string | null;
+} {
   const home = env.USERPROFILE ?? env.HOME;
   return {
     sessionsDb: env.APPDATA ? path.join(env.APPDATA, DEVIN_SESSIONS_DB) : null,
@@ -260,8 +345,20 @@ export function providerRecordRoots(env: NodeJS.ProcessEnv = process.env): { ses
 export function discover(packetDir: string, provider: Provider, env: NodeJS.ProcessEnv = process.env): Discovery {
   const roots = providerRecordRoots(env);
   switch (provider) {
-    case 'devin': return roots.sessionsDb ? discoverDevinSessions(roots.sessionsDb, packetDir) : { records: [], notes: ['No APPDATA is set; the Devin sessions store cannot be located.'] };
-    case 'claude': return roots.claudeProjects ? discoverClaudeProject(roots.claudeProjects, packetDir) : { records: [], notes: ['No user profile directory is set; the Claude Code projects store cannot be located.'] };
-    case 'openai': return roots.codexHome ? discoverCodexRollouts(roots.codexHome, packetDir) : { records: [], notes: ['No user profile directory is set; the Codex sessions store cannot be located.'] };
+    case 'devin':
+      return roots.sessionsDb
+        ? discoverDevinSessions(roots.sessionsDb, packetDir)
+        : { records: [], notes: ['No APPDATA is set; the Devin sessions store cannot be located.'] };
+    case 'claude':
+      return roots.claudeProjects
+        ? discoverClaudeProject(roots.claudeProjects, packetDir)
+        : {
+            records: [],
+            notes: ['No user profile directory is set; the Claude Code projects store cannot be located.'],
+          };
+    case 'openai':
+      return roots.codexHome
+        ? discoverCodexRollouts(roots.codexHome, packetDir)
+        : { records: [], notes: ['No user profile directory is set; the Codex sessions store cannot be located.'] };
   }
 }

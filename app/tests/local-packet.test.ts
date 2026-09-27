@@ -9,10 +9,33 @@ import { OfficeStore } from '../src/core/store';
 import { removeTreeSync } from '../src/main/fsx';
 import { buildProviderPayload, type SubmitContext } from '../src/main/controller';
 import { FakeLocalFileIO, GuardedLocalFileIO } from '../src/main/local-session-files';
-import { AGENTS_FILE, CLAUDE_FILE, CONTRACT_FILE, CONTRACT_OPTIONAL_FILE, FINISH_FILE, INPUTS_DIR, PACKET_FILE, PACKET_HASH_FILE, PACKET_READY_FILE, RESULT_FILE, packetPromptBlock, prepareLocalPacket, readLocalResult, readLocalResultV1, resultContractOptional, resultContractV2, tabularSummary } from '../src/main/local-packet';
+import {
+  AGENTS_FILE,
+  CLAUDE_FILE,
+  CONTRACT_FILE,
+  CONTRACT_OPTIONAL_FILE,
+  FINISH_FILE,
+  INPUTS_DIR,
+  PACKET_FILE,
+  PACKET_HASH_FILE,
+  PACKET_READY_FILE,
+  RESULT_FILE,
+  packetPromptBlock,
+  prepareLocalPacket,
+  readLocalResult,
+  readLocalResultV1,
+  resultContractOptional,
+  resultContractV2,
+  tabularSummary,
+} from '../src/main/local-packet';
 import { EVIDENCE_ARGS } from '../src/main/evidence-tool';
 import { EVIDENCE_SURFACE_ID } from '../src/shared/tool-profile';
-import { MEMORY_DIGEST_FILE, localPacketV2Schema, memoryDigestSchema, type LocalSessionRecord } from '../src/shared/local-session';
+import {
+  MEMORY_DIGEST_FILE,
+  localPacketV2Schema,
+  memoryDigestSchema,
+  type LocalSessionRecord,
+} from '../src/shared/local-session';
 import type { Assignment, InputSnapshot } from '../src/shared/types';
 
 const at = (minutes: number) => new Date(Date.UTC(2026, 8, 19, 10, 0, 0) + minutes * 60000).toISOString();
@@ -21,16 +44,38 @@ const bytes = (text: string) => new TextEncoder().encode(text);
 
 function record(overrides: Partial<LocalSessionRecord> = {}): LocalSessionRecord {
   return {
-    schemaVersion: 1, id: randomUUID(), jobId: randomUUID(), assignmentId: randomUUID(),
-    projectId: randomUUID(), attemptId: randomUUID(), revision: 0,
-    provider: 'devin', surface: 'DEVIN_CLI', layout: 'FLAT_PACKET', packetVersion: 2,
-    packetHash: null, storageRelativePath: 'bound-session', originalCwd: null,
-    repoRelativePath: null, seedCommit: null, worktreeOwner: 'NONE',
-    providerSessionId: null, providerProjectId: null, bindingEvidence: 'UNBOUND',
-    groupingStatus: 'UNKNOWN', requirement: 'SCOPED_DELIVERY', confinementStatus: 'UNVERIFIED',
-    confinementEvidenceId: null, lifecycle: 'READY', archiveRelativePath: null,
-    lastReceipt: null, cancelRequestId: null, stopStatus: 'NOT_REQUESTED',
-    createdAt: at(0), updatedAt: at(0), ...overrides,
+    schemaVersion: 1,
+    id: randomUUID(),
+    jobId: randomUUID(),
+    assignmentId: randomUUID(),
+    projectId: randomUUID(),
+    attemptId: randomUUID(),
+    revision: 0,
+    provider: 'devin',
+    surface: 'DEVIN_CLI',
+    layout: 'FLAT_PACKET',
+    packetVersion: 2,
+    packetHash: null,
+    storageRelativePath: 'bound-session',
+    originalCwd: null,
+    repoRelativePath: null,
+    seedCommit: null,
+    worktreeOwner: 'NONE',
+    providerSessionId: null,
+    providerProjectId: null,
+    bindingEvidence: 'UNBOUND',
+    groupingStatus: 'UNKNOWN',
+    requirement: 'SCOPED_DELIVERY',
+    confinementStatus: 'UNVERIFIED',
+    confinementEvidenceId: null,
+    lifecycle: 'READY',
+    archiveRelativePath: null,
+    lastReceipt: null,
+    cancelRequestId: null,
+    stopStatus: 'NOT_REQUESTED',
+    createdAt: at(0),
+    updatedAt: at(0),
+    ...overrides,
   };
 }
 
@@ -42,29 +87,61 @@ function fixture(t: test.TestContext) {
   writeFileSync(path.join(staging, 'data', 'input.csv'), 'a,b\n1,2\n');
   writeFileSync(path.join(staging, 'notes.txt'), 'fixture notes');
   const snapshot: InputSnapshot = {
-    id: randomUUID(), projectId: randomUUID(), requestId: randomUUID(), locationRevision: 0, requestRevision: 1,
+    id: randomUUID(),
+    projectId: randomUUID(),
+    requestId: randomUUID(),
+    locationRevision: 0,
+    requestRevision: 1,
     route: 'SELECTED_FILES_GIT_SNAPSHOT',
     files: [
       { path: 'data/input.csv', bytes: Buffer.byteLength('a,b\n1,2\n'), sha256: sha('a,b\n1,2\n') },
       { path: 'notes.txt', bytes: Buffer.byteLength('fixture notes'), sha256: sha('fixture notes') },
     ],
     totalBytes: Buffer.byteLength('a,b\n1,2\n') + Buffer.byteLength('fixture notes'),
-    manifestHash: sha('manifest'), stagingCommit: 'fixture-commit', stagingPath: staging,
-    warnings: [], provenance: 'OFFICE_STAGED', createdAt: at(0),
+    manifestHash: sha('manifest'),
+    stagingCommit: 'fixture-commit',
+    stagingPath: staging,
+    warnings: [],
+    provenance: 'OFFICE_STAGED',
+    createdAt: at(0),
   };
   const sessions = path.join(root, 'sessions');
   const binding = record({ projectId: snapshot.projectId });
   const assignment: Assignment = {
-    id: binding.assignmentId, projectId: snapshot.projectId, requestId: snapshot.requestId!, requestRevision: 1,
-    agentId: randomUUID(), agentRevision: 0, connectionId: randomUUID(), capabilitySnapshotId: randomUUID(),
-    snapshotId: snapshot.id, route: 'LOCAL_MAILBOX', requestedModel: 'devin-local', resolvedModel: '',
-    requestedEffort: 'default', appliedEffort: 'UNVERIFIED', delegation: false, objectiveHash: sha('objective'),
+    id: binding.assignmentId,
+    projectId: snapshot.projectId,
+    requestId: snapshot.requestId!,
+    requestRevision: 1,
+    agentId: randomUUID(),
+    agentRevision: 0,
+    connectionId: randomUUID(),
+    capabilitySnapshotId: randomUUID(),
+    snapshotId: snapshot.id,
+    route: 'LOCAL_MAILBOX',
+    requestedModel: 'devin-local',
+    resolvedModel: '',
+    requestedEffort: 'default',
+    appliedEffort: 'UNVERIFIED',
+    delegation: false,
+    objectiveHash: sha('objective'),
     createdAt: at(0),
   };
   const context: SubmitContext = {
-    assignment, snapshot, objective: 'Summarize the fixture input.', requestName: 'Tiny local task',
-    payload: buildProviderPayload({ requestName: 'Tiny local task', objective: 'Summarize the fixture input.', acceptanceCriteria: 'A summary file.', instructions: '', model: 'devin-local', effort: 'default', delegation: false }),
-    jobId: binding.jobId, localSession: binding,
+    assignment,
+    snapshot,
+    objective: 'Summarize the fixture input.',
+    requestName: 'Tiny local task',
+    payload: buildProviderPayload({
+      requestName: 'Tiny local task',
+      objective: 'Summarize the fixture input.',
+      acceptanceCriteria: 'A summary file.',
+      instructions: '',
+      model: 'devin-local',
+      effort: 'default',
+      delegation: false,
+    }),
+    jobId: binding.jobId,
+    localSession: binding,
   };
   const dir = path.join(sessions, binding.storageRelativePath);
   const io = new GuardedLocalFileIO();
@@ -74,9 +151,16 @@ function fixture(t: test.TestContext) {
 /** A well-formed v2 receipt for this fixture's binding — callers override what they attack. */
 function receipt(binding: LocalSessionRecord, packetHash: string, overrides: Record<string, unknown> = {}) {
   return {
-    schema: 'office-local-result@2', jobId: binding.jobId, assignmentId: binding.assignmentId,
-    attemptId: binding.attemptId, packetHash, sequence: 1, state: 'COMPLETED', detail: 'Done.',
-    outputs: [], ...overrides,
+    schema: 'office-local-result@2',
+    jobId: binding.jobId,
+    assignmentId: binding.assignmentId,
+    attemptId: binding.attemptId,
+    packetHash,
+    sequence: 1,
+    state: 'COMPLETED',
+    detail: 'Done.',
+    outputs: [],
+    ...overrides,
   };
 }
 
@@ -117,10 +201,16 @@ test('prepare writes a schema-valid v2 packet, its canonical hash and the ready 
     const onDisk = readFileSync(path.join(f.dir, file.path));
     assert.equal(sha(onDisk), file.sha256);
     assert.equal(onDisk.byteLength, file.bytes);
-    assert.equal(readFileSync(path.join(f.staging, file.path.slice('inputs/'.length)), 'utf8'), onDisk.toString('utf8'));
+    assert.equal(
+      readFileSync(path.join(f.staging, file.path.slice('inputs/'.length)), 'utf8'),
+      onDisk.toString('utf8'),
+    );
   }
   // The instruction files — including the optional contract half and the receipt helper — are declared and written.
-  assert.deepEqual(parsed.instructions.map(file => file.path).sort(), [AGENTS_FILE, CLAUDE_FILE, CONTRACT_FILE, CONTRACT_OPTIONAL_FILE, FINISH_FILE].sort());
+  assert.deepEqual(
+    parsed.instructions.map(file => file.path).sort(),
+    [AGENTS_FILE, CLAUDE_FILE, CONTRACT_FILE, CONTRACT_OPTIONAL_FILE, FINISH_FILE].sort(),
+  );
   for (const file of parsed.instructions) {
     const onDisk = readFileSync(path.join(f.dir, file.path));
     assert.equal(sha(onDisk), file.sha256);
@@ -166,10 +256,28 @@ test('CONTRACT.md documents the v2 result schema, office control files and the c
   prepare(f);
   const contract = readFileSync(path.join(f.dir, CONTRACT_FILE), 'utf8');
   for (const fragment of [
-    'office-local-result@2', 'jobId', 'assignmentId', 'attemptId', 'packetHash', 'sequence',
-    'ACCEPTED', 'RUNNING', 'COMPLETED', 'FAILED', 'outputs/', 'applied', CONTRACT_OPTIONAL_FILE, FINISH_FILE,
-    PACKET_READY_FILE, PACKET_HASH_FILE, 'cancel.requested', 'cancel.ack.json', 'office-local-cancel-ack@1', 'STOPPED',
-  ]) assert.ok(contract.includes(fragment), `contract names ${fragment}`);
+    'office-local-result@2',
+    'jobId',
+    'assignmentId',
+    'attemptId',
+    'packetHash',
+    'sequence',
+    'ACCEPTED',
+    'RUNNING',
+    'COMPLETED',
+    'FAILED',
+    'outputs/',
+    'applied',
+    CONTRACT_OPTIONAL_FILE,
+    FINISH_FILE,
+    PACKET_READY_FILE,
+    PACKET_HASH_FILE,
+    'cancel.requested',
+    'cancel.ack.json',
+    'office-local-cancel-ack@1',
+    'STOPPED',
+  ])
+    assert.ok(contract.includes(fragment), `contract names ${fragment}`);
   // The sentinel's precedence is stated explicitly — pilot sessions reasoned their way past an
   // ambiguous one, so the contract names the stop-first rule, its override-proofing and the
   // mid-work check advice. The encoding requirement follows a real BOM-prefixed receipt.
@@ -186,8 +294,13 @@ test('a receipt carrying findings and links parses through readLocalResult', t =
   const prepared = prepare(f);
   const bound = { ...f.binding, packetHash: prepared.packetHash };
   const findings = [
-    { ref: 'f-obs', kind: 'OBSERVATION', title: 'input has two rows', body: 'the csv carries two data rows',
-      evidenceRefs: [{ kind: 'OBJECT', id: sha('artifact-bytes') }] },
+    {
+      ref: 'f-obs',
+      kind: 'OBSERVATION',
+      title: 'input has two rows',
+      body: 'the csv carries two data rows',
+      evidenceRefs: [{ kind: 'OBJECT', id: sha('artifact-bytes') }],
+    },
     { kind: 'RESULT', title: 'summary finished', body: 'summarized the input', supersedes: randomUUID() },
   ];
   const links = [{ from: 'f-obs', to: randomUUID(), kind: 'SUPPORTS', note: 'grounds the summary' }];
@@ -210,18 +323,43 @@ test('CONTRACT-OPTIONAL.md documents findings/links with their kinds, bounds and
   const contract = readFileSync(path.join(f.dir, CONTRACT_OPTIONAL_FILE), 'utf8');
   assert.equal(contract, resultContractOptional());
   const core = readFileSync(path.join(f.dir, CONTRACT_FILE), 'utf8');
-  assert.doesNotMatch(core, /OBSERVATION, HYPOTHESIS/, 'the optional sections no longer ride the core contract every session reads');
+  assert.doesNotMatch(
+    core,
+    /OBSERVATION, HYPOTHESIS/,
+    'the optional sections no longer ride the core contract every session reads',
+  );
   for (const fragment of [
-    '`findings`', '`links`', 'OBSERVATION', 'HYPOTHESIS', 'RESULT', 'DEFECT', 'DECISION', 'NOTE',
-    'SUPPORTS', 'CONTRADICTS', 'RELATES', 'DUPLICATES', 'REFINES',
-    'session-local', 'evidenceRefs', 'supersedes', '64', '100',
-    'malformed entries', 'OBJECT', 'ASSIGNMENT', 'JOB', 'REQUEST',
-  ]) assert.ok(contract.includes(fragment), `contract names ${fragment}`);
+    '`findings`',
+    '`links`',
+    'OBSERVATION',
+    'HYPOTHESIS',
+    'RESULT',
+    'DEFECT',
+    'DECISION',
+    'NOTE',
+    'SUPPORTS',
+    'CONTRADICTS',
+    'RELATES',
+    'DUPLICATES',
+    'REFINES',
+    'session-local',
+    'evidenceRefs',
+    'supersedes',
+    '64',
+    '100',
+    'malformed entries',
+    'OBJECT',
+    'ASSIGNMENT',
+    'JOB',
+    'REQUEST',
+  ])
+    assert.ok(contract.includes(fragment), `contract names ${fragment}`);
   // A `ref` is session-local and never a durable finding id — the rule is stated, not implied.
   assert.match(contract, /never a durable finding id/);
   // The evidence-surface variant names memorySearch and its per-hop authorization.
   const surfaced = resultContractV2({ evidenceSurface: true });
-  for (const op of ['queryEvidence', 'readEvidence', 'stagePacket', 'memorySearch']) assert.match(surfaced, new RegExp(`- \`${op}\` \{`), `the contract documents ${op} args`);
+  for (const op of ['queryEvidence', 'readEvidence', 'stagePacket', 'memorySearch'])
+    assert.match(surfaced, new RegExp(`- \`${op}\` \{`), `the contract documents ${op} args`);
   assert.match(surfaced, /memory ledger/);
   assert.match(surfaced, /authorized only at the seats that also receive the memory digest/);
   assert.match(surfaced, /do not loop on sleep/);
@@ -233,7 +371,10 @@ test('CONTRACT-OPTIONAL.md documents findings/links with their kinds, bounds and
 test('finish.py writes a receipt the office reader verifies, advancing the sequence on a rewrite', async t => {
   const { spawnSync } = await import('node:child_process');
   const python = ['python', 'python3', 'py'].find(bin => spawnSync(bin, ['--version']).status === 0);
-  if (!python) { t.skip('no Python on this machine'); return; }
+  if (!python) {
+    t.skip('no Python on this machine');
+    return;
+  }
   const f = fixture(t);
   const prepared = prepare(f);
   const bound = { ...f.binding, packetHash: prepared.packetHash };
@@ -245,11 +386,17 @@ test('finish.py writes a receipt the office reader verifies, advancing the seque
   assert.equal(first.status, 0, first.stderr);
   const read = readLocalResult(f.dir, bound, f.io);
   assert.ok('value' in read, 'defect' in read ? read.defect : '');
-  assert.deepEqual(read.value.result.outputs.map(item => item.path), ['outputs/report.md', 'outputs/sub/data.csv']);
+  assert.deepEqual(
+    read.value.result.outputs.map(item => item.path),
+    ['outputs/report.md', 'outputs/sub/data.csv'],
+  );
   assert.equal(read.value.result.state, 'COMPLETED');
   assert.notEqual(readFileSync(path.join(f.dir, RESULT_FILE))[0], 0xef, 'no byte-order mark');
   const withReceipt = { ...bound, lastReceipt: { sequence: 1, hash: read.value.receiptHash, observedAt: at(2) } };
-  writeFileSync(path.join(f.dir, 'extra.json'), JSON.stringify({ findings: [{ kind: 'NOTE', title: 'n', body: 'b' }] }));
+  writeFileSync(
+    path.join(f.dir, 'extra.json'),
+    JSON.stringify({ findings: [{ kind: 'NOTE', title: 'n', body: 'b' }] }),
+  );
   const second = run('COMPLETED', 'Revised.', '--extra', 'extra.json');
   assert.equal(second.status, 0, second.stderr);
   const reread = readLocalResult(f.dir, withReceipt, f.io);
@@ -299,8 +446,14 @@ test('readLocalResult refuses a missing or mismatched ready marker before trusti
   report(f.dir, receipt(bound, prepared.packetHash));
   rmSync(path.join(f.dir, PACKET_READY_FILE));
   let read = readLocalResult(f.dir, bound, f.io);
-  assert.ok('defect' in read && /ready marker|packet\.ready\.json/i.test(read.defect), 'defect' in read ? read.defect : 'expected a defect');
-  writeFileSync(path.join(f.dir, PACKET_READY_FILE), JSON.stringify({ attemptId: randomUUID(), packetHash: prepared.packetHash }));
+  assert.ok(
+    'defect' in read && /ready marker|packet\.ready\.json/i.test(read.defect),
+    'defect' in read ? read.defect : 'expected a defect',
+  );
+  writeFileSync(
+    path.join(f.dir, PACKET_READY_FILE),
+    JSON.stringify({ attemptId: randomUUID(), packetHash: prepared.packetHash }),
+  );
   read = readLocalResult(f.dir, bound, f.io);
   assert.ok('defect' in read && /ready marker/i.test(read.defect));
 });
@@ -309,7 +462,12 @@ test('readLocalResult refuses a receipt bound to another job, assignment, attemp
   const f = fixture(t);
   const prepared = prepare(f);
   const bound = { ...f.binding, packetHash: prepared.packetHash };
-  for (const [key, value] of [['jobId', randomUUID()], ['assignmentId', randomUUID()], ['attemptId', randomUUID()], ['packetHash', sha('other')]] as const) {
+  for (const [key, value] of [
+    ['jobId', randomUUID()],
+    ['assignmentId', randomUUID()],
+    ['attemptId', randomUUID()],
+    ['packetHash', sha('other')],
+  ] as const) {
     report(f.dir, receipt(bound, prepared.packetHash, { [key]: value }));
     const read = readLocalResult(f.dir, bound, f.io);
     assert.ok('defect' in read, `${key} mismatch must be a defect`);
@@ -323,7 +481,9 @@ test('a cross-attempt receipt is refused even when its declared output hashes ma
   const bound = { ...f.binding, packetHash: prepared.packetHash };
   const output = { path: 'outputs/summary.txt', sha256: sha('done bytes'), bytes: Buffer.byteLength('done bytes') };
   // A receipt naming a different attempt — same outputs/, same bytes, same hashes.
-  report(f.dir, receipt(bound, prepared.packetHash, { attemptId: randomUUID(), outputs: [output] }), { 'outputs/summary.txt': 'done bytes' });
+  report(f.dir, receipt(bound, prepared.packetHash, { attemptId: randomUUID(), outputs: [output] }), {
+    'outputs/summary.txt': 'done bytes',
+  });
   const read = readLocalResult(f.dir, bound, f.io);
   assert.ok('defect' in read && /attemptId/.test(read.defect), 'defect' in read ? read.defect : 'expected a defect');
 });
@@ -335,7 +495,10 @@ test('a receipt that does not advance the sequence is refused with the prior rec
   const bound = { ...f.binding, packetHash: prepared.packetHash, lastReceipt: prior };
   report(f.dir, receipt(bound, prepared.packetHash, { sequence: 2 }));
   let read = readLocalResult(f.dir, bound, f.io);
-  assert.ok('defect' in read && /sequence/.test(read.defect) && read.defect.includes(prior.hash), 'defect' in read ? read.defect : 'expected a defect');
+  assert.ok(
+    'defect' in read && /sequence/.test(read.defect) && read.defect.includes(prior.hash),
+    'defect' in read ? read.defect : 'expected a defect',
+  );
   report(f.dir, receipt(bound, prepared.packetHash, { sequence: 3 }));
   read = readLocalResult(f.dir, bound, f.io);
   assert.ok('defect' in read && /sequence/.test(read.defect));
@@ -349,17 +512,30 @@ test('outputs outside outputs/, a byte mismatch and a sha mismatch are all refus
   const prepared = prepare(f);
   const bound = { ...f.binding, packetHash: prepared.packetHash };
   // Declared outside outputs/ — the schema itself refuses it.
-  report(f.dir, receipt(bound, prepared.packetHash, { outputs: [{ path: 'out.txt', sha256: sha('x'), bytes: 1 }] }), { 'out.txt': 'x' });
+  report(f.dir, receipt(bound, prepared.packetHash, { outputs: [{ path: 'out.txt', sha256: sha('x'), bytes: 1 }] }), {
+    'out.txt': 'x',
+  });
   assert.ok('defect' in readLocalResult(f.dir, bound, f.io));
   // Declared under outputs/ but missing on disk.
-  report(f.dir, receipt(bound, prepared.packetHash, { outputs: [{ path: 'outputs/ghost.txt', sha256: sha('x'), bytes: 1 }] }));
+  report(
+    f.dir,
+    receipt(bound, prepared.packetHash, { outputs: [{ path: 'outputs/ghost.txt', sha256: sha('x'), bytes: 1 }] }),
+  );
   assert.ok('defect' in readLocalResult(f.dir, bound, f.io));
   // Declared bytes differ from the file.
-  report(f.dir, receipt(bound, prepared.packetHash, { outputs: [{ path: 'outputs/real.txt', sha256: sha('actual'), bytes: 999 }] }), { 'outputs/real.txt': 'actual' });
+  report(
+    f.dir,
+    receipt(bound, prepared.packetHash, { outputs: [{ path: 'outputs/real.txt', sha256: sha('actual'), bytes: 999 }] }),
+    { 'outputs/real.txt': 'actual' },
+  );
   const read = readLocalResult(f.dir, bound, f.io);
   assert.ok('defect' in read && /bytes/.test(read.defect), 'defect' in read ? read.defect : 'expected a defect');
   // Declared sha differs.
-  report(f.dir, receipt(bound, prepared.packetHash, { outputs: [{ path: 'outputs/real.txt', sha256: sha('forged'), bytes: 6 }] }), { 'outputs/real.txt': 'actual' });
+  report(
+    f.dir,
+    receipt(bound, prepared.packetHash, { outputs: [{ path: 'outputs/real.txt', sha256: sha('forged'), bytes: 6 }] }),
+    { 'outputs/real.txt': 'actual' },
+  );
   const forged = readLocalResult(f.dir, bound, f.io);
   assert.ok('defect' in forged && /sha256|hashes to/.test(forged.defect));
 });
@@ -393,22 +569,44 @@ test('the same contract holds end-to-end through FakeLocalFileIO', t => {
   for (const file of [
     { path: 'data/input.csv', text: 'a,b\n1,2\n' },
     { path: 'notes.txt', text: 'fixture notes' },
-  ]) io.writeNew(staging, file.path, bytes(file.text));
+  ])
+    io.writeNew(staging, file.path, bytes(file.text));
   const snapshot: InputSnapshot = {
-    id: randomUUID(), projectId: binding.projectId, requestId: randomUUID(), locationRevision: 0, requestRevision: 1,
+    id: randomUUID(),
+    projectId: binding.projectId,
+    requestId: randomUUID(),
+    locationRevision: 0,
+    requestRevision: 1,
     route: 'SELECTED_FILES_GIT_SNAPSHOT',
     files: [
       { path: 'data/input.csv', bytes: Buffer.byteLength('a,b\n1,2\n'), sha256: sha('a,b\n1,2\n') },
       { path: 'notes.txt', bytes: Buffer.byteLength('fixture notes'), sha256: sha('fixture notes') },
     ],
-    totalBytes: 0, manifestHash: sha('manifest'), stagingCommit: 'x', stagingPath: staging,
-    warnings: [], provenance: 'OFFICE_STAGED', createdAt: at(0),
+    totalBytes: 0,
+    manifestHash: sha('manifest'),
+    stagingCommit: 'x',
+    stagingPath: staging,
+    warnings: [],
+    provenance: 'OFFICE_STAGED',
+    createdAt: at(0),
   };
   const assignment = { id: binding.assignmentId } as Assignment;
   const context: SubmitContext = {
-    assignment, snapshot, objective: 'o', requestName: 'r',
-    payload: buildProviderPayload({ requestName: 'r', objective: 'o', acceptanceCriteria: '', instructions: '', model: 'm', effort: 'low', delegation: true }),
-    jobId: binding.jobId, localSession: binding,
+    assignment,
+    snapshot,
+    objective: 'o',
+    requestName: 'r',
+    payload: buildProviderPayload({
+      requestName: 'r',
+      objective: 'o',
+      acceptanceCriteria: '',
+      instructions: '',
+      model: 'm',
+      effort: 'low',
+      delegation: true,
+    }),
+    jobId: binding.jobId,
+    localSession: binding,
   };
   const prepared = prepareLocalPacket({ dir, context, binding, io, now: at(1) });
   const packet = JSON.parse(Buffer.from(io.read(dir, PACKET_FILE, 1 << 20).bytes).toString());
@@ -421,45 +619,123 @@ test('the same contract holds end-to-end through FakeLocalFileIO', t => {
   const read = readLocalResult(dir, bound, io);
   assert.ok('value' in read, 'defect' in read ? read.defect : '');
   assert.equal(Buffer.from(read.value.outputs[0].data).toString(), 'fake out');
-  assert.ok(io.calls.some(call => call.method === 'inspectRoot'), 'the root was inspected through the io boundary');
+  assert.ok(
+    io.calls.some(call => call.method === 'inspectRoot'),
+    'the root was inspected through the io boundary',
+  );
 });
 
 /** A real store carrying a small memory ledger — the same data the caller passes as memoryDigest. */
 function digestLedger(t: test.TestContext) {
   const root = mkdtempSync(path.join(tmpdir(), 'qro-digest-ledger-'));
   const store = new OfficeStore(path.join(root, 'workspace.sqlite'));
-  t.after(() => { try { store.close(); } catch {} removeTreeSync(root); });
-  const project = store.execute({ type: 'project.create', idempotencyKey: randomUUID(), name: 'Alpha', mandate: 'm', budgetCents: 0 }).projects[0];
-  const request = store.execute({ type: 'request.create', idempotencyKey: randomUUID(), projectId: project.id, name: 'R', hypothesis: 'h', workType: 'OTHER', mode: 'SINGLE', leadAgentId: null, participantIds: [] }).requests![0];
+  t.after(() => {
+    try {
+      store.close();
+    } catch {}
+    removeTreeSync(root);
+  });
+  const project = store.execute({
+    type: 'project.create',
+    idempotencyKey: randomUUID(),
+    name: 'Alpha',
+    mandate: 'm',
+    budgetCents: 0,
+  }).projects[0];
+  const request = store.execute({
+    type: 'request.create',
+    idempotencyKey: randomUUID(),
+    projectId: project.id,
+    name: 'R',
+    hypothesis: 'h',
+    workType: 'OTHER',
+    mode: 'SINGLE',
+    leadAgentId: null,
+    participantIds: [],
+  }).requests![0];
   return { store, project, request };
 }
 
 test('an authorized synthesis seat mounts the bounded memory digest and declares it on the packet', t => {
   const ledger = digestLedger(t);
   // One superseded finding, its live correction and a proposed link — the digest marks corrections.
-  const prior = ledger.store.recordMemoryFinding({ projectId: ledger.project.id, requestId: ledger.request.id, assignmentId: null, kind: 'HYPOTHESIS', title: 'early guess', body: 'before the run', evidenceRefs: [], createdBy: { surface: 'USER' } }).finding;
-  const correction = ledger.store.recordMemoryFinding({ projectId: ledger.project.id, requestId: ledger.request.id, assignmentId: null, kind: 'OBSERVATION', title: 'settled read', body: 'after the run', evidenceRefs: [{ kind: 'REQUEST', id: ledger.request.id }], createdBy: { surface: 'AGENT_SESSION', agentId: randomUUID(), receiptHash: sha('receipt') }, supersedesFindingId: prior.id }).finding;
-  ledger.store.proposeMemoryRelationship({ projectId: ledger.project.id, fromFindingId: correction.id, toFindingId: prior.id, kind: 'REFINES', createdBy: { surface: 'OFFICE' } });
+  const prior = ledger.store.recordMemoryFinding({
+    projectId: ledger.project.id,
+    requestId: ledger.request.id,
+    assignmentId: null,
+    kind: 'HYPOTHESIS',
+    title: 'early guess',
+    body: 'before the run',
+    evidenceRefs: [],
+    createdBy: { surface: 'USER' },
+  }).finding;
+  const correction = ledger.store.recordMemoryFinding({
+    projectId: ledger.project.id,
+    requestId: ledger.request.id,
+    assignmentId: null,
+    kind: 'OBSERVATION',
+    title: 'settled read',
+    body: 'after the run',
+    evidenceRefs: [{ kind: 'REQUEST', id: ledger.request.id }],
+    createdBy: { surface: 'AGENT_SESSION', agentId: randomUUID(), receiptHash: sha('receipt') },
+    supersedesFindingId: prior.id,
+  }).finding;
+  ledger.store.proposeMemoryRelationship({
+    projectId: ledger.project.id,
+    fromFindingId: correction.id,
+    toFindingId: prior.id,
+    kind: 'REFINES',
+    createdBy: { surface: 'OFFICE' },
+  });
   const digest = ledger.store.memoryDigest(ledger.project.id);
   let priorBytes: Buffer | undefined;
   for (const seat of ['plan-brief', 'plan-synthesis', 'analysis-finalize']) {
     const f = fixture(t);
     f.assignment.pipelineKey = seat;
     // The digest names this packet's project — bind every id to the ledger's project.
-    f.assignment.projectId = ledger.project.id; f.binding.projectId = ledger.project.id; f.snapshot.projectId = ledger.project.id;
-    const prepared = prepareLocalPacket({ dir: f.dir, context: f.context, binding: f.binding, io: f.io, now: at(1), memoryDigest: digest });
+    f.assignment.projectId = ledger.project.id;
+    f.binding.projectId = ledger.project.id;
+    f.snapshot.projectId = ledger.project.id;
+    const prepared = prepareLocalPacket({
+      dir: f.dir,
+      context: f.context,
+      binding: f.binding,
+      io: f.io,
+      now: at(1),
+      memoryDigest: digest,
+    });
     const onDisk = readFileSync(path.join(f.dir, MEMORY_DIGEST_FILE));
     const parsed = memoryDigestSchema.parse(JSON.parse(onDisk.toString('utf8')));
     assert.equal(parsed.schema, 'office-memory-digest@1');
     assert.equal(parsed.generatedAt, at(1));
-    assert.deepEqual({ findings: parsed.findings, links: parsed.links }, digest, 'the file carries the store projection verbatim');
-    assert.equal(parsed.findings.find(item => item.id === prior.id)!.superseded, true, 'superseded findings are marked, not hidden');
+    assert.deepEqual(
+      { findings: parsed.findings, links: parsed.links },
+      digest,
+      'the file carries the store projection verbatim',
+    );
+    assert.equal(
+      parsed.findings.find(item => item.id === prior.id)!.superseded,
+      true,
+      'superseded findings are marked, not hidden',
+    );
     // The written bytes are the schema-canonical serialization — key order is the schema's,
     // so the same ledger state hashes identically regardless of the rows' literal layout.
-    assert.equal(onDisk.toString('utf8'), `${JSON.stringify(memoryDigestSchema.parse({ schema: 'office-memory-digest@1', generatedAt: at(1), ...digest }), null, 2)}\n`);
+    assert.equal(
+      onDisk.toString('utf8'),
+      `${JSON.stringify(memoryDigestSchema.parse({ schema: 'office-memory-digest@1', generatedAt: at(1), ...digest }), null, 2)}\n`,
+    );
     const packet = localPacketV2Schema.parse(JSON.parse(readFileSync(path.join(f.dir, PACKET_FILE), 'utf8')));
-    assert.deepEqual(packet.memoryDigest, { path: MEMORY_DIGEST_FILE, findings: 2, relationships: 1, sha256: sha(onDisk) });
-    assert.equal(prepared.packetHash, canonicalHash(JSON.parse(readFileSync(path.join(f.dir, PACKET_FILE), 'utf8'))), 'the declaration rides inside the hashed packet; the digest bytes do not');
+    assert.deepEqual(packet.memoryDigest, {
+      path: MEMORY_DIGEST_FILE,
+      findings: 2,
+      relationships: 1,
+      sha256: sha(onDisk),
+    });
+    assert.equal(
+      prepared.packetHash,
+      canonicalHash(JSON.parse(readFileSync(path.join(f.dir, PACKET_FILE), 'utf8'))),
+      'the declaration rides inside the hashed packet; the digest bytes do not',
+    );
     const contract = readFileSync(path.join(f.dir, CONTRACT_FILE), 'utf8');
     assert.match(contract, /memory-digest\.json` is a bounded, point-in-time projection/);
     assert.match(contract, /self-report context, not verified fact: apply what still holds/);
@@ -473,14 +749,29 @@ test('an authorized synthesis seat mounts the bounded memory digest and declares
 test('no other seat and no plain assignment carries the digest file or the declaration', t => {
   const ledger = digestLedger(t);
   const digest = ledger.store.memoryDigest(ledger.project.id);
-  for (const [label, pipelineKey] of [['a non-director pipeline hop', 'plan-draft-a'], ['the analysis brief, whose brief feeds the independent arms', 'analysis-brief'], ['a plain assignment', undefined]] as const) {
+  for (const [label, pipelineKey] of [
+    ['a non-director pipeline hop', 'plan-draft-a'],
+    ['the analysis brief, whose brief feeds the independent arms', 'analysis-brief'],
+    ['a plain assignment', undefined],
+  ] as const) {
     const f = fixture(t);
     if (pipelineKey) f.assignment.pipelineKey = pipelineKey;
-    prepareLocalPacket({ dir: f.dir, context: f.context, binding: f.binding, io: f.io, now: at(1), memoryDigest: digest });
+    prepareLocalPacket({
+      dir: f.dir,
+      context: f.context,
+      binding: f.binding,
+      io: f.io,
+      now: at(1),
+      memoryDigest: digest,
+    });
     assert.equal(existsSync(path.join(f.dir, MEMORY_DIGEST_FILE)), false, `${label} must not write the digest file`);
     const packet = localPacketV2Schema.parse(JSON.parse(readFileSync(path.join(f.dir, PACKET_FILE), 'utf8')));
     assert.equal(packet.memoryDigest, undefined, `${label} must not declare a digest`);
-    assert.doesNotMatch(readFileSync(path.join(f.dir, CONTRACT_FILE), 'utf8'), /memory-digest/, `${label} must not mention the digest`);
+    assert.doesNotMatch(
+      readFileSync(path.join(f.dir, CONTRACT_FILE), 'utf8'),
+      /memory-digest/,
+      `${label} must not mention the digest`,
+    );
   }
 });
 
@@ -488,8 +779,17 @@ test('an empty ledger still produces a well-formed 0/0 digest for an authorized 
   const ledger = digestLedger(t);
   const f = fixture(t);
   f.assignment.pipelineKey = 'analysis-finalize';
-  f.assignment.projectId = ledger.project.id; f.binding.projectId = ledger.project.id; f.snapshot.projectId = ledger.project.id;
-  prepareLocalPacket({ dir: f.dir, context: f.context, binding: f.binding, io: f.io, now: at(1), memoryDigest: ledger.store.memoryDigest(ledger.project.id) });
+  f.assignment.projectId = ledger.project.id;
+  f.binding.projectId = ledger.project.id;
+  f.snapshot.projectId = ledger.project.id;
+  prepareLocalPacket({
+    dir: f.dir,
+    context: f.context,
+    binding: f.binding,
+    io: f.io,
+    now: at(1),
+    memoryDigest: ledger.store.memoryDigest(ledger.project.id),
+  });
   const parsed = memoryDigestSchema.parse(JSON.parse(readFileSync(path.join(f.dir, MEMORY_DIGEST_FILE), 'utf8')));
   assert.deepEqual(parsed.findings, []);
   assert.deepEqual(parsed.links, []);
@@ -505,9 +805,19 @@ test('a BLIND packet withholds matching paths hash-only; bytes are never staged'
   const prepared = prepare(f);
   const packet = localPacketV2Schema.parse(JSON.parse(readFileSync(path.join(f.dir, PACKET_FILE), 'utf8')));
   // data/input.csv is declared under withheld with the manifest's own identity — never staged.
-  assert.deepEqual(packet.withheld, [{ path: 'data/input.csv', sha256: sha('a,b\n1,2\n'), bytes: Buffer.byteLength('a,b\n1,2\n') }]);
-  assert.deepEqual(packet.files.map(file => file.path), ['inputs/notes.txt'], 'only the non-withheld file is declared as staged input');
-  assert.equal(existsSync(path.join(f.dir, INPUTS_DIR, 'data', 'input.csv')), false, 'withheld bytes never enter the packet');
+  assert.deepEqual(packet.withheld, [
+    { path: 'data/input.csv', sha256: sha('a,b\n1,2\n'), bytes: Buffer.byteLength('a,b\n1,2\n') },
+  ]);
+  assert.deepEqual(
+    packet.files.map(file => file.path),
+    ['inputs/notes.txt'],
+    'only the non-withheld file is declared as staged input',
+  );
+  assert.equal(
+    existsSync(path.join(f.dir, INPUTS_DIR, 'data', 'input.csv')),
+    false,
+    'withheld bytes never enter the packet',
+  );
   assert.equal(existsSync(path.join(f.dir, INPUTS_DIR, 'notes.txt')), true);
   // Blinding narrows the packet, not the manifest: the frozen snapshot identity is untouched.
   assert.equal(packet.snapshotManifestHash, f.snapshot.manifestHash);
@@ -525,19 +835,31 @@ test('an exact withheld path blinds that file alone; a trailing-slash prefix is 
   exact.context.withheldPaths = ['notes.txt'];
   prepare(exact);
   const exactPacket = localPacketV2Schema.parse(JSON.parse(readFileSync(path.join(exact.dir, PACKET_FILE), 'utf8')));
-  assert.deepEqual(exactPacket.withheld, [{ path: 'notes.txt', sha256: sha('fixture notes'), bytes: Buffer.byteLength('fixture notes') }]);
-  assert.deepEqual(exactPacket.files.map(file => file.path), ['inputs/data/input.csv']);
+  assert.deepEqual(exactPacket.withheld, [
+    { path: 'notes.txt', sha256: sha('fixture notes'), bytes: Buffer.byteLength('fixture notes') },
+  ]);
+  assert.deepEqual(
+    exactPacket.files.map(file => file.path),
+    ['inputs/data/input.csv'],
+  );
   assert.equal(existsSync(path.join(exact.dir, INPUTS_DIR, 'notes.txt')), false);
   const slashed = fixture(t);
   slashed.assignment.inputScope = 'BLIND';
   slashed.context.withheldPaths = ['data/']; // a stored prefix with a trailing slash withholds identically
   prepare(slashed);
-  const slashedPacket = localPacketV2Schema.parse(JSON.parse(readFileSync(path.join(slashed.dir, PACKET_FILE), 'utf8')));
-  assert.deepEqual(slashedPacket.withheld, [{ path: 'data/input.csv', sha256: sha('a,b\n1,2\n'), bytes: Buffer.byteLength('a,b\n1,2\n') }]);
+  const slashedPacket = localPacketV2Schema.parse(
+    JSON.parse(readFileSync(path.join(slashed.dir, PACKET_FILE), 'utf8')),
+  );
+  assert.deepEqual(slashedPacket.withheld, [
+    { path: 'data/input.csv', sha256: sha('a,b\n1,2\n'), bytes: Buffer.byteLength('a,b\n1,2\n') },
+  ]);
 });
 
 test('FULL scope and an absent scope stage the withheld paths as ordinary inputs', t => {
-  for (const [label, scope] of [['FULL', 'FULL'], ['unspecified', undefined]] as const) {
+  for (const [label, scope] of [
+    ['FULL', 'FULL'],
+    ['unspecified', undefined],
+  ] as const) {
     const f = fixture(t);
     if (scope) f.assignment.inputScope = scope;
     f.context.withheldPaths = ['data'];
@@ -546,7 +868,11 @@ test('FULL scope and an absent scope stage the withheld paths as ordinary inputs
     assert.equal(packet.withheld, undefined, `${label} declares nothing`);
     assert.equal(packet.files.length, 2, `${label} stages every snapshot file`);
     assert.equal(existsSync(path.join(f.dir, INPUTS_DIR, 'data', 'input.csv')), true);
-    assert.doesNotMatch(readFileSync(path.join(f.dir, CONTRACT_FILE), 'utf8'), /withheld/, `${label} keeps the contract unchanged`);
+    assert.doesNotMatch(
+      readFileSync(path.join(f.dir, CONTRACT_FILE), 'utf8'),
+      /withheld/,
+      `${label} keeps the contract unchanged`,
+    );
   }
 });
 
@@ -579,14 +905,25 @@ test('inherited outputs stage under their hop key; a key two jobs claim falls ba
     const data = bytes(`${name} from ${sourceJobId}`);
     return { name, bytes: data, sourceJobId, objectHash: sha(data), ...(sourceKey ? { sourceKey } : {}) };
   };
-  f.context.inherited = [item('outputs/plan.md', first, 'plan-draft-a'), item('outputs/notes.md', first, 'plan-draft-a'), item('outputs/plan.md', second, 'plan-draft-a'), item('outputs/brief.md', third)];
+  f.context.inherited = [
+    item('outputs/plan.md', first, 'plan-draft-a'),
+    item('outputs/notes.md', first, 'plan-draft-a'),
+    item('outputs/plan.md', second, 'plan-draft-a'),
+    item('outputs/brief.md', third),
+  ];
   const prepared = prepare(f);
   const paths = prepared.packet.inherited!.map(entry => entry.path);
   assert.deepEqual(paths, [
-    'inputs/inherited/plan-draft-a/plan.md', 'inputs/inherited/plan-draft-a/notes.md',
-    `inputs/inherited/${second}/plan.md`, `inputs/inherited/${third}/brief.md`,
+    'inputs/inherited/plan-draft-a/plan.md',
+    'inputs/inherited/plan-draft-a/notes.md',
+    `inputs/inherited/${second}/plan.md`,
+    `inputs/inherited/${third}/brief.md`,
   ]);
-  assert.equal(prepared.packet.inherited![0].sourceKey, 'plan-draft-a', 'the manifest records the hop key beside the job id');
+  assert.equal(
+    prepared.packet.inherited![0].sourceKey,
+    'plan-draft-a',
+    'the manifest records the hop key beside the job id',
+  );
   assert.equal(readFileSync(path.join(f.dir, paths[0]), 'utf8'), `outputs/plan.md from ${first}`);
 });
 
@@ -595,28 +932,61 @@ test('the prompt block carries the receipt identity, input shapes and a wide-col
   const prepared = prepare(f);
   const block = packetPromptBlock(prepared);
   assert.match(block, /^## Packet essentials \(office-generated\)/);
-  assert.ok(block.includes(`"packetHash":"${prepared.packetHash}"`), 'the packet hash — not in packet.json — rides the prompt');
+  assert.ok(
+    block.includes(`"packetHash":"${prepared.packetHash}"`),
+    'the packet hash — not in packet.json — rides the prompt',
+  );
   assert.ok(block.includes(`"jobId":"${f.binding.jobId}"`) && block.includes(`"attemptId":"${f.binding.attemptId}"`));
   assert.match(block, /- inputs\/data\/input\.csv \(8 bytes\) — 1 data row \(line count\); columns: a, b/);
   assert.match(block, /- inputs\/notes\.txt \(13 bytes\)$/m);
   assert.doesNotMatch(block, /Deliverable: the revised/);
   assert.match(packetPromptBlock(prepared, 'brief-refine-2'), /Deliverable: the revised `outputs\/brief\.md`/);
-  assert.equal(canonicalHash(JSON.parse(readFileSync(path.join(f.dir, PACKET_FILE), 'utf8'))), prepared.packetHash, 'the summaries are prompt context, never packet identity');
-  const wide = tabularSummary('inputs/bars.csv', bytes(`time,close,footprint\n2026-05-05,1.4,"{""1.4"": ${'1'.repeat(200)}}"\n2026-05-06,1.5,"{}"\n`));
-  assert.match(wide!, /^2 data rows \(line count\); columns: time, close, footprint; wide columns — select columns instead of printing whole rows: footprint \(~2\d\d chars\)$/);
+  assert.equal(
+    canonicalHash(JSON.parse(readFileSync(path.join(f.dir, PACKET_FILE), 'utf8'))),
+    prepared.packetHash,
+    'the summaries are prompt context, never packet identity',
+  );
+  const wide = tabularSummary(
+    'inputs/bars.csv',
+    bytes(`time,close,footprint\n2026-05-05,1.4,"{""1.4"": ${'1'.repeat(200)}}"\n2026-05-06,1.5,"{}"\n`),
+  );
+  assert.match(
+    wide!,
+    /^2 data rows \(line count\); columns: time, close, footprint; wide columns — select columns instead of printing whole rows: footprint \(~2\d\d chars\)$/,
+  );
   assert.equal(tabularSummary('inputs/readme.md', bytes('a,b\n')), null, 'only .csv/.tsv inputs are summarized');
 });
 
 test('the prompt block documents the evidence surface args and lists memorySearch only at digest seats', t => {
   const f = fixture(t);
   const prepared = prepare(f);
-  const mounted = { ...prepared, packet: { ...prepared.packet, toolProfile: { ...(prepared.packet.toolProfile ?? {}), mcpServers: [{ id: EVIDENCE_SURFACE_ID }] } as never } };
+  const mounted = {
+    ...prepared,
+    packet: {
+      ...prepared.packet,
+      toolProfile: { ...(prepared.packet.toolProfile ?? {}), mcpServers: [{ id: EVIDENCE_SURFACE_ID }] } as never,
+    },
+  };
   const block = packetPromptBlock(mounted);
-  assert.ok(block.includes('{"id":"q1","op":"queryEvidence","args":{"pattern":"<literal text>"}}'), 'one working example rides the prompt');
-  for (const op of ['queryEvidence', 'readEvidence', 'stagePacket']) assert.ok(block.includes(`${op} ${EVIDENCE_ARGS[op as keyof typeof EVIDENCE_ARGS]}`));
+  assert.ok(
+    block.includes('{"id":"q1","op":"queryEvidence","args":{"pattern":"<literal text>"}}'),
+    'one working example rides the prompt',
+  );
+  for (const op of ['queryEvidence', 'readEvidence', 'stagePacket'])
+    assert.ok(block.includes(`${op} ${EVIDENCE_ARGS[op as keyof typeof EVIDENCE_ARGS]}`));
   assert.doesNotMatch(block, /memorySearch/, 'a seat without the digest is not offered a search it would be refused');
-  assert.doesNotMatch(block, /frame format is in/, 'the prompt no longer defers the format to the contract it says not to open');
-  const digestSeat = packetPromptBlock({ ...mounted, packet: { ...mounted.packet, memoryDigest: { path: 'memory-digest.json', findings: 1, relationships: 0, sha256: 'a'.repeat(64) } } });
+  assert.doesNotMatch(
+    block,
+    /frame format is in/,
+    'the prompt no longer defers the format to the contract it says not to open',
+  );
+  const digestSeat = packetPromptBlock({
+    ...mounted,
+    packet: {
+      ...mounted.packet,
+      memoryDigest: { path: 'memory-digest.json', findings: 1, relationships: 0, sha256: 'a'.repeat(64) },
+    },
+  });
   assert.ok(digestSeat.includes(`memorySearch ${EVIDENCE_ARGS.memorySearch}`));
   assert.doesNotMatch(packetPromptBlock(prepared), /queries\//, 'an unmounted packet carries no surface line');
 });
@@ -631,12 +1001,20 @@ test('the prompt asks for at most 3 durable findings in the exact --extra shape 
   assert.match(block, /--extra findings\.json/);
   const { spawnSync } = await import('node:child_process');
   const python = ['python', 'python3', 'py'].find(bin => spawnSync(bin, ['--version']).status === 0);
-  if (!python) { t.skip('no Python on this machine'); return; }
-  const filled = example[1].replace('<short fact>', 'First CSV row is discontinuous').replace('<what, where, and how you know>', 'row 1 is 16 h before row 2');
+  if (!python) {
+    t.skip('no Python on this machine');
+    return;
+  }
+  const filled = example[1]
+    .replace('<short fact>', 'First CSV row is discontinuous')
+    .replace('<what, where, and how you know>', 'row 1 is 16 h before row 2');
   writeFileSync(path.join(f.dir, 'findings.json'), filled);
   mkdirSync(path.join(f.dir, 'outputs'), { recursive: true });
   writeFileSync(path.join(f.dir, 'outputs', 'ema.csv'), 'x\n');
-  const run = spawnSync(python, [FINISH_FILE, 'COMPLETED', 'Done.', '--extra', 'findings.json'], { cwd: f.dir, encoding: 'utf8' });
+  const run = spawnSync(python, [FINISH_FILE, 'COMPLETED', 'Done.', '--extra', 'findings.json'], {
+    cwd: f.dir,
+    encoding: 'utf8',
+  });
   assert.equal(run.status, 0, run.stderr);
   const read = readLocalResult(f.dir, { ...f.binding, packetHash: prepared.packetHash }, f.io);
   assert.ok('value' in read, 'defect' in read ? read.defect : '');

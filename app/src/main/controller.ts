@@ -1,12 +1,32 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import type { AdapterRoute, Agent, Assignment, AppState, CapabilityEvidence, Effort, InputSnapshot, JobEvent, JobOutput, Provider, ProviderJob } from '../shared/types.js';
+import type {
+  AdapterRoute,
+  Agent,
+  Assignment,
+  AppState,
+  CapabilityEvidence,
+  Effort,
+  InputSnapshot,
+  JobEvent,
+  JobOutput,
+  Provider,
+  ProviderJob,
+} from '../shared/types.js';
 import { canonicalHash } from '../core/canonical.js';
 import { isTerminalJob, latestJobFor, reconciliationPlan } from '../core/jobs.js';
 import { assertHostedExecution, assertLocalExecution, assertWorkerCapacity } from '../core/guards.js';
 import type { OfficeStore } from '../core/store.js';
 import { appliedReportPayloadSchema, type LocalSessionRecord, type MemoryDigest } from '../shared/local-session.js';
-import { agentDispatchReadiness, currentConnection, effectiveEvidence, latestCapability, scopeMismatches, supplyingSnapshotIds, type RequestedScope } from '../shared/readiness.js';
+import {
+  agentDispatchReadiness,
+  currentConnection,
+  effectiveEvidence,
+  latestCapability,
+  scopeMismatches,
+  supplyingSnapshotIds,
+  type RequestedScope,
+} from '../shared/readiness.js';
 import { dependencyStatus } from '../shared/cooperation.js';
 import { recordChainHandoff } from './chain-messages.js';
 import { verifySnapshotForTransfer, type OutputDestination } from './locations.js';
@@ -18,12 +38,22 @@ import { settlePipelineDecision } from './pipeline-runner.js';
 import { ingestReceiptMemory } from './memory-ingest.js';
 import type { ToolProfile } from '../shared/tool-profile.js';
 
-const clip = (text: string, max: number) => text.length > max ? `${text.slice(0, max - 1)}…` : text;
+const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
 /** Bounds an evidence entry to the store's field limits (detail 1000, each confinement field 400). */
 export function boundEvidence(entry: CapabilityEvidence): CapabilityEvidence {
   return {
-    ...entry, detail: clip(entry.detail, 1000),
-    ...(entry.confinement ? { confinement: { tools: clip(entry.confinement.tools, 400), filesystem: clip(entry.confinement.filesystem, 400), network: clip(entry.confinement.network, 400), environment: clip(entry.confinement.environment, 400) } } : {}),
+    ...entry,
+    detail: clip(entry.detail, 1000),
+    ...(entry.confinement
+      ? {
+          confinement: {
+            tools: clip(entry.confinement.tools, 400),
+            filesystem: clip(entry.confinement.filesystem, 400),
+            network: clip(entry.confinement.network, 400),
+            environment: clip(entry.confinement.environment, 400),
+          },
+        }
+      : {}),
   };
 }
 
@@ -36,18 +66,31 @@ export function boundEvidence(entry: CapabilityEvidence): CapabilityEvidence {
  * and the launch both read it.
  */
 export interface ProviderPayload {
-  requestName: string; objective: string; acceptanceCriteria: string; instructions: string;
-  model: string; effort: Effort; delegation: boolean;
-  research?: Assignment['research']; researchSpec?: FrozenResearchSpec;
+  requestName: string;
+  objective: string;
+  acceptanceCriteria: string;
+  instructions: string;
+  model: string;
+  effort: Effort;
+  delegation: boolean;
+  research?: Assignment['research'];
+  researchSpec?: FrozenResearchSpec;
   /** The exact bytes an adapter must transmit, so what was previewed can be compared to what was sent. */
   text: string;
 }
 
 export function buildProviderPayload(frozen: Omit<ProviderPayload, 'text'>): ProviderPayload {
-  if(frozen.research&&['S2','S7'].includes(frozen.research.stage))frozen={...frozen,
-    requestName:`${frozen.research.stage} independent review`,objective:'Review only the independently admitted packet in this isolated context. Commit one complete first report before reading any other review.',
-    acceptanceCriteria:'Return the exact stage report contract. Missing evidence must be reported as blocked.',instructions:'Do not read other requests, contexts, reports, caches or external resources.',delegation:false,
-    ...(frozen.research.stage==='S2'?{researchSpec:undefined}:{})};
+  if (frozen.research && ['S2', 'S7'].includes(frozen.research.stage))
+    frozen = {
+      ...frozen,
+      requestName: `${frozen.research.stage} independent review`,
+      objective:
+        'Review only the independently admitted packet in this isolated context. Commit one complete first report before reading any other review.',
+      acceptanceCriteria: 'Return the exact stage report contract. Missing evidence must be reported as blocked.',
+      instructions: 'Do not read other requests, contexts, reports, caches or external resources.',
+      delegation: false,
+      ...(frozen.research.stage === 'S2' ? { researchSpec: undefined } : {}),
+    };
   const sections = [
     `# ${frozen.requestName}`,
     `## Objective\n${frozen.objective.trim()}`,
@@ -55,14 +98,20 @@ export function buildProviderPayload(frozen: Omit<ProviderPayload, 'text'>): Pro
     frozen.instructions.trim() ? `## Standing instructions\n${frozen.instructions.trim()}` : '',
     frozen.research ? `## Research stage context\n${JSON.stringify(frozen.research)}` : '',
     frozen.researchSpec ? `## Frozen research specification\n${JSON.stringify(frozen.researchSpec)}` : '',
-    frozen.research ? '## Stage report contract\nReturn research-stage-report@1 JSON with schemaVersion 1, branchId, specId, subjectHash, stage and contextHash exactly as recorded above, a gates array (gate, outcome, detail, rationale), and detail. Review reports also require verdict and defectFound. Provider-written verdicts are unverified claims, not independent gate approval.' : '',
+    frozen.research
+      ? '## Stage report contract\nReturn research-stage-report@1 JSON with schemaVersion 1, branchId, specId, subjectHash, stage and contextHash exactly as recorded above, a gates array (gate, outcome, detail, rationale), and detail. Review reports also require verdict and defectFound. Provider-written verdicts are unverified claims, not independent gate approval.'
+      : '',
     `## Execution policy\nDelegation is ${frozen.delegation ? 'authorized for this request' : 'not authorized'}. Do not install packages or use the network.`,
   ].filter(Boolean);
   return { ...frozen, text: sections.join('\n\n') };
 }
 
 export interface SubmitContext {
-  assignment: Assignment; snapshot: InputSnapshot; objective: string; requestName: string; payload: ProviderPayload;
+  assignment: Assignment;
+  snapshot: InputSnapshot;
+  objective: string;
+  requestName: string;
+  payload: ProviderPayload;
   /** The durable job this submission serves — created before submit so a packet can bind it. */
   jobId: string;
   /** The persisted local delivery binding when one exists; hosted adapters ignore it. */
@@ -92,7 +141,11 @@ export interface SubmitContext {
   withheldPaths?: string[];
 }
 export interface SubmitResult {
-  externalId: string; externalUrl: string; detail: string; resolvedModel?: string; appliedEffort?: Effort | 'UNVERIFIED';
+  externalId: string;
+  externalUrl: string;
+  detail: string;
+  resolvedModel?: string;
+  appliedEffort?: Effort | 'UNVERIFIED';
   /**
    * Set only by local-layout adapters that wrote a versioned packet: the verified packet hash the
    * service persists on the binding before reporting delivery. Hosted adapters never set it.
@@ -100,7 +153,8 @@ export interface SubmitResult {
   localPacket?: { packetHash: string };
 }
 export interface ObserveResult {
-  state: 'ACCEPTED' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'UNKNOWN'; detail: string;
+  state: 'ACCEPTED' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'UNKNOWN';
+  detail: string;
   events?: Omit<JobEvent, 'id' | 'jobId'>[];
   /** What the provider says exists. Metadata, not bytes: a hash here certifies nothing on its own. */
   outputs?: { path: string; sha256: string; bytes: number }[];
@@ -165,7 +219,7 @@ export interface OutputFetcher {
  */
 export interface ProviderAdapter {
   /** Implementations must actually deliver into the independently attested context ID. */
-  readonly isolatedContexts?:true;
+  readonly isolatedContexts?: true;
   readonly route: AdapterRoute;
   /** Which providers this adapter can actually reach. Omitted means the route's default below. */
   readonly providers?: readonly Provider[];
@@ -180,13 +234,20 @@ export interface ProviderAdapter {
    * `replay` names one already-recorded receipt hash the reader may accept despite its consumed
    * sequence — used only by the stranded-receipt repair, never for ordinary observation.
    */
-  observe(job: ProviderJob, local?: LocalSessionRecord | null, replay?: { receiptHash: string }): Promise<ObserveResult>;
+  observe(
+    job: ProviderJob,
+    local?: LocalSessionRecord | null,
+    replay?: { receiptHash: string },
+  ): Promise<ObserveResult>;
   /**
    * Requests cooperative cancellation. `acknowledged` means the office delivered the request —
    * never that anything stopped. `requestId` names the request the office wrote so the caller can
    * persist it on the binding; an absent or mismatched acknowledgement later is its own state.
    */
-  cancel(job: ProviderJob, local?: LocalSessionRecord | null): Promise<{ acknowledged: boolean; detail: string; requestId?: string }>;
+  cancel(
+    job: ProviderJob,
+    local?: LocalSessionRecord | null,
+  ): Promise<{ acknowledged: boolean; detail: string; requestId?: string }>;
   /**
    * Office-observed evidence from a completed local operation. Only local-route adapters implement
    * these; what they return is the office's own testimony about work it performed — the caller
@@ -197,18 +258,30 @@ export interface ProviderAdapter {
   observeEvidence?(job: ProviderJob, result: ObserveResult): CapabilityEvidence[];
   cancelEvidence?(job: ProviderJob): CapabilityEvidence[];
   /** Reads bytes for an output this route verifies itself, when the office has no fetcher for it. */
-  fetch?(job: ProviderJob, output: { path: string; sha256: string; bytes: number }, local?: LocalSessionRecord | null): Promise<Uint8Array>;
+  fetch?(
+    job: ProviderJob,
+    output: { path: string; sha256: string; bytes: number },
+    local?: LocalSessionRecord | null,
+  ): Promise<Uint8Array>;
 }
 
 /** Everything one external action needs, gathered and validated together by `launchGuard`. */
 interface LaunchContext {
-  state: AppState; assignment: Assignment; agent: AppState['agents'][number];
-  request: NonNullable<AppState['requests']>[number]; frozen: NonNullable<Assignment['frozen']>;
-  snapshot: InputSnapshot; connection: NonNullable<AppState['connections']>[number]; now: number;
+  state: AppState;
+  assignment: Assignment;
+  agent: AppState['agents'][number];
+  request: NonNullable<AppState['requests']>[number];
+  frozen: NonNullable<Assignment['frozen']>;
+  snapshot: InputSnapshot;
+  connection: NonNullable<AppState['connections']>[number];
+  now: number;
 }
 
 export class UnknownDispatchError extends Error {
-  constructor(message: string) { super(message); this.name = 'UnknownDispatchError'; }
+  constructor(message: string) {
+    super(message);
+    this.name = 'UnknownDispatchError';
+  }
 }
 
 /**
@@ -218,7 +291,10 @@ export class UnknownDispatchError extends Error {
  * UNKNOWN. The office's own refusal is office-local evidence.
  */
 export class NotLaunchedError extends Error {
-  constructor(message: string) { super(message); this.name = 'NotLaunchedError'; }
+  constructor(message: string) {
+    super(message);
+    this.name = 'NotLaunchedError';
+  }
 }
 
 /**
@@ -249,7 +325,12 @@ export class AssignmentController {
     /** Retrieves the actual bytes of a reported output. Absent means this route cannot retrieve them. */
     private readonly fetchOutput?: OutputFetcher,
     /** Persists verified output bytes into managed content-addressed storage. */
-    private readonly storeOutput?: (sha256: string, bytes: Uint8Array, job: ProviderJob, output: JobOutput) => Promise<void>,
+    private readonly storeOutput?: (
+      sha256: string,
+      bytes: Uint8Array,
+      job: ProviderJob,
+      output: JobOutput,
+    ) => Promise<void>,
     private readonly prepareOutputs?: (assignment: Assignment, snapshot: InputSnapshot) => OutputDestination,
     /**
      * Resolves which adapter carries a piece of work. At preparation time it is asked for the agent;
@@ -270,12 +351,17 @@ export class AssignmentController {
   ) {}
 
   /** One clock for gates and records, so evidence freshness never depends on the wall calendar. */
-  private nowMs(): number { return Date.parse(this.now()); }
+  private nowMs(): number {
+    return Date.parse(this.now());
+  }
 
   private adapterFor(ref: { agent?: Agent; route?: AdapterRoute }): ProviderAdapter {
     if (!this.adapters) return this.adapter;
     const adapter = this.adapters(ref);
-    if (!adapter) throw new Error(`No adapter is configured for ${ref.route ? `the ${ref.route.toLowerCase().replaceAll('_', ' ')} route` : `${ref.agent?.provider ?? 'this provider'} work`}. Configure a supported route or use a handoff.`);
+    if (!adapter)
+      throw new Error(
+        `No adapter is configured for ${ref.route ? `the ${ref.route.toLowerCase().replaceAll('_', ' ')} route` : `${ref.agent?.provider ?? 'this provider'} work`}. Configure a supported route or use a handoff.`,
+      );
     return adapter;
   }
 
@@ -291,64 +377,126 @@ export class AssignmentController {
     try {
       const state = this.store.snapshot({ history: false });
       const assignment = (state.assignments ?? []).find(item => item.id === job.assignmentId);
-      const capability = assignment ? (state.capabilities ?? []).find(item => item.id === assignment.capabilitySnapshotId) : undefined;
-      const connection = capability ? (state.connections ?? []).find(item => item.id === capability.connectionId) : undefined;
+      const capability = assignment
+        ? (state.capabilities ?? []).find(item => item.id === assignment.capabilitySnapshotId)
+        : undefined;
+      const connection = capability
+        ? (state.connections ?? []).find(item => item.id === capability.connectionId)
+        : undefined;
       if (!assignment || !connection) return;
       this.store.recordTransportEvidence({
-        connectionId: connection.id, route: job.route, environment: 'LOCAL_MACHINE',
+        connectionId: connection.id,
+        route: job.route,
+        environment: 'LOCAL_MACHINE',
         // An office-spawned launch record (executable, cwd, argv, restrictions) routinely exceeds the
         // evidence field limits; bounded prefixes are recorded rather than losing the whole entry.
-        model: assignment.requestedModel, operations: entries.map(boundEvidence),
-        source: 'office-local-transport', observedAt: this.now(),
+        model: assignment.requestedModel,
+        operations: entries.map(boundEvidence),
+        source: 'office-local-transport',
+        observedAt: this.now(),
       });
     } catch (error) {
-      this.store.recordJobEvents(job.id, [{ externalId: `transport-evidence:${job.revision}:${Date.parse(this.now())}`, cursor: '', kind: 'STATUS',
-        text: `Office-observed transport evidence could not be recorded: ${error instanceof Error ? error.message : 'unknown error'}`,
-        occurredAt: this.now(), receivedAt: this.now(), evidence: 'OFFICE_LOCAL' }]);
+      this.store.recordJobEvents(job.id, [
+        {
+          externalId: `transport-evidence:${job.revision}:${Date.parse(this.now())}`,
+          cursor: '',
+          kind: 'STATUS',
+          text: `Office-observed transport evidence could not be recorded: ${error instanceof Error ? error.message : 'unknown error'}`,
+          occurredAt: this.now(),
+          receivedAt: this.now(),
+          evidence: 'OFFICE_LOCAL',
+        },
+      ]);
     }
   }
 
   /** Freezes the exact inputs for one request and records the intent to submit. */
-  prepare(input: { requestId: string; agentId: string; snapshotId: string; expectedRequestRevision?: number; expectedAgentRevision?: number; dependsOn?: string[]; research?: Assignment['research']; toolProfile?: ToolProfile; pipelineKey?: string; inputScope?: Assignment['inputScope']; objective?: string }): { state: AppState; assignment: Assignment } {
-    const state = this.store.snapshot({history:false});
+  prepare(input: {
+    requestId: string;
+    agentId: string;
+    snapshotId: string;
+    expectedRequestRevision?: number;
+    expectedAgentRevision?: number;
+    dependsOn?: string[];
+    research?: Assignment['research'];
+    toolProfile?: ToolProfile;
+    pipelineKey?: string;
+    inputScope?: Assignment['inputScope'];
+    objective?: string;
+  }): { state: AppState; assignment: Assignment } {
+    const state = this.store.snapshot({ history: false });
     const request = state.requests?.find(item => item.id === input.requestId);
     if (!request) throw new Error('Request not found.');
     const agent = state.agents.find(item => item.id === input.agentId);
     if (!agent) throw new Error('Agent not found.');
     this.assertLifecycle(state, request, agent, Boolean(input.pipelineKey));
     // The caller freezes the versions it actually showed the user; a concurrent edit must not be swept in.
-    if (input.expectedRequestRevision !== undefined && input.expectedRequestRevision !== request.revision) throw new Error('The request changed in another view. Reload before starting it.');
-    if (input.expectedAgentRevision !== undefined && input.expectedAgentRevision !== (agent.revision ?? 0)) throw new Error('The profile changed in another view. Reload before starting it.');
+    if (input.expectedRequestRevision !== undefined && input.expectedRequestRevision !== request.revision)
+      throw new Error('The request changed in another view. Reload before starting it.');
+    if (input.expectedAgentRevision !== undefined && input.expectedAgentRevision !== (agent.revision ?? 0))
+      throw new Error('The profile changed in another view. Reload before starting it.');
     if (request.mode === 'SINGLE' && request.participantIds.filter(id => id !== input.agentId).length)
       throw new Error('A single-agent request cannot carry collaborators.');
     const snapshot = state.snapshots?.find(item => item.id === input.snapshotId);
     if (!snapshot) throw new Error('Prepare the request inputs first.');
-    if (snapshot.projectId !== request.projectId) throw new Error('That input snapshot belongs to a different project.');
+    if (snapshot.projectId !== request.projectId)
+      throw new Error('That input snapshot belongs to a different project.');
     const gate = agentDispatchReadiness(state, agent, { now: this.nowMs() });
-    if (!gate.binding.available) throw new Error(gate.binding.blockers[0] ?? 'This profile is not usable in the current account context.');
+    if (!gate.binding.available)
+      throw new Error(gate.binding.blockers[0] ?? 'This profile is not usable in the current account context.');
     const connection = currentConnection(state, agent.provider);
     const capability = connection ? latestCapability(state, connection.id) : undefined;
     if (!connection || !capability) throw new Error('Check the provider account before preparing work.');
     // The agent picks the route once, here; everything after reads the recorded route.
     const adapter = this.adapterFor({ agent });
     const assignment: Assignment = {
-      id: randomUUID(), projectId: request.projectId, requestId: request.id, requestRevision: request.revision,
-      agentId: agent.id, agentRevision: agent.revision ?? 0, connectionId: connection.id, capabilitySnapshotId: capability.id,
-      snapshotId: snapshot.id, route: adapter.route, requestedModel: agent.model, resolvedModel: '',
-      capabilitySnapshotIds: supplyingSnapshotIds(state, {
-        provider: agent.provider, identity: connection.identity, credentialContext: connection.credentialContext,
-        toolVersion: capability.toolVersion, route: adapter.route, environment: capability.environment,
-        model: agent.model, effort: agent.effort ?? 'default', delegation: request.delegation,
-      }, { now: this.nowMs() }),
-      requestedEffort: agent.effort ?? 'default', appliedEffort: 'UNVERIFIED', delegation: request.delegation,
-      objectiveHash: canonicalHash({ objective: input.objective ?? request.objective, criteria: request.acceptanceCriteria }),
+      id: randomUUID(),
+      projectId: request.projectId,
+      requestId: request.id,
+      requestRevision: request.revision,
+      agentId: agent.id,
+      agentRevision: agent.revision ?? 0,
+      connectionId: connection.id,
+      capabilitySnapshotId: capability.id,
+      snapshotId: snapshot.id,
+      route: adapter.route,
+      requestedModel: agent.model,
+      resolvedModel: '',
+      capabilitySnapshotIds: supplyingSnapshotIds(
+        state,
+        {
+          provider: agent.provider,
+          identity: connection.identity,
+          credentialContext: connection.credentialContext,
+          toolVersion: capability.toolVersion,
+          route: adapter.route,
+          environment: capability.environment,
+          model: agent.model,
+          effort: agent.effort ?? 'default',
+          delegation: request.delegation,
+        },
+        { now: this.nowMs() },
+      ),
+      requestedEffort: agent.effort ?? 'default',
+      appliedEffort: 'UNVERIFIED',
+      delegation: request.delegation,
+      objectiveHash: canonicalHash({
+        objective: input.objective ?? request.objective,
+        criteria: request.acceptanceCriteria,
+      }),
       // The exact text the adapter will receive, captured now. Launch uses this and never re-reads
       // the request, so a later edit cannot ride along with these frozen inputs and this binding.
       // Pipeline hops override the objective with the minted hop's bounded instruction.
       frozen: {
-        requestName: request.name, objective: input.objective ?? request.objective, acceptanceCriteria: request.acceptanceCriteria,
-        instructions: agent.instructions, model: agent.model, effort: agent.effort ?? 'default', delegation: request.delegation,
-        accountIdentity: connection.identity, credentialContext: connection.credentialContext,
+        requestName: request.name,
+        objective: input.objective ?? request.objective,
+        acceptanceCriteria: request.acceptanceCriteria,
+        instructions: agent.instructions,
+        model: agent.model,
+        effort: agent.effort ?? 'default',
+        delegation: request.delegation,
+        accountIdentity: connection.identity,
+        credentialContext: connection.credentialContext,
         outputFolder: state.locations?.find(item => item.projectId === request.projectId)?.outputFolder ?? '',
       },
       createdAt: this.now(),
@@ -360,10 +508,20 @@ export class AssignmentController {
       // the recorded link, so a caller cannot name a stage or subject the branch is not on.
       ...(input.research ? { research: input.research } : {}),
     };
-    this.prepareOutputs?.(assignment, state.snapshots!.find(item => item.id === assignment.snapshotId)!);
+    this.prepareOutputs?.(
+      assignment,
+      state.snapshots!.find(item => item.id === assignment.snapshotId)!,
+    );
     const next = this.store.createAssignment({
       assignment,
-      job: { id: randomUUID(), assignmentId: assignment.id, projectId: assignment.projectId, requestId: assignment.requestId, provider: agent.provider, route: adapter.route },
+      job: {
+        id: randomUUID(),
+        assignmentId: assignment.id,
+        projectId: assignment.projectId,
+        requestId: assignment.requestId,
+        provider: agent.provider,
+        route: adapter.route,
+      },
     });
     return { state: next, assignment };
   }
@@ -374,11 +532,24 @@ export class AssignmentController {
    * A request can be canceled, or its project archived, at any point after preparation. Checking
    * only at creation means a canceled request can still be launched from a window opened earlier.
    */
-  private assertLifecycle(state: AppState, request: { id: string; projectId: string; status: string; participantIds: string[]; leadAgentId: string | null; mode: string }, agent: { id: string; removedAt?: string; name: string }, pipelineSeat = false): void {
+  private assertLifecycle(
+    state: AppState,
+    request: {
+      id: string;
+      projectId: string;
+      status: string;
+      participantIds: string[];
+      leadAgentId: string | null;
+      mode: string;
+    },
+    agent: { id: string; removedAt?: string; name: string },
+    pipelineSeat = false,
+  ): void {
     const project = state.projects.find(item => item.id === request.projectId);
     if (!project) throw new Error('Project not found.');
     if (project.archived) throw new Error('This project is archived. Restore it before starting work.');
-    if (request.status === 'CANCELED') throw new Error('This request was canceled. Duplicate it if the work is still wanted.');
+    if (request.status === 'CANCELED')
+      throw new Error('This request was canceled. Duplicate it if the work is still wanted.');
     if (agent.removedAt) throw new Error(`${agent.name} is archived. Restore the profile before using it.`);
     // A single-agent request has a closed roster by definition. Group and team work deliberately
     // draws in agents who are not listed participants - a reviewer must not be the author - but that
@@ -391,9 +562,13 @@ export class AssignmentController {
         throw new Error(`${agent.name} is not the agent this single-agent request was assigned to.`);
     } else {
       const listed = request.leadAgentId === agent.id || request.participantIds.includes(agent.id);
-      const granted = (state.grants ?? []).some(grant => grant.requestId === request.id && grant.agentId === agent.id && !grant.revokedAt);
+      const granted = (state.grants ?? []).some(
+        grant => grant.requestId === request.id && grant.agentId === agent.id && !grant.revokedAt,
+      );
       if (!listed && !granted)
-        throw new Error(`${agent.name} is neither listed on this request nor granted a role on it. Record an explicit grant before assigning this work.`);
+        throw new Error(
+          `${agent.name} is neither listed on this request nor granted a role on it. Record an explicit grant before assigning this work.`,
+        );
     }
   }
 
@@ -406,7 +581,7 @@ export class AssignmentController {
    * is a window in which a request can be canceled, a project archived or a profile rebound.
    */
   private launchGuard(assignmentId: string, kind: 'DISPATCH' | 'HANDOFF'): LaunchContext {
-    const state = this.store.snapshot({history:false});
+    const state = this.store.snapshot({ history: false });
     const assignment = (state.assignments ?? []).find(item => item.id === assignmentId);
     if (!assignment) throw new Error('Assignment not found.');
     const agent = state.agents.find(item => item.id === assignment.agentId);
@@ -415,8 +590,10 @@ export class AssignmentController {
     if (!dependencies.ready) throw new Error(`This work waits on other work: ${dependencies.blockers[0]}`);
     const now = this.nowMs();
     const gate = agentDispatchReadiness(state, agent, { now });
-    if (kind === 'DISPATCH' && !gate.canStart) throw new Error(`Automatic start is blocked: ${gate.blockers[0] ?? 'the transport is unverified.'}`);
-    if (kind === 'HANDOFF' && !gate.canHandoff) throw new Error(`The handoff is blocked: ${gate.blockers[0] ?? 'the account is not usable right now.'}`);
+    if (kind === 'DISPATCH' && !gate.canStart)
+      throw new Error(`Automatic start is blocked: ${gate.blockers[0] ?? 'the transport is unverified.'}`);
+    if (kind === 'HANDOFF' && !gate.canHandoff)
+      throw new Error(`The handoff is blocked: ${gate.blockers[0] ?? 'the account is not usable right now.'}`);
 
     const request = state.requests?.find(item => item.id === assignment.requestId);
     if (!request) throw new Error('Request not found.');
@@ -426,30 +603,43 @@ export class AssignmentController {
     if (!snapshot) throw new Error('The prepared inputs for this work are no longer recorded.');
 
     if (assignment.delegation && request.mode === 'SINGLE')
-      throw new Error('Uncontrolled delegation: this request is single-agent, so delegated execution is not authorized.');
+      throw new Error(
+        'Uncontrolled delegation: this request is single-agent, so delegated execution is not authorized.',
+      );
 
     // The route must be able to reach this provider at all, on every path. No substitution: an
     // unsupported pairing is refused rather than quietly sent somewhere that might accept it.
     const adapter = this.adapterFor({ route: assignment.route });
-    const supported = adapter.providers ?? (adapter.route === 'FAKE_ADAPTER' ? (['claude', 'openai', 'devin'] as const) : (['claude'] as const));
+    const supported =
+      adapter.providers ??
+      (adapter.route === 'FAKE_ADAPTER' ? (['claude', 'openai', 'devin'] as const) : (['claude'] as const));
     if (!supported.includes(agent.provider))
-      throw new Error(`No supported route: the ${adapter.route.toLowerCase().replaceAll('_', ' ')} adapter cannot run ${agent.provider} work. Use a handoff, or configure a supported route.`);
+      throw new Error(
+        `No supported route: the ${adapter.route.toLowerCase().replaceAll('_', ' ')} adapter cannot run ${agent.provider} work. Use a handoff, or configure a supported route.`,
+      );
 
     // The account context this work was frozen against must still be the one in force, by record and
     // not merely by name: a different connection with the same address is a different context.
     const connection = (state.connections ?? []).find(item => item.id === assignment.connectionId);
     if (!connection) throw new Error('The account this work was frozen against is no longer in this workspace.');
-    if (connection.provider !== agent.provider) throw new Error('The frozen account belongs to a different provider than this profile.');
+    if (connection.provider !== agent.provider)
+      throw new Error('The frozen account belongs to a different provider than this profile.');
     const active = currentConnection(state, agent.provider);
     if (!active || active.id !== connection.id)
-      throw new Error(`This work was prepared for ${connection.identity}, but ${active?.identity ?? 'no account'} is the current account context. Sign that account back in, or prepare the work again.`);
+      throw new Error(
+        `This work was prepared for ${connection.identity}, but ${active?.identity ?? 'no account'} is the current account context. Sign that account back in, or prepare the work again.`,
+      );
     // Compared against the values frozen at preparation, not against the connection row, which a
     // later observation rewrites in place. Same address, different credential context, is a different
     // account context and this work was not prepared against it.
     if (active.identity !== frozen.accountIdentity || active.credentialContext !== frozen.credentialContext)
-      throw new Error(`The signed-in account context changed since this work was prepared: it was frozen for ${frozen.accountIdentity} (${frozen.credentialContext}) and is now ${active.identity} (${active.credentialContext}). Prepare it again.`);
+      throw new Error(
+        `The signed-in account context changed since this work was prepared: it was frozen for ${frozen.accountIdentity} (${frozen.credentialContext}) and is now ${active.identity} (${active.credentialContext}). Prepare it again.`,
+      );
     if (agent.connectionId !== connection.id)
-      throw new Error(`${agent.name} is no longer bound to the account this work was frozen against. Prepare the work again.`);
+      throw new Error(
+        `${agent.name} is no longer bound to the account this work was frozen against. Prepare the work again.`,
+      );
     if ((agent.revision ?? 0) !== assignment.agentRevision)
       throw new Error(`${agent.name} changed since this work was frozen. Prepare the work again.`);
     // The request-revision pin protects user-authored dispatches from silent edits. Pipeline hops
@@ -463,23 +653,53 @@ export class AssignmentController {
     if (assignment.research) {
       const research = assignment.research;
       const branch = (state.branches ?? []).find(item => item.id === research.branchId);
-      const link = (state.pipeline ?? []).filter(item => item.kind === 'LINK' && item.branchId === research.branchId).at(-1);
+      const link = (state.pipeline ?? [])
+        .filter(item => item.kind === 'LINK' && item.branchId === research.branchId)
+        .at(-1);
       if (!branch || branch.revision !== research.branchRevision || branch.stage !== research.stage)
-        throw new Error('The research branch moved since this work was prepared. Prepare it again for the current stage.');
-      if (!link || link.kind !== 'LINK' || link.requestId !== assignment.requestId || link.requestRevision !== assignment.requestRevision || link.subjectHash !== research.subjectHash)
+        throw new Error(
+          'The research branch moved since this work was prepared. Prepare it again for the current stage.',
+        );
+      if (
+        !link ||
+        link.kind !== 'LINK' ||
+        link.requestId !== assignment.requestId ||
+        link.requestRevision !== assignment.requestRevision ||
+        link.subjectHash !== research.subjectHash
+      )
         throw new Error('The branch-to-request link changed since this work was prepared. Prepare it again.');
       if (branch.outcome !== 'IN_PROGRESS' || branch.specId !== research.specId)
         throw new Error('The research branch is no longer active under this specification.');
       const blocker = this.store.researchStageBlocker(research.stage);
       if (blocker) throw new Error(blocker);
-      this.store.assertIsolatedLaunch(assignment.id,adapter.route);
-      if(['S2','S7'].includes(research.stage)&&!adapter.isolatedContexts)throw new Error('This adapter has no isolated context delivery implementation.');
-      if (kind === 'HANDOFF') throw new Error('Research handoff is blocked: the terminal route cannot deliver the frozen stage context.');
-      if (stageContextHash({ ...research, agentId: assignment.agentId, agentRevision: assignment.agentRevision, inputs: research }) !== research.contextHash)
+      this.store.assertIsolatedLaunch(assignment.id, adapter.route);
+      if (['S2', 'S7'].includes(research.stage) && !adapter.isolatedContexts)
+        throw new Error('This adapter has no isolated context delivery implementation.');
+      if (kind === 'HANDOFF')
+        throw new Error('Research handoff is blocked: the terminal route cannot deliver the frozen stage context.');
+      if (
+        stageContextHash({
+          ...research,
+          agentId: assignment.agentId,
+          agentRevision: assignment.agentRevision,
+          inputs: research,
+        }) !== research.contextHash
+      )
         throw new Error('This research context predates exact input/revision binding. Prepare it again.');
-      const appointment = (state.functions ?? []).filter(item => item.projectId === assignment.projectId && item.stage === research.stage
-        && item.function === research.function && !item.supersededById).at(-1);
-      if (!appointment || appointment.agentId !== assignment.agentId || appointment.agentRevision !== assignment.agentRevision)
+      const appointment = (state.functions ?? [])
+        .filter(
+          item =>
+            item.projectId === assignment.projectId &&
+            item.stage === research.stage &&
+            item.function === research.function &&
+            !item.supersededById,
+        )
+        .at(-1);
+      if (
+        !appointment ||
+        appointment.agentId !== assignment.agentId ||
+        appointment.agentRevision !== assignment.agentRevision
+      )
         throw new Error('This profile no longer holds the prepared stage function. Prepare the work again.');
     }
 
@@ -496,7 +716,7 @@ export class AssignmentController {
    */
   private async refreshFrozenAccount(assignmentId: string): Promise<void> {
     if (!this.refreshAccount) return;
-    const state = this.store.snapshot({history:false});
+    const state = this.store.snapshot({ history: false });
     const assignment = (state.assignments ?? []).find(item => item.id === assignmentId);
     if (!assignment) throw new Error('Assignment not found.');
     const agent = state.agents.find(item => item.id === assignment.agentId);
@@ -517,7 +737,7 @@ export class AssignmentController {
   }
 
   private job(assignmentId: string): ProviderJob {
-    const job = latestJobFor(this.store.snapshot({history:false}).jobs, assignmentId);
+    const job = latestJobFor(this.store.snapshot({ history: false }).jobs, assignmentId);
     if (!job) throw new Error('This assignment has no job record.');
     return job;
   }
@@ -536,12 +756,19 @@ export class AssignmentController {
     // One normalized scope, checked as a whole. Evidence for another model, environment, tool version,
     // effort or delegation policy is evidence about a different question and does not authorize this.
     const scope: RequestedScope = {
-      provider: agent.provider, identity: connection.identity, credentialContext: connection.credentialContext,
-      toolVersion: capability?.toolVersion ?? '', route: assignment.route, environment: capability?.environment ?? '',
-      model: assignment.requestedModel, effort: assignment.requestedEffort, delegation: assignment.delegation,
+      provider: agent.provider,
+      identity: connection.identity,
+      credentialContext: connection.credentialContext,
+      toolVersion: capability?.toolVersion ?? '',
+      route: assignment.route,
+      environment: capability?.environment ?? '',
+      model: assignment.requestedModel,
+      effort: assignment.requestedEffort,
+      delegation: assignment.delegation,
     };
     const mismatches = scopeMismatches(state, scope, { now });
-    if (mismatches.length) throw new Error(`This work is not verified for the exact conditions it would run under: ${mismatches[0]}`);
+    if (mismatches.length)
+      throw new Error(`This work is not verified for the exact conditions it would run under: ${mismatches[0]}`);
 
     // The evidence that authorized this work must be the same evidence that authorized it when the
     // user froze it. A later observation can supply a different snapshot for the same operation.
@@ -549,23 +776,39 @@ export class AssignmentController {
       const supplying = supplyingSnapshotIds(state, scope, { now });
       const frozenSet = [...assignment.capabilitySnapshotIds].sort().join(',');
       if (supplying.join(',') !== frozenSet)
-        throw new Error('The capability evidence behind this work changed since it was frozen. Prepare the request again.');
+        throw new Error(
+          'The capability evidence behind this work changed since it was frozen. Prepare the request again.',
+        );
     }
 
     // Confinement is read as its own fact, from its own observation, rather than inferred from the
     // other checks passing. Delegation control describes delegation; it says nothing about whether
     // tools, the filesystem or the network were actually restricted.
     const confinement = effectiveEvidence(state, connection, 'TOOL_CONFINEMENT', {
-      now, model: scope.model, environment: scope.environment, route: scope.route,
+      now,
+      model: scope.model,
+      environment: scope.environment,
+      route: scope.route,
     });
     const policy = confinement?.confinement;
     const localRoute = assignment.route.startsWith('LOCAL_');
     // The confinement level bar follows the route family: the office is the observing authority for
     // local delivery, so TOOL_SUPPORTED is its ceiling, exactly as the scope check already applied.
-    const levelOk = confinement && (confinement.level === 'ACCOUNT_VERIFIED' || (localRoute && confinement.level === 'TOOL_SUPPORTED'));
-    const toolsConfined = Boolean(confinement && levelOk && confinement.evidence === 'OBSERVED'
-      && !confinement.expired && !confinement.impossible
-      && policy && policy.tools.trim() && policy.filesystem.trim() && policy.network.trim() && policy.environment.trim());
+    const levelOk =
+      confinement &&
+      (confinement.level === 'ACCOUNT_VERIFIED' || (localRoute && confinement.level === 'TOOL_SUPPORTED'));
+    const toolsConfined = Boolean(
+      confinement &&
+      levelOk &&
+      confinement.evidence === 'OBSERVED' &&
+      !confinement.expired &&
+      !confinement.impossible &&
+      policy &&
+      policy.tools.trim() &&
+      policy.filesystem.trim() &&
+      policy.network.trim() &&
+      policy.environment.trim(),
+    );
     if (localRoute) {
       // A local route runs only under office-observed scoped delivery — honestly labeled, never a
       // claim of enforced isolation or provider attestation.
@@ -581,12 +824,28 @@ export class AssignmentController {
       });
     }
     // Every open job in the workspace counts against capacity, including this one.
-    assertWorkerCapacity((state.jobs ?? []).map(job => ({ id: job.id, state: job.state === 'INTENT' ? 'RESERVED' : job.state === 'SUBMITTING' ? 'SUBMITTED' : job.state === 'CANCEL_ACKNOWLEDGED' ? 'CANCELED_ACKNOWLEDGED' : job.state === 'ACCEPTED' ? 'SUBMITTED' : job.state })), 1);
+    assertWorkerCapacity(
+      (state.jobs ?? []).map(job => ({
+        id: job.id,
+        state:
+          job.state === 'INTENT'
+            ? 'RESERVED'
+            : job.state === 'SUBMITTING'
+              ? 'SUBMITTED'
+              : job.state === 'CANCEL_ACKNOWLEDGED'
+                ? 'CANCELED_ACKNOWLEDGED'
+                : job.state === 'ACCEPTED'
+                  ? 'SUBMITTED'
+                  : job.state,
+      })),
+      1,
+    );
     // The frozen bytes are re-checked against the staged tree and its commit immediately before the
     // provider is contacted. A refusal happens before the intent transition, so nothing is stranded.
     const staged = await this.recoverMissingStaging(snapshot);
     const problems = await this.verifyTransfer(staged);
-    if (problems.length) throw new Error(`The prepared inputs no longer match what was frozen: ${problems[0]} Prepare the request again.`);
+    if (problems.length)
+      throw new Error(`The prepared inputs no longer match what was frozen: ${problems[0]} Prepare the request again.`);
     // Verification is an await, and the workspace stayed writable throughout it. Everything the guard
     // established could have been invalidated in that window, so it is established again here, with no
     // further await before the adapter call.
@@ -603,43 +862,88 @@ export class AssignmentController {
     // intent the router requires, written before the job says SUBMITTING so a refused
     // classification or an un-retryable binding leaves the job honestly undispatched.
     const attempt = localRoute ? this.prepareLocalSession({ assignment, agent, adapter, job }) : null;
-    this.store.recordJobTransition({ jobId: job.id, expectedRevision: job.revision, to: 'SUBMITTING', evidence: 'OFFICE_LOCAL', detail: `Submitting through ${assignment.route}.`, at: this.now() });
+    this.store.recordJobTransition({
+      jobId: job.id,
+      expectedRevision: job.revision,
+      to: 'SUBMITTING',
+      evidence: 'OFFICE_LOCAL',
+      detail: `Submitting through ${assignment.route}.`,
+      at: this.now(),
+    });
     job = this.job(assignmentId);
-    const submitContext: SubmitContext = { assignment, snapshot: staged, objective: frozen.objective, requestName: frozen.requestName, payload: this.providerPayload(assignment), jobId: job.id };
-    if (attempt) { submitContext.localSession = attempt.binding; submitContext.memoryDigest = this.store.memoryDigest(assignment.projectId); }
+    const submitContext: SubmitContext = {
+      assignment,
+      snapshot: staged,
+      objective: frozen.objective,
+      requestName: frozen.requestName,
+      payload: this.providerPayload(assignment),
+      jobId: job.id,
+    };
+    if (attempt) {
+      submitContext.localSession = attempt.binding;
+      submitContext.memoryDigest = this.store.memoryDigest(assignment.projectId);
+    }
     if (inherited?.length) submitContext.inherited = inherited;
-    const withheld = (this.store.snapshot({history:false}).locations ?? []).find(item => item.projectId === assignment.projectId)?.withheldPaths;
+    const withheld = (this.store.snapshot({ history: false }).locations ?? []).find(
+      item => item.projectId === assignment.projectId,
+    )?.withheldPaths;
     if (withheld?.length) submitContext.withheldPaths = withheld;
     try {
       const result = await adapter.submit(submitContext);
-      if (!result.externalId) throw new UnknownDispatchError('The provider returned no identifier for this submission.');
+      if (!result.externalId)
+        throw new UnknownDispatchError('The provider returned no identifier for this submission.');
       if (attempt) this.settleLocalPreparation(attempt, 'READY', result.localPacket?.packetHash ?? null, null);
       // A local transport delivers into a mailbox the office owns; nothing has run or been accepted
       // yet, so the honest record is the office's submission awaiting a session — never ACCEPTED.
       const submitted = localRoute
         ? this.store.recordJobTransition({
-          jobId: job.id, expectedRevision: job.revision, to: 'UNKNOWN', evidence: 'OFFICE_LOCAL',
-          detail: result.detail, externalId: result.externalId, externalUrl: result.externalUrl, at: this.now(),
-        })
+            jobId: job.id,
+            expectedRevision: job.revision,
+            to: 'UNKNOWN',
+            evidence: 'OFFICE_LOCAL',
+            detail: result.detail,
+            externalId: result.externalId,
+            externalUrl: result.externalUrl,
+            at: this.now(),
+          })
         : this.store.recordJobTransition({
-          jobId: job.id, expectedRevision: job.revision, to: 'ACCEPTED', evidence: 'PROVIDER_REPORTED',
-          detail: result.detail, externalId: result.externalId, externalUrl: result.externalUrl, at: this.now(),
-        });
+            jobId: job.id,
+            expectedRevision: job.revision,
+            to: 'ACCEPTED',
+            evidence: 'PROVIDER_REPORTED',
+            detail: result.detail,
+            externalId: result.externalId,
+            externalUrl: result.externalUrl,
+            at: this.now(),
+          });
       // The office itself performed this delivery, so what it did is recorded as office evidence.
       this.noteLocalEvidence(job, adapter.submitEvidence?.(submitContext, result) ?? []);
       return submitted;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'The dispatch failed for an unknown reason.';
-      if (attempt) this.settleLocalPreparation(attempt, 'PREPARATION_FAILED', null, `Dispatch outcome unknown: ${message}`);
+      if (attempt)
+        this.settleLocalPreparation(attempt, 'PREPARATION_FAILED', null, `Dispatch outcome unknown: ${message}`);
       if (error instanceof NotLaunchedError) {
         // The submit path proved no delivery ever happened — recording UNKNOWN would claim a
         // provider-side ambiguity that cannot exist.
-        return this.store.recordJobTransition({ jobId: job.id, expectedRevision: job.revision, to: 'FAILED', evidence: 'OFFICE_LOCAL',
-          detail: `The work never reached the provider: ${message}`, at: this.now() });
+        return this.store.recordJobTransition({
+          jobId: job.id,
+          expectedRevision: job.revision,
+          to: 'FAILED',
+          evidence: 'OFFICE_LOCAL',
+          detail: `The work never reached the provider: ${message}`,
+          at: this.now(),
+        });
       }
       // Any failure after the call started leaves the provider's view unknown, never "not submitted".
-      return this.store.recordJobTransition({ jobId: job.id, expectedRevision: job.revision, to: 'UNKNOWN', evidence: 'OFFICE_LOCAL',
-        detail: `Dispatch outcome unknown: ${message} The office will not resubmit automatically.`, at: this.now() });
+      return this.store.recordJobTransition({
+        jobId: job.id,
+        expectedRevision: job.revision,
+        to: 'UNKNOWN',
+        evidence: 'OFFICE_LOCAL',
+        detail: `Dispatch outcome unknown: ${message} The office will not resubmit automatically.`,
+        at: this.now(),
+      });
     }
   }
 
@@ -652,30 +956,47 @@ export class AssignmentController {
    */
   private frozenPayload(assignment: Assignment): NonNullable<Assignment['frozen']> {
     if (!assignment.frozen)
-      throw new Error('This work was frozen before the office recorded the exact payload it would send. Prepare the request again.');
+      throw new Error(
+        'This work was frozen before the office recorded the exact payload it would send. Prepare the request again.',
+      );
     return assignment.frozen;
   }
 
   private providerPayload(assignment: Assignment): ProviderPayload {
     const frozen = this.frozenPayload(assignment);
     if (!assignment.research) return buildProviderPayload(frozen);
-    const spec = (this.store.snapshot({history:false}).specs ?? []).find(item => item.id === assignment.research!.specId);
+    const spec = (this.store.snapshot({ history: false }).specs ?? []).find(
+      item => item.id === assignment.research!.specId,
+    );
     if (!spec?.frozen) throw new Error('Research payload requires its exact frozen specification.');
     return buildProviderPayload({ ...frozen, research: assignment.research, researchSpec: spec });
   }
 
   /** The exact command a handoff would run, for display before anything is launched. */
-  handoffPlan(assignmentId: string): { executable: string; args: string[]; cwd: string; outputDestination?: OutputDestination } | null {
-    const state = this.store.snapshot({history:false});
+  handoffPlan(
+    assignmentId: string,
+  ): { executable: string; args: string[]; cwd: string; outputDestination?: OutputDestination } | null {
+    const state = this.store.snapshot({ history: false });
     const assignment = (state.assignments ?? []).find(item => item.id === assignmentId);
     if (!assignment) throw new Error('Assignment not found.');
-    const adapter = this.adapterFor({ route: assignment.route }) as ProviderAdapter & { plan?: (context: SubmitContext) => { executable: string; args: string[]; cwd: string } };
+    const adapter = this.adapterFor({ route: assignment.route }) as ProviderAdapter & {
+      plan?: (context: SubmitContext) => { executable: string; args: string[]; cwd: string };
+    };
     if (!adapter.plan) return null;
     const snapshot = state.snapshots!.find(item => item.id === assignment.snapshotId)!;
     const frozen = this.frozenPayload(assignment);
     // The preview and the launch read the same frozen values, so what the user approves is what runs.
-    return { ...adapter.plan({ assignment, snapshot, objective: frozen.objective, requestName: frozen.requestName, payload: this.providerPayload(assignment), jobId: this.job(assignmentId).id }),
-      outputDestination: this.prepareOutputs?.(assignment, snapshot) };
+    return {
+      ...adapter.plan({
+        assignment,
+        snapshot,
+        objective: frozen.objective,
+        requestName: frozen.requestName,
+        payload: this.providerPayload(assignment),
+        jobId: this.job(assignmentId).id,
+      }),
+      outputDestination: this.prepareOutputs?.(assignment, snapshot),
+    };
   }
 
   /**
@@ -691,7 +1012,10 @@ export class AssignmentController {
     // Unknown that implies the provider may have seen something.
     const staged = await this.recoverMissingStaging(snapshot);
     const problems = await this.verifyTransfer(staged);
-    if (problems.length) throw new Error(`The prepared inputs no longer match what was frozen: ${problems[0]} Prepare the request again. Nothing was opened, so this work is still prepared.`);
+    if (problems.length)
+      throw new Error(
+        `The prepared inputs no longer match what was frozen: ${problems[0]} Prepare the request again. Nothing was opened, so this work is still prepared.`,
+      );
     // Re-established after the await, immediately before the terminal is opened.
     context = this.launchGuard(assignmentId, 'HANDOFF');
     this.prepareOutputs?.(assignment, staged);
@@ -704,20 +1028,46 @@ export class AssignmentController {
     const inherited = localRoute && assignment.dependsOn?.length ? await this.inheritedInputs(assignment) : undefined;
     // Same durable-intent rule as dispatch: the persisted binding goes with the submission.
     const attempt = localRoute ? this.prepareLocalSession({ assignment, agent: context.agent, adapter, job }) : null;
-    this.store.recordJobTransition({ jobId: job.id, expectedRevision: job.revision, to: 'SUBMITTING', evidence: 'OFFICE_LOCAL', detail: 'Opening the official terminal for a manual submission.', at: this.now() });
+    this.store.recordJobTransition({
+      jobId: job.id,
+      expectedRevision: job.revision,
+      to: 'SUBMITTING',
+      evidence: 'OFFICE_LOCAL',
+      detail: 'Opening the official terminal for a manual submission.',
+      at: this.now(),
+    });
     job = this.job(assignmentId);
-    const submitContext: SubmitContext = { assignment, snapshot: staged, objective: frozen.objective, requestName: frozen.requestName, payload: this.providerPayload(assignment), jobId: job.id };
-    if (attempt) { submitContext.localSession = attempt.binding; submitContext.memoryDigest = this.store.memoryDigest(assignment.projectId); }
+    const submitContext: SubmitContext = {
+      assignment,
+      snapshot: staged,
+      objective: frozen.objective,
+      requestName: frozen.requestName,
+      payload: this.providerPayload(assignment),
+      jobId: job.id,
+    };
+    if (attempt) {
+      submitContext.localSession = attempt.binding;
+      submitContext.memoryDigest = this.store.memoryDigest(assignment.projectId);
+    }
     if (inherited?.length) submitContext.inherited = inherited;
-    const withheld = (this.store.snapshot({history:false}).locations ?? []).find(item => item.projectId === assignment.projectId)?.withheldPaths;
+    const withheld = (this.store.snapshot({ history: false }).locations ?? []).find(
+      item => item.projectId === assignment.projectId,
+    )?.withheldPaths;
     if (withheld?.length) submitContext.withheldPaths = withheld;
     try {
       const result = await adapter.submit(submitContext);
       if (attempt) this.settleLocalPreparation(attempt, 'READY', result.localPacket?.packetHash ?? null, null);
       // For a local transport the office knows the session identity it created; recording it keeps
       // observation and cancellation pointed at the packet directory that actually exists.
-      const opened = this.store.recordJobTransition({ jobId: job.id, expectedRevision: job.revision, to: 'UNKNOWN', evidence: 'OFFICE_LOCAL',
-        detail: result.detail, externalId: localRoute ? result.externalId : undefined, at: this.now() });
+      const opened = this.store.recordJobTransition({
+        jobId: job.id,
+        expectedRevision: job.revision,
+        to: 'UNKNOWN',
+        evidence: 'OFFICE_LOCAL',
+        detail: result.detail,
+        externalId: localRoute ? result.externalId : undefined,
+        at: this.now(),
+      });
       this.noteLocalEvidence(job, adapter.submitEvidence?.(submitContext, result) ?? []);
       return opened;
     } catch (error) {
@@ -726,8 +1076,14 @@ export class AssignmentController {
       if (error instanceof NotLaunchedError) {
         // The launcher refused before anything could run — FAILED is the honest terminal, not an
         // UNKNOWN that implies the provider may have seen the attempt.
-        return this.store.recordJobTransition({ jobId: job.id, expectedRevision: job.revision, to: 'FAILED', evidence: 'OFFICE_LOCAL',
-          detail: `The work never launched: ${failure}`, at: this.now() });
+        return this.store.recordJobTransition({
+          jobId: job.id,
+          expectedRevision: job.revision,
+          to: 'FAILED',
+          evidence: 'OFFICE_LOCAL',
+          detail: `The work never launched: ${failure}`,
+          at: this.now(),
+        });
       }
       // The failure class follows where the launcher ran. A local route fails writing the session
       // packet on this machine — the provider never saw the attempt, so naming it would send the
@@ -735,15 +1091,27 @@ export class AssignmentController {
       const detail = localRoute
         ? `The local session packet could not be written on this machine: ${failure} Check the workspace and try again.`
         : `The handoff could not be completed: ${failure} Check the provider before trying again.`;
-      return this.store.recordJobTransition({ jobId: job.id, expectedRevision: job.revision, to: 'UNKNOWN', evidence: 'OFFICE_LOCAL',
-        detail, at: this.now() });
+      return this.store.recordJobTransition({
+        jobId: job.id,
+        expectedRevision: job.revision,
+        to: 'UNKNOWN',
+        evidence: 'OFFICE_LOCAL',
+        detail,
+        at: this.now(),
+      });
     }
   }
 
   /** Records a session the user says was created. Linkage only; it settles nothing. */
   link(assignmentId: string, externalId: string, externalUrl: string): AppState {
     const job = this.job(assignmentId);
-    return this.store.recordUserReportedLink({ jobId: job.id, expectedRevision: job.revision, externalId, externalUrl, at: this.now() });
+    return this.store.recordUserReportedLink({
+      jobId: job.id,
+      expectedRevision: job.revision,
+      externalId,
+      externalUrl,
+      at: this.now(),
+    });
   }
 
   /**
@@ -756,21 +1124,32 @@ export class AssignmentController {
    * a launch refusal, never a partially delivered input.
    */
   private async inheritedInputs(assignment: Assignment): Promise<NonNullable<SubmitContext['inherited']>> {
-    const state = this.store.snapshot({history:false});
+    const state = this.store.snapshot({ history: false });
     const inherited: NonNullable<SubmitContext['inherited']> = [];
     for (const dependency of assignment.dependsOn ?? []) {
       const job = latestJobFor(state.jobs, dependency);
       // Name the staged directory after the producing hop so the instruction's artifact names
       // ('plan-draft-a', 'plan-synthesis') resolve to a path; a prior round's hop is prefixed.
       const source = state.assignments?.find(item => item.id === dependency);
-      const sourceKey = source?.pipelineKey ? (source.requestId === assignment.requestId ? source.pipelineKey : `prior-${source.pipelineKey}`) : undefined;
+      const sourceKey = source?.pipelineKey
+        ? source.requestId === assignment.requestId
+          ? source.pipelineKey
+          : `prior-${source.pipelineKey}`
+        : undefined;
       for (const output of job?.outputs ?? []) {
         if (!output.stored) continue;
-        if (!this.readObject) throw new Error('This workspace cannot read stored predecessor output for a dependent packet.');
+        if (!this.readObject)
+          throw new Error('This workspace cannot read stored predecessor output for a dependent packet.');
         const bytes = await this.readObject(output.sha256);
         if (createHash('sha256').update(bytes).digest('hex') !== output.sha256)
           throw new Error(`The recorded output ${output.path} could not be read back intact for the dependent packet.`);
-        inherited.push({ name: output.path, bytes, sourceJobId: job!.id, objectHash: output.sha256, ...(sourceKey ? { sourceKey } : {}) });
+        inherited.push({
+          name: output.path,
+          bytes,
+          sourceJobId: job!.id,
+          objectHash: output.sha256,
+          ...(sourceKey ? { sourceKey } : {}),
+        });
       }
     }
     return inherited;
@@ -786,13 +1165,13 @@ export class AssignmentController {
    * a refused launch is recorded on the job as office-local testimony, not swallowed.
    */
   async advanceLocalChain(assignmentId: string): Promise<AppState> {
-    const state = this.store.snapshot({history:false});
+    const state = this.store.snapshot({ history: false });
     const settled = latestJobFor(state.jobs, assignmentId);
     if (!settled || settled.state !== 'COMPLETED') return state;
     for (const dependent of (state.assignments ?? []).filter(item => (item.dependsOn ?? []).includes(assignmentId)))
       await this.launchChainDependent(state, dependent, assignmentId);
     this.settlePipelineForAssignment(assignmentId);
-    return this.store.snapshot({history:false});
+    return this.store.snapshot({ history: false });
   }
 
   /**
@@ -802,34 +1181,43 @@ export class AssignmentController {
    * `dependsOn` set is considered.
    */
   async reconcileLocalChain(): Promise<AppState> {
-    const state = this.store.snapshot({history:false});
+    const state = this.store.snapshot({ history: false });
     // Dependency-free hops (a request's brief is the common one) mint INTENT at start and were
     // stranded forever if the office died before dispatch — the filter used to require a
     // recorded predecessor, so no reconcile could ever reach them.
     const live = (item: Assignment) => {
       const request = state.requests?.find(r => r.id === item.requestId);
-      return !!request && request.status !== 'CANCELED'
-        && (!request.pipeline || request.pipeline.phase === 'BRIEFING' || request.pipeline.phase === 'LAUNCHED');
+      return (
+        !!request &&
+        request.status !== 'CANCELED' &&
+        (!request.pipeline || request.pipeline.phase === 'BRIEFING' || request.pipeline.phase === 'LAUNCHED')
+      );
     };
-    for (const dependent of (state.assignments ?? []).filter(item => (item.dependsOn?.length || item.pipelineKey) && live(item)))
+    for (const dependent of (state.assignments ?? []).filter(
+      item => (item.dependsOn?.length || item.pipelineKey) && live(item),
+    ))
       await this.launchChainDependent(state, dependent);
     // Startup reconciliation also seals a launched round whose last hop completed while the
     // office was down — the settle reports a non-terminal round instead of throwing, so a
     // mid-round request passes through untouched.
-    const current = this.store.snapshot({history:false});
+    const current = this.store.snapshot({ history: false });
     for (const request of (current.requests ?? []).filter(item => item.pipeline?.phase === 'LAUNCHED'))
-      try { settlePipelineDecision({ store: this.store }, request); } catch {}
-    return this.store.snapshot({history:false});
+      try {
+        settlePipelineDecision({ store: this.store }, request);
+      } catch {}
+    return this.store.snapshot({ history: false });
   }
 
   /** A completed hop may seal its round — the office settle is a no-op until every minted hop verifies. */
   private settlePipelineForAssignment(assignmentId: string): void {
-    const state = this.store.snapshot({history:false});
+    const state = this.store.snapshot({ history: false });
     const assignment = state.assignments?.find(item => item.id === assignmentId);
     if (!assignment?.pipelineKey) return;
     const request = state.requests?.find(item => item.id === assignment.requestId);
     if (request?.pipeline?.phase !== 'LAUNCHED') return;
-    try { settlePipelineDecision({ store: this.store }, request); } catch {}
+    try {
+      settlePipelineDecision({ store: this.store }, request);
+    } catch {}
   }
 
   /**
@@ -845,13 +1233,24 @@ export class AssignmentController {
     const request = state.requests?.find(item => item.id === assignment.requestId);
     if (!request?.pipeline || request.status === 'CANCELED') return;
     const jobIds = new Set((state.jobs ?? []).filter(item => item.assignmentId === assignmentId).map(item => item.id));
-    if ((state.jobEvents ?? []).some(event => jobIds.has(event.jobId) && event.externalId.startsWith('auto-retry:'))) return;
+    if ((state.jobEvents ?? []).some(event => jobIds.has(event.jobId) && event.externalId.startsWith('auto-retry:')))
+      return;
     const job = latestJobFor(state.jobs, assignmentId);
     if (!job) return;
-    this.store.recordJobEvents(job.id, [{ externalId: `auto-retry:${assignmentId}`, cursor: '', kind: 'STATUS',
-      text: 'The provider reported a transient error; the office retries this hop once, in about a minute.',
-      occurredAt: this.now(), receivedAt: this.now(), evidence: 'OFFICE_LOCAL' }]);
-    const timer = setTimeout(() => { void this.runTransientRetry(assignmentId); }, 60_000);
+    this.store.recordJobEvents(job.id, [
+      {
+        externalId: `auto-retry:${assignmentId}`,
+        cursor: '',
+        kind: 'STATUS',
+        text: 'The provider reported a transient error; the office retries this hop once, in about a minute.',
+        occurredAt: this.now(),
+        receivedAt: this.now(),
+        evidence: 'OFFICE_LOCAL',
+      },
+    ]);
+    const timer = setTimeout(() => {
+      void this.runTransientRetry(assignmentId);
+    }, 60_000);
     timer.unref?.();
   }
 
@@ -862,26 +1261,50 @@ export class AssignmentController {
     const request = assignment ? state.requests?.find(item => item.id === assignment.requestId) : undefined;
     const job = assignment ? latestJobFor(state.jobs, assignmentId) : undefined;
     if (!assignment?.pipelineKey || !request || !job) return;
-    const report = (text: string) => this.store.recordJobEvents(job.id, [{ externalId: `auto-retry-fired:${job.id}`, cursor: '', kind: 'STATUS',
-      text, occurredAt: this.now(), receivedAt: this.now(), evidence: 'OFFICE_LOCAL' }]);
+    const report = (text: string) =>
+      this.store.recordJobEvents(job.id, [
+        {
+          externalId: `auto-retry-fired:${job.id}`,
+          cursor: '',
+          kind: 'STATUS',
+          text,
+          occurredAt: this.now(),
+          receivedAt: this.now(),
+          evidence: 'OFFICE_LOCAL',
+        },
+      ]);
     // Guards re-read durable state at fire time: a user cancel, a manual retry or a settled later
     // attempt must not race a stale timer into minting work.
-    if (request.status === 'CANCELED' || job.state !== 'FAILED') { report('The scheduled transient retry did not run — the hop is no longer awaiting one.'); return; }
+    if (request.status === 'CANCELED' || job.state !== 'FAILED') {
+      report('The scheduled transient retry did not run — the hop is no longer awaiting one.');
+      return;
+    }
     try {
-      this.store.execute({ type: 'request.pipeline.retryHop', idempotencyKey: randomUUID(),
-        requestId: request.id, pipelineKey: assignment.pipelineKey, expectedRevision: request.revision });
+      this.store.execute({
+        type: 'request.pipeline.retryHop',
+        idempotencyKey: randomUUID(),
+        requestId: request.id,
+        pipelineKey: assignment.pipelineKey,
+        expectedRevision: request.revision,
+      });
       const rearmed = latestJobFor(this.store.snapshot({ history: false }).jobs, assignmentId);
       if (rearmed?.state === 'INTENT') await this.handoff(assignmentId);
       report('The office retried this hop once after the provider-reported transient error.');
     } catch (error) {
-      report(`The scheduled transient retry could not run: ${error instanceof Error ? error.message : 'unknown error'} The hop stays failed; retry it manually when the blocker clears.`);
+      report(
+        `The scheduled transient retry could not run: ${error instanceof Error ? error.message : 'unknown error'} The hop stays failed; retry it manually when the blocker clears.`,
+      );
     }
   }
 
   /** Serializes chain launches — two predecessors settling together must not race one dependent. */
   private chainTail: Promise<unknown> = Promise.resolve();
 
-  private async launchChainDependent(state: AppState, dependent: Assignment, settledAssignmentId?: string): Promise<void> {
+  private async launchChainDependent(
+    state: AppState,
+    dependent: Assignment,
+    settledAssignmentId?: string,
+  ): Promise<void> {
     const job = latestJobFor(state.jobs, dependent.id);
     if (!job || job.state !== 'INTENT' || !dependent.route.startsWith('LOCAL_')) return;
     if (!dependencyStatus(state, dependent).ready) return;
@@ -891,20 +1314,41 @@ export class AssignmentController {
       const current = this.store.snapshot({ history: false });
       const currentAssignment = current.assignments?.find(item => item.id === dependent.id);
       const currentJob = current.jobs?.find(item => item.id === job.id);
-      if (!currentAssignment || currentJob?.state !== 'INTENT'
-        || !currentAssignment.route.startsWith('LOCAL_') || !dependencyStatus(current, currentAssignment).ready) return;
+      if (
+        !currentAssignment ||
+        currentJob?.state !== 'INTENT' ||
+        !currentAssignment.route.startsWith('LOCAL_') ||
+        !dependencyStatus(current, currentAssignment).ready
+      )
+        return;
       let launched = false;
       try {
         await this.handoff(dependent.id);
         launched = true;
-        this.store.recordJobEvents(job.id, [{ externalId: `chain-launch:${job.id}`, cursor: '', kind: 'STATUS',
-          text: 'The office launched this work automatically — its recorded predecessor work completed with verified output.',
-          occurredAt: this.now(), receivedAt: this.now(), evidence: 'OFFICE_LOCAL' }]);
+        this.store.recordJobEvents(job.id, [
+          {
+            externalId: `chain-launch:${job.id}`,
+            cursor: '',
+            kind: 'STATUS',
+            text: 'The office launched this work automatically — its recorded predecessor work completed with verified output.',
+            occurredAt: this.now(),
+            receivedAt: this.now(),
+            evidence: 'OFFICE_LOCAL',
+          },
+        ]);
       } catch (error) {
         const detail = error instanceof Error ? error.message : 'unknown error';
-        this.store.recordJobEvents(job.id, [{ externalId: `chain-blocked:${canonicalHash({ job: job.id, revision: job.revision, detail })}`, cursor: '', kind: 'STATUS',
-          text: `The automatic chain launch could not run: ${detail} The work stays prepared; launch it manually when the blocker clears.`,
-          occurredAt: this.now(), receivedAt: this.now(), evidence: 'OFFICE_LOCAL' }]);
+        this.store.recordJobEvents(job.id, [
+          {
+            externalId: `chain-blocked:${canonicalHash({ job: job.id, revision: job.revision, detail })}`,
+            cursor: '',
+            kind: 'STATUS',
+            text: `The automatic chain launch could not run: ${detail} The work stays prepared; launch it manually when the blocker clears.`,
+            occurredAt: this.now(),
+            receivedAt: this.now(),
+            evidence: 'OFFICE_LOCAL',
+          },
+        ]);
       }
       // The handoff message rides only on a launch that actually ran: the helper itself confirms
       // the packet settled READY before naming it, and every other path stays silent by contract.
@@ -927,14 +1371,30 @@ export class AssignmentController {
     try {
       const outcome = recordChainHandoff({ store: this.store, state, dependent, settledAssignmentId, now: this.now });
       if (!outcome.recorded)
-        this.store.recordJobEvents(job.id, [{ externalId: `chain-handoff-note:${job.id}`, cursor: '', kind: 'STATUS',
-          text: `The chain launch stands, but no handoff message was recorded: ${outcome.reason}`,
-          occurredAt: this.now(), receivedAt: this.now(), evidence: 'OFFICE_LOCAL' }]);
+        this.store.recordJobEvents(job.id, [
+          {
+            externalId: `chain-handoff-note:${job.id}`,
+            cursor: '',
+            kind: 'STATUS',
+            text: `The chain launch stands, but no handoff message was recorded: ${outcome.reason}`,
+            occurredAt: this.now(),
+            receivedAt: this.now(),
+            evidence: 'OFFICE_LOCAL',
+          },
+        ]);
     } catch (error) {
       const detail = error instanceof Error ? error.message : 'unknown error';
-      this.store.recordJobEvents(job.id, [{ externalId: `chain-handoff-blocked:${canonicalHash({ job: job.id, detail })}`, cursor: '', kind: 'STATUS',
-        text: `The chain launch ran, but its handoff record could not be written: ${detail}`,
-        occurredAt: this.now(), receivedAt: this.now(), evidence: 'OFFICE_LOCAL' }]);
+      this.store.recordJobEvents(job.id, [
+        {
+          externalId: `chain-handoff-blocked:${canonicalHash({ job: job.id, detail })}`,
+          cursor: '',
+          kind: 'STATUS',
+          text: `The chain launch ran, but its handoff record could not be written: ${detail}`,
+          occurredAt: this.now(),
+          receivedAt: this.now(),
+          evidence: 'OFFICE_LOCAL',
+        },
+      ]);
     }
   }
 
@@ -948,31 +1408,64 @@ export class AssignmentController {
    * claims SUBMITTING, so a refused classification or an un-retryable existing binding leaves the
    * job honestly undispatched. Hosted routes never reach this helper.
    */
-  private prepareLocalSession(input: { assignment: Assignment; agent: Agent; adapter: ProviderAdapter; job: ProviderJob }): { binding: LocalSessionRecord; operationId: string } {
+  private prepareLocalSession(input: {
+    assignment: Assignment;
+    agent: Agent;
+    adapter: ProviderAdapter;
+    job: ProviderJob;
+  }): { binding: LocalSessionRecord; operationId: string } {
     const { assignment, agent, adapter, job } = input;
     const decision = localRequirementFor(assignment);
     if (!decision.allowed)
       throw new Error(`This assignment cannot be delivered to a local session: ${decision.reason}`);
-    if (decision.requirement === 'READ_CONFINEMENT_REQUIRED')
-      throw new Error(decision.detail);
+    if (decision.requirement === 'READ_CONFINEMENT_REQUIRED') throw new Error(decision.detail);
     const operationId = randomUUID();
     const mint = () => `session-${this.now().replace(/[^0-9A-Za-z]/g, '')}-${randomUUID()}`;
     const existing = this.store.localSessionForJob(job.id);
     if (!existing) {
       const binding = this.store.createLocalSession({
-        schemaVersion: 1, jobId: job.id, assignmentId: assignment.id, projectId: assignment.projectId,
-        attemptId: randomUUID(), provider: agent.provider, surface: 'UNKNOWN', layout: 'FLAT_PACKET',
-        packetVersion: adapter.packetVersion ?? 1, packetHash: null, storageRelativePath: mint(),
-        originalCwd: null, repoRelativePath: null, seedCommit: null, providerSessionId: null,
-        providerProjectId: null, confinementEvidenceId: null, archiveRelativePath: null,
-        worktreeOwner: 'NONE', bindingEvidence: 'UNBOUND', groupingStatus: 'UNKNOWN',
-        requirement: decision.requirement, confinementStatus: 'UNVERIFIED', lastReceipt: null,
-        cancelRequestId: null, stopStatus: 'NOT_REQUESTED', lifecycle: 'PREPARING',
+        schemaVersion: 1,
+        jobId: job.id,
+        assignmentId: assignment.id,
+        projectId: assignment.projectId,
+        attemptId: randomUUID(),
+        provider: agent.provider,
+        surface: 'UNKNOWN',
+        layout: 'FLAT_PACKET',
+        packetVersion: adapter.packetVersion ?? 1,
+        packetHash: null,
+        storageRelativePath: mint(),
+        originalCwd: null,
+        repoRelativePath: null,
+        seedCommit: null,
+        providerSessionId: null,
+        providerProjectId: null,
+        confinementEvidenceId: null,
+        archiveRelativePath: null,
+        worktreeOwner: 'NONE',
+        bindingEvidence: 'UNBOUND',
+        groupingStatus: 'UNKNOWN',
+        requirement: decision.requirement,
+        confinementStatus: 'UNVERIFIED',
+        lastReceipt: null,
+        cancelRequestId: null,
+        stopStatus: 'NOT_REQUESTED',
+        lifecycle: 'PREPARING',
         // An explicit undefined would break canonical hashing — the field rides along only when set.
         ...(assignment.toolProfile ? { toolProfile: assignment.toolProfile } : {}),
       });
-      this.store.appendLocalJournal({ operationId, localSessionId: binding.id, jobId: job.id, kind: 'PREPARE', phase: 'INTENT',
-        expectedRevision: binding.revision, source: null, destination: binding.storageRelativePath, outcome: 'NONE', failureDetail: null });
+      this.store.appendLocalJournal({
+        operationId,
+        localSessionId: binding.id,
+        jobId: job.id,
+        kind: 'PREPARE',
+        phase: 'INTENT',
+        expectedRevision: binding.revision,
+        source: null,
+        destination: binding.storageRelativePath,
+        outcome: 'NONE',
+        failureDetail: null,
+      });
       return { binding, operationId };
     }
     if (existing.lifecycle === 'PREPARATION_FAILED') {
@@ -981,15 +1474,36 @@ export class AssignmentController {
       // attempt-scoped state resets and the new attempt's first receipt starts at sequence 1.
       const { revision: _revision, updatedAt: _updatedAt, ...rest } = existing;
       const binding = this.store.updateLocalSession({
-        localSessionId: existing.id, expectedRevision: existing.revision,
-        next: { ...rest, lifecycle: 'PREPARING', attemptId: randomUUID(), storageRelativePath: mint(),
-          packetHash: null, lastReceipt: null, cancelRequestId: null, stopStatus: 'NOT_REQUESTED' },
+        localSessionId: existing.id,
+        expectedRevision: existing.revision,
+        next: {
+          ...rest,
+          lifecycle: 'PREPARING',
+          attemptId: randomUUID(),
+          storageRelativePath: mint(),
+          packetHash: null,
+          lastReceipt: null,
+          cancelRequestId: null,
+          stopStatus: 'NOT_REQUESTED',
+        },
       });
-      this.store.appendLocalJournal({ operationId, localSessionId: binding.id, jobId: job.id, kind: 'PREPARE', phase: 'INTENT',
-        expectedRevision: binding.revision, source: null, destination: binding.storageRelativePath, outcome: 'NONE', failureDetail: null });
+      this.store.appendLocalJournal({
+        operationId,
+        localSessionId: binding.id,
+        jobId: job.id,
+        kind: 'PREPARE',
+        phase: 'INTENT',
+        expectedRevision: binding.revision,
+        source: null,
+        destination: binding.storageRelativePath,
+        outcome: 'NONE',
+        failureDetail: null,
+      });
       return { binding, operationId };
     }
-    throw new Error(`This job already has a local-session binding in ${existing.lifecycle}; reconcile it before dispatching again — the office never silently rebinds.`);
+    throw new Error(
+      `This job already has a local-session binding in ${existing.lifecycle}; reconcile it before dispatching again — the office never silently rebinds.`,
+    );
   }
 
   /**
@@ -999,21 +1513,34 @@ export class AssignmentController {
    * on the PREPARING record this attempt observed; a binding that already moved belongs to
    * reconciliation and is never overwritten by a dispatch finishing late.
    */
-  private settleLocalPreparation(attempt: { binding: LocalSessionRecord; operationId: string }, outcome: 'READY' | 'PREPARATION_FAILED', packetHash: string | null, failureDetail: string | null): void {
+  private settleLocalPreparation(
+    attempt: { binding: LocalSessionRecord; operationId: string },
+    outcome: 'READY' | 'PREPARATION_FAILED',
+    packetHash: string | null,
+    failureDetail: string | null,
+  ): void {
     const current = this.store.localSessionForJob(attempt.binding.jobId);
     if (!current || current.id !== attempt.binding.id || current.lifecycle !== 'PREPARING') return;
     try {
       const { revision: _revision, updatedAt: _updatedAt, ...rest } = current;
       const next = this.store.updateLocalSession({
-        localSessionId: current.id, expectedRevision: current.revision,
-        next: outcome === 'READY'
-          ? { ...rest, lifecycle: 'READY', packetHash, packetVersion: packetHash ? 2 : current.packetVersion }
-          : { ...rest, lifecycle: 'PREPARATION_FAILED' },
+        localSessionId: current.id,
+        expectedRevision: current.revision,
+        next:
+          outcome === 'READY'
+            ? { ...rest, lifecycle: 'READY', packetHash, packetVersion: packetHash ? 2 : current.packetVersion }
+            : { ...rest, lifecycle: 'PREPARATION_FAILED' },
       });
       this.store.appendLocalJournal({
-        operationId: attempt.operationId, localSessionId: next.id, jobId: next.jobId, kind: 'PREPARE',
-        phase: outcome === 'READY' ? 'VERIFIED' : 'FAILED', expectedRevision: next.revision,
-        source: null, destination: current.storageRelativePath, outcome: outcome === 'READY' ? 'SUCCESS' : 'UNKNOWN',
+        operationId: attempt.operationId,
+        localSessionId: next.id,
+        jobId: next.jobId,
+        kind: 'PREPARE',
+        phase: outcome === 'READY' ? 'VERIFIED' : 'FAILED',
+        expectedRevision: next.revision,
+        source: null,
+        destination: current.storageRelativePath,
+        outcome: outcome === 'READY' ? 'SUCCESS' : 'UNKNOWN',
         failureDetail: failureDetail === null ? null : failureDetail.slice(0, 2000),
       });
     } catch {
@@ -1034,7 +1561,8 @@ export class AssignmentController {
     if (!binding) return;
     const { revision: _revision, updatedAt: _updatedAt, ...rest } = binding;
     const next = { ...rest };
-    if (result.receipt) next.lastReceipt = { sequence: result.receipt.sequence, hash: result.receipt.hash, observedAt: this.now() };
+    if (result.receipt)
+      next.lastReceipt = { sequence: result.receipt.sequence, hash: result.receipt.hash, observedAt: this.now() };
     if (result.cancelAck) next.stopStatus = 'SESSION_REPORTED_STOPPED';
     // A resolved provider record upgrades the grouping claim only — a later observe that finds
     // nothing reports no field and downgrades nothing. The record's own key is also the exact
@@ -1052,23 +1580,34 @@ export class AssignmentController {
    *  stranded-receipt repair is its only caller. */
   async observe(assignmentId: string, replayReceiptHash?: string): Promise<AppState> {
     let job = this.job(assignmentId);
-    if (isTerminalJob(job.state)) return this.store.snapshot({history:false});
+    if (isTerminalJob(job.state)) return this.store.snapshot({ history: false });
     const adapter = this.adapterFor({ route: job.route });
     // Undispatched work has nothing to observe: the adapter would only report that no session
     // exists yet, and writing that as lastObservation manufactures a diagnosis out of nothing —
     // the exact residue the legacy-binding prefix produced on INTENT hops. The route still
     // resolves above so an unconfigured route fails closed rather than silently no-oping.
-    if (job.state === 'INTENT' || job.state === 'SUBMITTING') return this.store.snapshot({history:false});
-    const result = await adapter.observe(job, undefined, replayReceiptHash ? { receiptHash: replayReceiptHash } : undefined);
+    if (job.state === 'INTENT' || job.state === 'SUBMITTING') return this.store.snapshot({ history: false });
+    const result = await adapter.observe(
+      job,
+      undefined,
+      replayReceiptHash ? { receiptHash: replayReceiptHash } : undefined,
+    );
     if (result.events?.length) this.store.recordJobEvents(job.id, result.events);
     // The latest verified observation persists on the job itself — the interface reads
     // `lastObservation` for "what the office last saw" without paging the event log.
     try {
-      this.store.recordJobObservation({ jobId: job.id, expectedRevision: job.revision, detail: result.detail, at: this.now() });
-    } catch { /* an observation note never blocks the observation it describes */ }
+      this.store.recordJobObservation({
+        jobId: job.id,
+        expectedRevision: job.revision,
+        detail: result.detail,
+        at: this.now(),
+      });
+    } catch {
+      /* an observation note never blocks the observation it describes */
+    }
     this.recordLocalObservation(job, result);
     job = this.job(assignmentId);
-    if (isTerminalJob(job.state)) return this.store.snapshot({history:false});
+    if (isTerminalJob(job.state)) return this.store.snapshot({ history: false });
     // An adapter that cannot observe anything is describing its own limits, not reporting what the
     // provider said. Recording that as provider testimony would manufacture evidence out of silence,
     // and it must not overwrite a receipt or a pending cancellation the office already holds. An
@@ -1077,12 +1616,26 @@ export class AssignmentController {
       // The latest diagnosis rides the job; a distinct detail also earns one dedup-keyed History
       // entry so repeated polls stay quiet but a changed reason is never lost.
       if (result.detail && result.detail !== job.lastObservation)
-        this.store.recordJobEvents(job.id, [{ externalId: `observe:${canonicalHash({ job: job.id, detail: result.detail })}`, cursor: '', kind: 'STATUS',
-          text: result.detail.slice(0, 2000), occurredAt: this.now(), receivedAt: this.now(), evidence: 'OFFICE_LOCAL' }]);
-      if (job.externalId || job.state === 'CANCEL_REQUESTED' || job.state === 'UNKNOWN') return this.store.snapshot({history:false});
+        this.store.recordJobEvents(job.id, [
+          {
+            externalId: `observe:${canonicalHash({ job: job.id, detail: result.detail })}`,
+            cursor: '',
+            kind: 'STATUS',
+            text: result.detail.slice(0, 2000),
+            occurredAt: this.now(),
+            receivedAt: this.now(),
+            evidence: 'OFFICE_LOCAL',
+          },
+        ]);
+      if (job.externalId || job.state === 'CANCEL_REQUESTED' || job.state === 'UNKNOWN')
+        return this.store.snapshot({ history: false });
       return this.store.recordJobTransition({
-        jobId: job.id, expectedRevision: job.revision, to: 'UNKNOWN', evidence: 'OFFICE_LOCAL',
-        detail: result.detail, at: this.now(),
+        jobId: job.id,
+        expectedRevision: job.revision,
+        to: 'UNKNOWN',
+        evidence: 'OFFICE_LOCAL',
+        detail: result.detail,
+        at: this.now(),
       });
     }
     // Output metadata is what the provider says exists. Before any of it is recorded as a retrieved
@@ -1093,44 +1646,87 @@ export class AssignmentController {
     const names = new Map<string, string>();
     if ((result.outputs?.length ?? 0) > 256) throw new Error('The output inventory exceeds 256 entries.');
     for (const output of result.outputs ?? []) {
-      if (!safeEntry(output.path) || !Number.isSafeInteger(output.bytes) || output.bytes < 0 || output.bytes > MAX_FILE || !/^[a-f0-9]{64}$/.test(output.sha256)) {
-        failures.push('An output has an unsafe path, size or identity.'); continue;
+      if (
+        !safeEntry(output.path) ||
+        !Number.isSafeInteger(output.bytes) ||
+        output.bytes < 0 ||
+        output.bytes > MAX_FILE ||
+        !/^[a-f0-9]{64}$/.test(output.sha256)
+      ) {
+        failures.push('An output has an unsafe path, size or identity.');
+        continue;
       }
       const previous = names.get(output.path.toLowerCase());
-      if (previous && previous !== output.sha256) { failures.push('The output inventory has conflicting paths.'); continue; }
+      if (previous && previous !== output.sha256) {
+        failures.push('The output inventory has conflicting paths.');
+        continue;
+      }
       names.set(output.path.toLowerCase(), output.sha256);
       // adapter.fetch is a method that reads its own adapter state (the session root), so it
       // must stay bound to the adapter — extracting it bare crashes every declared output.
       const fetch = adapter.fetch ? adapter.fetch.bind(adapter) : this.fetchOutput;
-      if (!fetch) { failures.push(`${output.path} was reported but this route cannot retrieve bytes.`); continue; }
-      if (!this.storeOutput) { failures.push(`${output.path} cannot be durably stored by this route.`); continue; }
+      if (!fetch) {
+        failures.push(`${output.path} was reported but this route cannot retrieve bytes.`);
+        continue;
+      }
+      if (!this.storeOutput) {
+        failures.push(`${output.path} cannot be durably stored by this route.`);
+        continue;
+      }
       try {
         const bytes = await fetch(job, output);
         const digest = createHash('sha256').update(bytes).digest('hex');
-        if (bytes.byteLength !== output.bytes) { failures.push(`${output.path} arrived as ${bytes.byteLength} bytes, not the ${output.bytes} reported.`); continue; }
-        if (digest !== output.sha256) { failures.push(`${output.path} does not match the identity the provider reported.`); continue; }
+        if (bytes.byteLength !== output.bytes) {
+          failures.push(`${output.path} arrived as ${bytes.byteLength} bytes, not the ${output.bytes} reported.`);
+          continue;
+        }
+        if (digest !== output.sha256) {
+          failures.push(`${output.path} does not match the identity the provider reported.`);
+          continue;
+        }
         // Content addressing dedupes a repeated event: the same bytes land on the same object.
         await this.storeOutput(digest, bytes, job, output);
-        if (!retrieved.some(item => item.path === output.path && item.sha256 === digest)) retrieved.push({ ...output, sha256: digest, stored: true });
+        if (!retrieved.some(item => item.path === output.path && item.sha256 === digest))
+          retrieved.push({ ...output, sha256: digest, stored: true });
       } catch (error) {
-        failures.push(`${output.path} could not be retrieved: ${error instanceof Error ? error.message : 'unknown error'}`);
+        failures.push(
+          `${output.path} could not be retrieved: ${error instanceof Error ? error.message : 'unknown error'}`,
+        );
       }
     }
-    const detail = failures.length ? `${result.detail} Some reported output was not retrieved: ${failures[0]}` : result.detail;
+    const detail = failures.length
+      ? `${result.detail} Some reported output was not retrieved: ${failures[0]}`
+      : result.detail;
     if (failures.length) {
-      this.store.recordJobEvents(job.id, [{ externalId: `retrieval:${canonicalHash({ outputs: result.outputs, failures })}`, cursor: '', kind: 'STATUS',
-        text: detail.slice(0,1900), occurredAt: this.now(), receivedAt: this.now(), evidence: 'OFFICE_LOCAL' }]);
-      throw new Error(`Completion needs attributable output durably stored for the entire reported inventory. ${failures[0]}`);
+      this.store.recordJobEvents(job.id, [
+        {
+          externalId: `retrieval:${canonicalHash({ outputs: result.outputs, failures })}`,
+          cursor: '',
+          kind: 'STATUS',
+          text: detail.slice(0, 1900),
+          occurredAt: this.now(),
+          receivedAt: this.now(),
+          evidence: 'OFFICE_LOCAL',
+        },
+      ]);
+      throw new Error(
+        `Completion needs attributable output durably stored for the entire reported inventory. ${failures[0]}`,
+      );
     }
     job = this.job(assignmentId);
-    if (isTerminalJob(job.state)) return this.store.snapshot({history:false});
+    if (isTerminalJob(job.state)) return this.store.snapshot({ history: false });
     // A verified receipt's applied self-report is the session's own claim about what ran — never
     // folded into the job's verified outcome. A bound v2 receipt names its own event identity
     // (the receipt hash), so replaying the same receipt dedupes while a fresh receipt reporting
     // identical values still lands. An unbound report has no receipt identity, so it dedupes
     // against the latest report instead of the content hash alone — that keeps repeated polls of
     // an unchanged file quiet while a return to an earlier value (A→B→A) still lands.
-    if (result.applied && (result.applied.model !== undefined || result.applied.effort !== undefined || result.applied.delegation !== undefined)) {
+    if (
+      result.applied &&
+      (result.applied.model !== undefined ||
+        result.applied.effort !== undefined ||
+        result.applied.delegation !== undefined)
+    ) {
       const declared: string[] = [];
       if (result.applied.model !== undefined) declared.push(`appliedModel=${JSON.stringify(result.applied.model)}`);
       if (result.applied.effort !== undefined) declared.push(`appliedEffort=${JSON.stringify(result.applied.effort)}`);
@@ -1148,22 +1744,39 @@ export class AssignmentController {
       if (result.receipt) {
         externalId = `applied:${result.receipt.hash}`;
         const binding = this.store.localSessionForJob(job.id);
-        applied = binding ? appliedReportPayloadSchema.parse({
-          schema: 'office-applied-report@1', attemptId: binding.attemptId,
-          receiptSequence: result.receipt.sequence, receiptHash: result.receipt.hash, ...stripped,
-        }) : undefined;
+        applied = binding
+          ? appliedReportPayloadSchema.parse({
+              schema: 'office-applied-report@1',
+              attemptId: binding.attemptId,
+              receiptSequence: result.receipt.sequence,
+              receiptHash: result.receipt.hash,
+              ...stripped,
+            })
+          : undefined;
       } else {
-        externalId = latest?.text === text ? null
-          : `applied:${canonicalHash({ report: stripped, after: latest?.id ?? 'none' })}`;
+        externalId =
+          latest?.text === text ? null : `applied:${canonicalHash({ report: stripped, after: latest?.id ?? 'none' })}`;
         applied = undefined;
       }
-      if (externalId) this.store.recordJobEvents(job.id, [{ externalId, cursor: '', kind: 'STATUS', text,
-        occurredAt: this.now(), receivedAt: this.now(), evidence: 'PROVIDER_REPORTED',
-        // A present-but-undefined key would survive zod and poison the change's canonical hash.
-        ...(applied ? { applied } : {}) }]);
+      if (externalId)
+        this.store.recordJobEvents(job.id, [
+          {
+            externalId,
+            cursor: '',
+            kind: 'STATUS',
+            text,
+            occurredAt: this.now(),
+            receivedAt: this.now(),
+            evidence: 'PROVIDER_REPORTED',
+            // A present-but-undefined key would survive zod and poison the change's canonical hash.
+            ...(applied ? { applied } : {}),
+          },
+        ]);
     }
-    const fresh = retrieved.filter(output => !job.outputs.some(old => old.path === output.path && old.sha256 === output.sha256 && old.stored));
-    if (job.state === result.state && !fresh.length) return this.store.snapshot({history:false});
+    const fresh = retrieved.filter(
+      output => !job.outputs.some(old => old.path === output.path && old.sha256 === output.sha256 && old.stored),
+    );
+    if (job.state === result.state && !fresh.length) return this.store.snapshot({ history: false });
     // The receipt contract allows a longer detail than a job record holds; the full text stays in
     // the session's result.json, so the record keeps a bounded prefix instead of refusing it.
     const boundedDetail = detail.length > 2000 ? `${detail.slice(0, 1999)}…` : detail;
@@ -1171,8 +1784,13 @@ export class AssignmentController {
     let completed = result.state === 'COMPLETED';
     try {
       transitioned = this.store.recordJobTransition({
-        jobId: job.id, expectedRevision: job.revision, to: result.state, evidence: 'PROVIDER_REPORTED',
-        detail: boundedDetail, outputs: fresh.length ? fresh : undefined, at: this.now(),
+        jobId: job.id,
+        expectedRevision: job.revision,
+        to: result.state,
+        evidence: 'PROVIDER_REPORTED',
+        detail: boundedDetail,
+        outputs: fresh.length ? fresh : undefined,
+        at: this.now(),
       });
     } catch (error) {
       // A verified receipt is already bound as lastReceipt, so every later observation refuses it as
@@ -1184,8 +1802,12 @@ export class AssignmentController {
       const reason = error instanceof Error ? error.message : 'the store refused the transition';
       const failed = `The session reported COMPLETED on a verified receipt, but the office refused completion: ${reason} Session detail: ${detail}`;
       transitioned = this.store.recordJobTransition({
-        jobId: job.id, expectedRevision: job.revision, to: 'FAILED', evidence: 'OFFICE_LOCAL',
-        detail: failed.length > 2000 ? `${failed.slice(0, 1999)}…` : failed, at: this.now(),
+        jobId: job.id,
+        expectedRevision: job.revision,
+        to: 'FAILED',
+        evidence: 'OFFICE_LOCAL',
+        detail: failed.length > 2000 ? `${failed.slice(0, 1999)}…` : failed,
+        at: this.now(),
       });
     }
     // A verified observation of a local session is itself office evidence — recorded only when the
@@ -1197,24 +1819,57 @@ export class AssignmentController {
     // The receipt's self-reported memory ingests only after the verified COMPLETED transition —
     // every cited output already exists as a stored artifact by then. Malformed entries are
     // skipped by ingest, never thrown; the report lands as a dedup-keyed job event.
-    if (completed && result.receipt && result.memory && (result.memory.findings?.length || result.memory.links?.length)) {
-      const assignment = this.store.snapshot({ history: false }).assignments?.find(item => item.id === job.assignmentId);
+    if (
+      completed &&
+      result.receipt &&
+      result.memory &&
+      (result.memory.findings?.length || result.memory.links?.length)
+    ) {
+      const assignment = this.store
+        .snapshot({ history: false })
+        .assignments?.find(item => item.id === job.assignmentId);
       try {
         if (!assignment) throw new Error('the job names an assignment the office does not hold');
-        const report = ingestReceiptMemory(this.store, {
-          projectId: assignment.projectId, requestId: assignment.requestId, assignmentId: assignment.id,
-          agentId: assignment.agentId, receiptHash: result.receipt.hash,
-        }, result.memory);
-        const summary = `Receipt memory ingested: ${report.findings.length} finding${report.findings.length === 1 ? '' : 's'} recorded, ${report.links.length} link${report.links.length === 1 ? '' : 's'} proposed` +
+        const report = ingestReceiptMemory(
+          this.store,
+          {
+            projectId: assignment.projectId,
+            requestId: assignment.requestId,
+            assignmentId: assignment.id,
+            agentId: assignment.agentId,
+            receiptHash: result.receipt.hash,
+          },
+          result.memory,
+        );
+        const summary =
+          `Receipt memory ingested: ${report.findings.length} finding${report.findings.length === 1 ? '' : 's'} recorded, ${report.links.length} link${report.links.length === 1 ? '' : 's'} proposed` +
           (report.findingsSkipped.length || report.linksSkipped.length
             ? `; ${report.findingsSkipped.length + report.linksSkipped.length} malformed entr${report.findingsSkipped.length + report.linksSkipped.length === 1 ? 'y' : 'ies'} skipped`
-            : '') + '.';
-        this.store.recordJobEvents(job.id, [{ externalId: `memory:${result.receipt.hash}`, cursor: '', kind: 'STATUS', text: summary,
-          occurredAt: this.now(), receivedAt: this.now(), evidence: 'OFFICE_LOCAL' }]);
+            : '') +
+          '.';
+        this.store.recordJobEvents(job.id, [
+          {
+            externalId: `memory:${result.receipt.hash}`,
+            cursor: '',
+            kind: 'STATUS',
+            text: summary,
+            occurredAt: this.now(),
+            receivedAt: this.now(),
+            evidence: 'OFFICE_LOCAL',
+          },
+        ]);
       } catch (error) {
-        this.store.recordJobEvents(job.id, [{ externalId: `memory-failed:${result.receipt.hash}`, cursor: '', kind: 'STATUS',
-          text: `Receipt memory could not be ingested: ${error instanceof Error ? error.message : 'unknown error'}`,
-          occurredAt: this.now(), receivedAt: this.now(), evidence: 'OFFICE_LOCAL' }]);
+        this.store.recordJobEvents(job.id, [
+          {
+            externalId: `memory-failed:${result.receipt.hash}`,
+            cursor: '',
+            kind: 'STATUS',
+            text: `Receipt memory could not be ingested: ${error instanceof Error ? error.message : 'unknown error'}`,
+            occurredAt: this.now(),
+            receivedAt: this.now(),
+            evidence: 'OFFICE_LOCAL',
+          },
+        ]);
       }
     }
     return transitioned;
@@ -1228,26 +1883,55 @@ export class AssignmentController {
     let job = this.job(assignmentId);
     if (isTerminalJob(job.state)) throw new Error('This job already has a recorded outcome.');
     if (job.state === 'INTENT') {
-      return this.store.recordJobTransition({ jobId: job.id, expectedRevision: job.revision, to: 'CANCEL_ACKNOWLEDGED', evidence: 'OFFICE_LOCAL',
-        detail: 'Canceled before anything was submitted.', at: this.now() });
+      return this.store.recordJobTransition({
+        jobId: job.id,
+        expectedRevision: job.revision,
+        to: 'CANCEL_ACKNOWLEDGED',
+        evidence: 'OFFICE_LOCAL',
+        detail: 'Canceled before anything was submitted.',
+        at: this.now(),
+      });
     }
     if (job.state !== 'CANCEL_REQUESTED') {
-      this.store.recordJobTransition({ jobId: job.id, expectedRevision: job.revision, to: 'CANCEL_REQUESTED', evidence: 'OFFICE_LOCAL',
-        detail: 'Cancellation requested; no dependent work will be dispatched while this is open.', at: this.now() });
+      this.store.recordJobTransition({
+        jobId: job.id,
+        expectedRevision: job.revision,
+        to: 'CANCEL_REQUESTED',
+        evidence: 'OFFICE_LOCAL',
+        detail: 'Cancellation requested; no dependent work will be dispatched while this is open.',
+        at: this.now(),
+      });
       job = this.job(assignmentId);
     }
     const adapter = this.adapterFor({ route: job.route });
     const result = await adapter.cancel(job);
     const binding = this.store.localSessionForJob(job.id);
     if (!result.acknowledged) {
-      if (binding) this.store.appendLocalJournal({
-        operationId: randomUUID(), localSessionId: binding.id, jobId: job.id, kind: 'CANCEL_REQUEST',
-        phase: 'EXECUTED', expectedRevision: binding.revision, source: null, destination: null,
-        outcome: 'REFUSED', failureDetail: result.detail.slice(0, 2000),
-      });
-      this.store.recordJobEvents(job.id, [{ externalId: `cancel-attempt:${job.revision}`, cursor: '', kind: 'STATUS',
-        text: `Cancellation not acknowledged: ${result.detail}`, occurredAt: this.now(), receivedAt: this.now(), evidence: 'OFFICE_LOCAL' }]);
-      return this.store.snapshot({history:false});
+      if (binding)
+        this.store.appendLocalJournal({
+          operationId: randomUUID(),
+          localSessionId: binding.id,
+          jobId: job.id,
+          kind: 'CANCEL_REQUEST',
+          phase: 'EXECUTED',
+          expectedRevision: binding.revision,
+          source: null,
+          destination: null,
+          outcome: 'REFUSED',
+          failureDetail: result.detail.slice(0, 2000),
+        });
+      this.store.recordJobEvents(job.id, [
+        {
+          externalId: `cancel-attempt:${job.revision}`,
+          cursor: '',
+          kind: 'STATUS',
+          text: `Cancellation not acknowledged: ${result.detail}`,
+          occurredAt: this.now(),
+          receivedAt: this.now(),
+          evidence: 'OFFICE_LOCAL',
+        },
+      ]);
+      return this.store.snapshot({ history: false });
     }
     if (binding && result.requestId) {
       // A cooperative cancel request was delivered into the packet — persist which request and
@@ -1255,22 +1939,36 @@ export class AssignmentController {
       // is not a stopped session, and the session's own acknowledgement arrives through observe().
       const { revision: _r, updatedAt: _u, ...rest } = binding;
       const requested = this.store.updateLocalSession({
-        localSessionId: binding.id, expectedRevision: binding.revision,
+        localSessionId: binding.id,
+        expectedRevision: binding.revision,
         next: { ...rest, cancelRequestId: result.requestId, stopStatus: 'REQUESTED' },
       });
       this.store.appendLocalJournal({
-        operationId: randomUUID(), localSessionId: requested.id, jobId: job.id, kind: 'CANCEL_REQUEST',
-        phase: 'EXECUTED', expectedRevision: requested.revision, source: null, destination: null,
-        outcome: 'SUCCESS', failureDetail: null,
+        operationId: randomUUID(),
+        localSessionId: requested.id,
+        jobId: job.id,
+        kind: 'CANCEL_REQUEST',
+        phase: 'EXECUTED',
+        expectedRevision: requested.revision,
+        source: null,
+        destination: null,
+        outcome: 'SUCCESS',
+        failureDetail: null,
       });
       this.noteLocalEvidence(job, adapter.cancelEvidence?.(job) ?? []);
-      return this.store.snapshot({history:false});
+      return this.store.snapshot({ history: false });
     }
     // The acknowledgement's provenance follows who actually answered: a hosted provider's reply is
     // PROVIDER_REPORTED, but a local route's acknowledgement is the office's own sentinel write —
     // recording that as provider testimony manufactures evidence (defect F02, legacy path).
-    const acknowledged = this.store.recordJobTransition({ jobId: job.id, expectedRevision: job.revision, to: 'CANCEL_ACKNOWLEDGED',
-      evidence: job.route.startsWith('LOCAL_') ? 'OFFICE_LOCAL' : 'PROVIDER_REPORTED', detail: result.detail, at: this.now() });
+    const acknowledged = this.store.recordJobTransition({
+      jobId: job.id,
+      expectedRevision: job.revision,
+      to: 'CANCEL_ACKNOWLEDGED',
+      evidence: job.route.startsWith('LOCAL_') ? 'OFFICE_LOCAL' : 'PROVIDER_REPORTED',
+      detail: result.detail,
+      at: this.now(),
+    });
     this.noteLocalEvidence(job, adapter.cancelEvidence?.(job) ?? []);
     return acknowledged;
   }
@@ -1285,69 +1983,117 @@ export class AssignmentController {
    */
   async retireLocal(assignmentId: string): Promise<{
     state: AppState;
-    archive: { operationId: string; packetOutcome: 'ARCHIVED' | 'ALREADY_ARCHIVED' | 'REFUSED' | 'UNKNOWN'; providerOutcome: 'NOT_REQUESTED' | 'ARCHIVED' | 'ALREADY_ARCHIVED' | 'UNSUPPORTED' | 'BUSY' | 'UNKNOWN'; detail: string };
+    archive: {
+      operationId: string;
+      packetOutcome: 'ARCHIVED' | 'ALREADY_ARCHIVED' | 'REFUSED' | 'UNKNOWN';
+      providerOutcome: 'NOT_REQUESTED' | 'ARCHIVED' | 'ALREADY_ARCHIVED' | 'UNSUPPORTED' | 'BUSY' | 'UNKNOWN';
+      detail: string;
+    };
   }> {
     const job = this.job(assignmentId);
     const binding = this.store.localSessionForJob(job.id);
     if (!binding) throw new Error('This job has no local-session binding — nothing to retire.');
     if (!isTerminalJob(job.state))
-      throw new Error(`This job is ${job.state.toLowerCase().replaceAll('_', ' ')} — only finished work retires; observe or cancel it first.`);
+      throw new Error(
+        `This job is ${job.state.toLowerCase().replaceAll('_', ' ')} — only finished work retires; observe or cancel it first.`,
+      );
     if (binding.lifecycle !== 'READY')
-      throw new Error(`This packet is ${binding.lifecycle.toLowerCase().replaceAll('_', ' ')} — only a ready packet archives; reconcile the record first if it disagrees.`);
+      throw new Error(
+        `This packet is ${binding.lifecycle.toLowerCase().replaceAll('_', ' ')} — only a ready packet archives; reconcile the record first if it disagrees.`,
+      );
     if (binding.layout !== 'FLAT_PACKET')
       throw new Error('The worktree layout carries no retire operation — reconcile it manually.');
     const operationId = randomUUID();
     const destination = `archive/${binding.storageRelativePath}`;
     this.store.appendLocalJournal({
-      operationId, localSessionId: binding.id, jobId: job.id, kind: 'PACKET_ARCHIVE', phase: 'INTENT',
-      expectedRevision: binding.revision, source: binding.storageRelativePath, destination, outcome: 'NONE', failureDetail: null,
+      operationId,
+      localSessionId: binding.id,
+      jobId: job.id,
+      kind: 'PACKET_ARCHIVE',
+      phase: 'INTENT',
+      expectedRevision: binding.revision,
+      source: binding.storageRelativePath,
+      destination,
+      outcome: 'NONE',
+      failureDetail: null,
     });
     const { revision: _r0, updatedAt: _u0, ...rest0 } = binding;
     let current = this.store.updateLocalSession({
-      localSessionId: binding.id, expectedRevision: binding.revision, next: { ...rest0, lifecycle: 'ARCHIVING' },
+      localSessionId: binding.id,
+      expectedRevision: binding.revision,
+      next: { ...rest0, lifecycle: 'ARCHIVING' },
     });
     const adapter = this.adapterFor({ route: job.route });
-    const retiring = adapter as ProviderAdapter & { retire?: (job: ProviderJob) => Promise<{ retired: boolean; alreadyArchived?: boolean; archivedAs?: string; detail: string }> };
+    const retiring = adapter as ProviderAdapter & {
+      retire?: (
+        job: ProviderJob,
+      ) => Promise<{ retired: boolean; alreadyArchived?: boolean; archivedAs?: string; detail: string }>;
+    };
     let retired: { retired: boolean; alreadyArchived?: boolean; archivedAs?: string; detail: string };
     try {
-      retired = typeof retiring.retire === 'function'
-        ? await retiring.retire(job)
-        : { retired: false, detail: 'This route carries no retire operation.' };
+      retired =
+        typeof retiring.retire === 'function'
+          ? await retiring.retire(job)
+          : { retired: false, detail: 'This route carries no retire operation.' };
     } catch (error) {
       // A thrown retire may have partially moved the packet — the record claims neither side.
       const message = error instanceof Error ? error.message : 'unknown error';
       const { revision: _rx, updatedAt: _ux, ...restx } = current;
       current = this.store.updateLocalSession({
-        localSessionId: current.id, expectedRevision: current.revision, next: { ...restx, lifecycle: 'RECONCILE_REQUIRED' },
+        localSessionId: current.id,
+        expectedRevision: current.revision,
+        next: { ...restx, lifecycle: 'RECONCILE_REQUIRED' },
       });
       this.store.appendLocalJournal({
-        operationId, localSessionId: binding.id, jobId: job.id, kind: 'PACKET_ARCHIVE', phase: 'FAILED',
-        expectedRevision: current.revision, source: binding.storageRelativePath, destination,
-        outcome: 'UNKNOWN', failureDetail: `The packet move threw (${message.slice(0, 1900)}) — the directory may be partially moved; reconcile before trusting either side.`,
+        operationId,
+        localSessionId: binding.id,
+        jobId: job.id,
+        kind: 'PACKET_ARCHIVE',
+        phase: 'FAILED',
+        expectedRevision: current.revision,
+        source: binding.storageRelativePath,
+        destination,
+        outcome: 'UNKNOWN',
+        failureDetail: `The packet move threw (${message.slice(0, 1900)}) — the directory may be partially moved; reconcile before trusting either side.`,
       });
-      return { state: this.store.snapshot({ history: false }),
-        archive: { operationId, packetOutcome: 'UNKNOWN', providerOutcome: 'NOT_REQUESTED',
-          detail: `The packet move threw: ${message.slice(0, 1800)} The record is reconcile-required; provider archive was not attempted.` } };
+      return {
+        state: this.store.snapshot({ history: false }),
+        archive: {
+          operationId,
+          packetOutcome: 'UNKNOWN',
+          providerOutcome: 'NOT_REQUESTED',
+          detail: `The packet move threw: ${message.slice(0, 1800)} The record is reconcile-required; provider archive was not attempted.`,
+        },
+      };
     }
     const packetOutcome = retired.retired ? (retired.alreadyArchived ? 'ALREADY_ARCHIVED' : 'ARCHIVED') : 'REFUSED';
     {
       const { revision: _r1, updatedAt: _u1, ...rest1 } = current;
       current = this.store.updateLocalSession({
-        localSessionId: current.id, expectedRevision: current.revision,
+        localSessionId: current.id,
+        expectedRevision: current.revision,
         next: retired.retired
           ? { ...rest1, lifecycle: 'ARCHIVED', archiveRelativePath: retired.archivedAs ?? destination }
           : { ...rest1, lifecycle: 'READY' },
       });
       this.store.appendLocalJournal({
-        operationId, localSessionId: binding.id, jobId: job.id, kind: 'PACKET_ARCHIVE', phase: 'EXECUTED',
-        expectedRevision: current.revision, source: binding.storageRelativePath, destination,
-        outcome: retired.retired ? 'SUCCESS' : 'REFUSED', failureDetail: retired.retired ? null : retired.detail.slice(0, 2000),
+        operationId,
+        localSessionId: binding.id,
+        jobId: job.id,
+        kind: 'PACKET_ARCHIVE',
+        phase: 'EXECUTED',
+        expectedRevision: current.revision,
+        source: binding.storageRelativePath,
+        destination,
+        outcome: retired.retired ? 'SUCCESS' : 'REFUSED',
+        failureDetail: retired.retired ? null : retired.detail.slice(0, 2000),
       });
     }
     // Provider-side archive runs only when discovery recorded an exact record identity, and only
     // through a supported verb — an unobserved or unsupported record is honestly NOT_REQUESTED or
     // UNSUPPORTED, and no provider bytes are ever deleted by the office.
-    let providerOutcome: 'NOT_REQUESTED' | 'ARCHIVED' | 'ALREADY_ARCHIVED' | 'UNSUPPORTED' | 'BUSY' | 'UNKNOWN' = 'NOT_REQUESTED';
+    let providerOutcome: 'NOT_REQUESTED' | 'ARCHIVED' | 'ALREADY_ARCHIVED' | 'UNSUPPORTED' | 'BUSY' | 'UNKNOWN' =
+      'NOT_REQUESTED';
     let detail = retired.detail;
     if (!binding.providerSessionId) {
       detail += ' No provider-side record identity was observed for this session — provider archive was not requested.';
@@ -1355,28 +2101,56 @@ export class AssignmentController {
       providerOutcome = 'UNKNOWN';
       detail += ' No provider lifecycle service is configured — provider archive was not attempted.';
     } else {
-      const outcome = await this.providerLifecycle.archive({ provider: binding.provider, providerSessionId: binding.providerSessionId }, operationId);
+      const outcome = await this.providerLifecycle.archive(
+        { provider: binding.provider, providerSessionId: binding.providerSessionId },
+        operationId,
+      );
       providerOutcome = outcome.status;
       detail += ` ${outcome.detail}`;
       this.store.appendLocalJournal({
-        operationId, localSessionId: binding.id, jobId: job.id, kind: 'PROVIDER_ARCHIVE', phase: 'EXECUTED',
-        expectedRevision: current.revision, source: null, destination: null,
-        outcome: outcome.status === 'ARCHIVED' || outcome.status === 'ALREADY_ARCHIVED' ? 'SUCCESS'
-          : outcome.status === 'UNSUPPORTED' ? 'UNSUPPORTED' : outcome.status === 'BUSY' ? 'REFUSED' : 'UNKNOWN',
-        failureDetail: outcome.status === 'ARCHIVED' || outcome.status === 'ALREADY_ARCHIVED' ? null : outcome.detail.slice(0, 2000),
+        operationId,
+        localSessionId: binding.id,
+        jobId: job.id,
+        kind: 'PROVIDER_ARCHIVE',
+        phase: 'EXECUTED',
+        expectedRevision: current.revision,
+        source: null,
+        destination: null,
+        outcome:
+          outcome.status === 'ARCHIVED' || outcome.status === 'ALREADY_ARCHIVED'
+            ? 'SUCCESS'
+            : outcome.status === 'UNSUPPORTED'
+              ? 'UNSUPPORTED'
+              : outcome.status === 'BUSY'
+                ? 'REFUSED'
+                : 'UNKNOWN',
+        failureDetail:
+          outcome.status === 'ARCHIVED' || outcome.status === 'ALREADY_ARCHIVED' ? null : outcome.detail.slice(0, 2000),
       });
     }
-    this.noteLocalEvidence(job, (adapter as { retireEvidence?: (id: string) => CapabilityEvidence[] }).retireEvidence?.(job.externalId) ?? []);
-    return { state: this.store.snapshot({ history: false }),
-      archive: { operationId, packetOutcome, providerOutcome, detail: detail.slice(0, 2000) } };
+    this.noteLocalEvidence(
+      job,
+      (adapter as { retireEvidence?: (id: string) => CapabilityEvidence[] }).retireEvidence?.(job.externalId) ?? [],
+    );
+    return {
+      state: this.store.snapshot({ history: false }),
+      archive: { operationId, packetOutcome, providerOutcome, detail: detail.slice(0, 2000) },
+    };
   }
 
   /** Retire only a proven-undispatched preparation so a new revision can be prepared. */
   discardPreparation(assignmentId: string): AppState {
     const job = this.job(assignmentId);
-    if (job.state !== 'INTENT' || job.dispatchedAt || job.externalId) throw new Error('Only undispatched preparation can be discarded. Reconcile provider work instead.');
-    return this.store.recordJobTransition({ jobId: job.id, expectedRevision: job.revision, to: 'FAILED', evidence: 'OFFICE_LOCAL',
-      detail: 'Preparation discarded by the user before dispatch. The request remains available for a new preparation.', at: this.now() });
+    if (job.state !== 'INTENT' || job.dispatchedAt || job.externalId)
+      throw new Error('Only undispatched preparation can be discarded. Reconcile provider work instead.');
+    return this.store.recordJobTransition({
+      jobId: job.id,
+      expectedRevision: job.revision,
+      to: 'FAILED',
+      evidence: 'OFFICE_LOCAL',
+      detail: 'Preparation discarded by the user before dispatch. The request remains available for a new preparation.',
+      at: this.now(),
+    });
   }
 
   /**
@@ -1386,20 +2160,37 @@ export class AssignmentController {
    * job. One hop's refusal never aborts the others.
    */
   async cancelPipelineJobs(requestId: string): Promise<{ canceled: number; skipped: number; errors: number }> {
-    const state = this.store.snapshot({history:false});
+    const state = this.store.snapshot({ history: false });
     const hops = (state.assignments ?? []).filter(item => item.requestId === requestId && item.pipelineKey);
-    let canceled = 0, skipped = 0, errors = 0;
+    let canceled = 0,
+      skipped = 0,
+      errors = 0;
     for (const hop of hops) {
       const job = latestJobFor(state.jobs, hop.id);
-      if (!job || isTerminalJob(job.state) || job.state === 'CANCEL_REQUESTED') { skipped++; continue; }
-      try { await this.cancel(hop.id); canceled++; }
-      catch (error) {
+      if (!job || isTerminalJob(job.state) || job.state === 'CANCEL_REQUESTED') {
+        skipped++;
+        continue;
+      }
+      try {
+        await this.cancel(hop.id);
+        canceled++;
+      } catch (error) {
         errors++;
         try {
-          this.store.recordJobEvents(job.id, [{ externalId: `pipeline-cancel:${randomUUID()}`, cursor: '', kind: 'STATUS',
-            text: `The request's cancellation could not act on this hop: ${error instanceof Error ? error.message : 'unknown error'}`,
-            occurredAt: this.now(), receivedAt: this.now(), evidence: 'OFFICE_LOCAL' }]);
-        } catch { /* the cascade's own bookkeeping never blocks the rest of it */ }
+          this.store.recordJobEvents(job.id, [
+            {
+              externalId: `pipeline-cancel:${randomUUID()}`,
+              cursor: '',
+              kind: 'STATUS',
+              text: `The request's cancellation could not act on this hop: ${error instanceof Error ? error.message : 'unknown error'}`,
+              occurredAt: this.now(),
+              receivedAt: this.now(),
+              evidence: 'OFFICE_LOCAL',
+            },
+          ]);
+        } catch {
+          /* the cascade's own bookkeeping never blocks the rest of it */
+        }
       }
     }
     return { canceled, skipped, errors };
@@ -1424,26 +2215,57 @@ export class AssignmentController {
             const repaired = await this.observe(job.assignmentId, binding.lastReceipt.hash);
             const after = latestJobFor(repaired.jobs, job.assignmentId);
             if (after && isTerminalJob(after.state)) {
-              this.store.recordJobEvents(after.id, [{ externalId: `stranded-receipt:${binding.lastReceipt.hash}`, cursor: '', kind: 'STATUS',
-                text: 'Recovered a verified receipt stranded by a pre-0.5.x transition failure.',
-                occurredAt: this.now(), receivedAt: this.now(), evidence: 'OFFICE_LOCAL' }]);
+              this.store.recordJobEvents(after.id, [
+                {
+                  externalId: `stranded-receipt:${binding.lastReceipt.hash}`,
+                  cursor: '',
+                  kind: 'STATUS',
+                  text: 'Recovered a verified receipt stranded by a pre-0.5.x transition failure.',
+                  occurredAt: this.now(),
+                  receivedAt: this.now(),
+                  evidence: 'OFFICE_LOCAL',
+                },
+              ]);
             }
-            results.push({ jobId: job.id, action: 'REPAIR', detail: `Re-observed against recorded receipt ${binding.lastReceipt.hash.slice(0, 12)}.` });
+            results.push({
+              jobId: job.id,
+              action: 'REPAIR',
+              detail: `Re-observed against recorded receipt ${binding.lastReceipt.hash.slice(0, 12)}.`,
+            });
           } catch (error) {
-            results.push({ jobId: job.id, action: 'REPAIR_FAILED', detail: error instanceof Error ? error.message : 'Repair observation failed.' });
+            results.push({
+              jobId: job.id,
+              action: 'REPAIR_FAILED',
+              detail: error instanceof Error ? error.message : 'Repair observation failed.',
+            });
           }
           continue;
         }
       }
       const plan = reconciliationPlan(job);
       if (plan.action === 'MARK_UNKNOWN') {
-        this.store.recordJobTransition({ jobId: job.id, expectedRevision: job.revision, to: 'UNKNOWN', evidence: 'OFFICE_LOCAL', detail: plan.reason, at: this.now() });
+        this.store.recordJobTransition({
+          jobId: job.id,
+          expectedRevision: job.revision,
+          to: 'UNKNOWN',
+          evidence: 'OFFICE_LOCAL',
+          detail: plan.reason,
+          at: this.now(),
+        });
         results.push({ jobId: job.id, action: 'MARK_UNKNOWN', detail: plan.reason });
         continue;
       }
       if (plan.action === 'OBSERVE') {
-        try { await this.observe(job.assignmentId); results.push({ jobId: job.id, action: 'OBSERVE', detail: plan.reason }); }
-        catch (error) { results.push({ jobId: job.id, action: 'OBSERVE_FAILED', detail: error instanceof Error ? error.message : 'Observation failed.' }); }
+        try {
+          await this.observe(job.assignmentId);
+          results.push({ jobId: job.id, action: 'OBSERVE', detail: plan.reason });
+        } catch (error) {
+          results.push({
+            jobId: job.id,
+            action: 'OBSERVE_FAILED',
+            detail: error instanceof Error ? error.message : 'Observation failed.',
+          });
+        }
       }
     }
     return results;

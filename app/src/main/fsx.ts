@@ -12,21 +12,29 @@ const isGone = (error: unknown) => (error as NodeJS.ErrnoException).code === 'EN
  */
 export function removeTreeSync(target: string): void {
   let stats;
-  try { stats = lstatSync(target); } catch (error) {
+  try {
+    stats = lstatSync(target);
+  } catch (error) {
     if (isGone(error)) return;
     throw error;
   }
   if (stats.isDirectory() && !stats.isSymbolicLink()) {
     let entries: string[] = [];
-    try { entries = readdirSync(target); } catch (error) {
+    try {
+      entries = readdirSync(target);
+    } catch (error) {
       if (!isGone(error)) throw error;
     }
     for (const entry of entries) removeTreeSync(path.join(target, entry));
-    try { rmdirSync(target); } catch (error) {
+    try {
+      rmdirSync(target);
+    } catch (error) {
       if (!isGone(error)) throw error;
     }
   } else {
-    try { unlinkSync(target); } catch (error) {
+    try {
+      unlinkSync(target);
+    } catch (error) {
       if (!isGone(error)) throw error;
     }
   }
@@ -34,23 +42,30 @@ export function removeTreeSync(target: string): void {
 
 export async function removeTree(target: string): Promise<void> {
   let stats;
-  try { stats = await lstat(target); } catch (error) {
+  try {
+    stats = await lstat(target);
+  } catch (error) {
     if (isGone(error)) return;
     throw error;
   }
   if (stats.isDirectory() && !stats.isSymbolicLink()) {
     let entries: string[] = [];
-    try { entries = await readdir(target); } catch (error) {
+    try {
+      entries = await readdir(target);
+    } catch (error) {
       if (!isGone(error)) throw error;
     }
     for (const entry of entries) await removeTree(path.join(target, entry));
-    try { await rmdir(target); } catch (error) {
+    try {
+      await rmdir(target);
+    } catch (error) {
       if (!isGone(error)) throw error;
     }
   } else {
-    try { await unlink(target); } catch (error) {
+    try {
+      await unlink(target);
+    } catch (error) {
       if (!isGone(error)) throw error;
     }
   }
 }
-
