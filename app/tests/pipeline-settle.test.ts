@@ -11,7 +11,12 @@ import { LocalCliExecAdapter, type CliSpawn } from '../src/main/local-cli-exec';
 import { LocalSessionRouter } from '../src/main/local-session-router';
 import { OutputService } from '../src/main/outputs';
 import { prepareInputSnapshot } from '../src/main/locations';
-import { mintPipelineBrief, mintPipelineRound, settlePipelineDecision, type PipelineMintContext } from '../src/main/pipeline-runner';
+import {
+  mintPipelineBrief,
+  mintPipelineRound,
+  settlePipelineDecision,
+  type PipelineMintContext,
+} from '../src/main/pipeline-runner';
 import { RESULT_FILE } from '../src/main/local-packet';
 import { latestJobFor } from '../src/core/jobs';
 import { dependencyStatus } from '../src/shared/cooperation';
@@ -23,48 +28,92 @@ const at = (m: number) => new Date(Date.UTC(2026, 8, 19, 10, 0, 0) + m * 60000).
 const clock = () => at(5);
 
 const LOCAL_DISPATCH_OPS = [
-  'LOCAL_SUBMIT', 'LOCAL_OBSERVE', 'LOCAL_OUTPUT_FETCH', 'LOCAL_CANCEL',
-  'MODEL_APPLICATION', 'EFFORT_APPLICATION', 'DELEGATION_CONTROL', 'TOOL_CONFINEMENT',
+  'LOCAL_SUBMIT',
+  'LOCAL_OBSERVE',
+  'LOCAL_OUTPUT_FETCH',
+  'LOCAL_CANCEL',
+  'MODEL_APPLICATION',
+  'EFFORT_APPLICATION',
+  'DELEGATION_CONTROL',
+  'TOOL_CONFINEMENT',
 ] as const;
 const localObservation = (route: 'LOCAL_CLI_EXEC', minutes: number) => ({
-  provider: 'claude' as const, identity: 'researcher@example.com', credentialContext: 'claude-code-cli',
-  state: 'SIGNED_IN' as const, allowance: [], note: '',
-  toolVersion: '2.1.236', transport: route, environment: 'LOCAL_MACHINE',
+  provider: 'claude' as const,
+  identity: 'researcher@example.com',
+  credentialContext: 'claude-code-cli',
+  state: 'SIGNED_IN' as const,
+  allowance: [],
+  note: '',
+  toolVersion: '2.1.236',
+  transport: route,
+  environment: 'LOCAL_MACHINE',
   models: [{ id: 'opus', name: 'Opus' }],
   operations: [
-    { operation: 'ACCOUNT_STATUS' as const, level: 'ACCOUNT_VERIFIED' as const, detail: 'Signed in.', evidence: 'OBSERVED' as const, verifiedAt: at(minutes), source: 'fixture' },
-    { operation: 'MODEL_CATALOG' as const, level: 'ACCOUNT_VERIFIED' as const, detail: 'Catalog read.', evidence: 'OBSERVED' as const, verifiedAt: at(minutes), source: 'fixture' },
+    {
+      operation: 'ACCOUNT_STATUS' as const,
+      level: 'ACCOUNT_VERIFIED' as const,
+      detail: 'Signed in.',
+      evidence: 'OBSERVED' as const,
+      verifiedAt: at(minutes),
+      source: 'fixture',
+    },
+    {
+      operation: 'MODEL_CATALOG' as const,
+      level: 'ACCOUNT_VERIFIED' as const,
+      detail: 'Catalog read.',
+      evidence: 'OBSERVED' as const,
+      verifiedAt: at(minutes),
+      source: 'fixture',
+    },
     ...LOCAL_DISPATCH_OPS.map(operation => ({
-      operation, level: 'TOOL_SUPPORTED' as const, detail: 'Exercised by the fixture.',
-      evidence: 'OBSERVED' as const, verifiedAt: at(minutes), source: 'fixture',
-      model: 'opus', route,
+      operation,
+      level: 'TOOL_SUPPORTED' as const,
+      detail: 'Exercised by the fixture.',
+      evidence: 'OBSERVED' as const,
+      verifiedAt: at(minutes),
+      source: 'fixture',
+      model: 'opus',
+      route,
       ...(operation === 'EFFORT_APPLICATION' ? { effort: 'default' as const } : {}),
       ...(operation === 'DELEGATION_CONTROL' ? { delegation: false } : {}),
-      ...(operation === 'TOOL_CONFINEMENT' ? {
-        confinement: {
-          tools: 'only the fixture packet tools', filesystem: 'the staged snapshot directory',
-          network: 'no outbound network', environment: 'a user-launched session on this machine',
-        },
-      } : {}),
+      ...(operation === 'TOOL_CONFINEMENT'
+        ? {
+            confinement: {
+              tools: 'only the fixture packet tools',
+              filesystem: 'the staged snapshot directory',
+              network: 'no outbound network',
+              environment: 'a user-launched session on this machine',
+            },
+          }
+        : {}),
     })),
   ],
-  source: 'transport fixture', observedAt: at(minutes),
+  source: 'transport fixture',
+  observedAt: at(minutes),
 });
 
 class FakeChild {
   readonly stdout = new PassThrough();
   readonly stderr = new PassThrough();
-  private readonly listeners = { exit: [] as ((code: number | null, signal: NodeJS.Signals | null) => void)[], error: [] as ((error: Error) => void)[] };
+  private readonly listeners = {
+    exit: [] as ((code: number | null, signal: NodeJS.Signals | null) => void)[],
+    error: [] as ((error: Error) => void)[],
+  };
   constructor(readonly pid: number | undefined = 4321) {}
-  kill() { return true; }
+  kill() {
+    return true;
+  }
   on(event: 'exit', listener: (code: number | null, signal: NodeJS.Signals | null) => void): unknown;
   on(event: 'error', listener: (error: Error) => void): unknown;
   on(event: 'exit' | 'error', listener: unknown) {
-    if (event === 'exit') this.listeners.exit.push(listener as (code: number | null, signal: NodeJS.Signals | null) => void);
+    if (event === 'exit')
+      this.listeners.exit.push(listener as (code: number | null, signal: NodeJS.Signals | null) => void);
     else this.listeners.error.push(listener as (error: Error) => void);
     return this;
   }
-  emitExit(code: number | null = 0, signal: NodeJS.Signals | null = null) { for (const listener of this.listeners.exit) listener(code, signal); }
+  emitExit(code: number | null = 0, signal: NodeJS.Signals | null = null) {
+    for (const listener of this.listeners.exit) listener(code, signal);
+  }
 }
 
 /** Answers the MCP initialize handshake so declared serena tool surfaces pass the office probe. */
@@ -75,85 +124,212 @@ class FakeSerenaChild {
   readonly kills: unknown[] = [];
   constructor(readonly pid = 7777) {
     this.stdin.on('data', () => {
-      this.stdout.write('{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{},"serverInfo":{"name":"serena","version":"1.7.0"}}}\n');
+      this.stdout.write(
+        '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{},"serverInfo":{"name":"serena","version":"1.7.0"}}}\n',
+      );
     });
   }
-  kill(signal?: unknown) { this.kills.push(signal); return true; }
-  on(event: string, listener: (...args: never[]) => void) { return this; }
+  kill(signal?: unknown) {
+    this.kills.push(signal);
+    return true;
+  }
+  on(event: string, listener: (...args: never[]) => void) {
+    return this;
+  }
 }
 
 interface Fixture {
-  root: string; store: OfficeStore; project: { id: string };
+  root: string;
+  store: OfficeStore;
+  project: { id: string };
   agents: Record<string, Agent>;
-  ctx: PipelineMintContext; controller: AssignmentController; sessionsRoot: string;
+  ctx: PipelineMintContext;
+  controller: AssignmentController;
+  sessionsRoot: string;
 }
 
 async function fixture(t: any): Promise<Fixture> {
   const root = mkdtempSync(path.join(tmpdir(), 'qro-pipeline-settle-'));
   const store = new OfficeStore(path.join(root, 'workspace.sqlite'));
   const execAdapter: { current?: LocalCliExecAdapter } = {};
-  t.after(() => { execAdapter.current?.disposeAll(); try { store.close(); } catch {} removeTreeSync(root, { recursive: true, force: true }); });
+  t.after(() => {
+    execAdapter.current?.disposeAll();
+    try {
+      store.close();
+    } catch {}
+    removeTreeSync(root, { recursive: true, force: true });
+  });
   const sessionsRoot = path.join(root, 'local-sessions');
   mkdirSync(sessionsRoot, { recursive: true });
-  const project = store.execute({ type: 'project.create', idempotencyKey: key(), name: 'Alpha', mandate: 'm', budgetCents: 0 }).projects[0];
+  const project = store.execute({
+    type: 'project.create',
+    idempotencyKey: key(),
+    name: 'Alpha',
+    mandate: 'm',
+    budgetCents: 0,
+  }).projects[0];
   const agents: Record<string, Agent> = {};
   for (const role of ['DIRECTOR', 'PM_A', 'PM_B', 'PM_C', 'PM_D', 'WORKER'] as const) {
-    const agent: Agent = { id: randomUUID(), name: `${role} agent`, provider: 'claude', model: 'opus', team: 'Research', role, instructions: '', effort: 'default',
-      account: 'researcher@example.com', createdAt: at(0), connectionVerifiedAt: at(0), execution: 'LOCAL', localRoute: 'LOCAL_CLI_EXEC' };
+    const agent: Agent = {
+      id: randomUUID(),
+      name: `${role} agent`,
+      provider: 'claude',
+      model: 'opus',
+      team: 'Research',
+      role,
+      instructions: '',
+      effort: 'default',
+      account: 'researcher@example.com',
+      createdAt: at(0),
+      connectionVerifiedAt: at(0),
+      execution: 'LOCAL',
+      localRoute: 'LOCAL_CLI_EXEC',
+    };
     store.confirmAgentBinding({ observation: localObservation('LOCAL_CLI_EXEC', 0), agent });
     agents[role] = agent;
   }
   const spawn: CliSpawn = () => new FakeChild() as never;
-  const exec = new LocalCliExecAdapter(() => sessionsRoot, provider => `${provider}.exe`, clock, undefined, spawn,
-    () => ({ TEST_ENV: 'scrubbed' }), undefined, undefined, agentId => store.snapshot().agents.find(a => a.id === agentId)?.provider,
-    undefined, () => new FakeSerenaChild() as never, 60,
-    async () => '{"answer":"fixture"}');
+  const exec = new LocalCliExecAdapter(
+    () => sessionsRoot,
+    provider => `${provider}.exe`,
+    clock,
+    undefined,
+    spawn,
+    () => ({ TEST_ENV: 'scrubbed' }),
+    undefined,
+    undefined,
+    agentId => store.snapshot().agents.find(a => a.id === agentId)?.provider,
+    undefined,
+    () => new FakeSerenaChild() as never,
+    60,
+    async () => '{"answer":"fixture"}',
+  );
   execAdapter.current = exec;
-  const local = new LocalSessionRouter(id => store.localSessionForJob(id), { FLAT_PACKET: exec, PROJECT_WORKTREE: exec }, 'LOCAL_CLI_EXEC');
+  const local = new LocalSessionRouter(
+    id => store.localSessionForJob(id),
+    { FLAT_PACKET: exec, PROJECT_WORKTREE: exec },
+    'LOCAL_CLI_EXEC',
+  );
   const outputs = new OutputService(store, root);
-  const controller = new AssignmentController(store, local, clock, () => Promise.resolve([]), undefined, undefined, undefined,
-    outputs.storeBytes, undefined,
-    ref => ref.route ? (ref.route === 'LOCAL_CLI_EXEC' ? local : undefined)
-      : ref.agent?.execution === 'LOCAL' ? local : undefined,
-    undefined, outputs.readBytes);
+  const controller = new AssignmentController(
+    store,
+    local,
+    clock,
+    () => Promise.resolve([]),
+    undefined,
+    undefined,
+    undefined,
+    outputs.storeBytes,
+    undefined,
+    ref =>
+      ref.route
+        ? ref.route === 'LOCAL_CLI_EXEC'
+          ? local
+          : undefined
+        : ref.agent?.execution === 'LOCAL'
+          ? local
+          : undefined,
+    undefined,
+    outputs.readBytes,
+  );
   const ctx: PipelineMintContext = {
     store,
-    snapshotFor: req => prepareInputSnapshot({ store, objectRoot: root, stagingRoot: path.join(root, 'staging'), projectId: req.projectId, requestId: req.id, requestRevision: req.revision, objective: req.objective }),
+    snapshotFor: req =>
+      prepareInputSnapshot({
+        store,
+        objectRoot: root,
+        stagingRoot: path.join(root, 'staging'),
+        projectId: req.projectId,
+        requestId: req.id,
+        requestRevision: req.revision,
+        objective: req.objective,
+      }),
     prepare: input => controller.prepare(input),
   };
   return { root, store, project, agents, ctx, controller, sessionsRoot };
 }
 
-const requestOf = (f: Fixture, requestId: string): Request => f.store.snapshot({ history: false }).requests!.find(item => item.id === requestId)!;
-const hopsOf = (f: Fixture, requestId: string) => f.store.snapshot({ history: false }).assignments!.filter(item => item.requestId === requestId && item.pipelineKey);
-const jobFor = (f: Fixture, assignmentId: string): ProviderJob => f.store.snapshot({ history: false }).jobs!.find(item => item.assignmentId === assignmentId)!;
+const requestOf = (f: Fixture, requestId: string): Request =>
+  f.store.snapshot({ history: false }).requests!.find(item => item.id === requestId)!;
+const hopsOf = (f: Fixture, requestId: string) =>
+  f.store.snapshot({ history: false }).assignments!.filter(item => item.requestId === requestId && item.pipelineKey);
+const jobFor = (f: Fixture, assignmentId: string): ProviderJob =>
+  f.store.snapshot({ history: false }).jobs!.find(item => item.assignmentId === assignmentId)!;
 
 /** Drives one hop's job to a terminal receipt through the real launch + observe path. */
-async function settleHop(f: Fixture, assignmentId: string, outputName: string, state: 'COMPLETED' | 'FAILED' = 'COMPLETED'): Promise<void> {
+async function settleHop(
+  f: Fixture,
+  assignmentId: string,
+  outputName: string,
+  state: 'COMPLETED' | 'FAILED' = 'COMPLETED',
+): Promise<void> {
   await f.controller.handoff(assignmentId);
   const job = jobFor(f, assignmentId);
   const bound = f.store.localSessionForJob(job.id)!;
   const dir = path.join(f.sessionsRoot, bound.storageRelativePath);
-  const output = { path: `outputs/${outputName}`, sha256: sha(`${outputName} bytes`), bytes: Buffer.byteLength(`${outputName} bytes`) };
+  const output = {
+    path: `outputs/${outputName}`,
+    sha256: sha(`${outputName} bytes`),
+    bytes: Buffer.byteLength(`${outputName} bytes`),
+  };
   mkdirSync(path.join(dir, 'outputs'), { recursive: true });
   writeFileSync(path.join(dir, `outputs/${outputName}`), `${outputName} bytes`);
-  writeFileSync(path.join(dir, RESULT_FILE), JSON.stringify({ schema: 'office-local-result@2', jobId: job.id, assignmentId, attemptId: bound.attemptId, packetHash: bound.packetHash, sequence: 1, state, detail: 'Done.', outputs: [output] }));
+  writeFileSync(
+    path.join(dir, RESULT_FILE),
+    JSON.stringify({
+      schema: 'office-local-result@2',
+      jobId: job.id,
+      assignmentId,
+      attemptId: bound.attemptId,
+      packetHash: bound.packetHash,
+      sequence: 1,
+      state,
+      detail: 'Done.',
+      outputs: [output],
+    }),
+  );
   await f.controller.observe(assignmentId);
   assert.equal(jobFor(f, assignmentId).state, state, jobFor(f, assignmentId).detail);
 }
 
 /** Writes a verified receipt for the hop's LATEST attempt — the retry/attempt counterpart of
  *  settleHop, used where the re-armed attempt was already launched by the chain machinery. */
-async function settleAttempt(f: Fixture, assignmentId: string, outputName: string, state: 'COMPLETED' | 'FAILED' = 'COMPLETED'): Promise<void> {
+async function settleAttempt(
+  f: Fixture,
+  assignmentId: string,
+  outputName: string,
+  state: 'COMPLETED' | 'FAILED' = 'COMPLETED',
+): Promise<void> {
   const job = latestJobFor(f.store.snapshot({ history: false }).jobs, assignmentId)!;
   const bound = f.store.localSessionForJob(job.id)!;
   const dir = path.join(f.sessionsRoot, bound.storageRelativePath);
-  const output = { path: `outputs/${outputName}`, sha256: sha(`${outputName} bytes`), bytes: Buffer.byteLength(`${outputName} bytes`) };
+  const output = {
+    path: `outputs/${outputName}`,
+    sha256: sha(`${outputName} bytes`),
+    bytes: Buffer.byteLength(`${outputName} bytes`),
+  };
   mkdirSync(path.join(dir, 'outputs'), { recursive: true });
   writeFileSync(path.join(dir, `outputs/${outputName}`), `${outputName} bytes`);
-  writeFileSync(path.join(dir, RESULT_FILE), JSON.stringify({ schema: 'office-local-result@2', jobId: job.id, assignmentId, attemptId: bound.attemptId, packetHash: bound.packetHash, sequence: 1, state, detail: 'Done.', outputs: [output] }));
+  writeFileSync(
+    path.join(dir, RESULT_FILE),
+    JSON.stringify({
+      schema: 'office-local-result@2',
+      jobId: job.id,
+      assignmentId,
+      attemptId: bound.attemptId,
+      packetHash: bound.packetHash,
+      sequence: 1,
+      state,
+      detail: 'Done.',
+      outputs: [output],
+    }),
+  );
   await f.controller.observe(assignmentId);
-  assert.equal(latestJobFor(f.store.snapshot({ history: false }).jobs, assignmentId)!.state, state, latestJobFor(f.store.snapshot({ history: false }).jobs, assignmentId)!.detail);
+  assert.equal(
+    latestJobFor(f.store.snapshot({ history: false }).jobs, assignmentId)!.state,
+    state,
+    latestJobFor(f.store.snapshot({ history: false }).jobs, assignmentId)!.detail,
+  );
 }
 
 /** Completes every minted hop on the request in dependency order. */
@@ -169,15 +345,39 @@ async function completeRound(f: Fixture, requestId: string): Promise<void> {
 
 /** Starts a pipeline request, mints + completes its brief, confirms and mints the round. */
 async function launchedRound(f: Fixture, name: string, kind: 'PLANNING' | 'RESULT_ANALYSIS'): Promise<Request> {
-  f.store.execute({ type: 'request.create', idempotencyKey: key(), projectId: f.project.id, name, hypothesis: 'h', workType: kind, mode: 'SINGLE', leadAgentId: f.agents.DIRECTOR.id, participantIds: [] });
+  f.store.execute({
+    type: 'request.create',
+    idempotencyKey: key(),
+    projectId: f.project.id,
+    name,
+    hypothesis: 'h',
+    workType: kind,
+    mode: 'SINGLE',
+    leadAgentId: f.agents.DIRECTOR.id,
+    participantIds: [],
+  });
   let request = f.store.snapshot({ history: false }).requests!.find(item => item.name === name)!;
-  request = f.store.execute({ type: 'request.start', idempotencyKey: key(), requestId: request.id, expectedRevision: request.revision }).requests!.find(item => item.id === request.id)!;
+  request = f.store
+    .execute({
+      type: 'request.start',
+      idempotencyKey: key(),
+      requestId: request.id,
+      expectedRevision: request.revision,
+    })
+    .requests!.find(item => item.id === request.id)!;
   const briefed = await mintPipelineBrief(f.ctx, request);
   assert.equal(briefed.minted, true, 'the brief hop mints');
   request = requestOf(f, request.id);
   await settleHop(f, request.pipeline!.briefAssignmentId!, 'brief.txt');
   request = requestOf(f, request.id);
-  request = f.store.execute({ type: 'request.pipeline.confirm', idempotencyKey: key(), requestId: request.id, expectedRevision: request.revision }).requests!.find(item => item.id === request.id)!;
+  request = f.store
+    .execute({
+      type: 'request.pipeline.confirm',
+      idempotencyKey: key(),
+      requestId: request.id,
+      expectedRevision: request.revision,
+    })
+    .requests!.find(item => item.id === request.id)!;
   await mintPipelineRound(f.ctx, request);
   return requestOf(f, request.id);
 }
@@ -194,9 +394,15 @@ test('a fully-completed PLANNING round settles to AWAITING_DECISION bound to the
   assert.equal(settled.settled, true);
   const after = requestOf(f, request.id);
   assert.equal(after.pipeline?.phase, 'AWAITING_DECISION');
-  assert.deepEqual(after.pipeline?.pendingDecision, {
-    specHash: request.pipeline!.specHash, headAssignmentId: head.id, headReceiptHash: receiptHash,
-  }, 'the decision binds the terminal hop\'s verified receipt hash');
+  assert.deepEqual(
+    after.pipeline?.pendingDecision,
+    {
+      specHash: request.pipeline!.specHash,
+      headAssignmentId: head.id,
+      headReceiptHash: receiptHash,
+    },
+    "the decision binds the terminal hop's verified receipt hash",
+  );
   // A repeated settle is a refusal, not a mutation — the wait is already recorded.
   const again = settlePipelineDecision(f.ctx, after);
   assert.equal(again.settled, false);
@@ -207,21 +413,41 @@ test('a fully-completed RESULT_ANALYSIS round settles on its report/gate head', 
   const request = await launchedRound(f, 'Analyze it', 'RESULT_ANALYSIS');
   await completeRound(f, request.id);
   const hops = hopsOf(f, request.id);
-  const head = hops.find(item => item.pipelineKey === 'user-gate') ?? hops.find(item => item.pipelineKey === 'analysis-report')!;
+  const head =
+    hops.find(item => item.pipelineKey === 'user-gate') ?? hops.find(item => item.pipelineKey === 'analysis-report')!;
   const receiptHash = f.store.localSessionForJob(jobFor(f, head.id).id)!.lastReceipt!.hash;
   const settled = settlePipelineDecision(f.ctx, requestOf(f, request.id));
   assert.equal(settled.settled, true);
   assert.deepEqual(requestOf(f, request.id).pipeline?.pendingDecision, {
-    specHash: request.pipeline!.specHash, headAssignmentId: head.id, headReceiptHash: receiptHash,
+    specHash: request.pipeline!.specHash,
+    headAssignmentId: head.id,
+    headReceiptHash: receiptHash,
   });
 });
 
 test('settle refuses — never throws, never mutates — for wrong phase, open hops and a failed hop', async t => {
   const f = await fixture(t);
   // BRIEFING: minted brief, not yet confirmed.
-  f.store.execute({ type: 'request.create', idempotencyKey: key(), projectId: f.project.id, name: 'Briefing', hypothesis: 'h', workType: 'PLANNING', mode: 'SINGLE', leadAgentId: f.agents.DIRECTOR.id, participantIds: [] });
+  f.store.execute({
+    type: 'request.create',
+    idempotencyKey: key(),
+    projectId: f.project.id,
+    name: 'Briefing',
+    hypothesis: 'h',
+    workType: 'PLANNING',
+    mode: 'SINGLE',
+    leadAgentId: f.agents.DIRECTOR.id,
+    participantIds: [],
+  });
   let briefing = f.store.snapshot({ history: false }).requests!.find(item => item.name === 'Briefing')!;
-  briefing = f.store.execute({ type: 'request.start', idempotencyKey: key(), requestId: briefing.id, expectedRevision: briefing.revision }).requests!.find(item => item.id === briefing.id)!;
+  briefing = f.store
+    .execute({
+      type: 'request.start',
+      idempotencyKey: key(),
+      requestId: briefing.id,
+      expectedRevision: briefing.revision,
+    })
+    .requests!.find(item => item.id === briefing.id)!;
   await mintPipelineBrief(f.ctx, briefing);
   briefing = requestOf(f, briefing.id);
   const notLaunched = settlePipelineDecision(f.ctx, briefing);
@@ -236,7 +462,8 @@ test('settle refuses — never throws, never mutates — for wrong phase, open h
   assert.equal(stillOpen.settled, false);
   if (!stillOpen.settled) {
     assert.match(stillOpen.reason, /not COMPLETED/);
-    for (const hop of pending) assert.ok(stillOpen.reason.includes(hop.pipelineKey!), `reason names open hop ${hop.pipelineKey}`);
+    for (const hop of pending)
+      assert.ok(stillOpen.reason.includes(hop.pipelineKey!), `reason names open hop ${hop.pipelineKey}`);
   }
   const stillLaunched = requestOf(f, request.id);
   assert.equal(stillLaunched.pipeline?.phase, 'LAUNCHED');
@@ -246,7 +473,9 @@ test('settle refuses — never throws, never mutates — for wrong phase, open h
   const planB = await launchedRound(f, 'Plan B', 'PLANNING');
   const hops = hopsOf(f, planB.id);
   const synthesis = hops.find(item => item.pipelineKey === 'plan-synthesis')!;
-  for (const hop of hops.filter(item => ['plan-draft-a', 'plan-draft-b', 'plan-critique-a-on-b', 'plan-critique-b-on-a'].includes(item.pipelineKey!)))
+  for (const hop of hops.filter(item =>
+    ['plan-draft-a', 'plan-draft-b', 'plan-critique-a-on-b', 'plan-critique-b-on-a'].includes(item.pipelineKey!),
+  ))
     await settleHop(f, hop.id, `${hop.pipelineKey}.txt`);
   await settleHop(f, synthesis.id, 'plan-synthesis.txt', 'FAILED');
   const failed = settlePipelineDecision(f.ctx, requestOf(f, planB.id));
@@ -255,7 +484,17 @@ test('settle refuses — never throws, never mutates — for wrong phase, open h
   assert.equal(requestOf(f, planB.id).pipeline?.pendingDecision, undefined);
 
   // A non-pipeline request refuses without touching anything.
-  f.store.execute({ type: 'request.create', idempotencyKey: key(), projectId: f.project.id, name: 'Plain', hypothesis: 'h', workType: 'OTHER', mode: 'SINGLE', leadAgentId: f.agents.DIRECTOR.id, participantIds: [] });
+  f.store.execute({
+    type: 'request.create',
+    idempotencyKey: key(),
+    projectId: f.project.id,
+    name: 'Plain',
+    hypothesis: 'h',
+    workType: 'OTHER',
+    mode: 'SINGLE',
+    leadAgentId: f.agents.DIRECTOR.id,
+    participantIds: [],
+  });
   const plain = f.store.snapshot({ history: false }).requests!.find(item => item.name === 'Plain')!;
   const notPipeline = settlePipelineDecision(f.ctx, plain);
   assert.equal(notPipeline.settled, false);
@@ -274,13 +513,22 @@ test('a re-armed hop leaves dependents gated on the latest attempt', async t => 
 
   // The retry command mints attempt 2 INTENT on the same assignment — no duplicate hop.
   const current = requestOf(f, request.id);
-  f.store.execute({ type: 'request.pipeline.retryHop', idempotencyKey: key(), requestId: request.id, pipelineKey: 'plan-draft-a', expectedRevision: current.revision });
+  f.store.execute({
+    type: 'request.pipeline.retryHop',
+    idempotencyKey: key(),
+    requestId: request.id,
+    pipelineKey: 'plan-draft-a',
+    expectedRevision: current.revision,
+  });
   const jobs = () => f.store.snapshot({ history: false }).jobs ?? [];
   const attempt2 = latestJobFor(jobs(), draft.id)!;
   assert.equal(attempt2.attempt, 2);
   assert.equal(attempt2.state, 'INTENT');
-  assert.equal(hopsOf(f, request.id).filter(item => item.pipelineKey === 'plan-draft-a').length, 1,
-    'the retry re-arms the same assignment, never a second hop');
+  assert.equal(
+    hopsOf(f, request.id).filter(item => item.pipelineKey === 'plan-draft-a').length,
+    1,
+    'the retry re-arms the same assignment, never a second hop',
+  );
 
   // The dependent's gate reads the dependency's LATEST attempt: attempt 1's failure neither
   // releases it nor counts against it — it waits on attempt 2 exactly as on a fresh mint.
@@ -289,7 +537,11 @@ test('a re-armed hop leaves dependents gated on the latest attempt', async t => 
   assert.equal(status.ready, false);
   assert.match(status.blockers[0] ?? '', /still intent/i);
   await f.controller.reconcileLocalChain();
-  assert.equal(jobFor(f, dependent.id).state, 'INTENT', 'no dependent may launch while the re-armed attempt is unlaunched');
+  assert.equal(
+    jobFor(f, dependent.id).state,
+    'INTENT',
+    'no dependent may launch while the re-armed attempt is unlaunched',
+  );
 });
 
 // The pickup half of the proof: a re-armed hop launches through the ordinary sweep. Originally
@@ -303,7 +555,13 @@ test('a re-armed hop is picked up by the chain exactly like a fresh mint — dep
   const dependent = hops.find(item => item.pipelineKey === 'plan-critique-b-on-a')!;
   await settleHop(f, draft.id, 'plan-draft-a.txt', 'FAILED');
   const current = requestOf(f, request.id);
-  f.store.execute({ type: 'request.pipeline.retryHop', idempotencyKey: key(), requestId: request.id, pipelineKey: 'plan-draft-a', expectedRevision: current.revision });
+  f.store.execute({
+    type: 'request.pipeline.retryHop',
+    idempotencyKey: key(),
+    requestId: request.id,
+    pipelineKey: 'plan-draft-a',
+    expectedRevision: current.revision,
+  });
   const jobs = () => f.store.snapshot({ history: false }).jobs ?? [];
 
   // The startup sweep picks the re-armed hop up exactly like a fresh mint.
@@ -324,18 +582,41 @@ test('a re-armed hop is picked up by the chain exactly like a fresh mint — dep
 // The reconcile now also covers dependency-free pipeline hops on live requests.
 test('a stranded INTENT brief is launched by the startup reconcile', async t => {
   const f = await fixture(t);
-  f.store.execute({ type: 'request.create', idempotencyKey: key(), projectId: f.project.id, name: 'Stranded brief', hypothesis: 'h', workType: 'PLANNING', mode: 'SINGLE', leadAgentId: f.agents.DIRECTOR.id, participantIds: [] });
+  f.store.execute({
+    type: 'request.create',
+    idempotencyKey: key(),
+    projectId: f.project.id,
+    name: 'Stranded brief',
+    hypothesis: 'h',
+    workType: 'PLANNING',
+    mode: 'SINGLE',
+    leadAgentId: f.agents.DIRECTOR.id,
+    participantIds: [],
+  });
   let request = f.store.snapshot({ history: false }).requests!.find(item => item.name === 'Stranded brief')!;
-  request = f.store.execute({ type: 'request.start', idempotencyKey: key(), requestId: request.id, expectedRevision: request.revision }).requests!.find(item => item.id === request.id)!;
+  request = f.store
+    .execute({
+      type: 'request.start',
+      idempotencyKey: key(),
+      requestId: request.id,
+      expectedRevision: request.revision,
+    })
+    .requests!.find(item => item.id === request.id)!;
   const briefed = await mintPipelineBrief(f.ctx, request);
   assert.equal(briefed.minted, true);
-  const briefAssignment = f.store.snapshot({ history: false }).assignments!.find(item => item.id === requestOf(f, request.id).pipeline!.briefAssignmentId)!;
+  const briefAssignment = f.store
+    .snapshot({ history: false })
+    .assignments!.find(item => item.id === requestOf(f, request.id).pipeline!.briefAssignmentId)!;
   assert.equal(briefAssignment.pipelineKey, 'plan-brief');
   assert.equal(jobFor(f, briefAssignment.id).state, 'INTENT', 'the minted brief starts undispatched');
   assert.equal(briefAssignment.dependsOn?.length ?? 0, 0, 'the brief is the dependency-free root');
 
   await f.controller.reconcileLocalChain();
-  assert.equal(jobFor(f, briefAssignment.id).state, 'UNKNOWN', 'reconcile launches the stranded brief through the guarded path');
+  assert.equal(
+    jobFor(f, briefAssignment.id).state,
+    'UNKNOWN',
+    'reconcile launches the stranded brief through the guarded path',
+  );
   assert.ok(f.store.localSessionForJob(jobFor(f, briefAssignment.id).id), 'the launch wrote the local-session binding');
 });
 
@@ -343,18 +624,41 @@ test('a stranded INTENT brief is launched by the startup reconcile', async t => 
 // a RESULT_ANALYSIS round, and a sweep that only knew the planning key would strand it in BRIEFING.
 test('a stranded INTENT analysis-brief is launched by the startup reconcile', async t => {
   const f = await fixture(t);
-  f.store.execute({ type: 'request.create', idempotencyKey: key(), projectId: f.project.id, name: 'Stranded analysis', hypothesis: 'h', workType: 'RESULT_ANALYSIS', mode: 'SINGLE', leadAgentId: f.agents.DIRECTOR.id, participantIds: [] });
+  f.store.execute({
+    type: 'request.create',
+    idempotencyKey: key(),
+    projectId: f.project.id,
+    name: 'Stranded analysis',
+    hypothesis: 'h',
+    workType: 'RESULT_ANALYSIS',
+    mode: 'SINGLE',
+    leadAgentId: f.agents.DIRECTOR.id,
+    participantIds: [],
+  });
   let request = f.store.snapshot({ history: false }).requests!.find(item => item.name === 'Stranded analysis')!;
-  request = f.store.execute({ type: 'request.start', idempotencyKey: key(), requestId: request.id, expectedRevision: request.revision }).requests!.find(item => item.id === request.id)!;
+  request = f.store
+    .execute({
+      type: 'request.start',
+      idempotencyKey: key(),
+      requestId: request.id,
+      expectedRevision: request.revision,
+    })
+    .requests!.find(item => item.id === request.id)!;
   const briefed = await mintPipelineBrief(f.ctx, request);
   assert.equal(briefed.minted, true);
-  const briefAssignment = f.store.snapshot({ history: false }).assignments!.find(item => item.id === requestOf(f, request.id).pipeline!.briefAssignmentId)!;
+  const briefAssignment = f.store
+    .snapshot({ history: false })
+    .assignments!.find(item => item.id === requestOf(f, request.id).pipeline!.briefAssignmentId)!;
   assert.equal(briefAssignment.pipelineKey, 'analysis-brief');
   assert.equal(jobFor(f, briefAssignment.id).state, 'INTENT', 'the minted brief starts undispatched');
   assert.equal(briefAssignment.dependsOn?.length ?? 0, 0, 'the brief is the dependency-free root');
 
   await f.controller.reconcileLocalChain();
-  assert.equal(jobFor(f, briefAssignment.id).state, 'UNKNOWN', 'reconcile launches the stranded analysis brief through the guarded path');
+  assert.equal(
+    jobFor(f, briefAssignment.id).state,
+    'UNKNOWN',
+    'reconcile launches the stranded analysis brief through the guarded path',
+  );
   assert.ok(f.store.localSessionForJob(jobFor(f, briefAssignment.id).id), 'the launch wrote the local-session binding');
 });
 
@@ -373,12 +677,27 @@ test('a dependent on an AWAITING_DECISION or DECIDED request is never relaunched
   // this is exactly what the sweep would launch.
   const brief = hopsOf(f, request.id).find(item => item.pipelineKey === 'plan-brief')!;
   const current = requestOf(f, request.id);
-  const snapshot = await prepareInputSnapshot({ store: f.store, objectRoot: f.root, stagingRoot: path.join(f.root, 'staging'), projectId: current.projectId, requestId: current.id, requestRevision: current.revision });
-  const { assignment: extra } = f.controller.prepare({ requestId: request.id, agentId: f.agents.DIRECTOR.id, snapshotId: snapshot.id, dependsOn: [brief.id] });
+  const snapshot = await prepareInputSnapshot({
+    store: f.store,
+    objectRoot: f.root,
+    stagingRoot: path.join(f.root, 'staging'),
+    projectId: current.projectId,
+    requestId: current.id,
+    requestRevision: current.revision,
+  });
+  const { assignment: extra } = f.controller.prepare({
+    requestId: request.id,
+    agentId: f.agents.DIRECTOR.id,
+    snapshotId: snapshot.id,
+    dependsOn: [brief.id],
+  });
   const extraJob = () => jobFor(f, extra.id);
   assert.equal(extraJob().state, 'INTENT');
-  assert.equal(dependencyStatus(f.store.snapshot({ history: false }), extra).ready, true,
-    'the dependency is settled — only the request phase holds the launch');
+  assert.equal(
+    dependencyStatus(f.store.snapshot({ history: false }), extra).ready,
+    true,
+    'the dependency is settled — only the request phase holds the launch',
+  );
 
   await f.controller.reconcileLocalChain();
   assert.equal(extraJob().state, 'INTENT', 'a request awaiting decision never relaunches attached work');
@@ -386,8 +705,15 @@ test('a dependent on an AWAITING_DECISION or DECIDED request is never relaunched
 
   // The decided round is sealed identically.
   const pending = requestOf(f, request.id).pipeline!.pendingDecision!;
-  f.store.execute({ type: 'request.pipeline.decide', idempotencyKey: key(), requestId: request.id, expectedRevision: requestOf(f, request.id).revision,
-    decision: 'APPROVE', expectedSpecHash: pending.specHash, expectedReceiptHash: pending.headReceiptHash });
+  f.store.execute({
+    type: 'request.pipeline.decide',
+    idempotencyKey: key(),
+    requestId: request.id,
+    expectedRevision: requestOf(f, request.id).revision,
+    decision: 'APPROVE',
+    expectedSpecHash: pending.specHash,
+    expectedReceiptHash: pending.headReceiptHash,
+  });
   assert.equal(requestOf(f, request.id).pipeline?.phase, 'DECIDED');
   await f.controller.reconcileLocalChain();
   assert.equal(extraJob().state, 'INTENT', 'a decided request never relaunches attached work');
@@ -397,13 +723,35 @@ test('a dependent on an AWAITING_DECISION or DECIDED request is never relaunched
 // The same sweep must never relaunch a hop on a canceled request.
 test('a canceled request keeps its hops canceled through reconcile', async t => {
   const f = await fixture(t);
-  f.store.execute({ type: 'request.create', idempotencyKey: key(), projectId: f.project.id, name: 'Cancel me', hypothesis: 'h', workType: 'PLANNING', mode: 'SINGLE', leadAgentId: f.agents.DIRECTOR.id, participantIds: [] });
+  f.store.execute({
+    type: 'request.create',
+    idempotencyKey: key(),
+    projectId: f.project.id,
+    name: 'Cancel me',
+    hypothesis: 'h',
+    workType: 'PLANNING',
+    mode: 'SINGLE',
+    leadAgentId: f.agents.DIRECTOR.id,
+    participantIds: [],
+  });
   let request = f.store.snapshot({ history: false }).requests!.find(item => item.name === 'Cancel me')!;
-  request = f.store.execute({ type: 'request.start', idempotencyKey: key(), requestId: request.id, expectedRevision: request.revision }).requests!.find(item => item.id === request.id)!;
+  request = f.store
+    .execute({
+      type: 'request.start',
+      idempotencyKey: key(),
+      requestId: request.id,
+      expectedRevision: request.revision,
+    })
+    .requests!.find(item => item.id === request.id)!;
   const briefed = await mintPipelineBrief(f.ctx, request);
   assert.equal(briefed.minted, true);
   request = requestOf(f, request.id);
-  f.store.execute({ type: 'request.cancel', idempotencyKey: key(), requestId: request.id, expectedRevision: request.revision });
+  f.store.execute({
+    type: 'request.cancel',
+    idempotencyKey: key(),
+    requestId: request.id,
+    expectedRevision: request.revision,
+  });
   await f.controller.reconcileLocalChain();
   const briefId = requestOf(f, request.id).pipeline!.briefAssignmentId!;
   assert.notEqual(jobFor(f, briefId).state, 'UNKNOWN', 'a canceled request never relaunches');
@@ -413,9 +761,26 @@ test('a canceled request keeps its hops canceled through reconcile', async t => 
 // "[legacy binding]" lastObservation, then throw INTENT->UNKNOWN. It is a quiet no-op now.
 test('observing an INTENT job is a no-op that records nothing', async t => {
   const f = await fixture(t);
-  f.store.execute({ type: 'request.create', idempotencyKey: key(), projectId: f.project.id, name: 'Observe intent', hypothesis: 'h', workType: 'PLANNING', mode: 'SINGLE', leadAgentId: f.agents.DIRECTOR.id, participantIds: [] });
+  f.store.execute({
+    type: 'request.create',
+    idempotencyKey: key(),
+    projectId: f.project.id,
+    name: 'Observe intent',
+    hypothesis: 'h',
+    workType: 'PLANNING',
+    mode: 'SINGLE',
+    leadAgentId: f.agents.DIRECTOR.id,
+    participantIds: [],
+  });
   let request = f.store.snapshot({ history: false }).requests!.find(item => item.name === 'Observe intent')!;
-  request = f.store.execute({ type: 'request.start', idempotencyKey: key(), requestId: request.id, expectedRevision: request.revision }).requests!.find(item => item.id === request.id)!;
+  request = f.store
+    .execute({
+      type: 'request.start',
+      idempotencyKey: key(),
+      requestId: request.id,
+      expectedRevision: request.revision,
+    })
+    .requests!.find(item => item.id === request.id)!;
   await mintPipelineBrief(f.ctx, request);
   const briefId = requestOf(f, request.id).pipeline!.briefAssignmentId!;
   const before = jobFor(f, briefId);
@@ -425,6 +790,9 @@ test('observing an INTENT job is a no-op that records nothing', async t => {
   assert.equal(after.state, 'INTENT');
   assert.equal(after.lastObservation, undefined, 'no observation is recorded for undispatched work');
   assert.ok(!f.store.localSessionForJob(after.id), 'no local-session binding is manufactured');
-  assert.equal((f.store.snapshot({ history: true }).jobEvents ?? []).filter(item => item.jobId === after.id).length, 0,
-    'no diagnostic or observation event is recorded for undispatched work');
+  assert.equal(
+    (f.store.snapshot({ history: true }).jobEvents ?? []).filter(item => item.jobId === after.id).length,
+    0,
+    'no diagnostic or observation event is recorded for undispatched work',
+  );
 });

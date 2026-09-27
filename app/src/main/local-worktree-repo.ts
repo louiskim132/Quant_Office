@@ -22,67 +22,101 @@ export const WORKTREES_DIR = 'worktrees';
 const INITIAL_COMMIT = 'Quant Research Office session-worktree root';
 /** Configuration forced on every invocation, mirroring the staging path's safety posture. */
 const GIT_SAFETY = [
- '-c', 'core.hooksPath=',
- '-c', 'init.templateDir=',
- '-c', 'core.fsmonitor=',
- '-c', 'core.autocrlf=false',
- '-c', 'core.symlinks=false',
- '-c', 'protocol.allow=never',
- '-c', 'core.attributesFile=',
- '-c', 'core.excludesFile=',
- '-c', 'core.sshCommand=',
- '-c', 'credential.helper=',
- '-c', 'filter.lfs.smudge=',
- '-c', 'filter.lfs.clean=',
- '-c', 'filter.lfs.process=',
- '-c', 'gc.auto=0',
+  '-c',
+  'core.hooksPath=',
+  '-c',
+  'init.templateDir=',
+  '-c',
+  'core.fsmonitor=',
+  '-c',
+  'core.autocrlf=false',
+  '-c',
+  'core.symlinks=false',
+  '-c',
+  'protocol.allow=never',
+  '-c',
+  'core.attributesFile=',
+  '-c',
+  'core.excludesFile=',
+  '-c',
+  'core.sshCommand=',
+  '-c',
+  'credential.helper=',
+  '-c',
+  'filter.lfs.smudge=',
+  '-c',
+  'filter.lfs.clean=',
+  '-c',
+  'filter.lfs.process=',
+  '-c',
+  'gc.auto=0',
 ];
 /** The initial commit's identity is declared here, never borrowed from machine config. */
 const COMMIT_IDENTITY = ['-c', 'user.email=office@localhost', '-c', 'user.name=Quant Research Office'];
 
 /** One parsed row of `git worktree list --porcelain`. */
 export interface WorktreeEntry {
- path: string; head: string; branch: string | null; detached: boolean; bare: boolean; prunable: boolean;
+  path: string;
+  head: string;
+  branch: string | null;
+  detached: boolean;
+  bare: boolean;
+  prunable: boolean;
 }
 
 /** A repo or worktree name is one safe directory name — never a path, never traversal. */
 function safeSegment(name: string): boolean {
- return safeEntry(name) && !name.includes('/');
+  return safeEntry(name) && !name.includes('/');
 }
 
 function repoDir(reposRoot: string, projectId: string): string {
- if (!safeSegment(projectId))
-  throw new Error(`The office project id ${JSON.stringify(projectId)} is not a safe repository directory name.`);
- return path.join(reposRoot, projectId);
+  if (!safeSegment(projectId))
+    throw new Error(`The office project id ${JSON.stringify(projectId)} is not a safe repository directory name.`);
+  return path.join(reposRoot, projectId);
 }
 
 /** The directory every session worktree of one office project is registered under. */
 export function worktreesRoot(reposRoot: string, projectId: string): string {
- return path.join(repoDir(reposRoot, projectId), WORKTREES_DIR);
+  return path.join(repoDir(reposRoot, projectId), WORKTREES_DIR);
 }
 
 /** git runs with the machine's GIT_* variables removed and all user configuration switched off. */
 function gitEnvironment(cwd: string): NodeJS.ProcessEnv {
- const inherited = Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.toUpperCase().startsWith('GIT_')));
- return {
-  ...inherited,
-  GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: '', GIT_CONFIG_NOSYSTEM: '1', GIT_ATTR_NOSYSTEM: '1',
-  GIT_OPTIONAL_LOCKS: '0', GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
-  GIT_CONFIG_SYSTEM: process.platform === 'win32' ? 'NUL' : '/dev/null',
-  HOME: cwd, USERPROFILE: cwd, XDG_CONFIG_HOME: cwd,
- };
+  const inherited = Object.fromEntries(
+    Object.entries(process.env).filter(([name]) => !name.toUpperCase().startsWith('GIT_')),
+  );
+  return {
+    ...inherited,
+    GIT_TERMINAL_PROMPT: '0',
+    GIT_ASKPASS: '',
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_ATTR_NOSYSTEM: '1',
+    GIT_OPTIONAL_LOCKS: '0',
+    GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
+    GIT_CONFIG_SYSTEM: process.platform === 'win32' ? 'NUL' : '/dev/null',
+    HOME: cwd,
+    USERPROFILE: cwd,
+    XDG_CONFIG_HOME: cwd,
+  };
 }
 
 function git(args: string[], cwd: string): Promise<{ ok: boolean; out: string }> {
- return new Promise(resolve => execFile('git', [...GIT_SAFETY, ...args], { cwd, windowsHide: true, timeout: 60000, maxBuffer: 1024 * 1024, env: gitEnvironment(cwd) },
-  (error, stdout, stderr) => resolve({ ok: !error, out: String(stdout || stderr || (error?.message ?? '')).trim() })));
+  return new Promise(resolve =>
+    execFile(
+      'git',
+      [...GIT_SAFETY, ...args],
+      { cwd, windowsHide: true, timeout: 60000, maxBuffer: 1024 * 1024, env: gitEnvironment(cwd) },
+      (error, stdout, stderr) =>
+        resolve({ ok: !error, out: String(stdout || stderr || (error?.message ?? '')).trim() }),
+    ),
+  );
 }
 
 /** A git invocation that must succeed; the thrown error names the exact command that failed. */
 async function gitOrThrow(args: string[], cwd: string): Promise<string> {
- const result = await git(args, cwd);
- if (!result.ok) throw new Error(`git ${args.join(' ')} failed: ${result.out || 'unknown git failure'}`);
- return result.out;
+  const result = await git(args, cwd);
+  if (!result.ok) throw new Error(`git ${args.join(' ')} failed: ${result.out || 'unknown git failure'}`);
+  return result.out;
 }
 
 /** The office's project repos are sha1 — a seed is always a full 40-hex commit id. */
@@ -95,9 +129,10 @@ const COMMIT_SHA = /^[0-9a-f]{40}$/;
  * a sha256 repo or a corrupt answer is a defect, never a seed.
  */
 export async function resolveHeadCommit(repoDir: string): Promise<string> {
- const head = await gitOrThrow(['rev-parse', '--verify', 'HEAD'], repoDir);
- if (!COMMIT_SHA.test(head)) throw new Error(`git rev-parse --verify HEAD answered ${JSON.stringify(head)} — not a full sha1 commit id.`);
- return head;
+  const head = await gitOrThrow(['rev-parse', '--verify', 'HEAD'], repoDir);
+  if (!COMMIT_SHA.test(head))
+    throw new Error(`git rev-parse --verify HEAD answered ${JSON.stringify(head)} — not a full sha1 commit id.`);
+  return head;
 }
 
 /**
@@ -106,14 +141,14 @@ export async function resolveHeadCommit(repoDir: string): Promise<string> {
  * gets topped up rather than reported broken.
  */
 export async function ensureRepo(reposRoot: string, projectId: string): Promise<string> {
- const dir = repoDir(reposRoot, projectId);
- if (!existsSync(path.join(dir, '.git'))) {
-  mkdirSync(dir, { recursive: true });
-  await gitOrThrow(['init'], dir);
- }
- const head = await git(['rev-parse', '--verify', 'HEAD'], dir);
- if (!head.ok) await gitOrThrow([...COMMIT_IDENTITY, 'commit', '--allow-empty', '-m', INITIAL_COMMIT], dir);
- return dir;
+  const dir = repoDir(reposRoot, projectId);
+  if (!existsSync(path.join(dir, '.git'))) {
+    mkdirSync(dir, { recursive: true });
+    await gitOrThrow(['init'], dir);
+  }
+  const head = await git(['rev-parse', '--verify', 'HEAD'], dir);
+  if (!head.ok) await gitOrThrow([...COMMIT_IDENTITY, 'commit', '--allow-empty', '-m', INITIAL_COMMIT], dir);
+  return dir;
 }
 
 /**
@@ -122,19 +157,26 @@ export async function ensureRepo(reposRoot: string, projectId: string): Promise<
  * not lines of development, so no branch is ever created for them. The seed commit is always
  * named explicitly — a worktree that followed bare HEAD would silently drift (defect F08).
  */
-export async function createWorktree(reposRoot: string, projectId: string, name: string, commit: string): Promise<string> {
- // A name is refused before git ever runs: an unsafe segment could land outside the worktrees root.
- if (!safeSegment(name))
-  throw new Error(`The session worktree name ${JSON.stringify(name)} is not a safe directory name.`);
- // The seed commit is explicit and required (defect F08): a worktree created from bare HEAD
- // silently follows whatever HEAD happens to be, so the caller names the recorded seed and this
- // validates its shape before git ever runs. Refs, abbreviations and non-sha1 strings are refused.
- if (!COMMIT_SHA.test(commit))
-  throw new Error(`The session worktree seed ${JSON.stringify(commit)} is not a full sha1 commit id — worktrees are pinned to explicit commits, never resolved here.`);
- const dir = await ensureRepo(reposRoot, projectId);
- const worktree = path.join(dir, WORKTREES_DIR, name);
- await gitOrThrow(['worktree', 'add', '--detach', worktree, commit], dir);
- return worktree;
+export async function createWorktree(
+  reposRoot: string,
+  projectId: string,
+  name: string,
+  commit: string,
+): Promise<string> {
+  // A name is refused before git ever runs: an unsafe segment could land outside the worktrees root.
+  if (!safeSegment(name))
+    throw new Error(`The session worktree name ${JSON.stringify(name)} is not a safe directory name.`);
+  // The seed commit is explicit and required (defect F08): a worktree created from bare HEAD
+  // silently follows whatever HEAD happens to be, so the caller names the recorded seed and this
+  // validates its shape before git ever runs. Refs, abbreviations and non-sha1 strings are refused.
+  if (!COMMIT_SHA.test(commit))
+    throw new Error(
+      `The session worktree seed ${JSON.stringify(commit)} is not a full sha1 commit id — worktrees are pinned to explicit commits, never resolved here.`,
+    );
+  const dir = await ensureRepo(reposRoot, projectId);
+  const worktree = path.join(dir, WORKTREES_DIR, name);
+  await gitOrThrow(['worktree', 'add', '--detach', worktree, commit], dir);
+  return worktree;
 }
 
 /**
@@ -142,9 +184,9 @@ export async function createWorktree(reposRoot: string, projectId: string, name:
  * relocated them. Only the registration is touched: this never deletes a directory's bytes.
  */
 export async function removeWorktreeRegistration(repoDir: string): Promise<void> {
- // A directory that is not a repo has no registrations to drop; that is reported as done.
- if (!existsSync(path.join(repoDir, '.git'))) return;
- await gitOrThrow(['worktree', 'prune'], repoDir);
+  // A directory that is not a repo has no registrations to drop; that is reported as done.
+  if (!existsSync(path.join(repoDir, '.git'))) return;
+  await gitOrThrow(['worktree', 'prune'], repoDir);
 }
 
 /**
@@ -152,24 +194,38 @@ export async function removeWorktreeRegistration(repoDir: string): Promise<void>
  * A missing repo is reported as an empty list: nothing is registered anywhere we can see.
  */
 export async function listWorktrees(repoDir: string): Promise<WorktreeEntry[]> {
- if (!existsSync(path.join(repoDir, '.git'))) return [];
- const out = await gitOrThrow(['worktree', 'list', '--porcelain'], repoDir);
- const entries: WorktreeEntry[] = [];
- let current: Partial<WorktreeEntry> | null = null;
- const flush = () => {
-  if (current?.path) entries.push({ path: current.path, head: current.head ?? '', branch: current.branch ?? null, detached: !!current.detached, bare: !!current.bare, prunable: !!current.prunable });
-  current = null;
- };
- for (const line of out.split(/\r?\n/)) {
-  if (!line.trim()) { flush(); continue; }
-  if (line.startsWith('worktree ')) { flush(); current = { path: path.resolve(line.slice('worktree '.length)) }; }
-  else if (!current) { continue; }
-  else if (line.startsWith('HEAD ')) current.head = line.slice('HEAD '.length);
-  else if (line.startsWith('branch ')) current.branch = line.slice('branch '.length);
-  else if (line === 'detached') current.detached = true;
-  else if (line === 'bare') current.bare = true;
-  else if (line.startsWith('prunable')) current.prunable = true;
- }
- flush();
- return entries;
+  if (!existsSync(path.join(repoDir, '.git'))) return [];
+  const out = await gitOrThrow(['worktree', 'list', '--porcelain'], repoDir);
+  const entries: WorktreeEntry[] = [];
+  let current: Partial<WorktreeEntry> | null = null;
+  const flush = () => {
+    if (current?.path)
+      entries.push({
+        path: current.path,
+        head: current.head ?? '',
+        branch: current.branch ?? null,
+        detached: !!current.detached,
+        bare: !!current.bare,
+        prunable: !!current.prunable,
+      });
+    current = null;
+  };
+  for (const line of out.split(/\r?\n/)) {
+    if (!line.trim()) {
+      flush();
+      continue;
+    }
+    if (line.startsWith('worktree ')) {
+      flush();
+      current = { path: path.resolve(line.slice('worktree '.length)) };
+    } else if (!current) {
+      continue;
+    } else if (line.startsWith('HEAD ')) current.head = line.slice('HEAD '.length);
+    else if (line.startsWith('branch ')) current.branch = line.slice('branch '.length);
+    else if (line === 'detached') current.detached = true;
+    else if (line === 'bare') current.bare = true;
+    else if (line.startsWith('prunable')) current.prunable = true;
+  }
+  flush();
+  return entries;
 }

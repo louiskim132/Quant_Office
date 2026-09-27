@@ -33,8 +33,11 @@ function sessionsDb(dir: string, rows: { id: string; working_directory: string; 
     id TEXT PRIMARY KEY, working_directory TEXT, backend_type TEXT, model TEXT, agent_mode TEXT,
     created_at TEXT, last_activity_at TEXT, title TEXT)`);
   for (const row of rows)
-    db.prepare('INSERT INTO sessions (id, working_directory, title) VALUES (?, ?, ?)')
-      .run(row.id, row.working_directory, row.title ?? null);
+    db.prepare('INSERT INTO sessions (id, working_directory, title) VALUES (?, ?, ?)').run(
+      row.id,
+      row.working_directory,
+      row.title ?? null,
+    );
   db.close();
   return file;
 }
@@ -42,14 +45,21 @@ function sessionsDb(dir: string, rows: { id: string; working_directory: string; 
 /** A fake Codex rollout carrying session_meta with a recorded cwd in its opening line. */
 function rollout(file: string, cwd: string, extra: Record<string, unknown> = {}): void {
   mkdirSync(path.dirname(file), { recursive: true });
-  const meta = { timestamp: '2026-09-18T10:00:00.000Z', type: 'session_meta', payload: { id: 'rollout-id', cwd, ...extra } };
+  const meta = {
+    timestamp: '2026-09-18T10:00:00.000Z',
+    type: 'session_meta',
+    payload: { id: 'rollout-id', cwd, ...extra },
+  };
   writeFileSync(file, `${JSON.stringify(meta)}\n${JSON.stringify({ type: 'user_message', message: 'work' })}\n`);
 }
 
 test('the claude project key mangles an observed cwd into the observed key shape', t => {
   fixture(t);
   // Inferred from observed key names: drive colon, separators and spaces each become a dash.
-  assert.equal(claudeProjectKey('C:\\Users\\louis\\Desktop\\AI\\Quant Office'), 'C--Users-louis-Desktop-AI-Quant-Office');
+  assert.equal(
+    claudeProjectKey('C:\\Users\\louis\\Desktop\\AI\\Quant Office'),
+    'C--Users-louis-Desktop-AI-Quant-Office',
+  );
   assert.equal(claudeProjectKey('C:/Users/louis/Desktop/AI/Quant Office'), 'C--Users-louis-Desktop-AI-Quant-Office');
 });
 
@@ -136,7 +146,14 @@ test('codex discovery matches rollouts by recorded cwd across sessions and archi
   const f = fixture(t);
   const codexRoot = path.join(f.root, '.codex');
   const live = path.join(codexRoot, 'sessions', '2026', '09', '18', 'rollout-2026-09-18T10-00-00-aaaa.jsonl');
-  const archived = path.join(codexRoot, 'archived_sessions', '2026', '09', '17', 'rollout-2026-09-17T09-00-00-bbbb.jsonl');
+  const archived = path.join(
+    codexRoot,
+    'archived_sessions',
+    '2026',
+    '09',
+    '17',
+    'rollout-2026-09-17T09-00-00-bbbb.jsonl',
+  );
   rollout(live, f.packetDir);
   rollout(archived, f.packetDir.toLowerCase().replaceAll('\\', '/')); // case/separator drift still binds
   const { records } = discoverCodexRollouts(codexRoot, f.packetDir);
@@ -155,7 +172,10 @@ test('codex discovery reports unparseable rollouts and never guesses at them', t
   mkdirSync(path.dirname(bad), { recursive: true });
   writeFileSync(bad, 'not json {\nno metadata here\n');
   const { records, notes } = discoverCodexRollouts(codexRoot, f.packetDir);
-  assert.deepEqual(records.map(r => r.id), ['rollout-good.jsonl']);
+  assert.deepEqual(
+    records.map(r => r.id),
+    ['rollout-good.jsonl'],
+  );
   assert.match(notes.join('\n'), /rollout-bad\.jsonl carries no readable session cwd/);
 });
 
@@ -170,7 +190,11 @@ test('codex exact-name lookup matches rollout file names only, across both recor
   assert.equal(records.length, 1);
   assert.equal(records[0].location, live);
   assert.ok(existsSync(live), 'lookup is read-only');
-  assert.equal(findCodexRollout(codexRoot, 'rollout-2026-09-18T10-00-00-aaaa').records.length, 0, 'no partial-name matching');
+  assert.equal(
+    findCodexRollout(codexRoot, 'rollout-2026-09-18T10-00-00-aaaa').records.length,
+    0,
+    'no partial-name matching',
+  );
   assert.equal(findCodexRollout(codexRoot, '..\\rollout-x.jsonl').records.length, 0, 'a non-basename is refused');
 });
 

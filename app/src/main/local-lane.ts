@@ -17,17 +17,30 @@ export type LocalLaneDecision =
 
 /** The scalar fields a record must carry to be recognized as an assignment at all. */
 const STRING_FIELDS = [
-  'id', 'projectId', 'requestId', 'agentId', 'connectionId', 'capabilitySnapshotId',
-  'snapshotId', 'route', 'requestedModel', 'resolvedModel', 'requestedEffort', 'appliedEffort',
-  'objectiveHash', 'createdAt',
+  'id',
+  'projectId',
+  'requestId',
+  'agentId',
+  'connectionId',
+  'capabilitySnapshotId',
+  'snapshotId',
+  'route',
+  'requestedModel',
+  'resolvedModel',
+  'requestedEffort',
+  'appliedEffort',
+  'objectiveHash',
+  'createdAt',
 ] as const;
 const NUMBER_FIELDS = ['requestRevision', 'agentRevision'] as const;
 
 function hasAssignmentShape(assignment: object): boolean {
   const record = assignment as Record<string, unknown>;
-  return STRING_FIELDS.every(field => typeof record[field] === 'string')
-    && NUMBER_FIELDS.every(field => typeof record[field] === 'number' && Number.isFinite(record[field]))
-    && typeof record.delegation === 'boolean';
+  return (
+    STRING_FIELDS.every(field => typeof record[field] === 'string') &&
+    NUMBER_FIELDS.every(field => typeof record[field] === 'number' && Number.isFinite(record[field])) &&
+    typeof record.delegation === 'boolean'
+  );
 }
 
 /** Stages whose contexts are bound to frozen review rounds — the existing isolation guard. */
@@ -50,12 +63,21 @@ const SEALED_STAGES: readonly string[] = ['S2', 'S7'];
  */
 export function localRequirementFor(assignment: Assignment): LocalLaneDecision {
   if (assignment === null || typeof assignment !== 'object')
-    return { allowed: false, reason: 'The assignment is not a record; nothing about its requirements can be established.' };
+    return {
+      allowed: false,
+      reason: 'The assignment is not a record; nothing about its requirements can be established.',
+    };
   if (!hasAssignmentShape(assignment))
-    return { allowed: false, reason: 'The assignment is missing or mistyped required fields; malformed requirements block admission.' };
+    return {
+      allowed: false,
+      reason: 'The assignment is missing or mistyped required fields; malformed requirements block admission.',
+    };
   if (assignment.research !== undefined) {
     if (!stageContextSchema.safeParse(assignment.research).success)
-      return { allowed: false, reason: 'The assignment carries a malformed research context; it cannot be routed until the context validates.' };
+      return {
+        allowed: false,
+        reason: 'The assignment carries a malformed research context; it cannot be routed until the context validates.',
+      };
     const sealed = SEALED_STAGES.includes(assignment.research.stage);
     return {
       allowed: true,
@@ -70,6 +92,7 @@ export function localRequirementFor(assignment: Assignment): LocalLaneDecision {
     allowed: true,
     requirement: 'SCOPED_DELIVERY',
     permittedLayouts: ['FLAT_PACKET', 'PROJECT_WORKTREE'],
-    detail: 'A plain request assignment needs only scoped delivery; confinement status stays UNVERIFIED until evidence exists.',
+    detail:
+      'A plain request assignment needs only scoped delivery; confinement status stays UNVERIFIED until evidence exists.',
   };
 }

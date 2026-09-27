@@ -18,7 +18,10 @@ function fakeWindow(script: ('ok' | Error)[]) {
 /** Records the requested delays; never actually waits. */
 function fakeSleep() {
   const delays: number[] = [];
-  const sleep = (ms: number) => { delays.push(ms); return Promise.resolve(); };
+  const sleep = (ms: number) => {
+    delays.push(ms);
+    return Promise.resolve();
+  };
   return { sleep, delays };
 }
 
@@ -59,7 +62,13 @@ test('the injected sleep is the only delay — the real clock is never consulted
   const { win, calls } = fakeWindow([new Error('did-fail-load'), 'ok']);
   const delays: number[] = [];
   const started = Date.now();
-  await loadWindowWithRetry(win, 'index.html', { sleep: ms => { delays.push(ms); return Promise.resolve(); }, delayMs: 400 });
+  await loadWindowWithRetry(win, 'index.html', {
+    sleep: ms => {
+      delays.push(ms);
+      return Promise.resolve();
+    },
+    delayMs: 400,
+  });
   assert.equal(calls.length, 2);
   assert.deepEqual(delays, [400]);
   assert.ok(Date.now() - started < 200, 'the test must not actually wait the configured delay');

@@ -1,53 +1,498 @@
-import React,{useEffect,useState} from 'react';
-import type {Agent,AgentLog,AppState,Connection,Effort,LocalUsage,TokenTotals} from '../shared/types';
-import {suggestedEfforts,PROVIDER_MODEL_SUGGESTIONS,effortIsIndependentAxis} from '../shared/effort';
-const number=(n:number)=>n.toLocaleString();
-function TokenTable({items}:{items:{label:string;totals:TokenTotals}[]}){return <div className="log-table-wrap"><table className="token-table"><thead><tr><th>Period / model</th><th>Input</th><th>Output</th><th>Cache read</th><th>Cache creation</th><th>Responses</th></tr></thead><tbody>{items.map(row=><tr key={row.label}><th>{row.label}</th><td>{number(row.totals.input)}</td><td>{number(row.totals.output)}</td><td>{number(row.totals.cacheRead)}</td><td>{number(row.totals.cacheCreation)}</td><td>{number(row.totals.messages)}</td></tr>)}</tbody></table></div>;}
-export function LocalConsumption(){
- const [data,setData]=useState<LocalUsage|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState('');
- async function scan(choose:boolean){setBusy(true);setError('');try{const result=await window.office.scanClaudeUsage(choose);if(result)setData(result);}catch(e){setError((e as Error).message);setData(null);}finally{setBusy(false);}}
- return <section className="settings-card"><div className="section-title"><div><h2>Claude · local consumption</h2><p>Reconstructed token counts from local JSONL transcripts. No model calls or account credentials are used.</p></div></div><div className="button-row"><button className="secondary" disabled={busy} onClick={()=>void scan(false)}>{busy?'Reading local records…':'Scan local transcripts'}</button><button className="secondary" disabled={busy} onClick={()=>void scan(true)}>Choose transcript folder</button></div><p className="muted">This measures recorded activity, not remaining allowance. Rolling five-hour and seven-day totals do not identify subscription reset windows.</p>{error&&<p role="alert" className="form-error">{error}</p>}{data&&<><div className="inline-note">{data.note}</div><p>{data.files} files · {data.sessions} sessions · {data.duplicates} duplicate response records consolidated · {data.skipped} skipped files/directories · {data.malformed} unusable records</p><p><strong>{data.partial?'Partial coverage — some records could not be read':'Selected files scanned'}</strong> · {new Date(data.scannedAt).toLocaleString()}</p><code className="hash">{data.root}</code><TokenTable items={[{label:'Last 5 hours (rolling)',totals:data.last5Hours},{label:'Last 7 days (rolling)',totals:data.last7Days}]}/>{data.models.length>0&&<><h3>Models · last 7 days</h3><TokenTable items={data.models.map(m=>({label:m.model,totals:m.totals}))}/></>}{data.daily.length>0&&<details><summary>Daily breakdown (UTC dates, within last 7 days)</summary><TokenTable items={data.daily.map(d=>({label:d.day,totals:d.totals}))}/></details>}</>}</section>;
+import React, { useEffect, useState } from 'react';
+import type { Agent, AgentLog, AppState, Connection, Effort, LocalUsage, TokenTotals } from '../shared/types';
+import { suggestedEfforts, PROVIDER_MODEL_SUGGESTIONS, effortIsIndependentAxis } from '../shared/effort';
+const number = (n: number) => n.toLocaleString();
+function TokenTable({ items }: { items: { label: string; totals: TokenTotals }[] }) {
+  return (
+    <div className="log-table-wrap">
+      <table className="token-table">
+        <thead>
+          <tr>
+            <th>Period / model</th>
+            <th>Input</th>
+            <th>Output</th>
+            <th>Cache read</th>
+            <th>Cache creation</th>
+            <th>Responses</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map(row => (
+            <tr key={row.label}>
+              <th>{row.label}</th>
+              <td>{number(row.totals.input)}</td>
+              <td>{number(row.totals.output)}</td>
+              <td>{number(row.totals.cacheRead)}</td>
+              <td>{number(row.totals.cacheCreation)}</td>
+              <td>{number(row.totals.messages)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 }
-export function ActivityView({state,fixedAgent}:{state:AppState;fixedAgent?:string}){
- const [logs,setLogs]=useState<AgentLog[]>([]),[agentId,setAgentId]=useState(fixedAgent??''),[peer,setPeer]=useState(''),[conversation,setConversation]=useState(''),[kind,setKind]=useState('all'),[search,setSearch]=useState(''),[limit,setLimit]=useState(50),[error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false);
- async function refresh(){try{setLogs(await window.office.getWorkLogs());}catch(e){setError((e as Error).message);}}
- useEffect(()=>{void refresh();return window.office.onChanged(()=>void refresh());},[]);
- useEffect(()=>{setAgentId(fixedAgent??'');},[fixedAgent]);
- useEffect(()=>{setLimit(50);},[agentId,peer,conversation,kind,search]);
- const name=(id:string)=>state.agents.find(a=>a.id===id)?.name??({USER:'You',SYSTEM:'Office',TOOL:'Tool'}[id]??id);
- const isAgent=(id:string)=>state.agents.some(a=>a.id===id);
- const scoped=logs.filter(l=>(!agentId||l.from===agentId||l.to===agentId)&&(!peer||l.from===peer||l.to===peer));
- const filtered=scoped.filter(l=>(!conversation||l.conversationId===conversation)&&(kind==='all'||kind==='messages'&&l.kind==='MESSAGE'||kind==='work'&&l.kind!=='MESSAGE'||kind==='between'&&isAgent(l.from)&&isAgent(l.to))&&`${l.text} ${name(l.from)} ${name(l.to)}`.toLowerCase().includes(search.toLowerCase()));
- async function importLogs(){setBusy(true);setError('');try{const result=await window.office.importWorkLogs(agentId);setNotice(result.message);await refresh();}catch(e){setError((e as Error).message);}finally{setBusy(false);}}
- return <section className="activity-view"><div className="section-toolbar"><h2>Conversation &amp; work log</h2><div className="button-row"><button className="secondary" onClick={()=>void refresh()}>Refresh logs</button><button className="secondary" disabled={!agentId||busy} onClick={()=>void importLogs()}>{busy?'Importing…':'Import transcript'}</button></div></div><p className="muted">Office events are recorded automatically. Imported transcripts are labeled external evidence. No live agent research is running.</p>
- <div className="log-filters">{!fixedAgent&&<label className="field">Agent<select aria-label="Log agent" value={agentId} onChange={e=>{setAgentId(e.target.value);setPeer('');setConversation('');}}><option value="">All agents</option>{state.agents.map(a=><option key={a.id} value={a.id}>{a.name} · {a.team}</option>)}</select></label>}<label className="field">Other participant<select aria-label="Other participant" value={peer} onChange={e=>{setPeer(e.target.value);setConversation('');}}><option value="">Anyone</option>{state.agents.filter(a=>a.id!==agentId).map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select></label><label className="field">View<select aria-label="Log view" value={kind} onChange={e=>setKind(e.target.value)}><option value="all">All activity</option><option value="messages">Conversation messages</option><option value="work">Work &amp; configuration</option><option value="between">Between agents</option></select></label><label className="field">Conversation<select aria-label="Conversation" value={conversation} onChange={e=>setConversation(e.target.value)}><option value="">All conversations</option>{[...new Set(scoped.map(l=>l.conversationId))].map(id=><option value={id} key={id}>{id.startsWith('office:')?'Office configuration · '+name(id.slice(7)):id}</option>)}</select></label><label className="field">Search<input aria-label="Search logs" value={search} onChange={e=>setSearch(e.target.value)}/></label></div>
- {error&&<p className="form-error" role="alert">{error}</p>}{notice&&<p role="status">{notice}</p>}<p className="muted">{filtered.length} recorded entries</p>{filtered.length===0?<div className="inline-note">No entries match this view. Agent conversations and tool activity appear only when recorded or explicitly imported.</div>:<div className="work-log-list">{filtered.slice(-limit).map(l=><article className="work-log-entry" key={l.id}><div className="card-heading"><strong>{name(l.from)} → {name(l.to)}</strong><span className="quiet-badge small">{l.provenance==='OFFICE_EVENT'?'Office event':'Imported transcript'}</span></div><small>{new Date(l.timestamp).toLocaleString()} · {l.kind.toLowerCase()} · {l.conversationId}</small><pre>{l.text}</pre><details><summary>Record identity</summary><code className="hash">{l.externalId}<br/>{l.provenance==='OFFICE_EVENT'?'Event':'Source file'} SHA-256: {l.sourceHash}</code></details></article>)}</div>}{filtered.length>limit&&<button className="secondary" onClick={()=>setLimit(limit+50)}>Show 50 older entries</button>}</section>;
+export function LocalConsumption() {
+  const [data, setData] = useState<LocalUsage | null>(null),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState('');
+  async function scan(choose: boolean) {
+    setBusy(true);
+    setError('');
+    try {
+      const result = await window.office.scanClaudeUsage(choose);
+      if (result) setData(result);
+    } catch (e) {
+      setError((e as Error).message);
+      setData(null);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <section className="settings-card">
+      <div className="section-title">
+        <div>
+          <h2>Claude · local consumption</h2>
+          <p>
+            Reconstructed token counts from local JSONL transcripts. No model calls or account credentials are used.
+          </p>
+        </div>
+      </div>
+      <div className="button-row">
+        <button className="secondary" disabled={busy} onClick={() => void scan(false)}>
+          {busy ? 'Reading local records…' : 'Scan local transcripts'}
+        </button>
+        <button className="secondary" disabled={busy} onClick={() => void scan(true)}>
+          Choose transcript folder
+        </button>
+      </div>
+      <p className="muted">
+        This measures recorded activity, not remaining allowance. Rolling five-hour and seven-day totals do not identify
+        subscription reset windows.
+      </p>
+      {error && (
+        <p role="alert" className="form-error">
+          {error}
+        </p>
+      )}
+      {data && (
+        <>
+          <div className="inline-note">{data.note}</div>
+          <p>
+            {data.files} files · {data.sessions} sessions · {data.duplicates} duplicate response records consolidated ·{' '}
+            {data.skipped} skipped files/directories · {data.malformed} unusable records
+          </p>
+          <p>
+            <strong>
+              {data.partial ? 'Partial coverage — some records could not be read' : 'Selected files scanned'}
+            </strong>{' '}
+            · {new Date(data.scannedAt).toLocaleString()}
+          </p>
+          <code className="hash">{data.root}</code>
+          <TokenTable
+            items={[
+              { label: 'Last 5 hours (rolling)', totals: data.last5Hours },
+              { label: 'Last 7 days (rolling)', totals: data.last7Days },
+            ]}
+          />
+          {data.models.length > 0 && (
+            <>
+              <h3>Models · last 7 days</h3>
+              <TokenTable items={data.models.map(m => ({ label: m.model, totals: m.totals }))} />
+            </>
+          )}
+          {data.daily.length > 0 && (
+            <details>
+              <summary>Daily breakdown (UTC dates, within last 7 days)</summary>
+              <TokenTable items={data.daily.map(d => ({ label: d.day, totals: d.totals }))} />
+            </details>
+          )}
+        </>
+      )}
+    </section>
+  );
 }
-export function ModelEffortEditor({agent,onState}:{agent:Agent;onState:(state:AppState)=>void}){
- const [effort,setEffort]=useState<Effort>(agent.effort??'default'),[options,setOptions]=useState<Effort[]>(suggestedEfforts(agent.provider,agent.model)),[model,setModel]=useState(agent.model),[modelOptions,setModelOptions]=useState<Connection['models']>(PROVIDER_MODEL_SUGGESTIONS[agent.provider]),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
- useEffect(()=>{setEffort(agent.effort??'default');},[agent.id,agent.effort]);
- useEffect(()=>{setModel(agent.model);setOptions(suggestedEfforts(agent.provider,agent.model));},[agent.id,agent.model]);
- // Devin splits the picker into family (model) and variant (effort) axes when the catalog carries family data.
- const devinCatalog=agent.provider==='devin'&&modelOptions.some(m=>m.family)?modelOptions:[];
- const devinFamilies=devinCatalog.filter(m=>!m.family).slice().sort((a,b)=>a.name.localeCompare(b.name));
- const devinFamilyId=devinCatalog.length?(devinCatalog.find(m=>m.id===model)?.family??model):'';
- const devinFamily=devinCatalog.find(m=>m.id===devinFamilyId);
- const devinVariants=devinFamilyId?devinCatalog.filter(m=>m.family===devinFamilyId):[];
- // A variant's qualifier: its name minus the family name, else its uid suffix after the family id, else its name.
- const variantLabel=(variant:Connection['models'][number]):string=>{
-  if(devinFamily&&variant.name.startsWith(devinFamily.name+' '))return variant.name.slice(devinFamily.name.length+1);
-  if(devinFamily&&variant.id.startsWith(devinFamily.id+'-'))return variant.id.slice(devinFamily.id.length+1).split('-').map(word=>word?word[0].toUpperCase()+word.slice(1):word).join(' ');
-  return variant.name;
- };
- async function refresh(){setBusy(true);setError('');try{const connection=await window.office.connectionStatus(agent.provider);setModelOptions(connection.models.length?connection.models:PROVIDER_MODEL_SUGGESTIONS[agent.provider]);const levels=connection.models.find(m=>m.id===agent.model)?.efforts;setOptions(levels??suggestedEfforts(agent.provider,agent.model));const hasFamily=agent.provider==='devin'&&connection.models.some(m=>m.family);setNotice(!effortIsIndependentAxis(agent.provider)?hasFamily?'Devin encodes effort in the model variant: the model picks the family and the effort pick stages the matching variant — Save model applies it.':'Devin encodes effort in the model variant; this select intentionally offers only Provider default.':levels?'Options read from the provider model catalog.':'The catalog carries no effort data for this model — only Provider default is offered rather than an invented scale.');}catch(e){setError((e as Error).message);}finally{setBusy(false);}}
- async function save(){setBusy(true);setError('');try{const result=await window.office.changeAgentEffort({agentId:agent.id,effort,expectedEffort:agent.effort??'default'});onState(result);setNotice('Effort saved for the next provider request. Existing work is not restarted.');}catch(e){setError((e as Error).message);}finally{setBusy(false);}}
- async function saveModel(){setBusy(true);setError('');try{const result=await window.office.changeAgentModel({agentId:agent.id,model,expectedModel:agent.model});onState(result);setNotice('Model saved for the next provider request. Dispatch readiness is re-derived from the changed model; existing work is not restarted.');}catch(e){setError((e as Error).message);}finally{setBusy(false);}}
- return <>
-  <section className="effort-control"><label className="field">Model<select aria-label="Agent model" disabled={busy||!!agent.removedAt} value={devinCatalog.length?devinFamilyId:model} onChange={e=>setModel(e.target.value)}>{(devinCatalog.length?devinFamilies:modelOptions).map(m=><option key={m.id} value={m.id}>{m.name}</option>)}{(()=>{const shown=devinCatalog.length?devinFamilyId:model,list=devinCatalog.length?devinFamilies:modelOptions;return shown&&!list.some(m=>m.id===shown)&&<option value={shown}>{shown}</option>;})()}</select></label><button className="primary" disabled={busy||!!agent.removedAt||model===agent.model} onClick={()=>void saveModel()}>Save model</button><label className="field">Effort level<select aria-label="Agent effort level" disabled={busy||!!agent.removedAt} value={devinCatalog.length?model:effort} onChange={e=>devinCatalog.length?setModel(e.target.value):setEffort(e.target.value as Effort)}>{devinCatalog.length?<><option value={devinFamilyId}>Provider default</option>{devinVariants.map(variant=><option key={variant.id} value={variant.id}>{variantLabel(variant)}</option>)}{model!==devinFamilyId&&!devinVariants.some(variant=>variant.id===model)&&<option value={model}>{model}</option>}</>:[...new Set(effortIsIndependentAxis(agent.provider)?[...options,agent.effort??'default']:[agent.effort??'default'])].map(level=><option key={level} value={level}>{level==='default'?'Provider default':level}</option>)}</select></label>{agent.provider!=='devin'&&<button className="primary" disabled={busy||!!agent.removedAt||effort===(agent.effort??'default')} onClick={()=>void save()}>Save effort</button>}<button className="secondary" disabled={busy} onClick={()=>void refresh()}>Refresh effort options</button></section>
-  <p className="muted">{`This is the saved preference for future work. ${!effortIsIndependentAxis(agent.provider)?'Devin encodes effort in the model variant (e.g. swe-2-max); the model picks the family and the effort pick stages the matching variant, and the office does not verify which variant a session applied unless the session result.json reports appliedModel/appliedEffort. ':''}${agent.provider==='claude'?'Effort levels come from the Claude Code --effort flag — session-level, not per-model; whether the model honored a level is reported by the session result, not verified upfront. ':''}${agent.execution==='LOCAL'?'Local sessions run on this machine through the official CLI; they are not provider-hosted, isolated or independently attested.':'Hosted research execution is not configured.'} Unsupported levels are rejected rather than silently substituted.`}</p>
-  {error&&<p className="form-error" role="alert">{error}</p>}{notice&&<p role="status">{notice}</p>}</>;
+export function ActivityView({ state, fixedAgent }: { state: AppState; fixedAgent?: string }) {
+  const [logs, setLogs] = useState<AgentLog[]>([]),
+    [agentId, setAgentId] = useState(fixedAgent ?? ''),
+    [peer, setPeer] = useState(''),
+    [conversation, setConversation] = useState(''),
+    [kind, setKind] = useState('all'),
+    [search, setSearch] = useState(''),
+    [limit, setLimit] = useState(50),
+    [error, setError] = useState(''),
+    [notice, setNotice] = useState(''),
+    [busy, setBusy] = useState(false);
+  async function refresh() {
+    try {
+      setLogs(await window.office.getWorkLogs());
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  useEffect(() => {
+    void refresh();
+    return window.office.onChanged(() => void refresh());
+  }, []);
+  useEffect(() => {
+    setAgentId(fixedAgent ?? '');
+  }, [fixedAgent]);
+  useEffect(() => {
+    setLimit(50);
+  }, [agentId, peer, conversation, kind, search]);
+  const name = (id: string) =>
+    state.agents.find(a => a.id === id)?.name ?? { USER: 'You', SYSTEM: 'Office', TOOL: 'Tool' }[id] ?? id;
+  const isAgent = (id: string) => state.agents.some(a => a.id === id);
+  const scoped = logs.filter(
+    l => (!agentId || l.from === agentId || l.to === agentId) && (!peer || l.from === peer || l.to === peer),
+  );
+  const filtered = scoped.filter(
+    l =>
+      (!conversation || l.conversationId === conversation) &&
+      (kind === 'all' ||
+        (kind === 'messages' && l.kind === 'MESSAGE') ||
+        (kind === 'work' && l.kind !== 'MESSAGE') ||
+        (kind === 'between' && isAgent(l.from) && isAgent(l.to))) &&
+      `${l.text} ${name(l.from)} ${name(l.to)}`.toLowerCase().includes(search.toLowerCase()),
+  );
+  async function importLogs() {
+    setBusy(true);
+    setError('');
+    try {
+      const result = await window.office.importWorkLogs(agentId);
+      setNotice(result.message);
+      await refresh();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <section className="activity-view">
+      <div className="section-toolbar">
+        <h2>Conversation &amp; work log</h2>
+        <div className="button-row">
+          <button className="secondary" onClick={() => void refresh()}>
+            Refresh logs
+          </button>
+          <button className="secondary" disabled={!agentId || busy} onClick={() => void importLogs()}>
+            {busy ? 'Importing…' : 'Import transcript'}
+          </button>
+        </div>
+      </div>
+      <p className="muted">
+        Office events are recorded automatically. Imported transcripts are labeled external evidence. No live agent
+        research is running.
+      </p>
+      <div className="log-filters">
+        {!fixedAgent && (
+          <label className="field">
+            Agent
+            <select
+              aria-label="Log agent"
+              value={agentId}
+              onChange={e => {
+                setAgentId(e.target.value);
+                setPeer('');
+                setConversation('');
+              }}
+            >
+              <option value="">All agents</option>
+              {state.agents.map(a => (
+                <option key={a.id} value={a.id}>
+                  {a.name} · {a.team}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        <label className="field">
+          Other participant
+          <select
+            aria-label="Other participant"
+            value={peer}
+            onChange={e => {
+              setPeer(e.target.value);
+              setConversation('');
+            }}
+          >
+            <option value="">Anyone</option>
+            {state.agents
+              .filter(a => a.id !== agentId)
+              .map(a => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+          </select>
+        </label>
+        <label className="field">
+          View
+          <select aria-label="Log view" value={kind} onChange={e => setKind(e.target.value)}>
+            <option value="all">All activity</option>
+            <option value="messages">Conversation messages</option>
+            <option value="work">Work &amp; configuration</option>
+            <option value="between">Between agents</option>
+          </select>
+        </label>
+        <label className="field">
+          Conversation
+          <select aria-label="Conversation" value={conversation} onChange={e => setConversation(e.target.value)}>
+            <option value="">All conversations</option>
+            {[...new Set(scoped.map(l => l.conversationId))].map(id => (
+              <option value={id} key={id}>
+                {id.startsWith('office:') ? 'Office configuration · ' + name(id.slice(7)) : id}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          Search
+          <input aria-label="Search logs" value={search} onChange={e => setSearch(e.target.value)} />
+        </label>
+      </div>
+      {error && (
+        <p className="form-error" role="alert">
+          {error}
+        </p>
+      )}
+      {notice && <p role="status">{notice}</p>}
+      <p className="muted">{filtered.length} recorded entries</p>
+      {filtered.length === 0 ? (
+        <div className="inline-note">
+          No entries match this view. Agent conversations and tool activity appear only when recorded or explicitly
+          imported.
+        </div>
+      ) : (
+        <div className="work-log-list">
+          {filtered.slice(-limit).map(l => (
+            <article className="work-log-entry" key={l.id}>
+              <div className="card-heading">
+                <strong>
+                  {name(l.from)} → {name(l.to)}
+                </strong>
+                <span className="quiet-badge small">
+                  {l.provenance === 'OFFICE_EVENT' ? 'Office event' : 'Imported transcript'}
+                </span>
+              </div>
+              <small>
+                {new Date(l.timestamp).toLocaleString()} · {l.kind.toLowerCase()} · {l.conversationId}
+              </small>
+              <pre>{l.text}</pre>
+              <details>
+                <summary>Record identity</summary>
+                <code className="hash">
+                  {l.externalId}
+                  <br />
+                  {l.provenance === 'OFFICE_EVENT' ? 'Event' : 'Source file'} SHA-256: {l.sourceHash}
+                </code>
+              </details>
+            </article>
+          ))}
+        </div>
+      )}
+      {filtered.length > limit && (
+        <button className="secondary" onClick={() => setLimit(limit + 50)}>
+          Show 50 older entries
+        </button>
+      )}
+    </section>
+  );
+}
+export function ModelEffortEditor({ agent, onState }: { agent: Agent; onState: (state: AppState) => void }) {
+  const [effort, setEffort] = useState<Effort>(agent.effort ?? 'default'),
+    [options, setOptions] = useState<Effort[]>(suggestedEfforts(agent.provider, agent.model)),
+    [model, setModel] = useState(agent.model),
+    [modelOptions, setModelOptions] = useState<Connection['models']>(PROVIDER_MODEL_SUGGESTIONS[agent.provider]),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState(''),
+    [notice, setNotice] = useState('');
+  useEffect(() => {
+    setEffort(agent.effort ?? 'default');
+  }, [agent.id, agent.effort]);
+  useEffect(() => {
+    setModel(agent.model);
+    setOptions(suggestedEfforts(agent.provider, agent.model));
+  }, [agent.id, agent.model]);
+  // Devin splits the picker into family (model) and variant (effort) axes when the catalog carries family data.
+  const devinCatalog = agent.provider === 'devin' && modelOptions.some(m => m.family) ? modelOptions : [];
+  const devinFamilies = devinCatalog
+    .filter(m => !m.family)
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const devinFamilyId = devinCatalog.length ? (devinCatalog.find(m => m.id === model)?.family ?? model) : '';
+  const devinFamily = devinCatalog.find(m => m.id === devinFamilyId);
+  const devinVariants = devinFamilyId ? devinCatalog.filter(m => m.family === devinFamilyId) : [];
+  // A variant's qualifier: its name minus the family name, else its uid suffix after the family id, else its name.
+  const variantLabel = (variant: Connection['models'][number]): string => {
+    if (devinFamily && variant.name.startsWith(devinFamily.name + ' '))
+      return variant.name.slice(devinFamily.name.length + 1);
+    if (devinFamily && variant.id.startsWith(devinFamily.id + '-'))
+      return variant.id
+        .slice(devinFamily.id.length + 1)
+        .split('-')
+        .map(word => (word ? word[0].toUpperCase() + word.slice(1) : word))
+        .join(' ');
+    return variant.name;
+  };
+  async function refresh() {
+    setBusy(true);
+    setError('');
+    try {
+      const connection = await window.office.connectionStatus(agent.provider);
+      setModelOptions(connection.models.length ? connection.models : PROVIDER_MODEL_SUGGESTIONS[agent.provider]);
+      const levels = connection.models.find(m => m.id === agent.model)?.efforts;
+      setOptions(levels ?? suggestedEfforts(agent.provider, agent.model));
+      const hasFamily = agent.provider === 'devin' && connection.models.some(m => m.family);
+      setNotice(
+        !effortIsIndependentAxis(agent.provider)
+          ? hasFamily
+            ? 'Devin encodes effort in the model variant: the model picks the family and the effort pick stages the matching variant — Save model applies it.'
+            : 'Devin encodes effort in the model variant; this select intentionally offers only Provider default.'
+          : levels
+            ? 'Options read from the provider model catalog.'
+            : 'The catalog carries no effort data for this model — only Provider default is offered rather than an invented scale.',
+      );
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function save() {
+    setBusy(true);
+    setError('');
+    try {
+      const result = await window.office.changeAgentEffort({
+        agentId: agent.id,
+        effort,
+        expectedEffort: agent.effort ?? 'default',
+      });
+      onState(result);
+      setNotice('Effort saved for the next provider request. Existing work is not restarted.');
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function saveModel() {
+    setBusy(true);
+    setError('');
+    try {
+      const result = await window.office.changeAgentModel({ agentId: agent.id, model, expectedModel: agent.model });
+      onState(result);
+      setNotice(
+        'Model saved for the next provider request. Dispatch readiness is re-derived from the changed model; existing work is not restarted.',
+      );
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <>
+      <section className="effort-control">
+        <label className="field">
+          Model
+          <select
+            aria-label="Agent model"
+            disabled={busy || !!agent.removedAt}
+            value={devinCatalog.length ? devinFamilyId : model}
+            onChange={e => setModel(e.target.value)}
+          >
+            {(devinCatalog.length ? devinFamilies : modelOptions).map(m => (
+              <option key={m.id} value={m.id}>
+                {m.name}
+              </option>
+            ))}
+            {(() => {
+              const shown = devinCatalog.length ? devinFamilyId : model,
+                list = devinCatalog.length ? devinFamilies : modelOptions;
+              return shown && !list.some(m => m.id === shown) && <option value={shown}>{shown}</option>;
+            })()}
+          </select>
+        </label>
+        <button
+          className="primary"
+          disabled={busy || !!agent.removedAt || model === agent.model}
+          onClick={() => void saveModel()}
+        >
+          Save model
+        </button>
+        <label className="field">
+          Effort level
+          <select
+            aria-label="Agent effort level"
+            disabled={busy || !!agent.removedAt}
+            value={devinCatalog.length ? model : effort}
+            onChange={e => (devinCatalog.length ? setModel(e.target.value) : setEffort(e.target.value as Effort))}
+          >
+            {devinCatalog.length ? (
+              <>
+                <option value={devinFamilyId}>Provider default</option>
+                {devinVariants.map(variant => (
+                  <option key={variant.id} value={variant.id}>
+                    {variantLabel(variant)}
+                  </option>
+                ))}
+                {model !== devinFamilyId && !devinVariants.some(variant => variant.id === model) && (
+                  <option value={model}>{model}</option>
+                )}
+              </>
+            ) : (
+              [
+                ...new Set(
+                  effortIsIndependentAxis(agent.provider)
+                    ? [...options, agent.effort ?? 'default']
+                    : [agent.effort ?? 'default'],
+                ),
+              ].map(level => (
+                <option key={level} value={level}>
+                  {level === 'default' ? 'Provider default' : level}
+                </option>
+              ))
+            )}
+          </select>
+        </label>
+        {agent.provider !== 'devin' && (
+          <button
+            className="primary"
+            disabled={busy || !!agent.removedAt || effort === (agent.effort ?? 'default')}
+            onClick={() => void save()}
+          >
+            Save effort
+          </button>
+        )}
+        <button className="secondary" disabled={busy} onClick={() => void refresh()}>
+          Refresh effort options
+        </button>
+      </section>
+      <p className="muted">{`This is the saved preference for future work. ${!effortIsIndependentAxis(agent.provider) ? 'Devin encodes effort in the model variant (e.g. swe-2-max); the model picks the family and the effort pick stages the matching variant, and the office does not verify which variant a session applied unless the session result.json reports appliedModel/appliedEffort. ' : ''}${agent.provider === 'claude' ? 'Effort levels come from the Claude Code --effort flag — session-level, not per-model; whether the model honored a level is reported by the session result, not verified upfront. ' : ''}${agent.execution === 'LOCAL' ? 'Local sessions run on this machine through the official CLI; they are not provider-hosted, isolated or independently attested.' : 'Hosted research execution is not configured.'} Unsupported levels are rejected rather than silently substituted.`}</p>
+      {error && (
+        <p className="form-error" role="alert">
+          {error}
+        </p>
+      )}
+      {notice && <p role="status">{notice}</p>}
+    </>
+  );
 }
 
-export function AgentDetails({agent,state}:{agent:Agent;state:AppState;onState:(state:AppState)=>void}){
- return <div className="agent-detail"><code className="hash">Agent ID: {agent.id}</code>{agent.instructions&&<details><summary>Agent instructions</summary><pre>{agent.instructions}</pre></details>}<ActivityView state={state} fixedAgent={agent.id}/></div>;
+export function AgentDetails({ agent, state }: { agent: Agent; state: AppState; onState: (state: AppState) => void }) {
+  return (
+    <div className="agent-detail">
+      <code className="hash">Agent ID: {agent.id}</code>
+      {agent.instructions && (
+        <details>
+          <summary>Agent instructions</summary>
+          <pre>{agent.instructions}</pre>
+        </details>
+      )}
+      <ActivityView state={state} fixedAgent={agent.id} />
+    </div>
+  );
 }

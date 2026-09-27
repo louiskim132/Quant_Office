@@ -6,7 +6,13 @@ import { PipelineService } from '../src/main/pipeline';
 import { snapshotObjectPath } from '../src/main/locations';
 import { fixture, completeS1, key, at, sha256, declared } from './fixtures/pipeline';
 import { STAGE_GATES } from '../src/shared/research';
-import { runPackageHash, runPackageId, runReturnManifestSchema, type RunPackageManifest, type RunReturnManifest } from '../src/shared/run-package';
+import {
+  runPackageHash,
+  runPackageId,
+  runReturnManifestSchema,
+  type RunPackageManifest,
+  type RunReturnManifest,
+} from '../src/shared/run-package';
 import type { BranchLink, PipelineRecord, StageContext } from '../src/shared/pipeline';
 import type { AppState, Assignment } from '../src/shared/types';
 import type { FrozenResearchSpec, ResearchBranch } from '../src/shared/research';
@@ -24,18 +30,36 @@ import type { FrozenResearchSpec, ResearchBranch } from '../src/shared/research'
 
 const packages = {
   build: {
-    async build(input: { state: AppState; branch: ResearchBranch; link: BranchLink; spec: FrozenResearchSpec; readObject: (sha256: string) => Promise<Uint8Array | null> }) {
+    async build(input: {
+      state: AppState;
+      branch: ResearchBranch;
+      link: BranchLink;
+      spec: FrozenResearchSpec;
+      readObject: (sha256: string) => Promise<Uint8Array | null>;
+    }) {
       const base: Omit<RunPackageManifest, 'packageId' | 'packageHash' | 'exportedAt'> = {
-        schemaVersion: 1, kind: 'RUN_PACKAGE', projectId: input.branch.projectId, branchId: input.branch.id, branchRevision: input.branch.revision,
-        specId: input.spec.id, specHash: input.spec.contentHash, subjectHash: input.link.subjectHash,
-        requestId: input.link.requestId, requestRevision: input.link.requestRevision,
+        schemaVersion: 1,
+        kind: 'RUN_PACKAGE',
+        projectId: input.branch.projectId,
+        branchId: input.branch.id,
+        branchRevision: input.branch.revision,
+        specId: input.spec.id,
+        specHash: input.spec.contentHash,
+        subjectHash: input.link.subjectHash,
+        requestId: input.link.requestId,
+        requestRevision: input.link.requestRevision,
         entries: [{ path: 'main.py', sha256: sha256('synthetic-launcher'), bytes: 18 }],
         environment: { runtime: 'COLAB_USER_RUN', detail: 'Synthetic package; the user runs it in Colab.' },
         expectedReturn: { files: ['result.json'], requiredGates: ['G-PORTFOLIO', 'G-COST', 'G-ECON'] },
         instructions: 'Open Colab, upload this package, run the launcher, return the produced bundle.',
       };
       const packageHash = runPackageHash(base);
-      const manifest: RunPackageManifest = { ...base, packageId: runPackageId(packageHash), packageHash, exportedAt: new Date().toISOString() };
+      const manifest: RunPackageManifest = {
+        ...base,
+        packageId: runPackageId(packageHash),
+        packageHash,
+        exportedAt: new Date().toISOString(),
+      };
       return { manifest, bytes: Buffer.from(JSON.stringify({ kind: 'QRO_RUN_PACKAGE', manifest })) };
     },
   },
@@ -46,8 +70,13 @@ const packages = {
         throw new Error('Returned bundle names a different package.');
       return {
         manifest,
-        objects: manifest.artifacts.map(a => ({ path: a.path, sha256: a.sha256, bytes: Buffer.alloc(Math.max(1, a.bytes)) })),
-        manifestHash: sha256(input.bytes), summary: 'Bound return admitted for package ' + manifest.packageId + '.',
+        objects: manifest.artifacts.map(a => ({
+          path: a.path,
+          sha256: a.sha256,
+          bytes: Buffer.alloc(Math.max(1, a.bytes)),
+        })),
+        manifestHash: sha256(input.bytes),
+        summary: 'Bound return admitted for package ' + manifest.packageId + '.',
       };
     },
   },
@@ -63,11 +92,21 @@ const records = <K extends PipelineRecord['kind']>(f: Fixture, kind: K) =>
 /** A stage report bound to one exact assignment context, as that stage's worker would file it. */
 function stageReport(context: StageContext, overrides: Record<string, unknown> = {}) {
   return JSON.stringify({
-    schemaVersion: 1, branchId: context.branchId, specId: context.specId, subjectHash: context.subjectHash,
-    stage: context.stage, contextHash: context.contextHash,
-    gates: STAGE_GATES[context.stage].map(gate => ({ gate, outcome: 'PASS', detail: gate + ' reviewed.', rationale: 'separated review' })),
+    schemaVersion: 1,
+    branchId: context.branchId,
+    specId: context.specId,
+    subjectHash: context.subjectHash,
+    stage: context.stage,
+    contextHash: context.contextHash,
+    gates: STAGE_GATES[context.stage].map(gate => ({
+      gate,
+      outcome: 'PASS',
+      detail: gate + ' reviewed.',
+      rationale: 'separated review',
+    })),
     ...(['S2', 'S7'].includes(context.stage) ? { verdict: 'SUPPORTS', defectFound: false } : {}),
-    detail: `Separated ${context.stage} report.`, ...overrides,
+    detail: `Separated ${context.stage} report.`,
+    ...overrides,
   });
 }
 
@@ -75,7 +114,11 @@ function stageReport(context: StageContext, overrides: Record<string, unknown> =
 function observeStageReports(f: Fixture) {
   f.adapter.behaviour.observe = async job => {
     const context = f.store.snapshot().assignments!.find(a => a.id === job.assignmentId)!.research!;
-    return { state: 'COMPLETED' as const, detail: 'Stage report delivered.', outputs: [declared(stageReport(context))] };
+    return {
+      state: 'COMPLETED' as const,
+      detail: 'Stage report delivered.',
+      outputs: [declared(stageReport(context))],
+    };
   };
 }
 
@@ -83,24 +126,56 @@ function observeStageReports(f: Fixture) {
 async function artifact(f: Fixture, body: unknown, name = 'return.zip'): Promise<{ id: string; sha256: string }> {
   const object = await f.io.writeObject(Buffer.from(JSON.stringify(body)));
   const id = randomUUID();
-  f.store.addArtifact({ id, projectId: f.project.id, experimentId: null, name, sha256: object.sha256, size: object.bytes,
-    kind: 'RESULT', classification: 'USER_ATTESTED', status: 'QUARANTINED', createdAt: at(12),
-    mediaType: name.endsWith('.zip') ? 'application/zip' : 'application/json', note: 'Synthetic imported bytes' });
+  f.store.addArtifact({
+    id,
+    projectId: f.project.id,
+    experimentId: null,
+    name,
+    sha256: object.sha256,
+    size: object.bytes,
+    kind: 'RESULT',
+    classification: 'USER_ATTESTED',
+    status: 'QUARANTINED',
+    createdAt: at(12),
+    mediaType: name.endsWith('.zip') ? 'application/zip' : 'application/json',
+    note: 'Synthetic imported bytes',
+  });
   return { id, sha256: object.sha256 };
 }
 
-function returnManifest(pkg: { packageId: string; packageHash: string; branchId: string; specId: string; specHash: string; subjectHash: string }, overrides: Partial<RunReturnManifest> = {}) {
+function returnManifest(
+  pkg: {
+    packageId: string;
+    packageHash: string;
+    branchId: string;
+    specId: string;
+    specHash: string;
+    subjectHash: string;
+  },
+  overrides: Partial<RunReturnManifest> = {},
+) {
   return {
-    schemaVersion: 1, kind: 'RUN_RETURN', packageId: pkg.packageId, packageHash: pkg.packageHash,
-    branchId: pkg.branchId, specId: pkg.specId, specHash: pkg.specHash, subjectHash: pkg.subjectHash,
-    runId: 'synthetic-run-' + randomUUID().slice(0, 8), startedAt: at(10), finishedAt: at(11), status: 'COMPLETED',
+    schemaVersion: 1,
+    kind: 'RUN_RETURN',
+    packageId: pkg.packageId,
+    packageHash: pkg.packageHash,
+    branchId: pkg.branchId,
+    specId: pkg.specId,
+    specHash: pkg.specHash,
+    subjectHash: pkg.subjectHash,
+    runId: 'synthetic-run-' + randomUUID().slice(0, 8),
+    startedAt: at(10),
+    finishedAt: at(11),
+    status: 'COMPLETED',
     artifacts: [{ path: 'result.json', sha256: sha256('synthetic-result'), bytes: 16 }],
     gates: [
       { gate: 'G-PORTFOLIO', stage: 'S5', outcome: 'PASS', detail: 'Portfolio gate passed.', rationale: 'user run' },
       { gate: 'G-COST', stage: 'S6', outcome: 'PASS', detail: 'Cost gate passed.', rationale: 'user run' },
       { gate: 'G-ECON', stage: 'S6', outcome: 'PASS', detail: 'Economics gate passed.', rationale: 'user run' },
     ],
-    failedRuns: [], detail: 'Synthetic user-run return.', ...overrides,
+    failedRuns: [],
+    detail: 'Synthetic user-run return.',
+    ...overrides,
   };
 }
 
@@ -109,10 +184,18 @@ async function separatedFixture(t: TestContext) {
   const f = await fixture(t, undefined, true);
   const skeptic = f.makeAgent('Skeptic', at(2));
   // Both independent reviewers sit on the frozen request roster before the link is recorded.
-  f.store.execute({ type: 'request.update', idempotencyKey: key(), requestId: f.request.id, expectedRevision: f.request.revision,
-    objective: f.request.objective, leadAgentId: f.principal.id, participantIds: [f.second.id, skeptic.id],
-    acceptanceCriteria: f.request.acceptanceCriteria });
-  const service = () => new PipelineService(f.store, f.controller, null, f.stageInputs, f.readObject, f.clock, null, f.io, packages);
+  f.store.execute({
+    type: 'request.update',
+    idempotencyKey: key(),
+    requestId: f.request.id,
+    expectedRevision: f.request.revision,
+    objective: f.request.objective,
+    leadAgentId: f.principal.id,
+    participantIds: [f.second.id, skeptic.id],
+    acceptanceCriteria: f.request.acceptanceCriteria,
+  });
+  const service = () =>
+    new PipelineService(f.store, f.controller, null, f.stageInputs, f.readObject, f.clock, null, f.io, packages);
   await f.linked();
   await service().run({ type: 'verifySpec', branchId: f.branch().id, expectedRevision: f.branch().revision });
   await service().run({ type: 'advance', branchId: f.branch().id, expectedRevision: f.branch().revision });
@@ -122,15 +205,37 @@ async function separatedFixture(t: TestContext) {
   return { f, service, skeptic, s1 };
 }
 
-const appoint = (f: Fixture, stage: 'S2' | 'S4' | 'S7', fn: 'PRINCIPAL' | 'CORRECTNESS_REVIEWER' | 'ADVOCATE' | 'SKEPTIC', agentId: string, minute: number) =>
-  f.store.appendFunctionAssignment({ id: key(), projectId: f.project.id, stage, function: fn, agentId, agentRevision: 0,
-    appendedAt: at(minute), supersededById: null, origin: 'EXPLICIT', note: fn.toLowerCase().replaceAll('_', ' ') });
+const appoint = (
+  f: Fixture,
+  stage: 'S2' | 'S4' | 'S7',
+  fn: 'PRINCIPAL' | 'CORRECTNESS_REVIEWER' | 'ADVOCATE' | 'SKEPTIC',
+  agentId: string,
+  minute: number,
+) =>
+  f.store.appendFunctionAssignment({
+    id: key(),
+    projectId: f.project.id,
+    stage,
+    function: fn,
+    agentId,
+    agentRevision: 0,
+    appendedAt: at(minute),
+    supersededById: null,
+    origin: 'EXPLICIT',
+    note: fn.toLowerCase().replaceAll('_', ' '),
+  });
 
 /** Prepares the separated S2 round and returns the reviewer assignment; nothing is collected yet. */
-async function prepareS2(ctx: Separated): Promise<{ reviewer: Assignment; round: Extract<PipelineRecord, { kind: 'SEPARATED_REVIEW' }> }> {
+async function prepareS2(
+  ctx: Separated,
+): Promise<{ reviewer: Assignment; round: Extract<PipelineRecord, { kind: 'SEPARATED_REVIEW' }> }> {
   const { f, service } = ctx;
   appoint(f, 'S2', 'CORRECTNESS_REVIEWER', f.second.id, 3);
-  const prepared = await service().run({ type: 'prepare', branchId: f.branch().id, expectedRevision: f.branch().revision });
+  const prepared = await service().run({
+    type: 'prepare',
+    branchId: f.branch().id,
+    expectedRevision: f.branch().revision,
+  });
   const reviewer = prepared.assignments![0];
   const round = records(f, 'SEPARATED_REVIEW').find(r => r.stage === 'S2')!;
   assert.equal(round.kind, 'SEPARATED_REVIEW', 'S2 prepares a separated round when no runtime is configured');
@@ -157,7 +262,12 @@ async function manualS3(ctx: Separated, overrides: Partial<RunReturnManifest> = 
   const pkg = records(f, 'RUN_PACKAGE').at(-1)!;
   assert.equal(pkg.state, 'AWAITING_RETURN', 'the durable user wait is the package record itself');
   const returned = await artifact(f, returnManifest(pkg, overrides));
-  await service().run({ type: 'importRunReturn', branchId: f.branch().id, expectedRevision: f.branch().revision, artifactId: returned.id });
+  await service().run({
+    type: 'importRunReturn',
+    branchId: f.branch().id,
+    expectedRevision: f.branch().revision,
+    artifactId: returned.id,
+  });
   await service().run({ type: 'advance', branchId: f.branch().id, expectedRevision: f.branch().revision });
   assert.equal(f.branch().stage, 'S4');
   return pkg;
@@ -167,7 +277,11 @@ async function manualS3(ctx: Separated, overrides: Partial<RunReturnManifest> = 
 async function analystS4(ctx: Separated, via: 'provider' | 'import'): Promise<Assignment> {
   const { f, service } = ctx;
   appoint(f, 'S4', 'PRINCIPAL', f.principal.id, 13);
-  const prepared = await service().run({ type: 'prepare', branchId: f.branch().id, expectedRevision: f.branch().revision });
+  const prepared = await service().run({
+    type: 'prepare',
+    branchId: f.branch().id,
+    expectedRevision: f.branch().revision,
+  });
   const analyst = prepared.assignments![0];
   if (via === 'provider') {
     observeStageReports(f);
@@ -198,7 +312,12 @@ test('the runtime-free separated path drives S2 and S7 through SEPARATED_REVIEW 
   const ctx = await separatedFixture(t);
   const { f, service } = ctx;
   // No independent runtime or custody is configured; the separated tier is the pilot contract.
-  assert.deepEqual(service().capabilities(), { packageExport: true, returnValidation: true, independentRuntime: false, custody: false });
+  assert.deepEqual(service().capabilities(), {
+    packageExport: true,
+    returnValidation: true,
+    independentRuntime: false,
+    custody: false,
+  });
 
   // S2: the blinded correctness review freezes a separated round, not a hosted one.
   const { round: s2round } = await separatedS2(ctx);
@@ -224,7 +343,11 @@ test('the runtime-free separated path drives S2 and S7 through SEPARATED_REVIEW 
   // S7: advocate and skeptic appointments freeze one separated round with two contexts.
   appoint(f, 'S7', 'ADVOCATE', f.second.id, 14);
   appoint(f, 'S7', 'SKEPTIC', ctx.skeptic.id, 15);
-  const prepared = await service().run({ type: 'prepare', branchId: f.branch().id, expectedRevision: f.branch().revision });
+  const prepared = await service().run({
+    type: 'prepare',
+    branchId: f.branch().id,
+    expectedRevision: f.branch().revision,
+  });
   const s7round = records(f, 'SEPARATED_REVIEW').find(r => r.stage === 'S7')!;
   assert.equal(s7round.kind, 'SEPARATED_REVIEW');
   assert.equal(s7round.contexts.length, 2);
@@ -235,11 +358,18 @@ test('the runtime-free separated path drives S2 and S7 through SEPARATED_REVIEW 
   assert.equal(advocate.research!.reviewRoundId, s7round.id);
   assert.equal(skeptic.research!.reviewRoundId, s7round.id);
   assert.notEqual(advocate.research!.isolatedContextId, skeptic.research!.isolatedContextId);
-  assert.deepEqual([...advocate.research!.objectHashes].sort(), [...skeptic.research!.objectHashes].sort(),
-    'both sides argue the same evidence set');
+  assert.deepEqual(
+    [...advocate.research!.objectHashes].sort(),
+    [...skeptic.research!.objectHashes].sort(),
+    'both sides argue the same evidence set',
+  );
 
   // The bounded response is imported up front; it can only be admitted once both reports are open.
-  const rebuttal = await artifact(f, { phase: 'REBUTTAL', contextHash: advocate.research!.contextHash, detail: 'Bounded post-disclosure response.' }, 'rebuttal.json');
+  const rebuttal = await artifact(
+    f,
+    { phase: 'REBUTTAL', contextHash: advocate.research!.contextHash, detail: 'Bounded post-disclosure response.' },
+    'rebuttal.json',
+  );
 
   observeStageReports(f);
   await f.controller.dispatch(advocate.id);
@@ -249,8 +379,19 @@ test('the runtime-free separated path drives S2 and S7 through SEPARATED_REVIEW 
   assert.equal(filed.length, 1);
   assert.equal(filed[0].opened, false, 'the first report stays sealed until the round is complete');
   assert.equal(f.store.snapshot().sealed!.filter(s => s.openedAt === null).length, 1);
-  await assert.rejects(service().run({ type: 'rebuttal', assignmentId: advocate.id, artifactId: rebuttal.id }), /first reports must be immutable/);
-  await assert.rejects(service().run({ type: 'adjudicate', branchId: f.branch().id, expectedRevision: f.branch().revision, followUp: false }), /first reports/i);
+  await assert.rejects(
+    service().run({ type: 'rebuttal', assignmentId: advocate.id, artifactId: rebuttal.id }),
+    /first reports must be immutable/,
+  );
+  await assert.rejects(
+    service().run({
+      type: 'adjudicate',
+      branchId: f.branch().id,
+      expectedRevision: f.branch().revision,
+      followUp: false,
+    }),
+    /first reports/i,
+  );
 
   await f.controller.dispatch(skeptic.id);
   await f.controller.observe(skeptic.id);
@@ -271,12 +412,20 @@ test('the runtime-free separated path drives S2 and S7 through SEPARATED_REVIEW 
   const again = await service().run({ type: 'rebuttal', assignmentId: advocate.id, artifactId: rebuttal.id });
   assert.match(again.detail, /already recorded/);
 
-  const decided = await service().run({ type: 'adjudicate', branchId: f.branch().id, expectedRevision: f.branch().revision, followUp: false });
+  const decided = await service().run({
+    type: 'adjudicate',
+    branchId: f.branch().id,
+    expectedRevision: f.branch().revision,
+    followUp: false,
+  });
   const verdict = records(f, 'ADJUDICATION').at(-1)!;
   assert.equal(verdict.roundId, s7round.id);
   assert.equal(verdict.outcome, 'UPHELD');
   assert.equal(verdict.decision, 'PROMOTE');
-  assert.deepEqual(verdict.reportIds, opened.map(r => r.id));
+  assert.deepEqual(
+    verdict.reportIds,
+    opened.map(r => r.id),
+  );
   await service().run({ type: 'advance', branchId: f.branch().id, expectedRevision: f.branch().revision });
   assert.equal(f.branch().stage, 'S8', 'adjudication completes the round and the branch moves on');
 
@@ -288,7 +437,11 @@ test('the runtime-free separated path drives S2 and S7 through SEPARATED_REVIEW 
   const returned = records(f, 'RUN_RETURN').at(-1)!;
   assert.equal(returned.verification, 'USER_IMPORTED');
   for (const gate of ['G-PORTFOLIO', 'G-COST', 'G-ECON'])
-    assert.equal(f.store.snapshot().receipts!.find(r => r.gate === gate)!.provenance, 'USER_RUN', 'user-run gates keep their own label');
+    assert.equal(
+      f.store.snapshot().receipts!.find(r => r.gate === gate)!.provenance,
+      'USER_RUN',
+      'user-run gates keep their own label',
+    );
   assert.equal(records(f, 'STAGE_COMPLETION').find(r => r.stage === 'S3')!.provenance, 'USER_IMPORTED');
 });
 
@@ -300,28 +453,57 @@ test('importStageReport admits an exact-context report and refuses tampered, for
   // Tampered bytes: the object no longer matches the identity the artifact registered.
   const honest = JSON.parse(stageReport(reviewer.research!));
   const object = await f.io.writeObject(Buffer.from(JSON.stringify(honest)));
-  writeFileSync(snapshotObjectPath(f.root, object.sha256), Buffer.from(JSON.stringify({ ...honest, detail: 'Altered after hashing.' })));
+  writeFileSync(
+    snapshotObjectPath(f.root, object.sha256),
+    Buffer.from(JSON.stringify({ ...honest, detail: 'Altered after hashing.' })),
+  );
   const tampered = randomUUID();
-  f.store.addArtifact({ id: tampered, projectId: f.project.id, experimentId: null, name: 's2-report.json', sha256: object.sha256, size: object.bytes,
-    kind: 'RESULT', classification: 'USER_ATTESTED', status: 'QUARANTINED', createdAt: at(12), mediaType: 'application/json', note: 'tampered' });
-  await assert.rejects(service().run({ type: 'importStageReport', assignmentId: reviewer.id, artifactId: tampered }), /identity mismatch/);
+  f.store.addArtifact({
+    id: tampered,
+    projectId: f.project.id,
+    experimentId: null,
+    name: 's2-report.json',
+    sha256: object.sha256,
+    size: object.bytes,
+    kind: 'RESULT',
+    classification: 'USER_ATTESTED',
+    status: 'QUARANTINED',
+    createdAt: at(12),
+    mediaType: 'application/json',
+    note: 'tampered',
+  });
+  await assert.rejects(
+    service().run({ type: 'importStageReport', assignmentId: reviewer.id, artifactId: tampered }),
+    /identity mismatch/,
+  );
 
   // A well-formed report that names a different context is not this assignment's report.
   const foreign = await artifact(f, { ...honest, contextHash: ctx.s1.research!.contextHash }, 's2-report.json');
-  await assert.rejects(service().run({ type: 'importStageReport', assignmentId: reviewer.id, artifactId: foreign.id }), /different research/);
+  await assert.rejects(
+    service().run({ type: 'importStageReport', assignmentId: reviewer.id, artifactId: foreign.id }),
+    /different research/,
+  );
 
   // The pending attempt admits a correctly bound report with no provider job anywhere.
   const pending = f.store.snapshot().attempts!.find(a => a.assignmentId === reviewer.id)!;
   assert.equal(pending.state, 'OPEN');
   const imported = await artifact(f, honest, 's2-report.json');
-  const admitted = await service().run({ type: 'importStageReport', assignmentId: reviewer.id, artifactId: imported.id });
+  const admitted = await service().run({
+    type: 'importStageReport',
+    assignmentId: reviewer.id,
+    artifactId: imported.id,
+  });
   assert.match(admitted.detail, /user-imported provenance/);
   const completion = records(f, 'STAGE_COMPLETION').find(r => r.assignmentId === reviewer.id)!;
   assert.equal(completion.provenance, 'USER_IMPORTED');
   assert.equal(completion.jobId, null);
   assert.equal(completion.reportHash, imported.sha256);
   assert.equal(f.store.snapshot().attempts!.find(a => a.id === pending.id)!.state, 'COMPLETED');
-  assert.equal(f.store.snapshot().jobs!.find(j => j.assignmentId === reviewer.id)!.state, 'INTENT', 'the import never touched the provider job');
+  assert.equal(
+    f.store.snapshot().jobs!.find(j => j.assignmentId === reviewer.id)!.state,
+    'INTENT',
+    'the import never touched the provider job',
+  );
   const report = records(f, 'REVIEW_REPORT').find(r => r.assignmentId === reviewer.id)!;
   assert.equal(report.opened, true, 'the single-context separated round completes on admission');
   assert.equal(report.independence, 'SEPARATE_SESSION_UNVERIFIED');
@@ -332,13 +514,20 @@ test('importStageReport admits an exact-context report and refuses tampered, for
   await service().run({ type: 'advance', branchId: f.branch().id, expectedRevision: f.branch().revision });
   await manualS3(ctx);
   appoint(f, 'S4', 'PRINCIPAL', f.principal.id, 13);
-  const prepared = await service().run({ type: 'prepare', branchId: f.branch().id, expectedRevision: f.branch().revision });
+  const prepared = await service().run({
+    type: 'prepare',
+    branchId: f.branch().id,
+    expectedRevision: f.branch().revision,
+  });
   const analyst = prepared.assignments![0];
   f.controller.discardPreparation(analyst.id);
   const attempt = f.store.snapshot().attempts!.find(a => a.assignmentId === analyst.id)!;
   assert.equal(attempt.state, 'ABANDONED');
   const late = await artifact(f, JSON.parse(stageReport(analyst.research!)), 's4-report.json');
-  await assert.rejects(service().run({ type: 'importStageReport', assignmentId: analyst.id, artifactId: late.id }), /durable open attempt/);
+  await assert.rejects(
+    service().run({ type: 'importStageReport', assignmentId: analyst.id, artifactId: late.id }),
+    /durable open attempt/,
+  );
 });
 
 test('validateReturn refuses a failed user-run verdict without dropping the record, and a foreign package return is never imported', async t => {
@@ -355,14 +544,23 @@ test('validateReturn refuses a failed user-run verdict without dropping the reco
   assert.equal(records(f, 'RUN_RETURN').length, 0);
 
   // An honestly completed run whose portfolio check failed is admitted and preserved verbatim.
-  const failed = await artifact(f, returnManifest(pkg, {
-    gates: [
-      { gate: 'G-PORTFOLIO', stage: 'S5', outcome: 'FAIL', detail: 'Portfolio gate failed in the user run.', rationale: 'user run' },
-      { gate: 'G-COST', stage: 'S6', outcome: 'PASS', detail: 'Cost gate passed.', rationale: 'user run' },
-      { gate: 'G-ECON', stage: 'S6', outcome: 'PASS', detail: 'Economics gate passed.', rationale: 'user run' },
-    ],
-    detail: 'The user run completed; the portfolio check failed.',
-  }));
+  const failed = await artifact(
+    f,
+    returnManifest(pkg, {
+      gates: [
+        {
+          gate: 'G-PORTFOLIO',
+          stage: 'S5',
+          outcome: 'FAIL',
+          detail: 'Portfolio gate failed in the user run.',
+          rationale: 'user run',
+        },
+        { gate: 'G-COST', stage: 'S6', outcome: 'PASS', detail: 'Cost gate passed.', rationale: 'user run' },
+        { gate: 'G-ECON', stage: 'S6', outcome: 'PASS', detail: 'Economics gate passed.', rationale: 'user run' },
+      ],
+      detail: 'The user run completed; the portfolio check failed.',
+    }),
+  );
   await service().run({ type: 'importRunReturn', ...args, artifactId: failed.id });
   const returned = records(f, 'RUN_RETURN').at(-1)!;
   assert.equal(returned.status, 'COMPLETED');
@@ -377,8 +575,17 @@ test('validateReturn refuses a failed user-run verdict without dropping the reco
   assert.equal(f.branch().stage, 'S5');
 
   // The office validation reports the failure and leaves the stage incomplete; the record stands.
-  await assert.rejects(service().run({ type: 'validateReturn', branchId: f.branch().id, expectedRevision: f.branch().revision }), /G-PORTFOLIO.*no passing admitted evidence/);
-  assert.equal(records(f, 'STAGE_COMPLETION').some(r => r.stage === 'S5'), false);
+  await assert.rejects(
+    service().run({ type: 'validateReturn', branchId: f.branch().id, expectedRevision: f.branch().revision }),
+    /G-PORTFOLIO.*no passing admitted evidence/,
+  );
+  assert.equal(
+    records(f, 'STAGE_COMPLETION').some(r => r.stage === 'S5'),
+    false,
+  );
   assert.equal(records(f, 'RUN_RETURN').length, 1, 'the failed return is preserved, not dropped');
-  await assert.rejects(service().run({ type: 'advance', branchId: f.branch().id, expectedRevision: f.branch().revision }), /stage report|completion/i);
+  await assert.rejects(
+    service().run({ type: 'advance', branchId: f.branch().id, expectedRevision: f.branch().revision }),
+    /stage report|completion/i,
+  );
 });

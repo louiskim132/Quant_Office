@@ -1,48 +1,399 @@
-import React, {useState} from 'react';
-import {ListTodo} from 'lucide-react';
-import type {AppState,Experiment,Command,Request} from '../shared/types';
-import {queueScope,type QueueFilter} from '../shared/queue';
-import {Empty} from './components';
-import {RequestDispatch} from './dispatch';
-import {PipelineCard} from './pipeline-card';
+import React, { useState } from 'react';
+import { ListTodo } from 'lucide-react';
+import type { AppState, Experiment, Command, Request } from '../shared/types';
+import { queueScope, type QueueFilter } from '../shared/queue';
+import { Empty } from './components';
+import { RequestDispatch } from './dispatch';
+import { PipelineCard } from './pipeline-card';
 import './queue.css';
 import './office.css';
 
-export function WorkQueue({state,busy,onNew,onOpen,onCancel,onAction,onState}:{state:AppState;onAction:(command:Command)=>void;busy:boolean;onNew:()=>void;onOpen:(e:Experiment)=>void;onCancel:(id:string)=>void;onState:(s:AppState)=>void}){
- const [filter,setFilter]=useState<'active'|'completed'|'canceled'|'all'>('active');
- const [scopeProject,setScopeProject]=useState('');
- const [scopeAgent,setScopeAgent]=useState('');
- const [scopeTeam,setScopeTeam]=useState('');
- const [search,setSearch]=useState('');
- const queueFilter:QueueFilter={lifecycle:filter.toUpperCase() as QueueFilter['lifecycle'],
-  ...(scopeProject?{projectId:scopeProject}:{}),...(scopeAgent?{agentId:scopeAgent}:{}),...(scopeTeam?{teamId:scopeTeam}:{}),...(search?{search}:{})};
- const scope=queueScope(state,queueFilter);
- const rows=[...scope.entries].reverse();
- // Removable rows this filter hides: the Remove path must be findable without guessing which
- // lifecycle filter a just-canceled request moved under.
- const hiddenRemovable=queueScope(state,{...queueFilter,lifecycle:'ALL'}).entries.filter(entry=>entry.deletable&&!scope.entries.some(shown=>shown.id===entry.id));
- const hiddenCanceled=hiddenRemovable.filter(entry=>entry.status==='CANCELED').length;
- const hiddenCompleted=hiddenRemovable.length-hiddenCanceled;
- const hiddenLabel=[hiddenCanceled?`${hiddenCanceled} canceled`:'',hiddenCompleted?`${hiddenCompleted} completed`:''].filter(Boolean).join(' and ');
- const hiddenFilters=[hiddenCanceled?'Canceled':'',hiddenCompleted?'Completed':''].filter(Boolean).join(' or ');
- return <section className="work-queue"><div className="section-toolbar"><div><h2>Work queue · {scopeProject?state.projects.find(p=>p.id===scopeProject)?.name??'one project':'all projects'}</h2><p className="muted">New request → Research details → Review → Provider work → Results</p></div><button className="primary" onClick={onNew}>New request</button></div><div className="log-filters">
- <label className="field queue-filter">Show requests<select value={filter} onChange={e=>setFilter(e.target.value as typeof filter)}>
-  <option value="active">Active ({scope.counts.active})</option><option value="completed">Completed ({scope.counts.completed})</option>
-  <option value="canceled">Canceled ({scope.counts.canceled})</option><option value="all">All requests ({scope.counts.all})</option></select></label>
- <label className="field">Project<select value={scopeProject} onChange={e=>setScopeProject(e.target.value)}><option value="">All projects</option>{state.projects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
- <label className="field">Agent<select value={scopeAgent} onChange={e=>setScopeAgent(e.target.value)}><option value="">Any agent</option>{state.agents.filter(a=>!a.removedAt).map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select></label>
- <label className="field">Team<select value={scopeTeam} onChange={e=>setScopeTeam(e.target.value)}><option value="">Any team</option>{(state.teams??[]).map(team=><option key={team.id} value={team.id}>{team.name}</option>)}</select></label>
- <label className="field">Search<input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Request or agent"/></label>
-</div>
-<p className="muted">{scope.counts.all} request{scope.counts.all===1?'':'s'} in this scope · {scope.counts.active} active · {scope.counts.completed} completed · {scope.counts.canceled} canceled</p>{!!hiddenRemovable.length&&<p className="muted queue-hint">{hiddenLabel} request{hiddenRemovable.length===1?'':'s'} {hiddenRemovable.length===1?'is':'are'} hidden by this filter — switch to {hiddenFilters} to review or remove {hiddenRemovable.length===1?'it':'them'} from the list. Removing hides the row; records and history are retained.</p>}{!rows.length&&<Empty icon={ListTodo} title={`No ${filter==='all'?'':filter+' '}requests.`} description={filter==='completed'||filter==='canceled'?'Try a different filter to see more requests.':'Create a new request to start an investigation.'}/>}<div className="task-list">{rows.map(row=>{const {root}=row,exp=state.experiments.find(e=>e.id===root.experimentId),project=state.projects.find(p=>p.id===root.projectId),canceled=row.status==='CANCELED';
- const jobs=row.jobs??[],focusJob=jobs.find(item=>item.unresolved)??jobs.at(-1);
- const jobText=focusJob?`Provider job: ${focusJob.state.toLowerCase().replaceAll('_',' ')}${jobs.length>1?` · ${jobs.length} on record`:''}${focusJob.unresolved?' — needs reconciliation':''}`:'No provider job submitted';
- const assignmentIds=new Set((state.assignments??[]).filter(item=>item.requestId===root.id).map(item=>item.id));
- const reviewRecords=(state.decisions??[]).filter(item=>item.requestId===root.id).length+(row.request?.experimentId?state.reviews.filter(item=>item.experimentId===row.request!.experimentId).length:0)+(state.sealed??[]).filter(item=>item.subjectAssignmentId&&assignmentIds.has(item.subjectAssignmentId)).length;
- const reviewText=reviewRecords?`Independent review: ${reviewRecords} record${reviewRecords===1?'':'s'} on file`:'No independent review';
- return <article className="task-card" key={root.id}><div className="card-heading"><div className="card-title-block"><h3>{row.request?.name??exp?.name??'Research request'}</h3>{row.request&&<span className="task-meta-inline">{row.request.pipeline?(row.request.pipeline.kind==='PLANNING'?'planning pipeline':'result analysis pipeline'):`${row.request.workType.toLowerCase().replaceAll('_',' ')} · ${row.request.mode.toLowerCase()} · Lead: ${state.agents.find(a=>a.id===row.request?.leadAgentId)?.name??'Not selected'}`}</span>}</div><span className={canceled?'status-badge canceled':'status-badge'}>{canceled?'Canceled':row.status==='ACCEPTED'||row.settled?'Completed':row.status.toLowerCase()}</span></div><p className="task-prompt">{root.prompt}</p>{row.request?.pipeline&&<PipelineCard request={row.request} state={state} busy={busy} onAction={onAction}/>}<p className="muted">{project?.name} · {exp?.stage.replaceAll('_',' ').toLowerCase()??'Project request'}</p>{!canceled&&root.blocker&&<p className="blocker">{root.blocker}</p>}{row.request&&<>{row.request.blockers.map(b=><p className="blocker" key={b.code+b.message}>{b.message} {b.action}.</p>)}<details><summary>Participants and acceptance criteria</summary><p>{[...new Set([row.request.leadAgentId,...row.request.participantIds])].filter(Boolean).map(id=>state.agents.find(a=>a.id===id)?.name??id).join(', ')||'None selected'}</p><p>{row.request.acceptanceCriteria||'No criteria recorded.'}</p>{row.canCancel&&<><RequestEditor key={row.id+':'+row.request.revision} request={row.request} state={state} busy={busy} onAction={onAction}/><RequestDispatch key={row.id+":dispatch"} request={row.request} state={state} onState={onState}/></>}<p>{row.request.delegation?'Collaboration requested':'Automatic delegation disabled'} · {jobText} · {reviewText}</p></details></>}{row.request&&!row.canCancel&&row.actions?.awaitingReconciliation&&<RequestDispatch key={row.id+':dispatch'} request={row.request} state={state} onState={onState}/>}{row.request&&canceled&&!row.deletable&&<p className="muted remove-note">Remove stays unavailable while a provider job outcome is unresolved — reconcile the provider outcome first. The record and its history are retained either way.</p>}<div className="button-row task-actions">{row.request&&<><button className="primary" disabled={busy||!row.canCancel} onClick={()=>onAction({type:'request.start',requestId:row.id,expectedRevision:row.request!.revision,idempotencyKey:crypto.randomUUID()})}>Start request</button><button className="secondary" disabled={busy||project?.archived} onClick={()=>onAction({type:'request.duplicate',requestId:row.id,expectedRevision:row.request!.revision,idempotencyKey:crypto.randomUUID()})}>Use as new request</button></>}{exp&&<button className="secondary" onClick={()=>onOpen(exp)}>{canceled?'View research details':'Open research details'}</button>}{row.canCancel&&<button className="cancel-request" disabled={busy||project?.archived} onClick={()=>row.request?onAction({type:'request.cancel',requestId:row.id,expectedRevision:row.request.revision,idempotencyKey:crypto.randomUUID()}):onCancel(row.id)}>Cancel request</button>}{row.deletable&&<button className="cancel-request" disabled={busy} onClick={()=>onAction({type:'task.delete',idempotencyKey:crypto.randomUUID(),taskId:root.id,...(row.request?{expectedRevision:row.request.revision}:{})})}>Remove</button>}</div></article>;})}</div></section>;
+export function WorkQueue({
+  state,
+  busy,
+  onNew,
+  onOpen,
+  onCancel,
+  onAction,
+  onState,
+}: {
+  state: AppState;
+  onAction: (command: Command) => void;
+  busy: boolean;
+  onNew: () => void;
+  onOpen: (e: Experiment) => void;
+  onCancel: (id: string) => void;
+  onState: (s: AppState) => void;
+}) {
+  const [filter, setFilter] = useState<'active' | 'completed' | 'canceled' | 'all'>('active');
+  const [scopeProject, setScopeProject] = useState('');
+  const [scopeAgent, setScopeAgent] = useState('');
+  const [scopeTeam, setScopeTeam] = useState('');
+  const [search, setSearch] = useState('');
+  const queueFilter: QueueFilter = {
+    lifecycle: filter.toUpperCase() as QueueFilter['lifecycle'],
+    ...(scopeProject ? { projectId: scopeProject } : {}),
+    ...(scopeAgent ? { agentId: scopeAgent } : {}),
+    ...(scopeTeam ? { teamId: scopeTeam } : {}),
+    ...(search ? { search } : {}),
+  };
+  const scope = queueScope(state, queueFilter);
+  const rows = [...scope.entries].reverse();
+  // Removable rows this filter hides: the Remove path must be findable without guessing which
+  // lifecycle filter a just-canceled request moved under.
+  const hiddenRemovable = queueScope(state, { ...queueFilter, lifecycle: 'ALL' }).entries.filter(
+    entry => entry.deletable && !scope.entries.some(shown => shown.id === entry.id),
+  );
+  const hiddenCanceled = hiddenRemovable.filter(entry => entry.status === 'CANCELED').length;
+  const hiddenCompleted = hiddenRemovable.length - hiddenCanceled;
+  const hiddenLabel = [
+    hiddenCanceled ? `${hiddenCanceled} canceled` : '',
+    hiddenCompleted ? `${hiddenCompleted} completed` : '',
+  ]
+    .filter(Boolean)
+    .join(' and ');
+  const hiddenFilters = [hiddenCanceled ? 'Canceled' : '', hiddenCompleted ? 'Completed' : '']
+    .filter(Boolean)
+    .join(' or ');
+  return (
+    <section className="work-queue">
+      <div className="section-toolbar">
+        <div>
+          <h2>
+            Work queue ·{' '}
+            {scopeProject ? (state.projects.find(p => p.id === scopeProject)?.name ?? 'one project') : 'all projects'}
+          </h2>
+          <p className="muted">New request → Research details → Review → Provider work → Results</p>
+        </div>
+        <button className="primary" onClick={onNew}>
+          New request
+        </button>
+      </div>
+      <div className="log-filters">
+        <label className="field queue-filter">
+          Show requests
+          <select value={filter} onChange={e => setFilter(e.target.value as typeof filter)}>
+            <option value="active">Active ({scope.counts.active})</option>
+            <option value="completed">Completed ({scope.counts.completed})</option>
+            <option value="canceled">Canceled ({scope.counts.canceled})</option>
+            <option value="all">All requests ({scope.counts.all})</option>
+          </select>
+        </label>
+        <label className="field">
+          Project
+          <select value={scopeProject} onChange={e => setScopeProject(e.target.value)}>
+            <option value="">All projects</option>
+            {state.projects.map(p => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          Agent
+          <select value={scopeAgent} onChange={e => setScopeAgent(e.target.value)}>
+            <option value="">Any agent</option>
+            {state.agents
+              .filter(a => !a.removedAt)
+              .map(a => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+          </select>
+        </label>
+        <label className="field">
+          Team
+          <select value={scopeTeam} onChange={e => setScopeTeam(e.target.value)}>
+            <option value="">Any team</option>
+            {(state.teams ?? []).map(team => (
+              <option key={team.id} value={team.id}>
+                {team.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          Search
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Request or agent" />
+        </label>
+      </div>
+      <p className="muted">
+        {scope.counts.all} request{scope.counts.all === 1 ? '' : 's'} in this scope · {scope.counts.active} active ·{' '}
+        {scope.counts.completed} completed · {scope.counts.canceled} canceled
+      </p>
+      {!!hiddenRemovable.length && (
+        <p className="muted queue-hint">
+          {hiddenLabel} request{hiddenRemovable.length === 1 ? '' : 's'} {hiddenRemovable.length === 1 ? 'is' : 'are'}{' '}
+          hidden by this filter — switch to {hiddenFilters} to review or remove{' '}
+          {hiddenRemovable.length === 1 ? 'it' : 'them'} from the list. Removing hides the row; records and history are
+          retained.
+        </p>
+      )}
+      {!rows.length && (
+        <Empty
+          icon={ListTodo}
+          title={`No ${filter === 'all' ? '' : filter + ' '}requests.`}
+          description={
+            filter === 'completed' || filter === 'canceled'
+              ? 'Try a different filter to see more requests.'
+              : 'Create a new request to start an investigation.'
+          }
+        />
+      )}
+      <div className="task-list">
+        {rows.map(row => {
+          const { root } = row,
+            exp = state.experiments.find(e => e.id === root.experimentId),
+            project = state.projects.find(p => p.id === root.projectId),
+            canceled = row.status === 'CANCELED';
+          const jobs = row.jobs ?? [],
+            focusJob = jobs.find(item => item.unresolved) ?? jobs.at(-1);
+          const jobText = focusJob
+            ? `Provider job: ${focusJob.state.toLowerCase().replaceAll('_', ' ')}${jobs.length > 1 ? ` · ${jobs.length} on record` : ''}${focusJob.unresolved ? ' — needs reconciliation' : ''}`
+            : 'No provider job submitted';
+          const assignmentIds = new Set(
+            (state.assignments ?? []).filter(item => item.requestId === root.id).map(item => item.id),
+          );
+          const reviewRecords =
+            (state.decisions ?? []).filter(item => item.requestId === root.id).length +
+            (row.request?.experimentId
+              ? state.reviews.filter(item => item.experimentId === row.request!.experimentId).length
+              : 0) +
+            (state.sealed ?? []).filter(item => item.subjectAssignmentId && assignmentIds.has(item.subjectAssignmentId))
+              .length;
+          const reviewText = reviewRecords
+            ? `Independent review: ${reviewRecords} record${reviewRecords === 1 ? '' : 's'} on file`
+            : 'No independent review';
+          return (
+            <article className="task-card" key={root.id}>
+              <div className="card-heading">
+                <div className="card-title-block">
+                  <h3>{row.request?.name ?? exp?.name ?? 'Research request'}</h3>
+                  {row.request && (
+                    <span className="task-meta-inline">
+                      {row.request.pipeline
+                        ? row.request.pipeline.kind === 'PLANNING'
+                          ? 'planning pipeline'
+                          : 'result analysis pipeline'
+                        : `${row.request.workType.toLowerCase().replaceAll('_', ' ')} · ${row.request.mode.toLowerCase()} · Lead: ${state.agents.find(a => a.id === row.request?.leadAgentId)?.name ?? 'Not selected'}`}
+                    </span>
+                  )}
+                </div>
+                <span className={canceled ? 'status-badge canceled' : 'status-badge'}>
+                  {canceled
+                    ? 'Canceled'
+                    : row.status === 'ACCEPTED' || row.settled
+                      ? 'Completed'
+                      : row.status.toLowerCase()}
+                </span>
+              </div>
+              <p className="task-prompt">{root.prompt}</p>
+              {row.request?.pipeline && (
+                <PipelineCard request={row.request} state={state} busy={busy} onAction={onAction} />
+              )}
+              <p className="muted">
+                {project?.name} · {exp?.stage.replaceAll('_', ' ').toLowerCase() ?? 'Project request'}
+              </p>
+              {!canceled && root.blocker && <p className="blocker">{root.blocker}</p>}
+              {row.request && (
+                <>
+                  {row.request.blockers.map(b => (
+                    <p className="blocker" key={b.code + b.message}>
+                      {b.message} {b.action}.
+                    </p>
+                  ))}
+                  <details>
+                    <summary>Participants and acceptance criteria</summary>
+                    <p>
+                      {[...new Set([row.request.leadAgentId, ...row.request.participantIds])]
+                        .filter(Boolean)
+                        .map(id => state.agents.find(a => a.id === id)?.name ?? id)
+                        .join(', ') || 'None selected'}
+                    </p>
+                    <p>{row.request.acceptanceCriteria || 'No criteria recorded.'}</p>
+                    {row.canCancel && (
+                      <>
+                        <RequestEditor
+                          key={row.id + ':' + row.request.revision}
+                          request={row.request}
+                          state={state}
+                          busy={busy}
+                          onAction={onAction}
+                        />
+                        <RequestDispatch
+                          key={row.id + ':dispatch'}
+                          request={row.request}
+                          state={state}
+                          onState={onState}
+                        />
+                      </>
+                    )}
+                    <p>
+                      {row.request.delegation ? 'Collaboration requested' : 'Automatic delegation disabled'} · {jobText}{' '}
+                      · {reviewText}
+                    </p>
+                  </details>
+                </>
+              )}
+              {row.request && !row.canCancel && row.actions?.awaitingReconciliation && (
+                <RequestDispatch key={row.id + ':dispatch'} request={row.request} state={state} onState={onState} />
+              )}
+              {row.request && canceled && !row.deletable && (
+                <p className="muted remove-note">
+                  Remove stays unavailable while a provider job outcome is unresolved — reconcile the provider outcome
+                  first. The record and its history are retained either way.
+                </p>
+              )}
+              <div className="button-row task-actions">
+                {row.request && (
+                  <>
+                    <button
+                      className="primary"
+                      disabled={busy || !row.canCancel}
+                      onClick={() =>
+                        onAction({
+                          type: 'request.start',
+                          requestId: row.id,
+                          expectedRevision: row.request!.revision,
+                          idempotencyKey: crypto.randomUUID(),
+                        })
+                      }
+                    >
+                      Start request
+                    </button>
+                    <button
+                      className="secondary"
+                      disabled={busy || project?.archived}
+                      onClick={() =>
+                        onAction({
+                          type: 'request.duplicate',
+                          requestId: row.id,
+                          expectedRevision: row.request!.revision,
+                          idempotencyKey: crypto.randomUUID(),
+                        })
+                      }
+                    >
+                      Use as new request
+                    </button>
+                  </>
+                )}
+                {exp && (
+                  <button className="secondary" onClick={() => onOpen(exp)}>
+                    {canceled ? 'View research details' : 'Open research details'}
+                  </button>
+                )}
+                {row.canCancel && (
+                  <button
+                    className="cancel-request"
+                    disabled={busy || project?.archived}
+                    onClick={() =>
+                      row.request
+                        ? onAction({
+                            type: 'request.cancel',
+                            requestId: row.id,
+                            expectedRevision: row.request.revision,
+                            idempotencyKey: crypto.randomUUID(),
+                          })
+                        : onCancel(row.id)
+                    }
+                  >
+                    Cancel request
+                  </button>
+                )}
+                {row.deletable && (
+                  <button
+                    className="cancel-request"
+                    disabled={busy}
+                    onClick={() =>
+                      onAction({
+                        type: 'task.delete',
+                        idempotencyKey: crypto.randomUUID(),
+                        taskId: root.id,
+                        ...(row.request ? { expectedRevision: row.request.revision } : {}),
+                      })
+                    }
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    </section>
+  );
 }
 
-function RequestEditor({request,state,busy,onAction}:{request:Request;state:AppState;busy:boolean;onAction:(c:Command)=>void}){
- return <form className="request-editor" onSubmit={e=>{e.preventDefault();const f=new FormData(e.currentTarget);onAction({type:'request.update',idempotencyKey:crypto.randomUUID(),requestId:request.id,expectedRevision:request.revision,objective:String(f.get('objective')),leadAgentId:String(f.get('leadAgentId'))||null,participantIds:f.getAll('participantIds').map(String),acceptanceCriteria:String(f.get('acceptanceCriteria'))});}}><fieldset disabled={busy}><label className="field">Objective<textarea name="objective" defaultValue={request.objective} required maxLength={12000}/></label><label className="field">Responsible agent<select name="leadAgentId" defaultValue={request.leadAgentId??''}><option value="">Choose an agent</option>{state.agents.filter(a=>!a.removedAt).map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select></label>{request.mode!=='SINGLE'&&<label className="field">Collaborators<select multiple name="participantIds" defaultValue={request.participantIds}>{state.agents.filter(a=>!a.removedAt).map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select></label>}<label className="field">Acceptance criteria<textarea name="acceptanceCriteria" defaultValue={request.acceptanceCriteria} maxLength={12000}/></label><button className="secondary">Save request revision</button></fieldset></form>;
+function RequestEditor({
+  request,
+  state,
+  busy,
+  onAction,
+}: {
+  request: Request;
+  state: AppState;
+  busy: boolean;
+  onAction: (c: Command) => void;
+}) {
+  return (
+    <form
+      className="request-editor"
+      onSubmit={e => {
+        e.preventDefault();
+        const f = new FormData(e.currentTarget);
+        onAction({
+          type: 'request.update',
+          idempotencyKey: crypto.randomUUID(),
+          requestId: request.id,
+          expectedRevision: request.revision,
+          objective: String(f.get('objective')),
+          leadAgentId: String(f.get('leadAgentId')) || null,
+          participantIds: f.getAll('participantIds').map(String),
+          acceptanceCriteria: String(f.get('acceptanceCriteria')),
+        });
+      }}
+    >
+      <fieldset disabled={busy}>
+        <label className="field">
+          Objective
+          <textarea name="objective" defaultValue={request.objective} required maxLength={12000} />
+        </label>
+        <label className="field">
+          Responsible agent
+          <select name="leadAgentId" defaultValue={request.leadAgentId ?? ''}>
+            <option value="">Choose an agent</option>
+            {state.agents
+              .filter(a => !a.removedAt)
+              .map(a => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+          </select>
+        </label>
+        {request.mode !== 'SINGLE' && (
+          <label className="field">
+            Collaborators
+            <select multiple name="participantIds" defaultValue={request.participantIds}>
+              {state.agents
+                .filter(a => !a.removedAt)
+                .map(a => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
+            </select>
+          </label>
+        )}
+        <label className="field">
+          Acceptance criteria
+          <textarea name="acceptanceCriteria" defaultValue={request.acceptanceCriteria} maxLength={12000} />
+        </label>
+        <button className="secondary">Save request revision</button>
+      </fieldset>
+    </form>
+  );
 }

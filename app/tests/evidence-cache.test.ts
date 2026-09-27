@@ -24,29 +24,85 @@ function fixture(t: TestContext) {
   const workspace = path.join(root, 'workspace');
   mkdirSync(workspace, { recursive: true });
   const store = new OfficeStore(path.join(root, 'workspace.sqlite'));
-  t.after(() => { try { store.close(); } catch { /* already closed */ } removeTreeSync(root); });
+  t.after(() => {
+    try {
+      store.close();
+    } catch {
+      /* already closed */
+    }
+    removeTreeSync(root);
+  });
 
-  const project = store.execute({ type: 'project.create', idempotencyKey: key(), name: 'Alpha', mandate: 'm', budgetCents: 0 }).projects[0];
+  const project = store.execute({
+    type: 'project.create',
+    idempotencyKey: key(),
+    name: 'Alpha',
+    mandate: 'm',
+    budgetCents: 0,
+  }).projects[0];
   const agent = (name: string): Agent => {
-    const value: Agent = { id: randomUUID(), name, provider: 'claude', model: 'opus', team: 'Research', role: 'WORKER', instructions: '',
-      account: 'researcher@example.com', createdAt: new Date().toISOString(), connectionVerifiedAt: new Date().toISOString(), execution: 'HOSTED_SETUP_REQUIRED' };
-    store.addAgent(value); return value;
+    const value: Agent = {
+      id: randomUUID(),
+      name,
+      provider: 'claude',
+      model: 'opus',
+      team: 'Research',
+      role: 'WORKER',
+      instructions: '',
+      account: 'researcher@example.com',
+      createdAt: new Date().toISOString(),
+      connectionVerifiedAt: new Date().toISOString(),
+      execution: 'HOSTED_SETUP_REQUIRED',
+    };
+    store.addAgent(value);
+    return value;
   };
-  const author = agent('Author'), outsider = agent('Outsider');
-  const request = store.execute({ type: 'request.create', idempotencyKey: key(), projectId: project.id, name: 'Audit', hypothesis: 'Check',
-    workType: 'ANALYSIS', mode: 'GROUP', leadAgentId: author.id, participantIds: [outsider.id] }).requests![0];
-  store.execute({ type: 'request.grant', idempotencyKey: key(), requestId: request.id, agentId: author.id, capacity: 'WORKER', granted: true });
+  const author = agent('Author'),
+    outsider = agent('Outsider');
+  const request = store.execute({
+    type: 'request.create',
+    idempotencyKey: key(),
+    projectId: project.id,
+    name: 'Audit',
+    hypothesis: 'Check',
+    workType: 'ANALYSIS',
+    mode: 'GROUP',
+    leadAgentId: author.id,
+    participantIds: [outsider.id],
+  }).requests![0];
+  store.execute({
+    type: 'request.grant',
+    idempotencyKey: key(),
+    requestId: request.id,
+    agentId: author.id,
+    capacity: 'WORKER',
+    granted: true,
+  });
 
   const write = (body: string) => {
-    const data = strToU8(body), hash = sha256(data);
+    const data = strToU8(body),
+      hash = sha256(data);
     const file = path.join(workspace, 'objects', hash.slice(0, 2), hash);
-    mkdirSync(path.dirname(file), { recursive: true }); writeFileSync(file, data);
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, data);
     return { hash, bytes: data.length };
   };
   const artifact = (name: string, body: string) => {
     const object = write(body);
-    store.addArtifact({ id: randomUUID(), projectId: project.id, experimentId: null, name, sha256: object.hash, size: object.bytes, kind: 'RESULT',
-      classification: 'USER_ATTESTED', status: 'QUARANTINED', createdAt: new Date().toISOString(), mediaType: 'text/plain', note: 'fixture' });
+    store.addArtifact({
+      id: randomUUID(),
+      projectId: project.id,
+      experimentId: null,
+      name,
+      sha256: object.hash,
+      size: object.bytes,
+      kind: 'RESULT',
+      classification: 'USER_ATTESTED',
+      status: 'QUARANTINED',
+      createdAt: new Date().toISOString(),
+      mediaType: 'text/plain',
+      note: 'fixture',
+    });
     return object;
   };
   return { root, workspace, store, project, author, outsider, request, artifact };
@@ -104,12 +160,26 @@ test('a changed gate or review state invalidates an interpretation formed before
   const injected: GateReceipt[] = [];
   // A receipt only enters an answer's identity through a branch that exists in the object's project,
   // so the injected gate needs a real branch row behind it — an orphaned receipt proves nothing.
-  const injectedBranch = { id: randomUUID(), projectId: f.project.id, name: 'Injected', parentBranchId: null, lineageId: randomUUID(),
-    stage: 'S2' as const, outcome: 'IN_PROGRESS' as const, specId: null, predictionId: null, revision: 0,
-    createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
-  const store = new Proxy(f.store, { get: (target, property, receiver) => property === 'snapshot'
-    ? () => ({ ...target.snapshot(), branches: [injectedBranch], receipts: [...injected] })
-    : Reflect.get(target, property, receiver) }) as OfficeStore;
+  const injectedBranch = {
+    id: randomUUID(),
+    projectId: f.project.id,
+    name: 'Injected',
+    parentBranchId: null,
+    lineageId: randomUUID(),
+    stage: 'S2' as const,
+    outcome: 'IN_PROGRESS' as const,
+    specId: null,
+    predictionId: null,
+    revision: 0,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  const store = new Proxy(f.store, {
+    get: (target, property, receiver) =>
+      property === 'snapshot'
+        ? () => ({ ...target.snapshot(), branches: [injectedBranch], receipts: [...injected] })
+        : Reflect.get(target, property, receiver),
+  }) as OfficeStore;
   const evidence = new EvidenceService(store, f.workspace);
 
   const first = await evidence.query({ agentId: f.author.id, projectId: f.project.id, pattern: 'LOOK_AHEAD' });
@@ -117,12 +187,25 @@ test('a changed gate or review state invalidates an interpretation formed before
   const reused = await evidence.query({ agentId: f.author.id, projectId: f.project.id, pattern: 'LOOK_AHEAD' });
   assert.equal(evidence.allReceipts().find(r => r.id === reused.receiptId)!.reusedFromReceiptId, first.receiptId);
 
-  injected.push({ id: randomUUID(), branchId: injectedBranch.id, stage: 'S2', gate: 'G-CORRECT', outcome: 'FAIL',
-    subjectHash: sha256(object.hash), specId: randomUUID(), detail: 'Look-ahead reference on row 0.',
-    rationale: 'The log records a look-ahead reference.', evidenceRef: object.hash, createdAt: new Date().toISOString() });
+  injected.push({
+    id: randomUUID(),
+    branchId: injectedBranch.id,
+    stage: 'S2',
+    gate: 'G-CORRECT',
+    outcome: 'FAIL',
+    subjectHash: sha256(object.hash),
+    specId: randomUUID(),
+    detail: 'Look-ahead reference on row 0.',
+    rationale: 'The log records a look-ahead reference.',
+    evidenceRef: object.hash,
+    createdAt: new Date().toISOString(),
+  });
   const afterGate = await evidence.query({ agentId: f.author.id, projectId: f.project.id, pattern: 'LOOK_AHEAD' });
-  assert.equal(evidence.allReceipts().find(r => r.id === afterGate.receiptId)!.reusedFromReceiptId, null,
-    'a changed gate state must not reuse an interpretation formed before it');
+  assert.equal(
+    evidence.allReceipts().find(r => r.id === afterGate.receiptId)!.reusedFromReceiptId,
+    null,
+    'a changed gate state must not reuse an interpretation formed before it',
+  );
 });
 
 test('a cache hit never answers before the grant is checked', async t => {
@@ -135,14 +218,33 @@ test('a cache hit never answers before the grant is checked', async t => {
   assert.deepEqual(warmed.lines, ['row 0 confidential']);
 
   // The ungranted profile asks for the identical thing. The stored answer must not be what decides.
-  await assert.rejects(evidence.read({ agentId: f.outsider.id, objectHash: object.hash }), /not available to this agent/);
-  await assert.rejects(evidence.describe({ agentId: f.outsider.id, objectHash: object.hash }), /not available to this agent/);
-  await assert.rejects(evidence.query({ agentId: f.outsider.id, projectId: f.project.id, pattern: 'confidential' }),
-    /No stored object in this project is available to this agent/);
-  assert.equal(evidence.receiptsFor(f.outsider.id).length, 0, 'a refused request leaves no receipt claiming it was served');
+  await assert.rejects(
+    evidence.read({ agentId: f.outsider.id, objectHash: object.hash }),
+    /not available to this agent/,
+  );
+  await assert.rejects(
+    evidence.describe({ agentId: f.outsider.id, objectHash: object.hash }),
+    /not available to this agent/,
+  );
+  await assert.rejects(
+    evidence.query({ agentId: f.outsider.id, projectId: f.project.id, pattern: 'confidential' }),
+    /No stored object in this project is available to this agent/,
+  );
+  assert.equal(
+    evidence.receiptsFor(f.outsider.id).length,
+    0,
+    'a refused request leaves no receipt claiming it was served',
+  );
 
   // Revoking the author's own grant closes the warmed entry to them too.
-  f.store.execute({ type: 'request.grant', idempotencyKey: key(), requestId: f.request.id, agentId: f.author.id, capacity: 'WORKER', granted: false });
+  f.store.execute({
+    type: 'request.grant',
+    idempotencyKey: key(),
+    requestId: f.request.id,
+    agentId: f.author.id,
+    capacity: 'WORKER',
+    granted: false,
+  });
   await assert.rejects(evidence.read({ agentId: f.author.id, objectHash: object.hash }), /not available to this agent/);
 });
 
@@ -151,7 +253,9 @@ test('an answer cannot be keyed to no stored object at all', async t => {
   const evidence = new EvidenceService(f.store, f.workspace);
   // With nothing stored there is no dependency to key on, and the layer refuses rather than caching
   // an answer whose only identity would be the question that produced it.
-  await assert.rejects(evidence.query({ agentId: f.author.id, projectId: f.project.id, pattern: 'anything' }),
-    /No stored object in this project is available to this agent/);
+  await assert.rejects(
+    evidence.query({ agentId: f.author.id, projectId: f.project.id, pattern: 'anything' }),
+    /No stored object in this project is available to this agent/,
+  );
   assert.equal(evidence.allReceipts().length, 0);
 });

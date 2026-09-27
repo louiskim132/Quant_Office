@@ -77,7 +77,8 @@ function partitionServers(profile: ToolProfile | undefined) {
     cli: servers.filter(server => server.id !== EVIDENCE_SURFACE_ID),
   };
 }
-const surfaceMounted = 'evidence-surface mounted via the packet queries/answers drop-box — the office serves it, no provider flag involved';
+const surfaceMounted =
+  'evidence-surface mounted via the packet queries/answers drop-box — the office serves it, no provider flag involved';
 
 /**
  * Whether the provider has a verified flag that attaches declared MCP servers to the spawned
@@ -89,9 +90,12 @@ export const providerAttachesMcp = (provider: Provider): boolean => provider ===
 
 export function mapToolFlags(input: ToolFlagInput, platform: NodeJS.Platform = process.platform): ToolFlagResult {
   switch (input.provider) {
-    case 'claude': return claudeFlags(input);
-    case 'openai': return codexFlags(input);
-    case 'devin': return devinFlags(input, platform);
+    case 'claude':
+      return claudeFlags(input);
+    case 'openai':
+      return codexFlags(input);
+    case 'devin':
+      return devinFlags(input, platform);
   }
 }
 
@@ -108,7 +112,13 @@ export function mapToolFlags(input: ToolFlagInput, platform: NodeJS.Platform = p
  *   --exclude-dynamic-system-prompt-sections  per-machine sections (cwd, memory paths) move out of the
  *                                system prompt so consecutive hops share one cacheable prefix
  */
-export const CLAUDE_ISOLATION_FLAGS = ['--strict-mcp-config', '--setting-sources', 'project', '--disable-slash-commands', '--exclude-dynamic-system-prompt-sections'] as const;
+export const CLAUDE_ISOLATION_FLAGS = [
+  '--strict-mcp-config',
+  '--setting-sources',
+  'project',
+  '--disable-slash-commands',
+  '--exclude-dynamic-system-prompt-sections',
+] as const;
 /** The built-in tools a packet session needs when its profile names none: file work plus a shell. */
 export const CLAUDE_DEFAULT_TOOLS = ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep'] as const;
 
@@ -122,7 +132,20 @@ export const CLAUDE_DEFAULT_TOOLS = ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'G
  * without which every shell command is rejected (probed: --ignore-user-config broke exec).
  * Measured on this machine: 17.7k → 13.2k input tokens for a one-word reply.
  */
-export const CODEX_DISABLED_FEATURES = ['apps', 'browser_use', 'browser_use_external', 'computer_use', 'in_app_browser', 'image_generation', 'plugins', 'remote_plugin', 'goals', 'tool_suggest', 'skill_search', 'personality'] as const;
+export const CODEX_DISABLED_FEATURES = [
+  'apps',
+  'browser_use',
+  'browser_use_external',
+  'computer_use',
+  'in_app_browser',
+  'image_generation',
+  'plugins',
+  'remote_plugin',
+  'goals',
+  'tool_suggest',
+  'skill_search',
+  'personality',
+] as const;
 /** Reasoning efforts codex accepts as `-c model_reasoning_effort=…` (the set the probed model reported; others are refused by the API). */
 const CODEX_EFFORTS = new Set<Effort>(['low', 'medium', 'high', 'xhigh', 'max']);
 
@@ -145,7 +168,9 @@ function claudeFlags(input: ToolFlagInput): ToolFlagResult {
     // so the boundary survives --dangerously-skip-permissions; --allowedTools is a permission-
     // layer allowlist that the bypass flag renders advisory.
     args.push('--tools', profile.allowedTools.join(','));
-    applied.push(`allowedTools [${profile.allowedTools.join(', ')}] restricted via --tools (verified in claude --help: the available built-in tool set, enforced even under --dangerously-skip-permissions)`);
+    applied.push(
+      `allowedTools [${profile.allowedTools.join(', ')}] restricted via --tools (verified in claude --help: the available built-in tool set, enforced even under --dangerously-skip-permissions)`,
+    );
   } else {
     // No declared allowlist: the default packet tool set, not every built-in (agents, cron,
     // worktrees, web fetch …) whose schemas would ride every call of the session.
@@ -156,18 +181,26 @@ function claudeFlags(input: ToolFlagInput): ToolFlagResult {
   if (servers.cli.length) {
     // Claude launches each server without a shell, so a command carrying its sub-command
     // ("serena start-mcp-server") is split into the executable and leading arguments.
-    const config = Object.fromEntries(servers.cli.map(server => {
-      const [command, ...leading] = server.command.trim().split(/\s+/).filter(Boolean);
-      const args = [...leading, ...(server.args ?? [])];
-      return [server.id, args.length ? { command, args } : { command }];
-    }));
+    const config = Object.fromEntries(
+      servers.cli.map(server => {
+        const [command, ...leading] = server.command.trim().split(/\s+/).filter(Boolean);
+        const args = [...leading, ...(server.args ?? [])];
+        return [server.id, args.length ? { command, args } : { command }];
+      }),
+    );
     args.push('--mcp-config', JSON.stringify({ mcpServers: config }));
-    applied.push(`mcpServers [${servers.cli.map(server => server.id).join(', ')}] attached via --mcp-config (verified in claude --help; each server's readOnly intent is packet-declared metadata, not a CLI flag)`);
+    applied.push(
+      `mcpServers [${servers.cli.map(server => server.id).join(', ')}] attached via --mcp-config (verified in claude --help; each server's readOnly intent is packet-declared metadata, not a CLI flag)`,
+    );
   }
   if (profile?.filesystem)
-    unmapped.push(`filesystem=${profile.filesystem}: declared, not enforced by claude — the installed CLI has no flag that confines filesystem reads (--add-dir only widens access)`);
+    unmapped.push(
+      `filesystem=${profile.filesystem}: declared, not enforced by claude — the installed CLI has no flag that confines filesystem reads (--add-dir only widens access)`,
+    );
   if (profile?.canWrite === false)
-    unmapped.push('canWrite=false: declared, not enforced by claude — the installed CLI has no read-only sandbox flag and --dangerously-skip-permissions bypasses the permission layer');
+    unmapped.push(
+      'canWrite=false: declared, not enforced by claude — the installed CLI has no read-only sandbox flag and --dangerously-skip-permissions bypasses the permission layer',
+    );
   if (profile?.canWrite === true)
     applied.push('canWrite=true permitted by the baseline launch posture (--dangerously-skip-permissions)');
   return { args, bypassFlags: ['--dangerously-skip-permissions'], effortFlag, unmappedEffort, applied, unmapped };
@@ -176,34 +209,61 @@ function claudeFlags(input: ToolFlagInput): ToolFlagResult {
 function codexFlags(input: ToolFlagInput): ToolFlagResult {
   const { model, effort, prompt, profile, delegation } = input;
   // The prompt stays the final argument; the lean flags sit between -m and it.
-  const lean = ['-c', 'mcp_servers={}', ...[...CODEX_DISABLED_FEATURES, ...(delegation ? [] : ['multi_agent'])].flatMap(feature => ['--disable', feature])];
+  const lean = [
+    '-c',
+    'mcp_servers={}',
+    ...[...CODEX_DISABLED_FEATURES, ...(delegation ? [] : ['multi_agent'])].flatMap(feature => ['--disable', feature]),
+  ];
   const mappedEffort = effort !== 'default' && CODEX_EFFORTS.has(effort);
-  const args = ['exec', '-s', 'workspace-write', '--skip-git-repo-check', '-m', model, ...(mappedEffort ? ['-c', `model_reasoning_effort=${effort}`] : []), ...lean, prompt];
+  const args = [
+    'exec',
+    '-s',
+    'workspace-write',
+    '--skip-git-repo-check',
+    '-m',
+    model,
+    ...(mappedEffort ? ['-c', `model_reasoning_effort=${effort}`] : []),
+    ...lean,
+    prompt,
+  ];
   const applied: string[] = [];
   const unmapped: string[] = [];
   if (profile?.canWrite === false) {
     // Verified mode in codex exec --help: read-only removes the write capability entirely.
     args[2] = 'read-only';
-    applied.push('canWrite=false enforced via -s read-only (a verified sandbox mode in codex exec --help — model-generated commands cannot write)');
+    applied.push(
+      'canWrite=false enforced via -s read-only (a verified sandbox mode in codex exec --help — model-generated commands cannot write)',
+    );
   } else if (profile?.canWrite === true) {
-    applied.push('canWrite=true permitted by the baseline -s workspace-write sandbox (writes stay confined to the packet directory)');
+    applied.push(
+      'canWrite=true permitted by the baseline -s workspace-write sandbox (writes stay confined to the packet directory)',
+    );
   }
   if (profile?.filesystem === 'PACKET_ONLY')
-    applied.push(`filesystem=PACKET_ONLY carried by -s ${args[2]} — command writes are confined to the packet directory (the spawn cwd); reads are not confined`);
+    applied.push(
+      `filesystem=PACKET_ONLY carried by -s ${args[2]} — command writes are confined to the packet directory (the spawn cwd); reads are not confined`,
+    );
   else if (profile?.filesystem === 'READ_PROJECT')
-    applied.push(`filesystem=READ_PROJECT satisfied by -s ${args[2]} — reads are already unrestricted (the project included); command writes stay confined to the packet directory`);
+    applied.push(
+      `filesystem=READ_PROJECT satisfied by -s ${args[2]} — reads are already unrestricted (the project included); command writes stay confined to the packet directory`,
+    );
   if (profile?.allowedTools?.length)
-    unmapped.push(`allowedTools [${profile.allowedTools.join(', ')}]: declared, not enforced by codex — codex exec --help documents no per-tool allowlist; the tool surface follows the sandbox mode`);
+    unmapped.push(
+      `allowedTools [${profile.allowedTools.join(', ')}]: declared, not enforced by codex — codex exec --help documents no per-tool allowlist; the tool surface follows the sandbox mode`,
+    );
   const servers = partitionServers(profile);
   if (servers.surface.length) applied.push(surfaceMounted);
   if (servers.cli.length)
-    unmapped.push(`mcpServers [${servers.cli.map(server => server.id).join(', ')}]: declared, not enforced by codex — exec --help documents -c config overrides but not the mcp_servers keys a per-invocation attach would need`);
+    unmapped.push(
+      `mcpServers [${servers.cli.map(server => server.id).join(', ')}]: declared, not enforced by codex — exec --help documents -c config overrides but not the mcp_servers keys a per-invocation attach would need`,
+    );
   return {
     args,
     bypassFlags: ['-s', args[2], '--skip-git-repo-check'],
     effortFlag: mappedEffort ? `-c model_reasoning_effort=${effort}` : null,
     unmappedEffort: effort === 'default' || mappedEffort ? null : effort,
-    applied, unmapped,
+    applied,
+    unmapped,
   };
 }
 
@@ -216,20 +276,30 @@ function devinFlags(input: ToolFlagInput, platform: NodeJS.Platform): ToolFlagRe
     // --sandbox is verified in devin --help but documented macOS seatbelt / Linux bwrap+seccomp
     // only — on Windows passing it would claim a boundary that does not exist.
     if (platform === 'win32')
-      unmapped.push(`filesystem=${profile.filesystem}: declared, not enforced by devin — --sandbox is documented for macOS seatbelt / Linux bwrap only and is a no-op on this Windows machine`);
+      unmapped.push(
+        `filesystem=${profile.filesystem}: declared, not enforced by devin — --sandbox is documented for macOS seatbelt / Linux bwrap only and is a no-op on this Windows machine`,
+      );
     else {
       args.push('--sandbox');
-      applied.push(`filesystem=${profile.filesystem} partially carried by --sandbox (verified in devin --help: exec-tool commands write only within the workspace; the agent's other file tools are not covered and reads are not confined)`);
+      applied.push(
+        `filesystem=${profile.filesystem} partially carried by --sandbox (verified in devin --help: exec-tool commands write only within the workspace; the agent's other file tools are not covered and reads are not confined)`,
+      );
     }
   }
   if (profile?.allowedTools?.length)
-    unmapped.push(`allowedTools [${profile.allowedTools.join(', ')}]: declared, not enforced by devin — devin --help documents no per-tool allowlist flag`);
+    unmapped.push(
+      `allowedTools [${profile.allowedTools.join(', ')}]: declared, not enforced by devin — devin --help documents no per-tool allowlist flag`,
+    );
   const servers = partitionServers(profile);
   if (servers.surface.length) applied.push(surfaceMounted);
   if (servers.cli.length)
-    unmapped.push(`mcpServers [${servers.cli.map(server => server.id).join(', ')}]: declared, not enforced by devin — 'devin mcp' manages server configuration, but no per-invocation flag attaches servers to a -p run`);
+    unmapped.push(
+      `mcpServers [${servers.cli.map(server => server.id).join(', ')}]: declared, not enforced by devin — 'devin mcp' manages server configuration, but no per-invocation flag attaches servers to a -p run`,
+    );
   if (profile?.canWrite === false)
-    unmapped.push('canWrite=false: declared, not enforced by devin — --permission-mode auto auto-approves only read-only tools, but the help does not document that writes are denied non-interactively; the launch still records --permission-mode dangerous verbatim');
+    unmapped.push(
+      'canWrite=false: declared, not enforced by devin — --permission-mode auto auto-approves only read-only tools, but the help does not document that writes are denied non-interactively; the launch still records --permission-mode dangerous verbatim',
+    );
   if (profile?.canWrite === true)
     applied.push('canWrite=true permitted by the baseline --permission-mode dangerous posture');
   return {
@@ -237,6 +307,7 @@ function devinFlags(input: ToolFlagInput, platform: NodeJS.Platform): ToolFlagRe
     bypassFlags: ['--respect-workspace-trust', 'false', '--permission-mode', 'dangerous'],
     effortFlag: null,
     unmappedEffort: effort === 'default' ? null : effort,
-    applied, unmapped,
+    applied,
+    unmapped,
   };
 }

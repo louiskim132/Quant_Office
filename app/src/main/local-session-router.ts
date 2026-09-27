@@ -41,7 +41,9 @@ export class LocalSessionRouter implements ProviderAdapter {
    * version 1 while every registered adapter only writes v2, and a route that hard-requires the
    * v2 contract (LOCAL_CLI_EXEC) would refuse its own freshly minted binding.
    */
-  get packetVersion(): 1 | 2 | undefined { return this.adapters.FLAT_PACKET.packetVersion; }
+  get packetVersion(): 1 | 2 | undefined {
+    return this.adapters.FLAT_PACKET.packetVersion;
+  }
 
   /** Which layout implementation owns this job, and how the decision was reached. */
   private resolve(job: ProviderJob): { adapter: ProviderAdapter; binding: LocalSessionRecord | null } {
@@ -58,16 +60,26 @@ export class LocalSessionRouter implements ProviderAdapter {
     // The binding is created in the durable intent transaction before submit — a submit without
     // one means the wiring, not the worker, is wrong.
     if (!context.localSession)
-      throw new Error('Local submissions require a persisted local-session binding; the dispatch path must create it before calling submit.');
+      throw new Error(
+        'Local submissions require a persisted local-session binding; the dispatch path must create it before calling submit.',
+      );
     return this.adapters[context.localSession.layout].submit(context);
   }
 
-  async observe(job: ProviderJob, _local?: LocalSessionRecord | null, replay?: { receiptHash: string }): Promise<ObserveResult> {
+  async observe(
+    job: ProviderJob,
+    _local?: LocalSessionRecord | null,
+    replay?: { receiptHash: string },
+  ): Promise<ObserveResult> {
     const { adapter, binding } = this.resolve(job);
     // The resolved binding goes with the job: the bound packet version, attempt identity and
     // storage path are what the receipt is validated against — never the receipt's own claims.
     const result = await adapter.observe(job, binding, replay);
-    if (!binding) return { ...result, detail: `[legacy binding: no local-session record — resolved as flat packet by rule, reconcile to bind] ${result.detail}` };
+    if (!binding)
+      return {
+        ...result,
+        detail: `[legacy binding: no local-session record — resolved as flat packet by rule, reconcile to bind] ${result.detail}`,
+      };
     return result;
   }
 
@@ -83,10 +95,19 @@ export class LocalSessionRouter implements ProviderAdapter {
   }
 
   submitEvidence(context: SubmitContext, result: SubmitResult) {
-    return (context.localSession ? this.adapters[context.localSession.layout] : this.adapters.FLAT_PACKET).submitEvidence?.(context, result) ?? [];
+    return (
+      (context.localSession ? this.adapters[context.localSession.layout] : this.adapters.FLAT_PACKET).submitEvidence?.(
+        context,
+        result,
+      ) ?? []
+    );
   }
-  observeEvidence(job: ProviderJob, result: ObserveResult) { return this.resolve(job).adapter.observeEvidence?.(job, result) ?? []; }
-  cancelEvidence(job: ProviderJob) { return this.resolve(job).adapter.cancelEvidence?.(job) ?? []; }
+  observeEvidence(job: ProviderJob, result: ObserveResult) {
+    return this.resolve(job).adapter.observeEvidence?.(job, result) ?? [];
+  }
+  cancelEvidence(job: ProviderJob) {
+    return this.resolve(job).adapter.cancelEvidence?.(job) ?? [];
+  }
 
   async fetch(job: ProviderJob, output: { path: string; sha256: string; bytes: number }) {
     const { adapter, binding } = this.resolve(job);
@@ -99,19 +120,33 @@ export class LocalSessionRouter implements ProviderAdapter {
    * decides which layout owns it, and the binding's storage path (not the external id basename)
    * is what moves. Absent on a layout is an honest refusal.
    */
-  async retire(job: ProviderJob): Promise<{ retired: boolean; alreadyArchived?: boolean; archivedAs?: string; detail: string }> {
+  async retire(
+    job: ProviderJob,
+  ): Promise<{ retired: boolean; alreadyArchived?: boolean; archivedAs?: string; detail: string }> {
     const { adapter, binding } = this.resolve(job);
     const retiring = adapter as ProviderAdapter & {
-      retire?: (id: string, local?: LocalSessionRecord | null) => Promise<{ retired: boolean; alreadyArchived?: boolean; archivedAs?: string; detail: string }>
+      retire?: (
+        id: string,
+        local?: LocalSessionRecord | null,
+      ) => Promise<{ retired: boolean; alreadyArchived?: boolean; archivedAs?: string; detail: string }>;
     };
-    if (typeof retiring.retire !== 'function') return { retired: false, detail: `The ${binding?.layout ?? 'legacy flat'} layout carries no retire operation.` };
+    if (typeof retiring.retire !== 'function')
+      return { retired: false, detail: `The ${binding?.layout ?? 'legacy flat'} layout carries no retire operation.` };
     const packetKey = binding?.storageRelativePath ?? job.externalId;
-    if (!packetKey) return { retired: false, detail: 'Neither the binding nor the job records a packet directory; nothing can be moved.' };
+    if (!packetKey)
+      return {
+        retired: false,
+        detail: 'Neither the binding nor the job records a packet directory; nothing can be moved.',
+      };
     return retiring.retire(packetKey, binding);
   }
 
   /** Retirement evidence names a directory under the flat archive root — the only archive that exists. */
   retireEvidence(externalId: string) {
-    return (this.adapters.FLAT_PACKET as { retireEvidence?: (id: string) => CapabilityEvidence[] }).retireEvidence?.(externalId) ?? [];
+    return (
+      (this.adapters.FLAT_PACKET as { retireEvidence?: (id: string) => CapabilityEvidence[] }).retireEvidence?.(
+        externalId,
+      ) ?? []
+    );
   }
 }

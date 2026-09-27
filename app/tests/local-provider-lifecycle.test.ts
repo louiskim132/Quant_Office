@@ -5,10 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { removeTreeSync } from '../src/main/fsx';
-import {
-  createProviderLifecycle,
-  type ProviderSessionBinding,
-} from '../src/main/local-provider-lifecycle';
+import { createProviderLifecycle, type ProviderSessionBinding } from '../src/main/local-provider-lifecycle';
 import * as records from '../src/main/local-provider-records';
 import { claudeProjectKey } from '../src/main/local-provider-records';
 
@@ -19,7 +16,11 @@ function fixture(t: test.TestContext) {
 }
 
 /** A fake Devin sessions store; `uniqueIds` controls whether id is a PRIMARY KEY. */
-function sessionsDb(dir: string, rows: { id: string; working_directory: string; title?: string }[], uniqueIds = true): string {
+function sessionsDb(
+  dir: string,
+  rows: { id: string; working_directory: string; title?: string }[],
+  uniqueIds = true,
+): string {
   mkdirSync(dir, { recursive: true });
   const file = path.join(dir, 'sessions.db');
   const db = new DatabaseSync(file);
@@ -27,8 +28,11 @@ function sessionsDb(dir: string, rows: { id: string; working_directory: string; 
     id TEXT ${uniqueIds ? 'PRIMARY KEY' : ''}, working_directory TEXT, backend_type TEXT, model TEXT, agent_mode TEXT,
     created_at TEXT, last_activity_at TEXT, title TEXT)`);
   for (const row of rows)
-    db.prepare('INSERT INTO sessions (id, working_directory, title) VALUES (?, ?, ?)')
-      .run(row.id, row.working_directory, row.title ?? null);
+    db.prepare('INSERT INTO sessions (id, working_directory, title) VALUES (?, ?, ?)').run(
+      row.id,
+      row.working_directory,
+      row.title ?? null,
+    );
   db.close();
   return file;
 }
@@ -40,15 +44,21 @@ function rollout(file: string, cwd: string): void {
   writeFileSync(file, `${JSON.stringify(meta)}\n`);
 }
 
-const bind = (provider: ProviderSessionBinding['provider'], providerSessionId: string): ProviderSessionBinding =>
-  ({ provider, providerSessionId });
+const bind = (provider: ProviderSessionBinding['provider'], providerSessionId: string): ProviderSessionBinding => ({
+  provider,
+  providerSessionId,
+});
 
 test('no callable export of the records module deletes provider files', () => {
   for (const name of Object.keys(records))
     assert.doesNotMatch(name, /retire|remove|delete/i, `export ${name} must not be a deletion path`);
   for (const file of ['local-provider-records.ts', 'local-provider-lifecycle.ts']) {
     const source = readFileSync(new URL(`../src/main/${file}`, import.meta.url), 'utf8');
-    assert.doesNotMatch(source, /\brmSync\b|\brm\b\s*\(|\bunlink\b|\bunlinkSync\b/, `${file} must not reach fs deletion`);
+    assert.doesNotMatch(
+      source,
+      /\brmSync\b|\brm\b\s*\(|\bunlink\b|\bunlinkSync\b/,
+      `${file} must not reach fs deletion`,
+    );
   }
 });
 
@@ -74,7 +84,9 @@ test('devin inspect reports missing and never prefix-matches', async t => {
   const lifecycle = createProviderLifecycle({ sessionsDb: dbFile });
   const missing = await lifecycle.inspect(bind('devin', 'mulberry-ferry'));
   assert.equal(missing.status, 'MISSING');
-  const absentStore = await createProviderLifecycle({ sessionsDb: path.join(root, 'no.db') }).inspect(bind('devin', 'x'));
+  const absentStore = await createProviderLifecycle({ sessionsDb: path.join(root, 'no.db') }).inspect(
+    bind('devin', 'x'),
+  );
   assert.equal(absentStore.status, 'MISSING');
   const noStore = await createProviderLifecycle({ sessionsDb: null }).inspect(bind('devin', 'x'));
   assert.equal(noStore.status, 'UNKNOWN');
@@ -82,10 +94,14 @@ test('devin inspect reports missing and never prefix-matches', async t => {
 
 test('devin inspect reports ambiguity and store errors honestly', async t => {
   const { root } = fixture(t);
-  const dbFile = sessionsDb(path.join(root, 'devin', 'cli'), [
-    { id: 'dupe', working_directory: 'C:\\a' },
-    { id: 'dupe', working_directory: 'C:\\b' },
-  ], false);
+  const dbFile = sessionsDb(
+    path.join(root, 'devin', 'cli'),
+    [
+      { id: 'dupe', working_directory: 'C:\\a' },
+      { id: 'dupe', working_directory: 'C:\\b' },
+    ],
+    false,
+  );
   const lifecycle = createProviderLifecycle({ sessionsDb: dbFile });
   const ambiguous = await lifecycle.inspect(bind('devin', 'dupe'));
   assert.equal(ambiguous.status, 'UNKNOWN');
@@ -97,7 +113,10 @@ test('devin inspect reports ambiguity and store errors honestly', async t => {
   assert.equal((await busy.inspect(bind('devin', 'x'))).status, 'BUSY');
   const broken = createProviderLifecycle({
     sessionsDb: dbFile,
-    devinRows: () => ({ records: [], notes: ['The Devin sessions store could not be opened read-only: not a database'] }),
+    devinRows: () => ({
+      records: [],
+      notes: ['The Devin sessions store could not be opened read-only: not a database'],
+    }),
   });
   assert.equal((await broken.inspect(bind('devin', 'x'))).status, 'UNKNOWN');
 });
@@ -113,12 +132,15 @@ test('devin archive runs rm once and maps each outcome honestly', async t => {
   ]);
   const lifecycle = createProviderLifecycle({
     sessionsDb: path.join(root, 'unused.db'),
-    devinRm: async (id) => { calls.push(id); return scripted.get(id) ?? { ok: false, report: 'unscripted' }; },
+    devinRm: async id => {
+      calls.push(id);
+      return scripted.get(id) ?? { ok: false, report: 'unscripted' };
+    },
   });
   assert.equal((await lifecycle.archive(bind('devin', 'gone'), 'op-1')).status, 'ARCHIVED');
   const busy = await lifecycle.archive(bind('devin', 'live'), 'op-2');
   assert.equal(busy.status, 'BUSY');
-  assert.match(busy.detail, /open in another process/, 'the tool\'s own wording rides home');
+  assert.match(busy.detail, /open in another process/, "the tool's own wording rides home");
   const already = await lifecycle.archive(bind('devin', 'absent'), 'op-3');
   assert.equal(already.status, 'ALREADY_ARCHIVED');
   assert.match(already.detail, /already absent/);
@@ -142,7 +164,10 @@ test('claude inspect finds the project key exactly; archive is UNSUPPORTED and p
   const lifecycle = createProviderLifecycle({ claudeProjects: projectsRoot });
   assert.equal((await lifecycle.inspect(bind('claude', key))).status, 'FOUND');
   assert.equal((await lifecycle.inspect(bind('claude', 'no-such-key'))).status, 'MISSING');
-  assert.equal((await createProviderLifecycle({ claudeProjects: null }).inspect(bind('claude', key))).status, 'UNKNOWN');
+  assert.equal(
+    (await createProviderLifecycle({ claudeProjects: null }).inspect(bind('claude', key))).status,
+    'UNKNOWN',
+  );
   const outcome = await lifecycle.archive(bind('claude', key), 'op-1');
   assert.equal(outcome.status, 'UNSUPPORTED');
   assert.match(outcome.detail, /preserved/);

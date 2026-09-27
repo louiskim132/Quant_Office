@@ -1,0 +1,7 @@
+# Keep the LR-0 formatter's LF output stable on Windows checkouts.
+app/src/**/*.ts text eol=lf
+app/src/**/*.tsx text eol=lf
+app/src/**/*.css text eol=lf
+app/tests/**/*.ts text eol=lf
+app/scripts/**/*.mjs text eol=lf
+app/scripts/**/*.ts text eol=lf

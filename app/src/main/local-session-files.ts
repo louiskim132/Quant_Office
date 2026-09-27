@@ -53,14 +53,20 @@ export class GuardedLocalFileIO implements LocalFileIO {
    */
   inspectRoot(root: string): string {
     let stats;
-    try { stats = lstatSync(root); } catch (error) {
-      throw new Error(`The managed root is not present: ${gone(error) ? 'nothing exists at that path' : (error as Error).message}`);
+    try {
+      stats = lstatSync(root);
+    } catch (error) {
+      throw new Error(
+        `The managed root is not present: ${gone(error) ? 'nothing exists at that path' : (error as Error).message}`,
+      );
     }
-    if (stats.isSymbolicLink()) throw new Error('The managed root is a link — it must be a real directory this office owns.');
+    if (stats.isSymbolicLink())
+      throw new Error('The managed root is a link — it must be a real directory this office owns.');
     if (!stats.isDirectory()) throw new Error('The managed root is not a directory.');
     const resolved = realpathSync(root);
     const canonical = lstatSync(resolved);
-    if (canonical.isSymbolicLink() || !canonical.isDirectory()) throw new Error('The managed root does not resolve to a real directory.');
+    if (canonical.isSymbolicLink() || !canonical.isDirectory())
+      throw new Error('The managed root does not resolve to a real directory.');
     return resolved;
   }
 
@@ -76,16 +82,26 @@ export class GuardedLocalFileIO implements LocalFileIO {
     try {
       const stats = fstatSync(handle);
       if (!stats.isFile()) throw new Error(`${relativePath} resolves to something that is not a regular file.`);
-      if (!Number.isSafeInteger(stats.size) || stats.size < 0) throw new Error(`${relativePath} has no trustworthy size.`);
-      if (stats.size > maxBytes) throw new Error(`${relativePath} is ${stats.size} bytes — larger than the ${maxBytes}-byte limit; nothing was allocated or read.`);
+      if (!Number.isSafeInteger(stats.size) || stats.size < 0)
+        throw new Error(`${relativePath} has no trustworthy size.`);
+      if (stats.size > maxBytes)
+        throw new Error(
+          `${relativePath} is ${stats.size} bytes — larger than the ${maxBytes}-byte limit; nothing was allocated or read.`,
+        );
       const bytes = Buffer.alloc(stats.size);
       let offset = 0;
       while (offset < stats.size) {
         const read = readSync(handle, bytes, offset, stats.size - offset, offset);
-        if (read <= 0) throw new Error(`${relativePath} changed while being read — the file is not stable, so nothing is trusted.`);
+        if (read <= 0)
+          throw new Error(`${relativePath} changed while being read — the file is not stable, so nothing is trusted.`);
         offset += read;
       }
-      return { bytes: new Uint8Array(bytes), sha256: createHash('sha256').update(bytes).digest('hex'), byteLength: bytes.length, resolvedRelativePath };
+      return {
+        bytes: new Uint8Array(bytes),
+        sha256: createHash('sha256').update(bytes).digest('hex'),
+        byteLength: bytes.length,
+        resolvedRelativePath,
+      };
     } finally {
       closeSync(handle);
     }
@@ -112,16 +128,26 @@ export class GuardedLocalFileIO implements LocalFileIO {
  * accumulated path is re-checked for containment after every step. When `missingLeafOk` is set the
  * final component may be absent (writeNew's case); every earlier component must still exist.
  */
-function resolveManaged(managedRoot: string, relativePath: string, missingLeafOk = false): { target: string; resolvedRelativePath: string } {
-  if (typeof relativePath !== 'string' || !relativePath.length) throw new Error('A managed path must name a file inside the root.');
-  if (path.isAbsolute(relativePath) || /^[a-zA-Z]:/.test(relativePath)) throw new Error(`${relativePath} is not a relative path inside the managed root.`);
+function resolveManaged(
+  managedRoot: string,
+  relativePath: string,
+  missingLeafOk = false,
+): { target: string; resolvedRelativePath: string } {
+  if (typeof relativePath !== 'string' || !relativePath.length)
+    throw new Error('A managed path must name a file inside the root.');
+  if (path.isAbsolute(relativePath) || /^[a-zA-Z]:/.test(relativePath))
+    throw new Error(`${relativePath} is not a relative path inside the managed root.`);
   const parts = relativePath.split(/[\\/]+/).filter(part => part.length > 0);
   if (!parts.length) throw new Error('A managed path must name a file inside the root.');
   for (const part of parts) {
     if (part === '.' || part === '..') throw new Error(`${relativePath} contains '${part}' — traversal is refused.`);
-    if (ILLEGAL_SEGMENT.test(part)) throw new Error(`${relativePath} contains a segment with characters a managed path cannot carry.`);
+    if (ILLEGAL_SEGMENT.test(part))
+      throw new Error(`${relativePath} contains a segment with characters a managed path cannot carry.`);
     if (DEVICE_NAME.test(part)) throw new Error(`${relativePath} names a reserved device, not a managed file.`);
-    if (TRAILING_ALIAS.test(part)) throw new Error(`${relativePath} ends a segment in a character the filesystem would silently strip — that aliases a different name.`);
+    if (TRAILING_ALIAS.test(part))
+      throw new Error(
+        `${relativePath} ends a segment in a character the filesystem would silently strip — that aliases a different name.`,
+      );
   }
   let current = managedRoot;
   const walked: string[] = [];
@@ -129,17 +155,29 @@ function resolveManaged(managedRoot: string, relativePath: string, missingLeafOk
     const next = path.join(current, parts[i]);
     const leaf = i === parts.length - 1;
     let stats;
-    try { stats = lstatSync(next); } catch (error) {
-      if (leaf && missingLeafOk && gone(error)) { walked.push(parts[i]); return { target: next, resolvedRelativePath: walked.join('/') }; }
-      throw new Error(`${relativePath} is not present inside the managed root at '${parts.slice(0, i + 1).join('/')}'.`);
+    try {
+      stats = lstatSync(next);
+    } catch (error) {
+      if (leaf && missingLeafOk && gone(error)) {
+        walked.push(parts[i]);
+        return { target: next, resolvedRelativePath: walked.join('/') };
+      }
+      throw new Error(
+        `${relativePath} is not present inside the managed root at '${parts.slice(0, i + 1).join('/')}'.`,
+      );
     }
-    if (stats.isSymbolicLink()) throw new Error(`${relativePath} crosses '${parts.slice(0, i + 1).join('/')}', which is a link or reparse point — managed paths never follow one.`);
-    if (!leaf && !stats.isDirectory()) throw new Error(`${relativePath} crosses '${parts.slice(0, i + 1).join('/')}', which is not a directory.`);
+    if (stats.isSymbolicLink())
+      throw new Error(
+        `${relativePath} crosses '${parts.slice(0, i + 1).join('/')}', which is a link or reparse point — managed paths never follow one.`,
+      );
+    if (!leaf && !stats.isDirectory())
+      throw new Error(`${relativePath} crosses '${parts.slice(0, i + 1).join('/')}', which is not a directory.`);
     current = next;
     walked.push(parts[i]);
     // Defense in depth: the accumulated path must stay strictly inside the inspected root.
     const inside = path.relative(managedRoot, current);
-    if (inside.startsWith('..') || path.isAbsolute(inside)) throw new Error(`${relativePath} resolves outside the managed root.`);
+    if (inside.startsWith('..') || path.isAbsolute(inside))
+      throw new Error(`${relativePath} resolves outside the managed root.`);
   }
   return { target: current, resolvedRelativePath: walked.join('/') };
 }
@@ -151,7 +189,9 @@ function resolveManaged(managedRoot: string, relativePath: string, missingLeafOk
 export class FakeLocalFileIO implements LocalFileIO {
   readonly files = new Map<string, Uint8Array>();
   readonly calls: { method: 'inspectRoot' | 'read' | 'writeNew'; root: string; relativePath?: string }[] = [];
-  private key(root: string, relativePath: string): string { return `${root}\n${relativePath}`; }
+  private key(root: string, relativePath: string): string {
+    return `${root}\n${relativePath}`;
+  }
   inspectRoot(root: string): string {
     this.calls.push({ method: 'inspectRoot', root });
     return root;
@@ -160,13 +200,20 @@ export class FakeLocalFileIO implements LocalFileIO {
     this.calls.push({ method: 'read', root, relativePath });
     const bytes = this.files.get(this.key(root, relativePath));
     if (bytes === undefined) throw new Error(`${relativePath} is not present inside the managed root.`);
-    if (bytes.byteLength > maxBytes) throw new Error(`${relativePath} is ${bytes.byteLength} bytes — larger than the ${maxBytes}-byte limit.`);
-    return { bytes: bytes.slice(), sha256: createHash('sha256').update(bytes).digest('hex'), byteLength: bytes.byteLength, resolvedRelativePath: relativePath };
+    if (bytes.byteLength > maxBytes)
+      throw new Error(`${relativePath} is ${bytes.byteLength} bytes — larger than the ${maxBytes}-byte limit.`);
+    return {
+      bytes: bytes.slice(),
+      sha256: createHash('sha256').update(bytes).digest('hex'),
+      byteLength: bytes.byteLength,
+      resolvedRelativePath: relativePath,
+    };
   }
   writeNew(root: string, relativePath: string, bytes: Uint8Array): void {
     this.calls.push({ method: 'writeNew', root, relativePath });
     const key = this.key(root, relativePath);
-    if (this.files.has(key)) throw new Error(`${relativePath} already exists — writeNew never replaces an existing path.`);
+    if (this.files.has(key))
+      throw new Error(`${relativePath} already exists — writeNew never replaces an existing path.`);
     this.files.set(key, bytes.slice());
   }
 }

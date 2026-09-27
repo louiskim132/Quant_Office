@@ -33,16 +33,27 @@ export function latestJobFor(jobs: readonly ProviderJob[] | undefined, assignmen
   let latest: ProviderJob | undefined;
   for (const job of jobs ?? []) {
     if (job.assignmentId !== assignmentId) continue;
-    if (!latest
-      || (job.attempt ?? 1) > (latest.attempt ?? 1)
-      || ((job.attempt ?? 1) === (latest.attempt ?? 1) && (job.createdAt > latest.createdAt || (job.createdAt === latest.createdAt && job.id > latest.id)))) {
+    if (
+      !latest ||
+      (job.attempt ?? 1) > (latest.attempt ?? 1) ||
+      ((job.attempt ?? 1) === (latest.attempt ?? 1) &&
+        (job.createdAt > latest.createdAt || (job.createdAt === latest.createdAt && job.id > latest.id)))
+    ) {
       latest = job;
     }
   }
   return latest;
 }
 
-export interface Transition { to: JobState; at: string; evidence: JobEvidence; externalId?: string; externalUrl?: string; detail: string; outputs?: { path: string; sha256: string; bytes: number }[] }
+export interface Transition {
+  to: JobState;
+  at: string;
+  evidence: JobEvidence;
+  externalId?: string;
+  externalUrl?: string;
+  detail: string;
+  outputs?: { path: string; sha256: string; bytes: number }[];
+}
 
 /**
  * Applies one transition, or explains exactly why it is refused.
@@ -50,14 +61,28 @@ export interface Transition { to: JobState; at: string; evidence: JobEvidence; e
  */
 export function nextJob(job: ProviderJob, transition: Transition): ProviderJob {
   const allowed = JOB_TRANSITIONS[job.state];
-  if (isTerminalJob(job.state)) throw new Error(`This job is already ${job.state.toLowerCase().replaceAll('_', ' ')}; a later message cannot reopen it.`);
-  if (!allowed.includes(transition.to) && !(job.state === transition.to && transition.outputs?.length
-    && ['ACCEPTED','RUNNING','UNKNOWN','CANCEL_REQUESTED'].includes(job.state))) throw new Error(`A job cannot move from ${job.state} to ${transition.to}.`);
+  if (isTerminalJob(job.state))
+    throw new Error(
+      `This job is already ${job.state.toLowerCase().replaceAll('_', ' ')}; a later message cannot reopen it.`,
+    );
+  if (
+    !allowed.includes(transition.to) &&
+    !(
+      job.state === transition.to &&
+      transition.outputs?.length &&
+      ['ACCEPTED', 'RUNNING', 'UNKNOWN', 'CANCEL_REQUESTED'].includes(job.state)
+    )
+  )
+    throw new Error(`A job cannot move from ${job.state} to ${transition.to}.`);
   // Only the provider can report that work was accepted, finished or cancelled.
   if (['ACCEPTED', 'RUNNING', 'COMPLETED'].includes(transition.to) && transition.evidence !== 'PROVIDER_REPORTED')
-    throw new Error(`${transition.to} needs a provider observation; ${transition.evidence.toLowerCase().replaceAll('_', ' ')} evidence cannot establish it.`);
+    throw new Error(
+      `${transition.to} needs a provider observation; ${transition.evidence.toLowerCase().replaceAll('_', ' ')} evidence cannot establish it.`,
+    );
   if (transition.to === 'CANCEL_ACKNOWLEDGED' && job.state !== 'INTENT' && transition.evidence !== 'PROVIDER_REPORTED')
-    throw new Error('Cancellation of dispatched work needs a provider acknowledgement; a stop message or a closed window is not one.');
+    throw new Error(
+      'Cancellation of dispatched work needs a provider acknowledgement; a stop message or a closed window is not one.',
+    );
   if (transition.to === 'ACCEPTED' && !(transition.externalId || job.externalId))
     throw new Error('An accepted job must carry the identifier the provider returned.');
   if (transition.to === 'COMPLETED' && !(transition.outputs?.length || job.outputs.length))
@@ -83,7 +108,17 @@ export function nextJob(job: ProviderJob, transition: Transition): ProviderJob {
  */
 export function reconciliationPlan(job: ProviderJob): { action: 'NONE' | 'MARK_UNKNOWN' | 'OBSERVE'; reason: string } {
   if (isTerminalJob(job.state)) return { action: 'NONE', reason: 'This job already has a recorded outcome.' };
-  if (job.state === 'INTENT') return { action: 'NONE', reason: 'Preparation is durable; the SUBMITTING boundary was never reached. Keep this work prepared without contacting the provider.' };
-  if (job.state === 'SUBMITTING') return { action: 'MARK_UNKNOWN', reason: 'The office was interrupted during submission. The provider may already have accepted this work, so it is never resubmitted automatically.' };
+  if (job.state === 'INTENT')
+    return {
+      action: 'NONE',
+      reason:
+        'Preparation is durable; the SUBMITTING boundary was never reached. Keep this work prepared without contacting the provider.',
+    };
+  if (job.state === 'SUBMITTING')
+    return {
+      action: 'MARK_UNKNOWN',
+      reason:
+        'The office was interrupted during submission. The provider may already have accepted this work, so it is never resubmitted automatically.',
+    };
   return { action: 'OBSERVE', reason: 'The job is open; ask the provider for its current state before acting.' };
 }

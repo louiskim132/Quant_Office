@@ -1,16 +1,80 @@
 /* History page: merged event/work-log stream filter bar and timeline. */
-.history-filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin:0 0 16px}
-.history-filters .field{margin:0;font-size:11px;gap:6px;color:var(--muted)}
-.history-filters select,.history-filters input{width:100%;min-width:0;min-height:34px;box-sizing:border-box}
+.history-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  margin: 0 0 16px;
+}
+.history-filters .field {
+  margin: 0;
+  font-size: 11px;
+  gap: 6px;
+  color: var(--muted);
+}
+.history-filters select,
+.history-filters input {
+  width: 100%;
+  min-width: 0;
+  min-height: 34px;
+  box-sizing: border-box;
+}
 
-.timeline{margin-left:8px;border-left:1px solid var(--border);padding-left:24px}
-.timeline article{position:relative;padding:2px 0 16px;margin-bottom:16px;border-bottom:1px solid var(--border)}
-.timeline article:last-child{border-bottom:0;margin-bottom:0;padding-bottom:0}
-.timeline-dot{position:absolute;left:-30px;top:8px;background:var(--bg);border:2px solid var(--teal);height:9px;width:9px;border-radius:50%}
-.timeline h3{text-transform:capitalize;font-size:12px}
-.timeline time{font-size:10px;color:var(--subtle)}
-.timeline p{font-size:11px;color:var(--muted);margin:8px 0;overflow-wrap:anywhere}
-.event-meta{display:flex;gap:16px;color:var(--subtle);font-size:9px;align-items:baseline}
-.event-meta details{flex:1;min-width:0}
-.event-meta summary{cursor:pointer;color:var(--muted);max-width:120px}
-.event-meta .hash{margin-top:4px}
+.timeline {
+  margin-left: 8px;
+  border-left: 1px solid var(--border);
+  padding-left: 24px;
+}
+.timeline article {
+  position: relative;
+  padding: 2px 0 16px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+.timeline article:last-child {
+  border-bottom: 0;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+.timeline-dot {
+  position: absolute;
+  left: -30px;
+  top: 8px;
+  background: var(--bg);
+  border: 2px solid var(--teal);
+  height: 9px;
+  width: 9px;
+  border-radius: 50%;
+}
+.timeline h3 {
+  text-transform: capitalize;
+  font-size: 12px;
+}
+.timeline time {
+  font-size: 10px;
+  color: var(--subtle);
+}
+.timeline p {
+  font-size: 11px;
+  color: var(--muted);
+  margin: 8px 0;
+  overflow-wrap: anywhere;
+}
+.event-meta {
+  display: flex;
+  gap: 16px;
+  color: var(--subtle);
+  font-size: 9px;
+  align-items: baseline;
+}
+.event-meta details {
+  flex: 1;
+  min-width: 0;
+}
+.event-meta summary {
+  cursor: pointer;
+  color: var(--muted);
+  max-width: 120px;
+}
+.event-meta .hash {
+  margin-top: 4px;
+}

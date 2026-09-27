@@ -56,27 +56,47 @@ const inflight = new Map<string, Promise<void>>();
  * file the office cannot read gets a single FAILED frame instead of silence.
  */
 export function serveEvidenceQuery(args: {
-  dir: string; io: LocalFileIO; name: string; caller: EvidenceCaller; frames: EvidenceFrameHandler;
+  dir: string;
+  io: LocalFileIO;
+  name: string;
+  caller: EvidenceCaller;
+  frames: EvidenceFrameHandler;
 }): Promise<void> {
   if (existsSync(path.join(args.dir, ANSWERS_DIR, args.name))) return Promise.resolve();
   const key = `${args.dir}\0${args.name}`;
   const pending = inflight.get(key);
   if (pending) return pending;
-  const work = serveQueryFile(args).finally(() => { inflight.delete(key); });
+  const work = serveQueryFile(args).finally(() => {
+    inflight.delete(key);
+  });
   inflight.set(key, work);
   return work;
 }
 
 async function serveQueryFile(args: {
-  dir: string; io: LocalFileIO; name: string; caller: EvidenceCaller; frames: EvidenceFrameHandler;
+  dir: string;
+  io: LocalFileIO;
+  name: string;
+  caller: EvidenceCaller;
+  frames: EvidenceFrameHandler;
 }): Promise<void> {
   const answerPath = `${ANSWERS_DIR}/${args.name}`;
   let queryBytes: Uint8Array;
   try {
     queryBytes = args.io.read(args.dir, `${QUERIES_DIR}/${args.name}`, MAX_QUERY_BYTES).bytes;
   } catch {
-    try { args.io.writeNew(args.dir, answerPath, Buffer.from(failedFrame('The office could not read this query file — over the size bound or already gone.'), 'utf8')); }
-    catch { /* an answer already exists or the packet is gone — nothing more to do */ }
+    try {
+      args.io.writeNew(
+        args.dir,
+        answerPath,
+        Buffer.from(
+          failedFrame('The office could not read this query file — over the size bound or already gone.'),
+          'utf8',
+        ),
+      );
+    } catch {
+      /* an answer already exists or the packet is gone — nothing more to do */
+    }
     return;
   }
   const out: string[] = [];
@@ -88,6 +108,9 @@ async function serveQueryFile(args: {
       out.push(failedFrame('The office could not complete this frame.').trimEnd());
     }
   }
-  try { args.io.writeNew(args.dir, answerPath, Buffer.from(`${out.join('\n')}\n`, 'utf8')); }
-  catch { /* an answer already exists — a repeated watcher event is a no-op, never a rewrite */ }
+  try {
+    args.io.writeNew(args.dir, answerPath, Buffer.from(`${out.join('\n')}\n`, 'utf8'));
+  } catch {
+    /* an answer already exists — a repeated watcher event is a no-op, never a rewrite */
+  }
 }

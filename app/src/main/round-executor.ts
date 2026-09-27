@@ -1,7 +1,17 @@
 import { createHash } from 'node:crypto';
 import type { Agent, Assignment, Request, Role, PipelineShape } from '../shared/types.js';
 import type { ToolProfile } from '../shared/tool-profile.js';
-import { buildAnalysisRound, buildCommRound, DIRECTOR_TOOL_PROFILE, type CommRoundEntry, type CommRoundPhase, type CommRoundSpec, buildQuickCommRound, buildQuickAnalysisRound, buildRestartRound } from './round-template.js';
+import {
+  buildAnalysisRound,
+  buildCommRound,
+  DIRECTOR_TOOL_PROFILE,
+  type CommRoundEntry,
+  type CommRoundPhase,
+  type CommRoundSpec,
+  buildQuickCommRound,
+  buildQuickAnalysisRound,
+  buildRestartRound,
+} from './round-template.js';
 
 /**
  * The comm-round mint (inter-agent pipeline): the pure resolution layer between a pipeline
@@ -48,7 +58,8 @@ export const REFINE_NOTE_MAX = 4000;
 const OBJECTIVE_EXCERPT_MAX = 1000;
 
 const live = (agent: Agent): boolean => !agent.removedAt && !agent.deletedAt;
-const firstLive = (agents: readonly Agent[], role: Role): Agent | undefined => agents.find(agent => live(agent) && agent.role === role);
+const firstLive = (agents: readonly Agent[], role: Role): Agent | undefined =>
+  agents.find(agent => live(agent) && agent.role === role);
 
 /**
  * The seat a spec entry fills. Post-extension entries carry armRole themselves; pre-extension
@@ -59,19 +70,32 @@ function armRoleFor(entry: CommRoundEntry): Role {
   const declared = (entry as CommRoundEntry & { armRole?: Role }).armRole;
   if (declared) return declared;
   switch (entry.key) {
-    case 'plan-draft-a': case 'plan-critique-a-on-b': return 'PM_A';
-    case 'plan-draft-b': case 'plan-critique-b-on-a': return 'PM_B';
-    case 'analysis-interpret': case 'analysis-response-interpret': return 'PM_C';
-    case 'analysis-falsify': case 'analysis-response-falsify': return 'PM_D';
-    case 'analysis-digest': case 'analysis-report': return 'WORKER';
-    default: return entry.key.startsWith('implement-') ? 'WORKER' : 'DIRECTOR';
+    case 'plan-draft-a':
+    case 'plan-critique-a-on-b':
+      return 'PM_A';
+    case 'plan-draft-b':
+    case 'plan-critique-b-on-a':
+      return 'PM_B';
+    case 'analysis-interpret':
+    case 'analysis-response-interpret':
+      return 'PM_C';
+    case 'analysis-falsify':
+    case 'analysis-response-falsify':
+      return 'PM_D';
+    case 'analysis-digest':
+    case 'analysis-report':
+      return 'WORKER';
+    default:
+      return entry.key.startsWith('implement-') ? 'WORKER' : 'DIRECTOR';
   }
 }
 
 /** The request objective excerpt inside a hop instruction — bounded, marked when truncated. */
 function objectiveExcerpt(objective: string): string {
   const text = objective.trim();
-  return text.length <= OBJECTIVE_EXCERPT_MAX ? text : `${text.slice(0, OBJECTIVE_EXCERPT_MAX)}…(truncated — the full objective rides the packet)`;
+  return text.length <= OBJECTIVE_EXCERPT_MAX
+    ? text
+    : `${text.slice(0, OBJECTIVE_EXCERPT_MAX)}…(truncated — the full objective rides the packet)`;
 }
 
 /** Where a predecessor hop's verified outputs are staged in a dependent packet (see local-packet.ts). */
@@ -101,9 +125,10 @@ function objectiveText(entry: CommRoundEntry, objective: string, shape: RoundSha
   const opposite = entry.dependsOnKeys[0];
   const slices = shape.workerCount > 1;
   const noDeliverable = "Do not write code or the request's deliverables — later hops do that.";
-  const sliced = (file: string) => slices
-    ? `${file} split into exactly ${shape.workerCount} sections headed "## Slice 1" … "## Slice ${shape.workerCount}" that touch disjoint files (write "EMPTY" under a slice when the work does not split that far)`
-    : file;
+  const sliced = (file: string) =>
+    slices
+      ? `${file} split into exactly ${shape.workerCount} sections headed "## Slice 1" … "## Slice ${shape.workerCount}" that touch disjoint files (write "EMPTY" under a slice when the work does not split that far)`
+      : file;
   const text = (() => {
     switch (entry.key) {
       case 'plan-brief':
@@ -112,11 +137,13 @@ function objectiveText(entry: CommRoundEntry, objective: string, shape: RoundSha
         return `Brief the round: set the work order the declared arms execute against. Write outputs/brief.md — goal, constraints, the exact definitions the result must use, acceptance criteria, and any question the user should answer before planning. ${noDeliverable} Request objective: ${excerpt}`;
       case 'analysis-brief':
         return `Brief the round: set the work order the declared arms execute against. Write outputs/brief.md — the questions to answer, the metrics and thresholds that decide them, and the evidence each arm should check. When an inherited analysis-plan.md is present (pre-registered when the plan was synthesized), adopt it as the work order: restate it briefly and name only deliberate deviations. Do not compute results yourself. Request objective: ${excerpt}`;
-      case 'plan-draft-a': case 'plan-draft-b':
+      case 'plan-draft-a':
+      case 'plan-draft-b':
         if (shape.planKey === entry.key)
           return `Write the plan the worker executes, from the director's brief (${inheritedDir('plan-brief')}brief.md). This is a quick round: there is no second planner, critique or synthesis, so this plan is final. Write ${sliced('outputs/plan.md — approach, files to create, exact definitions, edge cases and how the result will be checked —')}, and outputs/analysis-plan.md — the pre-registered result analysis: metrics, thresholds, decision rules and what would falsify the result, fixed now before any result exists. ${noDeliverable} Request objective: ${excerpt}`;
         return `Draft the plan for this request from the director's brief (${inheritedDir('plan-brief')}brief.md). Write outputs/plan.md — approach, files to create, exact definitions, edge cases, and how the result will be checked. ${noDeliverable} Request objective: ${excerpt}`;
-      case 'plan-critique-a-on-b': case 'plan-critique-b-on-a':
+      case 'plan-critique-a-on-b':
+      case 'plan-critique-b-on-a':
         return `Critique only the named opposite artifact ${opposite} (${inheritedDir(opposite)}plan.md). Write outputs/critique.md — concrete defects, missing cases and the fix for each. Do not write your own plan or code. Request objective: ${excerpt}`;
       case 'plan-synthesis':
         return `Arbitrate the two drafts and their critiques (${inheritedDir('plan-draft-a')}, ${inheritedDir('plan-draft-b')} and the two critique directories) into a single plan. Write ${sliced('outputs/plan.md — the single plan the workers execute —')}, and outputs/analysis-plan.md — the pre-registered result analysis: metrics, thresholds, decision rules and what would falsify the result, fixed now before any result exists. ${noDeliverable} Request objective: ${excerpt}`;
@@ -126,7 +153,8 @@ function objectiveText(entry: CommRoundEntry, objective: string, shape: RoundSha
         return `Interpret the digest against the request. Write outputs/interpretation.md. Request objective: ${excerpt}`;
       case 'analysis-falsify':
         return `Falsify the digest's claims wherever the declared inputs do not support them. Write outputs/falsification.md. Request objective: ${excerpt}`;
-      case 'analysis-response-interpret': case 'analysis-response-falsify':
+      case 'analysis-response-interpret':
+      case 'analysis-response-falsify':
         return `Respond to the named opposite analysis artifact ${opposite} only (${inheritedDir(opposite)}). Write outputs/response.md. Request objective: ${excerpt}`;
       case 'analysis-finalize':
         return shape.planKey === 'analysis-finalize'
@@ -174,10 +202,15 @@ export function planCommRoundMint(input: CommRoundMintInput): CommRoundMint {
   const { request, agents, existingAssignments } = input;
   const roundShape: PipelineShape = input.shape ?? request.pipeline?.shape ?? 'FULL';
   const quick = roundShape === 'QUICK';
-  const kind = request.pipeline?.kind
-    ?? (request.workType === 'PLANNING' || request.workType === 'RESULT_ANALYSIS' ? request.workType : null);
+  const kind =
+    request.pipeline?.kind ??
+    (request.workType === 'PLANNING' || request.workType === 'RESULT_ANALYSIS' ? request.workType : null);
   if (!kind)
-    return { ok: false, missingRoles: [], detail: `Request ${request.id} carries no pipeline kind — workType ${request.workType} is not a comm-round.` };
+    return {
+      ok: false,
+      missingRoles: [],
+      detail: `Request ${request.id} carries no pipeline kind — workType ${request.workType} is not a comm-round.`,
+    };
   const restart = request.revisionOf?.restartAt === 'IMPLEMENTATION' && kind === 'PLANNING';
 
   const director = request.leadAgentId ? agents.find(agent => agent.id === request.leadAgentId) : undefined;
@@ -205,40 +238,74 @@ export function planCommRoundMint(input: CommRoundMintInput): CommRoundMint {
   }
   if (workers.length === 0) missingRoles.push('WORKER');
   if (missingRoles.length)
-    return { ok: false, missingRoles, detail: `Cannot mint the ${kind} round — no live agent fills ${missingRoles.join(', ')}.` };
+    return {
+      ok: false,
+      missingRoles,
+      detail: `Cannot mint the ${kind} round — no live agent fills ${missingRoles.join(', ')}.`,
+    };
 
   const brief = request.objective;
   let spec: CommRoundSpec;
   if (kind === 'PLANNING' && restart) {
-    spec = buildRestartRound({ projectId: request.projectId, brief, directorAgentId: director!.id, workerAgentId: workers[0]!.id, packetVersion: PACKET_VERSION });
+    spec = buildRestartRound({
+      projectId: request.projectId,
+      brief,
+      directorAgentId: director!.id,
+      workerAgentId: workers[0]!.id,
+      packetVersion: PACKET_VERSION,
+    });
   } else if (kind === 'PLANNING' && quick) {
     // The quick round is one planner and one worker — the first live worker fills the seat.
     spec = buildQuickCommRound({
-      projectId: request.projectId, brief, directorAgentId: director!.id,
-      planner: plannerPair![0], workerAgentId: workers[0]!.id, packetVersion: PACKET_VERSION,
+      projectId: request.projectId,
+      brief,
+      directorAgentId: director!.id,
+      planner: plannerPair![0],
+      workerAgentId: workers[0]!.id,
+      packetVersion: PACKET_VERSION,
     });
   } else if (kind === 'PLANNING') {
     spec = buildCommRound({
-      projectId: request.projectId, brief, directorAgentId: director!.id,
-      planners: plannerPair!, workerAgentIds: workers.map(agent => agent.id), packetVersion: PACKET_VERSION,
+      projectId: request.projectId,
+      brief,
+      directorAgentId: director!.id,
+      planners: plannerPair!,
+      workerAgentIds: workers.map(agent => agent.id),
+      packetVersion: PACKET_VERSION,
     });
   } else {
     // The analysis spec's digest and report hops are a single seat — the first live worker
     // fills it deterministically; the rest of the roster is unused in this round shape.
     spec = (quick ? buildQuickAnalysisRound : buildAnalysisRound)({
-      projectId: request.projectId, brief, directorAgentId: director!.id,
-      analysts: analystPair!, workerAgentId: workers[0]!.id, packetVersion: PACKET_VERSION,
+      projectId: request.projectId,
+      brief,
+      directorAgentId: director!.id,
+      analysts: analystPair!,
+      workerAgentId: workers[0]!.id,
+      packetVersion: PACKET_VERSION,
     });
   }
   const implementHops = spec.entries.filter(item => item.key.startsWith('implement-'));
-  const shape: RoundShape = { workerCount: implementHops.length, planKey: implementHops[0]?.dependsOnKeys[0] ?? 'plan-synthesis', restart };
+  const shape: RoundShape = {
+    workerCount: implementHops.length,
+    planKey: implementHops[0]?.dependsOnKeys[0] ?? 'plan-synthesis',
+    restart,
+  };
   const specHash = createHash('sha256').update(JSON.stringify(spec), 'utf8').digest('hex');
   // Request-scoped: two requests mint the same deterministic spec keys, so a pipelineKey lookup
   // must only ever see this request's own assignments — a foreign key is not this round's mint.
-  const minted = new Map(existingAssignments.filter(a => a.requestId === request.id && a.pipelineKey).map(a => [a.pipelineKey!, a.id] as const));
+  const minted = new Map(
+    existingAssignments
+      .filter(a => a.requestId === request.id && a.pipelineKey)
+      .map(a => [a.pipelineKey!, a.id] as const),
+  );
   const entries: MintEntry[] = spec.entries.map(specEntry => ({
-    key: specEntry.key, phase: specEntry.phase, armRole: armRoleFor(specEntry), agentId: specEntry.agentId,
-    toolProfile: specEntry.toolProfile, dependsOnKeys: [...specEntry.dependsOnKeys],
+    key: specEntry.key,
+    phase: specEntry.phase,
+    armRole: armRoleFor(specEntry),
+    agentId: specEntry.agentId,
+    toolProfile: specEntry.toolProfile,
+    dependsOnKeys: [...specEntry.dependsOnKeys],
     ...(specEntry.inputScope ? { inputScope: specEntry.inputScope } : {}),
     objectiveText: objectiveText(specEntry, request.objective, shape),
     ...(minted.has(specEntry.key) ? { assignmentId: minted.get(specEntry.key)! } : {}),
@@ -255,19 +322,24 @@ export function planRefineHop(request: Request, noteText: string, priorBriefKey:
   if (!request.leadAgentId) throw new Error('A refine hop needs the director seat — the request has no leadAgentId.');
   const note = noteText.trim();
   if (!note) throw new Error('A refine hop needs note text — an empty payload carries no instruction.');
-  if (note.length > REFINE_NOTE_MAX) throw new Error(`A refine note is bounded to ${REFINE_NOTE_MAX} characters; this note is ${note.length}.`);
+  if (note.length > REFINE_NOTE_MAX)
+    throw new Error(`A refine note is bounded to ${REFINE_NOTE_MAX} characters; this note is ${note.length}.`);
   if (!priorBriefKey.trim()) throw new Error('A refine hop must name the prior brief key it depends on.');
   const prior = /^brief-refine-(\d+)$/.exec(priorBriefKey);
   const next = prior ? Number(prior[1]) + 1 : 1;
   return {
-    key: `brief-refine-${next}`, phase: 'BRIEF_REFINE', armRole: 'DIRECTOR', agentId: request.leadAgentId,
-    toolProfile: DIRECTOR_TOOL_PROFILE, dependsOnKeys: [priorBriefKey], objectiveText: note,
+    key: `brief-refine-${next}`,
+    phase: 'BRIEF_REFINE',
+    armRole: 'DIRECTOR',
+    agentId: request.leadAgentId,
+    toolProfile: DIRECTOR_TOOL_PROFILE,
+    dependsOnKeys: [priorBriefKey],
+    objectiveText: note,
   };
 }
 
 export type ResolvedMintEntries =
-  | { ok: true; entries: { key: string; assignmentId: string; dependsOn: string[] }[] }
-  | { ok: false; detail: string };
+  { ok: true; entries: { key: string; assignmentId: string; dependsOn: string[] }[] } | { ok: false; detail: string };
 
 /**
  * Re-keys the spec's DAG onto minted assignment ids. The assignment list is scoped to the
@@ -276,20 +348,35 @@ export type ResolvedMintEntries =
  * to exactly one assignment via pipelineKey, and every pipelined assignment must name a spec
  * key — an unknown or unminted key is refused by name rather than resolved to nothing.
  */
-export function mintEntriesFor(spec: CommRoundSpec, request: Request, assignments: readonly Assignment[]): ResolvedMintEntries {
+export function mintEntriesFor(
+  spec: CommRoundSpec,
+  request: Request,
+  assignments: readonly Assignment[],
+): ResolvedMintEntries {
   const byKey = new Map<string, string>();
   for (const assignment of assignments) {
     if (assignment.requestId !== request.id || !assignment.pipelineKey) continue;
     const prior = byKey.get(assignment.pipelineKey);
     if (prior && prior !== assignment.id)
-      return { ok: false, detail: `Two assignments (${prior}, ${assignment.id}) claim pipeline key '${assignment.pipelineKey}' — the mint cannot resolve it.` };
+      return {
+        ok: false,
+        detail: `Two assignments (${prior}, ${assignment.id}) claim pipeline key '${assignment.pipelineKey}' — the mint cannot resolve it.`,
+      };
     byKey.set(assignment.pipelineKey, assignment.id);
   }
   const specKeys = new Set(spec.entries.map(entry => entry.key));
   for (const key of byKey.keys())
-    if (!specKeys.has(key)) return { ok: false, detail: `Assignment pipeline key '${key}' names no entry in this spec — unknown keys are refused.` };
+    if (!specKeys.has(key))
+      return {
+        ok: false,
+        detail: `Assignment pipeline key '${key}' names no entry in this spec — unknown keys are refused.`,
+      };
   const missing = spec.entries.filter(entry => !byKey.has(entry.key)).map(entry => entry.key);
-  if (missing.length) return { ok: false, detail: `No minted assignment carries spec ${missing.length === 1 ? 'key' : 'keys'}: ${missing.join(', ')}.` };
+  if (missing.length)
+    return {
+      ok: false,
+      detail: `No minted assignment carries spec ${missing.length === 1 ? 'key' : 'keys'}: ${missing.join(', ')}.`,
+    };
   return {
     ok: true,
     entries: spec.entries.map(entry => ({

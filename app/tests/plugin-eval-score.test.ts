@@ -4,7 +4,9 @@ import { cpSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writ
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+// Keep the diagnostic on the line covered by @ts-expect-error.
 // @ts-expect-error harness modules are dependency-free untyped .mjs by design (records.mjs contract)
+// prettier-ignore
 import { blindPacket, recordScore, runCodeGate, stripPreamble } from '../benchmarks/plugin-evaluation/harness/score.mjs';
 // @ts-expect-error same — shared record contract is plain .mjs
 import { EVIDENCE_FINDINGS, validateScore } from '../benchmarks/plugin-evaluation/harness/records.mjs';
@@ -54,17 +56,26 @@ function expectedPacket(attemptIds: string[], seed: number) {
   const used = new Set<string>();
   return idx.map(i => {
     let hex = '';
-    do { hex = Math.floor(rng() * 0x100000000).toString(16).padStart(8, '0'); } while (used.has(hex));
+    do {
+      hex = Math.floor(rng() * 0x100000000)
+        .toString(16)
+        .padStart(8, '0');
+    } while (used.has(hex));
     used.add(hex);
     return { attemptId: attemptIds[i], blindName: `report-${hex}.md` };
   });
 }
 
-const BODY = '# Report\nContract v2 governs admission; the v1 rule is superseded.\nAmber inputs need a manifest recheck; Birch is metadata-only.\n';
+const BODY =
+  '# Report\nContract v2 governs admission; the v1 rule is superseded.\nAmber inputs need a manifest recheck; Birch is metadata-only.\n';
 
 function presentFindings() {
-  return EVIDENCE_FINDINGS.map((id: string) => (
-    { id, verdict: 'PRESENT', source: 'catalog.md', heading: 'Beacon source' }));
+  return EVIDENCE_FINDINGS.map((id: string) => ({
+    id,
+    verdict: 'PRESENT',
+    source: 'catalog.md',
+    heading: 'Beacon source',
+  }));
 }
 
 test('blind packet carries no arm/config bytes and reproduces from its seed', t => {
@@ -78,7 +89,10 @@ test('blind packet carries no arm/config bytes and reproduces from its seed', t 
   const evaluatorDir = path.join(root, 'evaluator');
   const r = blindPacket({
     attemptReports: reports.map(({ attemptId, reportPath }) => ({ attemptId, reportPath })),
-    reviewDir, evaluatorDir, seed: 42, now: NOW,
+    reviewDir,
+    evaluatorDir,
+    seed: 42,
+    now: NOW,
   });
 
   const expected = expectedPacket(['as-run', 'b0-run', 'ag-run'], 42);
@@ -107,21 +121,28 @@ test('blind packet carries no arm/config bytes and reproduces from its seed', t 
     mapping.entries.map((e: any) => ({ attemptId: e.attemptId, blindName: e.blindName })),
     expected,
   );
-  assert.deepEqual(readdirSync(reviewDir).filter(f => f.endsWith('.json')), []);
+  assert.deepEqual(
+    readdirSync(reviewDir).filter(f => f.endsWith('.json')),
+    [],
+  );
   for (const a of reports) assert.deepEqual(readdirSync(a.dir), ['REPORT.md']);
 
   // Same seed reproduces the identical packet; a different seed shuffles differently.
   const root2 = path.join(root, 'again');
   const r2 = blindPacket({
     attemptReports: reports.map(({ attemptId, reportPath }) => ({ attemptId, reportPath })),
-    reviewDir: path.join(root2, 'review'), evaluatorDir: path.join(root2, 'evaluator'),
-    seed: 42, now: NOW,
+    reviewDir: path.join(root2, 'review'),
+    evaluatorDir: path.join(root2, 'evaluator'),
+    seed: 42,
+    now: NOW,
   });
   assert.deepEqual(r2.mapping.entries, r.mapping.entries);
   const r3 = blindPacket({
     attemptReports: reports.map(({ attemptId, reportPath }) => ({ attemptId, reportPath })),
-    reviewDir: path.join(root, 'r3', 'review'), evaluatorDir: path.join(root, 'r3', 'evaluator'),
-    seed: 7, now: NOW,
+    reviewDir: path.join(root, 'r3', 'review'),
+    evaluatorDir: path.join(root, 'r3', 'evaluator'),
+    seed: 7,
+    now: NOW,
   });
   assert.notDeepEqual(r3.mapping.entries, r.mapping.entries);
 });
@@ -131,18 +152,31 @@ test('blindPacket refuses any layout that puts the mapping or packet in reach', 
   const a = attempt(root, 'as-run', BODY);
   const arg = (reviewDir: string, evaluatorDir: string) => ({
     attemptReports: [{ attemptId: a.attemptId, reportPath: a.reportPath }],
-    reviewDir, evaluatorDir, seed: 1, now: NOW,
+    reviewDir,
+    evaluatorDir,
+    seed: 1,
+    now: NOW,
   });
-  assert.throws(() => blindPacket(arg(path.join(root, 'rev'), path.join(root, 'rev', 'eval'))),
-    /evaluatorDir must not resolve inside reviewDir/);
-  assert.throws(() => blindPacket(arg(path.join(root, 'rev'), path.join(root, 'rev'))),
-    /evaluatorDir must not resolve inside reviewDir/);
-  assert.throws(() => blindPacket(arg(path.join(root, 'rev'), path.join(a.dir, 'eval'))),
-    /evaluatorDir must not resolve inside attempt dir/);
-  assert.throws(() => blindPacket(arg(path.join(a.dir, 'rev'), path.join(root, 'eval'))),
-    /reviewDir must not resolve inside attempt dir/);
-  assert.throws(() => blindPacket(arg(path.dirname(a.dir), path.join(root, 'eval2'))),
-    /must not resolve inside reviewDir/);
+  assert.throws(
+    () => blindPacket(arg(path.join(root, 'rev'), path.join(root, 'rev', 'eval'))),
+    /evaluatorDir must not resolve inside reviewDir/,
+  );
+  assert.throws(
+    () => blindPacket(arg(path.join(root, 'rev'), path.join(root, 'rev'))),
+    /evaluatorDir must not resolve inside reviewDir/,
+  );
+  assert.throws(
+    () => blindPacket(arg(path.join(root, 'rev'), path.join(a.dir, 'eval'))),
+    /evaluatorDir must not resolve inside attempt dir/,
+  );
+  assert.throws(
+    () => blindPacket(arg(path.join(a.dir, 'rev'), path.join(root, 'eval'))),
+    /reviewDir must not resolve inside attempt dir/,
+  );
+  assert.throws(
+    () => blindPacket(arg(path.dirname(a.dir), path.join(root, 'eval2'))),
+    /must not resolve inside reviewDir/,
+  );
   // A non-empty review dir is refused — packets never mix.
   const reviewDir = path.join(root, 'occupied');
   mkdirSync(reviewDir, { recursive: true });
@@ -165,14 +199,17 @@ test('recordScore emits validateScore-clean records covering all six findings', 
   const b = attempt(root, 'b0-run', BODY);
   const { mapping } = blindPacket({
     attemptReports: [a, b].map(({ attemptId, reportPath }) => ({ attemptId, reportPath })),
-    reviewDir: path.join(root, 'review'), evaluatorDir: path.join(root, 'evaluator'),
-    seed: 9, now: NOW,
+    reviewDir: path.join(root, 'review'),
+    evaluatorDir: path.join(root, 'evaluator'),
+    seed: 9,
+    now: NOW,
   });
   const blindName = mapping.entries[0].blindName;
   const attemptId = mapping.entries[0].attemptId;
 
   const record = recordScore({
-    mapping, blindName,
+    mapping,
+    blindName,
     codeGate: { ran: true, exitCode: 0, passed: 16, total: 16 },
     findings: presentFindings().reverse(), // supplied out of order — record carries contract order
     freshness: { newSourceCited: true, birchRecheck: true, unknownPreserved: true },
@@ -181,12 +218,16 @@ test('recordScore emits validateScore-clean records covering all six findings', 
   assert.equal(record.schema, 'plugin-eval-score@1');
   assert.equal(record.attemptId, attemptId);
   assert.equal(record.blind, true);
-  assert.deepEqual(record.findings.map((f: any) => f.id), EVIDENCE_FINDINGS);
+  assert.deepEqual(
+    record.findings.map((f: any) => f.id),
+    EVIDENCE_FINDINGS,
+  );
   assert.deepEqual(validateScore(record), []);
 
   // An omitted finding is recorded MISSING, not dropped or invented.
   const partial = recordScore({
-    mapping, blindName,
+    mapping,
+    blindName,
     findings: presentFindings().slice(1),
     defects: ['report truncated'],
   });
@@ -200,25 +241,47 @@ test('recordScore emits validateScore-clean records covering all six findings', 
   assert.deepEqual(validateScore(trackB), []);
 
   // A score can never be constructed for an attempt that was never blinded.
-  assert.throws(() => recordScore({ mapping, blindName: 'report-deadbeef.md', findings: presentFindings() }),
-    /no blinded attempt/);
-  assert.throws(() => recordScore({ mapping: { entries: [] }, blindName, findings: presentFindings() }),
-    /no blinded attempt/);
+  assert.throws(
+    () => recordScore({ mapping, blindName: 'report-deadbeef.md', findings: presentFindings() }),
+    /no blinded attempt/,
+  );
+  assert.throws(
+    () => recordScore({ mapping: { entries: [] }, blindName, findings: presentFindings() }),
+    /no blinded attempt/,
+  );
   // Schema-dirty records throw instead of emitting: PRESENT without its citation, a
   // verdict outside FINDING_VERDICTS, and a code gate whose counts were never parsed.
   const noCitation = presentFindings();
   delete noCitation[0].source;
   assert.throws(() => recordScore({ mapping, blindName, findings: noCitation }), /not schema-clean/);
-  assert.throws(() => recordScore({
-    mapping, blindName, findings: [{ id: EVIDENCE_FINDINGS[0], verdict: 'PROBABLY' }],
-  }), /not schema-clean/);
-  assert.throws(() => recordScore({
-    mapping, blindName, findings: presentFindings(),
-    codeGate: { ran: true, exitCode: 1, passed: null, total: null },
-  }), /not schema-clean/);
-  assert.throws(() => recordScore({
-    mapping, blindName, findings: [{ id: 'not-a-finding', verdict: 'MISSING' }],
-  }), /unknown finding id/);
+  assert.throws(
+    () =>
+      recordScore({
+        mapping,
+        blindName,
+        findings: [{ id: EVIDENCE_FINDINGS[0], verdict: 'PROBABLY' }],
+      }),
+    /not schema-clean/,
+  );
+  assert.throws(
+    () =>
+      recordScore({
+        mapping,
+        blindName,
+        findings: presentFindings(),
+        codeGate: { ran: true, exitCode: 1, passed: null, total: null },
+      }),
+    /not schema-clean/,
+  );
+  assert.throws(
+    () =>
+      recordScore({
+        mapping,
+        blindName,
+        findings: [{ id: 'not-a-finding', verdict: 'MISSING' }],
+      }),
+    /unknown finding id/,
+  );
 });
 
 test('runCodeGate reports the real grader: oracle 16/16, starter rejected, garbage recorded not guessed', t => {
@@ -229,15 +292,17 @@ test('runCodeGate reports the real grader: oracle 16/16, starter rejected, garba
   cpSync(taskDir, brokenDir, { recursive: true });
   // The known-correct eligibility logic: contract-v2 precedence as encoded by the
   // grader's own self-check oracle (parse -> kind -> status -> lateness).
-  writeFileSync(path.join(oracleDir, 'src', 'eligibility.mjs'),
+  writeFileSync(
+    path.join(oracleDir, 'src', 'eligibility.mjs'),
     `import { instant } from './time.mjs';\n` +
-    `export function classify(row) {\n` +
-    `  const [observed, available, decision] = [row.observedAt, row.availableAt, row.decisionAt].map(instant);\n` +
-    `  const reason = [observed, available, decision].includes(null) || observed > available ? 'INVALID_TIME'\n` +
-    `    : row.kind !== 'FEATURE' ? 'NOT_FEATURE' : row.status !== 'COMPLETE' ? 'INCOMPLETE'\n` +
-    `    : available > decision ? 'LATE' : 'OK';\n` +
-    `  return { id: row.id, eligible: reason === 'OK', reason };\n` +
-    `}\n`);
+      `export function classify(row) {\n` +
+      `  const [observed, available, decision] = [row.observedAt, row.availableAt, row.decisionAt].map(instant);\n` +
+      `  const reason = [observed, available, decision].includes(null) || observed > available ? 'INVALID_TIME'\n` +
+      `    : row.kind !== 'FEATURE' ? 'NOT_FEATURE' : row.status !== 'COMPLETE' ? 'INCOMPLETE'\n` +
+      `    : available > decision ? 'LATE' : 'OK';\n` +
+      `  return { id: row.id, eligible: reason === 'OK', reason };\n` +
+      `}\n`,
+  );
 
   const oracle = runCodeGate(oracleDir, verifyPath);
   assert.deepEqual(oracle, { ran: true, exitCode: 0, passed: 16, total: 16 });

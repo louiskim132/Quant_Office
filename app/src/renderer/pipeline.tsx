@@ -1,121 +1,1213 @@
-import React,{useState,useEffect,useCallback,useRef} from 'react';
-import type {AppState,ResearchStatus,TrialLedgerEntry,WorkMode,Command} from '../shared/types';
-import type {PipelineAction,PipelineRecord} from '../shared/pipeline';
-import type {Stage,StageFunction} from '../shared/research';
-import {SPEC_SECTIONS,STAGE_FUNCTIONS,STAGE_GATES,STAGES} from '../shared/research';
-import type {ManualRunReadiness} from '../shared/run-package';
-import {BranchStanding} from './review';
-import {EvidencePanel} from './evidence';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import type { AppState, ResearchStatus, TrialLedgerEntry, WorkMode, Command } from '../shared/types';
+import type { PipelineAction, PipelineRecord } from '../shared/pipeline';
+import type { Stage, StageFunction } from '../shared/research';
+import { SPEC_SECTIONS, STAGE_FUNCTIONS, STAGE_GATES, STAGES } from '../shared/research';
+import type { ManualRunReadiness } from '../shared/run-package';
+import { BranchStanding } from './review';
+import { EvidencePanel } from './evidence';
 import './pipeline.css';
 
-const STAGE_TITLES:Record<Stage,string>={S0:'Register and freeze before candidate evaluation',S1:'Build the frozen specification',S2:'Independent correctness review, blinded to performance',S3:'Manual run: export, await, import the bound return',S4:'Evaluate the signal and look for unexpected findings',S5:'Office validation of bound evidence: positions',S6:'Office validation of bound evidence: net economics',S7:'Independent advocate/skeptic and bounded adjudication',S8:'Office validation of bound evidence: final holdout',S9:'Office validation of bound evidence: shadow, no capital',S10:'Office validation of bound evidence: monitor and retire'};
-const CAPABILITY_LABELS:[keyof ManualRunReadiness,string][]=[['agentCommunication','Agent communication'],['agentToolExecution','Agent tool execution'],['manualExperimentHandoff','Manual experiment handoff'],['returnValidation','Returned-result validation'],['protectedEvaluation','Protected evaluation']];
-const PROVENANCE_LABEL:Record<string,string>={PROVIDER_REPORTED:'provider-reported evidence',USER_IMPORTED:'user-run evidence',OFFICE_VALIDATED:'office-validated evidence'};
+const STAGE_TITLES: Record<Stage, string> = {
+  S0: 'Register and freeze before candidate evaluation',
+  S1: 'Build the frozen specification',
+  S2: 'Independent correctness review, blinded to performance',
+  S3: 'Manual run: export, await, import the bound return',
+  S4: 'Evaluate the signal and look for unexpected findings',
+  S5: 'Office validation of bound evidence: positions',
+  S6: 'Office validation of bound evidence: net economics',
+  S7: 'Independent advocate/skeptic and bounded adjudication',
+  S8: 'Office validation of bound evidence: final holdout',
+  S9: 'Office validation of bound evidence: shadow, no capital',
+  S10: 'Office validation of bound evidence: monitor and retire',
+};
+const CAPABILITY_LABELS: [keyof ManualRunReadiness, string][] = [
+  ['agentCommunication', 'Agent communication'],
+  ['agentToolExecution', 'Agent tool execution'],
+  ['manualExperimentHandoff', 'Manual experiment handoff'],
+  ['returnValidation', 'Returned-result validation'],
+  ['protectedEvaluation', 'Protected evaluation'],
+];
+const PROVENANCE_LABEL: Record<string, string> = {
+  PROVIDER_REPORTED: 'provider-reported evidence',
+  USER_IMPORTED: 'user-run evidence',
+  OFFICE_VALIDATED: 'office-validated evidence',
+};
 
-export function ResearchPipeline({state,projectId}:{state:AppState;projectId:string}){
- const [branchId,setBranchId]=useState(''),[subject,setSubject]=useState(''),[requestId,setRequestId]=useState('');
- const [agentId,setAgentId]=useState(''),[functionAgent,setFunctionAgent]=useState(''),[role,setRole]=useState<StageFunction>('PRINCIPAL');
- const [mode,setMode]=useState<WorkMode>('SINGLE'),[busy,setBusy]=useState(false),[message,setMessage]=useState(''),[error,setError]=useState('');
- const [records,setRecords]=useState<PipelineRecord[]>([]),[trials,setTrials]=useState<TrialLedgerEntry[]>([]);
- const loadEpoch=useRef(0);
- const [ledgerMatches,setLedgerMatches]=useState<TrialLedgerEntry[]>([]),[ledgerCursor,setLedgerCursor]=useState<string|null>(null),[ledgerQuery,setLedgerQuery]=useState('');
- const [recordCursor,setRecordCursor]=useState<string|null>(null),[trialCursor,setTrialCursor]=useState<string|null>(null);
- const [status,setStatus]=useState<ResearchStatus|null>(null),[insights,setInsights]=useState<Awaited<ReturnType<typeof window.office.researchInsights>>|null>(null);
- const [artifactId,setArtifactId]=useState(''),[holdoutId,setHoldoutId]=useState(''),[reservationId,setReservationId]=useState(''),[refit,setRefit]=useState('');
- const branches=(state.branches??[]).filter(b=>b.projectId===projectId),branch=branches.find(b=>b.id===branchId);
- const archived=!!state.projects.find(p=>p.id===projectId)?.archived,readOnly=archived||busy;
- const artifacts=state.artifacts.filter(a=>a.projectId===projectId),selectedArtifact=artifacts.find(a=>a.id===artifactId);
- const link=records.find((r):r is Extract<PipelineRecord,{kind:'LINK'}>=>r.kind==='LINK');
- const subjects=[...new Set([...trials.map(t=>t.variantHash),...(link?[link.subjectHash]:[])])];
- const spec=state.specs?.find(s=>s.id===branch?.specId),assignments=(state.assignments??[]).filter(a=>a.research?.branchId===branch?.id);
- const requests=(state.requests??[]).filter(r=>r.projectId===projectId&&r.status!=='CANCELED');
- const readers=state.agents.filter(a=>!a.removedAt&&(state.grants??[]).some(g=>g.projectId===projectId&&g.agentId===a.id&&!g.revokedAt));
- const load=useCallback(async()=>{
-  const epoch=++loadEpoch.current;
-  if(!branchId){setRecords([]);setTrials([]);setInsights(null);return;}
-  const scope={projectId,branchId,limit:100};
-  const [p,t,i]=await Promise.all([window.office.researchPage({...scope,kind:'pipeline'}),window.office.researchPage({...scope,kind:'trials'}),window.office.researchInsights({projectId,branchId})]);
-  if(epoch!==loadEpoch.current)return;
-  setRecords(p.entries as PipelineRecord[]);setRecordCursor(p.nextCursor);setTrials(t.entries as TrialLedgerEntry[]);setTrialCursor(t.nextCursor);setInsights(i);
- },[projectId,branchId]);
- useEffect(()=>{void load().catch(e=>setError((e as Error).message));return window.office.onChanged(()=>{void load().catch(e=>setError((e as Error).message));});},[load]);
- useEffect(()=>{let canceled=false;setStatus(null);if(branch&&subject)void window.office.researchStatus({branchId:branch.id,subjectHash:subject,mode:link?requests.find(r=>r.id===link.requestId)?.mode??mode:mode}).then(s=>{if(!canceled)setStatus(s);}).catch(e=>{if(!canceled)setError((e as Error).message);});return()=>{canceled=true;};},[branch?.id,branch?.revision,subject,mode,records,state]);
- async function run(operation:()=>Promise<unknown>){setBusy(true);setError('');try{const result=await operation();if(result&&typeof result==='object'&&'detail' in result)setMessage(String(result.detail));await load();}catch(e){setError((e as Error).message);}finally{setBusy(false);}}
- async function more(kind:'pipeline'|'trials',cursor:string){const epoch=loadEpoch.current;try{const page=await window.office.researchPage({projectId,branchId,kind,cursor,limit:100});if(epoch!==loadEpoch.current)return;if(kind==='pipeline'){setRecords(rows=>[...rows,...page.entries as PipelineRecord[]]);setRecordCursor(page.nextCursor);}else{setTrials(rows=>[...rows,...page.entries as TrialLedgerEntry[]]);setTrialCursor(page.nextCursor);}}catch(e){if(epoch===loadEpoch.current)setError((e as Error).message);}} const act=(action:PipelineAction)=>run(()=>window.office.pipelineAction(action));
- const command=(value:Command)=>run(()=>window.office.command(value));
- const key=()=>crypto.randomUUID();
- const field=(form:HTMLFormElement,name:string)=>String(new FormData(form).get(name)??'');
- return <section aria-label="Research pipeline" className="standing pipeline">
-  <h2>Research pipeline</h2>
- <p className="pipeline-sub">Separated review branches and evidence readers for this project.</p>
-  {error&&<p role="alert" className="notice error">{error}</p>}{message&&<p role="status">{message}</p>}
-  {archived&&<p>Archived project · research is read-only.</p>}
-  {!branches.length?<p>No research branches are recorded for this project.</p>:<label>Research branch<select aria-label="Research branch" value={branch?.id??''} onChange={e=>{setBranchId(e.target.value);setSubject('');setRecords([]);setTrials([]);}}><option value="">Select a branch</option>{branches.map(b=><option key={b.id} value={b.id}>{b.name} · {b.stage}</option>)}</select></label>}
-  {!archived&&<details><summary>Register a research branch</summary><form onSubmit={e=>{e.preventDefault();const form=e.currentTarget;void run(()=>window.office.command({type:'research.draftSpec',idempotencyKey:key(),projectId,name:field(form,'name'),sections:Object.fromEntries(SPEC_SECTIONS.map(name=>[name,field(form,name)])) as never,thresholds:JSON.parse(field(form,'thresholds')||'[]'),notApplicable:JSON.parse(field(form,'notApplicable')||'[]'),maxSelectionTrials:Number(field(form,'trials'))}));}}>
-   <label>Branch name<input name="name" required maxLength={160}/></label>
-   {SPEC_SECTIONS.map(name=><label key={name}>{name}<textarea name={name} required maxLength={12000}/></label>)}
-   <label>Gate thresholds (JSON)<textarea name="thresholds" defaultValue="[]"/></label><label>Declared inapplicable gates (JSON)<textarea name="notApplicable" defaultValue="[]"/></label>
-   <label>Selection trial limit<input name="trials" type="number" min="1" defaultValue="1" required/></label><button className="primary" disabled={readOnly}>Create draft specification</button>
-  </form></details>}
-  <details><summary>Search prior results before re-entry</summary><form onSubmit={e=>{e.preventDefault();void run(async()=>{const result=await window.office.researchPage({projectId,kind:'trials',query:ledgerQuery,limit:50});setLedgerMatches(result.entries as TrialLedgerEntry[]);setLedgerCursor(result.nextCursor);});}}><label>Search all project trials<input value={ledgerQuery} onChange={e=>setLedgerQuery(e.target.value)}/></label><button className="primary" disabled={busy}>Search ledger</button></form>{ledgerMatches.map(t=><article key={t.id}><b>{t.outcome} · {branches.find(b=>b.id===t.branchId)?.outcome}</b><p>{t.description}</p><p>{branches.find(b=>b.id===t.branchId)?.retiredReason}</p><button className="secondary" onClick={()=>{setBranchId(t.branchId);setSubject(t.variantHash);}}>Read source branch and ancestry</button></article>)}{ledgerCursor&&<button className="secondary" onClick={()=>void run(async()=>{const result=await window.office.researchPage({projectId,kind:'trials',query:ledgerQuery,cursor:ledgerCursor,limit:50});setLedgerMatches(rows=>[...rows,...result.entries as TrialLedgerEntry[]]);setLedgerCursor(result.nextCursor);})}>More prior trials</button>}</details>
-  {branch&&<>
-   <ol aria-label="Stage timeline" className="stage-steps">{STAGES.map(stage=>{const index=STAGES.indexOf(stage),current=STAGES.indexOf(branch.stage);return <li key={stage} data-state={index<current?'done':index===current?'current':'pending'} aria-current={stage===branch.stage?'step':undefined}><span className="stage-marker" aria-hidden="true"/><div className="stage-body"><b>{stage}</b><span className="stage-title">{STAGE_TITLES[stage]}</span>{STAGE_GATES[stage].length>0&&<span className="stage-gates">{STAGE_GATES[stage].join(' · ')}</span>}</div></li>;})}</ol>
-   <p>{branch.stage} · {branch.outcome} · revision {branch.revision}</p>{branch.retiredReason&&<p>Retired: {branch.retiredReason}</p>}
-   {subjects.length?<label>Recorded subject<select aria-label="Recorded subject" value={subjects.includes(subject)?subject:''} onChange={e=>setSubject(e.target.value)}><option value="">Select exact evidence subject</option>{subjects.map(hash=><option key={hash} value={hash}>{hash}</option>)}</select></label>:<p>No gate receipts identify a subject yet. Advancement remains blocked.</p>}
-   <label>Planning mode<select value={mode} onChange={e=>setMode(e.target.value as WorkMode)}><option value="SINGLE">Single agent</option><option value="GROUP">Group</option><option value="TEAM">Team</option></select></label><p>Planning mode previews requirements; it does not change any request or authorize dispatch.</p>
-   {subject&&<BranchStanding branchId={branch.id} subjectHash={subject} mode={link?requests.find(r=>r.id===link.requestId)?.mode??mode:mode} label={value=>value}/>}
-   {spec&&!spec.frozen&&!archived&&<details><summary>Edit draft specification</summary><form key={spec.id} onSubmit={e=>{e.preventDefault();const form=e.currentTarget;void run(()=>window.office.command({type:'research.draftSpec',idempotencyKey:key(),projectId,branchId:branch.id,expectedRevision:branch.revision,name:branch.name,sections:Object.fromEntries(SPEC_SECTIONS.map(name=>[name,field(form,name)])) as never,thresholds:JSON.parse(field(form,'thresholds')),notApplicable:JSON.parse(field(form,'notApplicable')),maxSelectionTrials:Number(field(form,'trials'))}));}}>{SPEC_SECTIONS.map(name=><label key={name}>{name}<textarea name={name} defaultValue={spec.sections[name]} required/></label>)}<label>Gate thresholds (JSON)<textarea name="thresholds" defaultValue={JSON.stringify(spec.thresholds)}/></label><label>Declared inapplicable gates (JSON)<textarea name="notApplicable" defaultValue={JSON.stringify(spec.notApplicable)}/></label><label>Selection trial limit<input name="trials" type="number" min="1" defaultValue={spec.maxSelectionTrials}/></label><button className="primary" disabled={readOnly}>Save draft revision</button></form></details>}
-   {spec&&!spec.frozen&&!archived&&<details><summary>Freeze prospective specification and shadow policy</summary>
-    <form onSubmit={e=>{e.preventDefault();const f=e.currentTarget;void run(async()=>{await window.office.pipelineAction({type:'shadowPolicy',branchId:branch.id,expectedRevision:branch.revision,policy:JSON.parse(field(f,'policy'))});return window.office.command({type:'research.freezeSpec',idempotencyKey:key(),specId:spec.id,expectedRevision:branch.revision,prediction:{outcomeName:field(f,'metric'),sign:field(f,'sign') as 'POSITIVE',expectedLow:Number(field(f,'low')),expectedHigh:Number(field(f,'high')),probability:Number(field(f,'probability')),falsifiers:field(f,'falsifiers').split('\n').filter(Boolean),existingKnowledge:field(f,'knowledge'),retrospective:false}});});}}>
-     <label>Predicted metric<input name="metric" required/></label><label>Expected sign<select name="sign"><option>POSITIVE</option><option>NEGATIVE</option><option>NONE</option></select></label>
-     <label>Expected low<input name="low" type="number" step="any" required/></label><label>Expected high<input name="high" type="number" step="any" required/></label><label>Probability<input name="probability" type="number" min="0" max="1" step="0.01" required/></label>
-     <label>Falsifiers, one per line<textarea name="falsifiers" required/></label><label>Existing knowledge<textarea name="knowledge" required/></label><label>Frozen shadow policy (JSON)<textarea name="policy" required placeholder='{"minimumElapsedSeconds":86400,"minimumObservationTimes":20,"minimumSamples":20,"maximumMissingShare":0.1,"retireBelowMetric":-0.01,"qualifyAtOrAboveMetric":0.01,"driftAlarmMetric":0,"killBelowMetric":-0.05}'/></label><button className="primary" disabled={readOnly}>Freeze registration</button>
-    </form></details>}
-   {!archived&&branch.stage==='S0'&&<details><summary>Bind candidate and request</summary>
-    <form onSubmit={e=>{e.preventDefault();const f=e.currentTarget;void command({type:'research.registerVariant',idempotencyKey:key(),branchId:branch.id,kind:'VARIANT',variantHash:field(f,'hash'),description:field(f,'description')});}}><label>Candidate SHA-256<input name="hash" pattern="[a-f0-9]{64}" required/></label><label>Trial description<input name="description" required/></label><button className="primary" disabled={readOnly||!spec?.frozen}>Register candidate</button></form>
-    <label>Research request<select value={requestId} onChange={e=>setRequestId(e.target.value)}><option value="">Select request</option>{requests.map(r=><option key={r.id} value={r.id}>{r.name} · {r.mode}</option>)}</select></label>
-    <button className="primary" disabled={readOnly||!requestId||!subject} onClick={()=>void act({type:'link',branchId:branch.id,requestId,subjectHash:subject,expectedRevision:branch.revision})}>Link exact candidate</button>
-    <button className="secondary" disabled={readOnly||!link} onClick={()=>void act({type:'verifySpec',branchId:branch.id,expectedRevision:branch.revision})}>Verify prospective specification</button>
-   </details>}
-   {!archived&&<details><summary>Assign stage functions</summary><label>Stage function<select value={role} onChange={e=>setRole(e.target.value as StageFunction)}>{STAGE_FUNCTIONS.map(f=><option key={f}>{f}</option>)}</select></label><label>Appointed profile<select value={functionAgent} onChange={e=>setFunctionAgent(e.target.value)}><option value="">Select profile</option>{state.agents.filter(a=>!a.removedAt).map(a=><option key={a.id} value={a.id}>{a.name} · {a.provider} · {a.model} · {a.effort}</option>)}</select></label><button className="primary" disabled={readOnly||!functionAgent} onClick={()=>void run(()=>window.office.assignResearchFunction({projectId,stage:branch.stage,function:role,agentId:functionAgent,expectedAgentRevision:state.agents.find(a=>a.id===functionAgent)?.revision??0,note:'Explicit appointment from the research workflow.'}))}>Save appointment</button></details>}
-   {!archived&&<div className="button-row"><button className="secondary" disabled={readOnly||!link||!status?.canPrepare} onClick={()=>void act({type:'prepare',branchId:branch.id,expectedRevision:branch.revision})}>Prepare stage</button><button className="primary" disabled={readOnly||!status?.canPromote} onClick={()=>void act({type:'advance',branchId:branch.id,expectedRevision:branch.revision})}>Advance verified stage</button><button className="secondary" disabled={busy} onClick={()=>void run(()=>window.office.exportResearch({branchId:branch.id}))}>Export research evidence</button></div>}
-   {archived&&<button className="secondary" disabled={busy} onClick={()=>void run(()=>window.office.exportResearch({branchId:branch.id}))}>Export research evidence</button>}{link&&<details><summary>Linked request · {requests.find(r=>r.id===link.requestId)?.name??link.requestId}</summary><p>{requests.find(r=>r.id===link.requestId)?.objective}</p><p>Request revision {link.requestRevision} · candidate {link.subjectHash}</p></details>}
-   <label>Imported artifact<select aria-label="Imported artifact" value={artifactId} onChange={e=>setArtifactId(e.target.value)}><option value="">Select imported artifact</option>{artifacts.map(a=><option key={a.id} value={a.id}>{a.name} · {a.status}</option>)}</select></label>
-   {status&&(status.stageDelivery==='USER_RUN'||status.manual?.canValidate)&&<section aria-label="Manual run and office validation" className="manual-run">
-    <h3>Manual run and office validation</h3>
-    {status.stageDelivery==='USER_RUN'&&<>
-     <p>The office exports the frozen run package, the user executes it independently, and the bound return is imported and validated here. No execution job exists for this stage.</p>
-     <div className="button-row"><button className="primary" disabled={readOnly||!status.manual?.canExport} onClick={()=>void act({type:'exportRunPackage',branchId:branch.id,expectedRevision:branch.revision})}>Export run package</button></div>
-     {status.manual?.awaitingPackageId&&<article><b>Awaiting user run · package {status.manual.awaitingPackageId}</b><p>Exported {status.manual.exportedAt}. The wait is durable across restart and restore; nothing is dispatched on this branch's behalf.</p><button className="secondary" disabled={readOnly||!status.manual.canImport||!artifactId} onClick={()=>void act({type:'importRunReturn',branchId:branch.id,artifactId,expectedRevision:branch.revision})}>Import returned bundle</button></article>}
-    </>}
-    {status.manual?.canValidate&&<div className="button-row"><button className="primary" disabled={readOnly} onClick={()=>void act({type:'validateReturn',branchId:branch.id,expectedRevision:branch.revision})}>Validate bound return</button></div>}
-   </section>}
-   {records.some(r=>['RUN_PACKAGE','RUN_RETURN','STAGE_COMPLETION','IMPORT'].includes(r.kind))&&<><h3>Stage evidence</h3>{records.map(r=>{
-    if(r.kind==='RUN_PACKAGE')return <p key={r.id}>Run package {r.packageId} · {r.state.replaceAll('_',' ').toLowerCase()} · exported {r.exportedAt}</p>;
-    if(r.kind==='RUN_RETURN')return <p key={r.id}>Bound return for package {r.packageId} · {r.status.replaceAll('_',' ').toLowerCase()} · user-run evidence · {r.summary}</p>;
-    if(r.kind==='STAGE_COMPLETION')return <p key={r.id}>{r.stage} completed · {PROVENANCE_LABEL[r.provenance??'']??'recorded evidence'} · report {r.reportHash.slice(0,12)}…</p>;
-    if(r.kind==='IMPORT')return <p key={r.id}>Imported {r.format.replaceAll('_',' ').toLowerCase()} · quarantined · {r.summary}</p>;
-    return null;})}</>}
-   <h3>Stage assignments</h3>{assignments.map(a=>{const job=state.jobs?.find(j=>j.assignmentId===a.id);return <article key={a.id}><b>{a.research?.stage} · {a.research?.function}</b><p>{state.agents.find(p=>p.id===a.agentId)?.name} · {job?.state} · {job?.evidence}</p><details><summary>Exact delivered scope</summary><code>{a.research?.contextHash}</code><ul>{state.snapshots?.find(s=>s.id===a.snapshotId)?.files.map(f=><li key={f.path}>{f.path} · {f.bytes} bytes</li>)}</ul></details>{!archived&&<><button className="secondary" disabled={readOnly||job?.state!=='INTENT'||!status?.canPrepare} onClick={()=>void act({type:'submit',assignmentId:a.id})}>Submit verified job</button><button className="secondary" disabled={readOnly||!job||['COMPLETED','FAILED'].includes(job.state)} onClick={()=>void run(()=>window.office.observeJob({assignmentId:a.id}))}>Observe job</button><button className="secondary" disabled={readOnly||job?.state!=='COMPLETED'||a.research?.stage!==branch.stage||a.research?.branchRevision!==branch.revision||!!status?.scheduleBlockers.some(b=>b.includes('execution and advancement are blocked'))} onClick={()=>void act({type:'collect',assignmentId:a.id})}>Collect completed report</button><button className="secondary" disabled={readOnly||!artifactId||a.research?.stage!==branch.stage||a.research?.branchRevision!==branch.revision} onClick={()=>void act({type:'importStageReport',assignmentId:a.id,artifactId})}>Import stage report</button></>}</article>;})}
-   <h3>Independent reviews</h3>{branch.stage==='S7'&&!archived&&assignments.filter(a=>a.research?.stage==='S7').map(a=><React.Fragment key={a.id}><button className="secondary" disabled={readOnly||records.filter(r=>r.kind==='REVIEW_REPORT'&&r.opened).length!==2} onClick={()=>void act({type:'rebuttal',assignmentId:a.id})}>Request bounded rebuttal · {state.agents.find(p=>p.id===a.agentId)?.name}</button><button className="secondary" disabled={readOnly||!artifactId||records.filter(r=>r.kind==='REVIEW_REPORT'&&r.opened).length!==2} onClick={()=>void act({type:'rebuttal',assignmentId:a.id,artifactId})}>Import bounded rebuttal artifact · {state.agents.find(p=>p.id===a.agentId)?.name}</button></React.Fragment>)}{records.filter(r=>r.kind==='REVIEW_ROUND').map(r=><p key={r.id}>{r.kind==='REVIEW_ROUND'&&r.verification==='HOSTED'?'Independent hosted isolation receipt':'Local fixture isolation only'} · round {r.id}</p>)}{records.filter(r=>r.kind==='SEPARATED_REVIEW').map(r=>r.kind==='SEPARATED_REVIEW'&&<p key={r.id}>Office-separated review, independence unverified · {r.stage} · round {r.id} · expires {r.expiresAt}</p>)}
-   {records.filter(r=>r.kind==='REVIEW_REPORT').map(r=>r.kind==='REVIEW_REPORT'&&<article key={r.id}><b>{r.opened?r.verdict:'First report sealed'}</b><p>{r.opened?r.detail:'Other reviews remain unavailable until every first report is immutable.'}</p><small>{r.independence} · {r.reportHash}</small></article>)}
-   {branch.stage==='S7'&&!archived&&<><button className="secondary" disabled={readOnly} onClick={()=>void act({type:'adjudicate',branchId:branch.id,expectedRevision:branch.revision,followUp:false})}>Adjudicate completed round</button><button className="secondary" disabled={readOnly} onClick={()=>void act({type:'adjudicate',branchId:branch.id,expectedRevision:branch.revision,followUp:true})}>Request one decisive test</button></>}
-   <h3>Holdout custody</h3><p>Registration stores bytes outside ordinary evidence. Evaluation spends the frozen candidate/query allowance before delivery. Live isolation requires independent custodian evidence.</p>
-   {!archived&&<form onSubmit={e=>{e.preventDefault();const f=e.currentTarget;void act({type:'holdoutRegister',branchId:branch.id,name:field(f,'name'),timezoneOffsetMinutes:Number(field(f,'offset')),allowancePerPeriod:Number(field(f,'allowance'))});}}><label>Holdout name<input name="name" required/></label><label>Quarter timezone offset (minutes)<input name="offset" type="number" min="-840" max="840" defaultValue="0"/></label><label>Quarter allowance<input name="allowance" type="number" min="1" max="16" defaultValue="1"/></label><button className="primary" disabled={readOnly}>Choose holdout file and register</button></form>}
-   {branch.stage==='S8'&&!archived&&<><label>Registered holdout<select value={holdoutId} onChange={e=>setHoldoutId(e.target.value)}><option value="">Select holdout</option>{records.filter(r=>r.kind==='HOLDOUT').map(r=>r.kind==='HOLDOUT'&&<option key={r.id} value={r.holdout.id}>{r.holdout.name}</option>)}</select></label><label>Verified refit artifact SHA-256<input value={refit} onChange={e=>setRefit(e.target.value)}/></label><button disabled={readOnly||!holdoutId||!artifactId||!/^[a-f0-9]{64}$/.test(refit)} onClick={()=>void act({type:'holdoutReserve',branchId:branch.id,holdoutId,refitHash:refit,queryArtifactId:artifactId})} className="primary">Reserve one exposure</button><label>Reservation<select value={reservationId} onChange={e=>setReservationId(e.target.value)}><option value="">Select reservation</option>{records.filter(r=>r.kind==='RESERVATION').map(r=>r.kind==='RESERVATION'&&<option key={r.id} value={r.reservation.id}>{r.reservation.id.slice(0,8)} · {r.reservation.state}</option>)}</select></label><button className="secondary" disabled={readOnly||!reservationId||!artifactId} onClick={()=>void act({type:'holdoutEvaluate',branchId:branch.id,reservationId,queryArtifactId:artifactId})}>Request holdout evaluation</button><button className="secondary" disabled={readOnly||!reservationId} onClick={()=>void act({type:'holdoutExport',branchId:branch.id,reservationId})}>Export to user custody · consumes exposure</button><button className="secondary" disabled={readOnly||!reservationId||!artifactId} onClick={()=>void act({type:'holdoutImport',branchId:branch.id,reservationId,artifactId})}>Import user-attested custody report</button></>}
-   <section aria-label="Shadow and monitoring"><h3>Shadow and monitoring</h3><p>Simulated fills and separately sourced execution imports remain distinct. Qualification does not authorize capital deployment.</p>
-    {!archived&&['S9','S10'].includes(branch.stage)&&<><button className="secondary" disabled={readOnly||!selectedArtifact||branch.outcome!=='IN_PROGRESS'} onClick={()=>void act({type:'shadowIngest',branchId:branch.id,artifactId,expectedRevision:branch.revision})}>Ingest shadow batch</button><button className="secondary" disabled={readOnly||branch.outcome!=='IN_PROGRESS'} onClick={()=>void act({type:'monitor',branchId:branch.id,expectedRevision:branch.revision})}>Evaluate monitoring window</button></>}
-    {records.filter(r=>r.kind==='SHADOW_BATCH').map(r=>r.kind==='SHADOW_BATCH'&&<p key={r.id}>{r.batchType} · {r.rows} rows · user-imported · admitted {r.createdAt}</p>)}
-    {records.filter(r=>r.kind==='MONITOR_VERDICT').map(r=>r.kind==='MONITOR_VERDICT'&&<article key={r.id}><b>{r.outcome} {r.killed?'· KILL':r.alarm?'· DRIFT ALARM':''}</b><p>{r.detail}</p><p>{r.samples} samples · {(100*r.missingShare).toFixed(1)}% missing · metric {r.metric??'UNKNOWN'}</p><small>USER_IMPORTED · independent G-SHADOW still required</small></article>)}
-   </section>
-   <h3>Lineage trials</h3><ul className="trial-list">{trials.map(t=><li key={t.id}><b>{t.outcome}</b><span>{t.description}</span></li>)}</ul>
-   {trialCursor&&<button className="secondary" onClick={()=>void more('trials',trialCursor!)}>More lineage trials</button>}
-   {insights&&<><h3>Prediction calibration</h3><p>{insights.calibration.detail}</p><h3>Method and version counts</h3>{insights.methods.map(m=><p key={m.name}>{m.name}: {m.detail}</p>)}<h3>Re-entry ancestry</h3>{insights.ancestry.map(n=><p key={n.branch.id}>{n.branch.name} · {n.branch.outcome}{n.retiredReason?' · '+n.retiredReason:''}</p>)}</>}
-   {!archived&&<form onSubmit={e=>{e.preventDefault();const f=e.currentTarget;void command({type:'research.amendBranch',idempotencyKey:key(),branchId:branch.id,expectedRevision:branch.revision,name:field(f,'name'),reason:field(f,'reason')});}}><label>Amended branch name<input name="name" required/></label><label>Reason for re-entry or revision<input name="reason" required/></label><button className="primary" disabled={readOnly}>Create linked revision</button><button type="button" className="secondary" disabled={readOnly||branch.outcome==='RETIRED'} onClick={()=>void command({type:'research.settleBranch',idempotencyKey:key(),branchId:branch.id,expectedRevision:branch.revision,outcome:'RETIRED',reason:'Explicit retirement from the research workflow.'})}>Retire branch</button></form>}
-   {recordCursor&&<button className="secondary" onClick={()=>void more('pipeline',recordCursor!)}>More research evidence</button>}
-  </>}
-  {status?.capabilities&&<section aria-label="Capability readiness" className="readiness"><h3>Readiness</h3><ul className="capability-list">{CAPABILITY_LABELS.map(([key,label])=>{const cap=status.capabilities?.[key];return cap?<li key={key} data-state={cap.state}><b>{label}</b><span className="cap-state">{cap.state==='NOT_CONFIGURED'?'Optional · not configured':cap.state.replaceAll('_',' ').toLowerCase()}</span><span className="cap-detail">{cap.detail}</span></li>:null;})}</ul></section>}
-  <label>Evidence reader<select value={readers.some(a=>a.id===agentId)?agentId:''} onChange={e=>setAgentId(e.target.value)}><option value="">Select a granted profile</option>{readers.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select></label>
-  {readers.some(a=>a.id===agentId)&&<EvidencePanel key={projectId+':'+agentId} projectId={projectId} agentId={agentId}/>}
- </section>;
+export function ResearchPipeline({ state, projectId }: { state: AppState; projectId: string }) {
+  const [branchId, setBranchId] = useState(''),
+    [subject, setSubject] = useState(''),
+    [requestId, setRequestId] = useState('');
+  const [agentId, setAgentId] = useState(''),
+    [functionAgent, setFunctionAgent] = useState(''),
+    [role, setRole] = useState<StageFunction>('PRINCIPAL');
+  const [mode, setMode] = useState<WorkMode>('SINGLE'),
+    [busy, setBusy] = useState(false),
+    [message, setMessage] = useState(''),
+    [error, setError] = useState('');
+  const [records, setRecords] = useState<PipelineRecord[]>([]),
+    [trials, setTrials] = useState<TrialLedgerEntry[]>([]);
+  const loadEpoch = useRef(0);
+  const [ledgerMatches, setLedgerMatches] = useState<TrialLedgerEntry[]>([]),
+    [ledgerCursor, setLedgerCursor] = useState<string | null>(null),
+    [ledgerQuery, setLedgerQuery] = useState('');
+  const [recordCursor, setRecordCursor] = useState<string | null>(null),
+    [trialCursor, setTrialCursor] = useState<string | null>(null);
+  const [status, setStatus] = useState<ResearchStatus | null>(null),
+    [insights, setInsights] = useState<Awaited<ReturnType<typeof window.office.researchInsights>> | null>(null);
+  const [artifactId, setArtifactId] = useState(''),
+    [holdoutId, setHoldoutId] = useState(''),
+    [reservationId, setReservationId] = useState(''),
+    [refit, setRefit] = useState('');
+  const branches = (state.branches ?? []).filter(b => b.projectId === projectId),
+    branch = branches.find(b => b.id === branchId);
+  const archived = !!state.projects.find(p => p.id === projectId)?.archived,
+    readOnly = archived || busy;
+  const artifacts = state.artifacts.filter(a => a.projectId === projectId),
+    selectedArtifact = artifacts.find(a => a.id === artifactId);
+  const link = records.find((r): r is Extract<PipelineRecord, { kind: 'LINK' }> => r.kind === 'LINK');
+  const subjects = [...new Set([...trials.map(t => t.variantHash), ...(link ? [link.subjectHash] : [])])];
+  const spec = state.specs?.find(s => s.id === branch?.specId),
+    assignments = (state.assignments ?? []).filter(a => a.research?.branchId === branch?.id);
+  const requests = (state.requests ?? []).filter(r => r.projectId === projectId && r.status !== 'CANCELED');
+  const readers = state.agents.filter(
+    a =>
+      !a.removedAt && (state.grants ?? []).some(g => g.projectId === projectId && g.agentId === a.id && !g.revokedAt),
+  );
+  const load = useCallback(async () => {
+    const epoch = ++loadEpoch.current;
+    if (!branchId) {
+      setRecords([]);
+      setTrials([]);
+      setInsights(null);
+      return;
+    }
+    const scope = { projectId, branchId, limit: 100 };
+    const [p, t, i] = await Promise.all([
+      window.office.researchPage({ ...scope, kind: 'pipeline' }),
+      window.office.researchPage({ ...scope, kind: 'trials' }),
+      window.office.researchInsights({ projectId, branchId }),
+    ]);
+    if (epoch !== loadEpoch.current) return;
+    setRecords(p.entries as PipelineRecord[]);
+    setRecordCursor(p.nextCursor);
+    setTrials(t.entries as TrialLedgerEntry[]);
+    setTrialCursor(t.nextCursor);
+    setInsights(i);
+  }, [projectId, branchId]);
+  useEffect(() => {
+    void load().catch(e => setError((e as Error).message));
+    return window.office.onChanged(() => {
+      void load().catch(e => setError((e as Error).message));
+    });
+  }, [load]);
+  useEffect(() => {
+    let canceled = false;
+    setStatus(null);
+    if (branch && subject)
+      void window.office
+        .researchStatus({
+          branchId: branch.id,
+          subjectHash: subject,
+          mode: link ? (requests.find(r => r.id === link.requestId)?.mode ?? mode) : mode,
+        })
+        .then(s => {
+          if (!canceled) setStatus(s);
+        })
+        .catch(e => {
+          if (!canceled) setError((e as Error).message);
+        });
+    return () => {
+      canceled = true;
+    };
+  }, [branch?.id, branch?.revision, subject, mode, records, state]);
+  async function run(operation: () => Promise<unknown>) {
+    setBusy(true);
+    setError('');
+    try {
+      const result = await operation();
+      if (result && typeof result === 'object' && 'detail' in result) setMessage(String(result.detail));
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function more(kind: 'pipeline' | 'trials', cursor: string) {
+    const epoch = loadEpoch.current;
+    try {
+      const page = await window.office.researchPage({ projectId, branchId, kind, cursor, limit: 100 });
+      if (epoch !== loadEpoch.current) return;
+      if (kind === 'pipeline') {
+        setRecords(rows => [...rows, ...(page.entries as PipelineRecord[])]);
+        setRecordCursor(page.nextCursor);
+      } else {
+        setTrials(rows => [...rows, ...(page.entries as TrialLedgerEntry[])]);
+        setTrialCursor(page.nextCursor);
+      }
+    } catch (e) {
+      if (epoch === loadEpoch.current) setError((e as Error).message);
+    }
+  }
+  const act = (action: PipelineAction) => run(() => window.office.pipelineAction(action));
+  const command = (value: Command) => run(() => window.office.command(value));
+  const key = () => crypto.randomUUID();
+  const field = (form: HTMLFormElement, name: string) => String(new FormData(form).get(name) ?? '');
+  return (
+    <section aria-label="Research pipeline" className="standing pipeline">
+      <h2>Research pipeline</h2>
+      <p className="pipeline-sub">Separated review branches and evidence readers for this project.</p>
+      {error && (
+        <p role="alert" className="notice error">
+          {error}
+        </p>
+      )}
+      {message && <p role="status">{message}</p>}
+      {archived && <p>Archived project · research is read-only.</p>}
+      {!branches.length ? (
+        <p>No research branches are recorded for this project.</p>
+      ) : (
+        <label>
+          Research branch
+          <select
+            aria-label="Research branch"
+            value={branch?.id ?? ''}
+            onChange={e => {
+              setBranchId(e.target.value);
+              setSubject('');
+              setRecords([]);
+              setTrials([]);
+            }}
+          >
+            <option value="">Select a branch</option>
+            {branches.map(b => (
+              <option key={b.id} value={b.id}>
+                {b.name} · {b.stage}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      {!archived && (
+        <details>
+          <summary>Register a research branch</summary>
+          <form
+            onSubmit={e => {
+              e.preventDefault();
+              const form = e.currentTarget;
+              void run(() =>
+                window.office.command({
+                  type: 'research.draftSpec',
+                  idempotencyKey: key(),
+                  projectId,
+                  name: field(form, 'name'),
+                  sections: Object.fromEntries(SPEC_SECTIONS.map(name => [name, field(form, name)])) as never,
+                  thresholds: JSON.parse(field(form, 'thresholds') || '[]'),
+                  notApplicable: JSON.parse(field(form, 'notApplicable') || '[]'),
+                  maxSelectionTrials: Number(field(form, 'trials')),
+                }),
+              );
+            }}
+          >
+            <label>
+              Branch name
+              <input name="name" required maxLength={160} />
+            </label>
+            {SPEC_SECTIONS.map(name => (
+              <label key={name}>
+                {name}
+                <textarea name={name} required maxLength={12000} />
+              </label>
+            ))}
+            <label>
+              Gate thresholds (JSON)
+              <textarea name="thresholds" defaultValue="[]" />
+            </label>
+            <label>
+              Declared inapplicable gates (JSON)
+              <textarea name="notApplicable" defaultValue="[]" />
+            </label>
+            <label>
+              Selection trial limit
+              <input name="trials" type="number" min="1" defaultValue="1" required />
+            </label>
+            <button className="primary" disabled={readOnly}>
+              Create draft specification
+            </button>
+          </form>
+        </details>
+      )}
+      <details>
+        <summary>Search prior results before re-entry</summary>
+        <form
+          onSubmit={e => {
+            e.preventDefault();
+            void run(async () => {
+              const result = await window.office.researchPage({
+                projectId,
+                kind: 'trials',
+                query: ledgerQuery,
+                limit: 50,
+              });
+              setLedgerMatches(result.entries as TrialLedgerEntry[]);
+              setLedgerCursor(result.nextCursor);
+            });
+          }}
+        >
+          <label>
+            Search all project trials
+            <input value={ledgerQuery} onChange={e => setLedgerQuery(e.target.value)} />
+          </label>
+          <button className="primary" disabled={busy}>
+            Search ledger
+          </button>
+        </form>
+        {ledgerMatches.map(t => (
+          <article key={t.id}>
+            <b>
+              {t.outcome} · {branches.find(b => b.id === t.branchId)?.outcome}
+            </b>
+            <p>{t.description}</p>
+            <p>{branches.find(b => b.id === t.branchId)?.retiredReason}</p>
+            <button
+              className="secondary"
+              onClick={() => {
+                setBranchId(t.branchId);
+                setSubject(t.variantHash);
+              }}
+            >
+              Read source branch and ancestry
+            </button>
+          </article>
+        ))}
+        {ledgerCursor && (
+          <button
+            className="secondary"
+            onClick={() =>
+              void run(async () => {
+                const result = await window.office.researchPage({
+                  projectId,
+                  kind: 'trials',
+                  query: ledgerQuery,
+                  cursor: ledgerCursor,
+                  limit: 50,
+                });
+                setLedgerMatches(rows => [...rows, ...(result.entries as TrialLedgerEntry[])]);
+                setLedgerCursor(result.nextCursor);
+              })
+            }
+          >
+            More prior trials
+          </button>
+        )}
+      </details>
+      {branch && (
+        <>
+          <ol aria-label="Stage timeline" className="stage-steps">
+            {STAGES.map(stage => {
+              const index = STAGES.indexOf(stage),
+                current = STAGES.indexOf(branch.stage);
+              return (
+                <li
+                  key={stage}
+                  data-state={index < current ? 'done' : index === current ? 'current' : 'pending'}
+                  aria-current={stage === branch.stage ? 'step' : undefined}
+                >
+                  <span className="stage-marker" aria-hidden="true" />
+                  <div className="stage-body">
+                    <b>{stage}</b>
+                    <span className="stage-title">{STAGE_TITLES[stage]}</span>
+                    {STAGE_GATES[stage].length > 0 && (
+                      <span className="stage-gates">{STAGE_GATES[stage].join(' · ')}</span>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
+          <p>
+            {branch.stage} · {branch.outcome} · revision {branch.revision}
+          </p>
+          {branch.retiredReason && <p>Retired: {branch.retiredReason}</p>}
+          {subjects.length ? (
+            <label>
+              Recorded subject
+              <select
+                aria-label="Recorded subject"
+                value={subjects.includes(subject) ? subject : ''}
+                onChange={e => setSubject(e.target.value)}
+              >
+                <option value="">Select exact evidence subject</option>
+                {subjects.map(hash => (
+                  <option key={hash} value={hash}>
+                    {hash}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <p>No gate receipts identify a subject yet. Advancement remains blocked.</p>
+          )}
+          <label>
+            Planning mode
+            <select value={mode} onChange={e => setMode(e.target.value as WorkMode)}>
+              <option value="SINGLE">Single agent</option>
+              <option value="GROUP">Group</option>
+              <option value="TEAM">Team</option>
+            </select>
+          </label>
+          <p>Planning mode previews requirements; it does not change any request or authorize dispatch.</p>
+          {subject && (
+            <BranchStanding
+              branchId={branch.id}
+              subjectHash={subject}
+              mode={link ? (requests.find(r => r.id === link.requestId)?.mode ?? mode) : mode}
+              label={value => value}
+            />
+          )}
+          {spec && !spec.frozen && !archived && (
+            <details>
+              <summary>Edit draft specification</summary>
+              <form
+                key={spec.id}
+                onSubmit={e => {
+                  e.preventDefault();
+                  const form = e.currentTarget;
+                  void run(() =>
+                    window.office.command({
+                      type: 'research.draftSpec',
+                      idempotencyKey: key(),
+                      projectId,
+                      branchId: branch.id,
+                      expectedRevision: branch.revision,
+                      name: branch.name,
+                      sections: Object.fromEntries(SPEC_SECTIONS.map(name => [name, field(form, name)])) as never,
+                      thresholds: JSON.parse(field(form, 'thresholds')),
+                      notApplicable: JSON.parse(field(form, 'notApplicable')),
+                      maxSelectionTrials: Number(field(form, 'trials')),
+                    }),
+                  );
+                }}
+              >
+                {SPEC_SECTIONS.map(name => (
+                  <label key={name}>
+                    {name}
+                    <textarea name={name} defaultValue={spec.sections[name]} required />
+                  </label>
+                ))}
+                <label>
+                  Gate thresholds (JSON)
+                  <textarea name="thresholds" defaultValue={JSON.stringify(spec.thresholds)} />
+                </label>
+                <label>
+                  Declared inapplicable gates (JSON)
+                  <textarea name="notApplicable" defaultValue={JSON.stringify(spec.notApplicable)} />
+                </label>
+                <label>
+                  Selection trial limit
+                  <input name="trials" type="number" min="1" defaultValue={spec.maxSelectionTrials} />
+                </label>
+                <button className="primary" disabled={readOnly}>
+                  Save draft revision
+                </button>
+              </form>
+            </details>
+          )}
+          {spec && !spec.frozen && !archived && (
+            <details>
+              <summary>Freeze prospective specification and shadow policy</summary>
+              <form
+                onSubmit={e => {
+                  e.preventDefault();
+                  const f = e.currentTarget;
+                  void run(async () => {
+                    await window.office.pipelineAction({
+                      type: 'shadowPolicy',
+                      branchId: branch.id,
+                      expectedRevision: branch.revision,
+                      policy: JSON.parse(field(f, 'policy')),
+                    });
+                    return window.office.command({
+                      type: 'research.freezeSpec',
+                      idempotencyKey: key(),
+                      specId: spec.id,
+                      expectedRevision: branch.revision,
+                      prediction: {
+                        outcomeName: field(f, 'metric'),
+                        sign: field(f, 'sign') as 'POSITIVE',
+                        expectedLow: Number(field(f, 'low')),
+                        expectedHigh: Number(field(f, 'high')),
+                        probability: Number(field(f, 'probability')),
+                        falsifiers: field(f, 'falsifiers').split('\n').filter(Boolean),
+                        existingKnowledge: field(f, 'knowledge'),
+                        retrospective: false,
+                      },
+                    });
+                  });
+                }}
+              >
+                <label>
+                  Predicted metric
+                  <input name="metric" required />
+                </label>
+                <label>
+                  Expected sign
+                  <select name="sign">
+                    <option>POSITIVE</option>
+                    <option>NEGATIVE</option>
+                    <option>NONE</option>
+                  </select>
+                </label>
+                <label>
+                  Expected low
+                  <input name="low" type="number" step="any" required />
+                </label>
+                <label>
+                  Expected high
+                  <input name="high" type="number" step="any" required />
+                </label>
+                <label>
+                  Probability
+                  <input name="probability" type="number" min="0" max="1" step="0.01" required />
+                </label>
+                <label>
+                  Falsifiers, one per line
+                  <textarea name="falsifiers" required />
+                </label>
+                <label>
+                  Existing knowledge
+                  <textarea name="knowledge" required />
+                </label>
+                <label>
+                  Frozen shadow policy (JSON)
+                  <textarea
+                    name="policy"
+                    required
+                    placeholder='{"minimumElapsedSeconds":86400,"minimumObservationTimes":20,"minimumSamples":20,"maximumMissingShare":0.1,"retireBelowMetric":-0.01,"qualifyAtOrAboveMetric":0.01,"driftAlarmMetric":0,"killBelowMetric":-0.05}'
+                  />
+                </label>
+                <button className="primary" disabled={readOnly}>
+                  Freeze registration
+                </button>
+              </form>
+            </details>
+          )}
+          {!archived && branch.stage === 'S0' && (
+            <details>
+              <summary>Bind candidate and request</summary>
+              <form
+                onSubmit={e => {
+                  e.preventDefault();
+                  const f = e.currentTarget;
+                  void command({
+                    type: 'research.registerVariant',
+                    idempotencyKey: key(),
+                    branchId: branch.id,
+                    kind: 'VARIANT',
+                    variantHash: field(f, 'hash'),
+                    description: field(f, 'description'),
+                  });
+                }}
+              >
+                <label>
+                  Candidate SHA-256
+                  <input name="hash" pattern="[a-f0-9]{64}" required />
+                </label>
+                <label>
+                  Trial description
+                  <input name="description" required />
+                </label>
+                <button className="primary" disabled={readOnly || !spec?.frozen}>
+                  Register candidate
+                </button>
+              </form>
+              <label>
+                Research request
+                <select value={requestId} onChange={e => setRequestId(e.target.value)}>
+                  <option value="">Select request</option>
+                  {requests.map(r => (
+                    <option key={r.id} value={r.id}>
+                      {r.name} · {r.mode}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                className="primary"
+                disabled={readOnly || !requestId || !subject}
+                onClick={() =>
+                  void act({
+                    type: 'link',
+                    branchId: branch.id,
+                    requestId,
+                    subjectHash: subject,
+                    expectedRevision: branch.revision,
+                  })
+                }
+              >
+                Link exact candidate
+              </button>
+              <button
+                className="secondary"
+                disabled={readOnly || !link}
+                onClick={() => void act({ type: 'verifySpec', branchId: branch.id, expectedRevision: branch.revision })}
+              >
+                Verify prospective specification
+              </button>
+            </details>
+          )}
+          {!archived && (
+            <details>
+              <summary>Assign stage functions</summary>
+              <label>
+                Stage function
+                <select value={role} onChange={e => setRole(e.target.value as StageFunction)}>
+                  {STAGE_FUNCTIONS.map(f => (
+                    <option key={f}>{f}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Appointed profile
+                <select value={functionAgent} onChange={e => setFunctionAgent(e.target.value)}>
+                  <option value="">Select profile</option>
+                  {state.agents
+                    .filter(a => !a.removedAt)
+                    .map(a => (
+                      <option key={a.id} value={a.id}>
+                        {a.name} · {a.provider} · {a.model} · {a.effort}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              <button
+                className="primary"
+                disabled={readOnly || !functionAgent}
+                onClick={() =>
+                  void run(() =>
+                    window.office.assignResearchFunction({
+                      projectId,
+                      stage: branch.stage,
+                      function: role,
+                      agentId: functionAgent,
+                      expectedAgentRevision: state.agents.find(a => a.id === functionAgent)?.revision ?? 0,
+                      note: 'Explicit appointment from the research workflow.',
+                    }),
+                  )
+                }
+              >
+                Save appointment
+              </button>
+            </details>
+          )}
+          {!archived && (
+            <div className="button-row">
+              <button
+                className="secondary"
+                disabled={readOnly || !link || !status?.canPrepare}
+                onClick={() => void act({ type: 'prepare', branchId: branch.id, expectedRevision: branch.revision })}
+              >
+                Prepare stage
+              </button>
+              <button
+                className="primary"
+                disabled={readOnly || !status?.canPromote}
+                onClick={() => void act({ type: 'advance', branchId: branch.id, expectedRevision: branch.revision })}
+              >
+                Advance verified stage
+              </button>
+              <button
+                className="secondary"
+                disabled={busy}
+                onClick={() => void run(() => window.office.exportResearch({ branchId: branch.id }))}
+              >
+                Export research evidence
+              </button>
+            </div>
+          )}
+          {archived && (
+            <button
+              className="secondary"
+              disabled={busy}
+              onClick={() => void run(() => window.office.exportResearch({ branchId: branch.id }))}
+            >
+              Export research evidence
+            </button>
+          )}
+          {link && (
+            <details>
+              <summary>Linked request · {requests.find(r => r.id === link.requestId)?.name ?? link.requestId}</summary>
+              <p>{requests.find(r => r.id === link.requestId)?.objective}</p>
+              <p>
+                Request revision {link.requestRevision} · candidate {link.subjectHash}
+              </p>
+            </details>
+          )}
+          <label>
+            Imported artifact
+            <select aria-label="Imported artifact" value={artifactId} onChange={e => setArtifactId(e.target.value)}>
+              <option value="">Select imported artifact</option>
+              {artifacts.map(a => (
+                <option key={a.id} value={a.id}>
+                  {a.name} · {a.status}
+                </option>
+              ))}
+            </select>
+          </label>
+          {status && (status.stageDelivery === 'USER_RUN' || status.manual?.canValidate) && (
+            <section aria-label="Manual run and office validation" className="manual-run">
+              <h3>Manual run and office validation</h3>
+              {status.stageDelivery === 'USER_RUN' && (
+                <>
+                  <p>
+                    The office exports the frozen run package, the user executes it independently, and the bound return
+                    is imported and validated here. No execution job exists for this stage.
+                  </p>
+                  <div className="button-row">
+                    <button
+                      className="primary"
+                      disabled={readOnly || !status.manual?.canExport}
+                      onClick={() =>
+                        void act({ type: 'exportRunPackage', branchId: branch.id, expectedRevision: branch.revision })
+                      }
+                    >
+                      Export run package
+                    </button>
+                  </div>
+                  {status.manual?.awaitingPackageId && (
+                    <article>
+                      <b>Awaiting user run · package {status.manual.awaitingPackageId}</b>
+                      <p>
+                        Exported {status.manual.exportedAt}. The wait is durable across restart and restore; nothing is
+                        dispatched on this branch's behalf.
+                      </p>
+                      <button
+                        className="secondary"
+                        disabled={readOnly || !status.manual.canImport || !artifactId}
+                        onClick={() =>
+                          void act({
+                            type: 'importRunReturn',
+                            branchId: branch.id,
+                            artifactId,
+                            expectedRevision: branch.revision,
+                          })
+                        }
+                      >
+                        Import returned bundle
+                      </button>
+                    </article>
+                  )}
+                </>
+              )}
+              {status.manual?.canValidate && (
+                <div className="button-row">
+                  <button
+                    className="primary"
+                    disabled={readOnly}
+                    onClick={() =>
+                      void act({ type: 'validateReturn', branchId: branch.id, expectedRevision: branch.revision })
+                    }
+                  >
+                    Validate bound return
+                  </button>
+                </div>
+              )}
+            </section>
+          )}
+          {records.some(r => ['RUN_PACKAGE', 'RUN_RETURN', 'STAGE_COMPLETION', 'IMPORT'].includes(r.kind)) && (
+            <>
+              <h3>Stage evidence</h3>
+              {records.map(r => {
+                if (r.kind === 'RUN_PACKAGE')
+                  return (
+                    <p key={r.id}>
+                      Run package {r.packageId} · {r.state.replaceAll('_', ' ').toLowerCase()} · exported {r.exportedAt}
+                    </p>
+                  );
+                if (r.kind === 'RUN_RETURN')
+                  return (
+                    <p key={r.id}>
+                      Bound return for package {r.packageId} · {r.status.replaceAll('_', ' ').toLowerCase()} · user-run
+                      evidence · {r.summary}
+                    </p>
+                  );
+                if (r.kind === 'STAGE_COMPLETION')
+                  return (
+                    <p key={r.id}>
+                      {r.stage} completed · {PROVENANCE_LABEL[r.provenance ?? ''] ?? 'recorded evidence'} · report{' '}
+                      {r.reportHash.slice(0, 12)}…
+                    </p>
+                  );
+                if (r.kind === 'IMPORT')
+                  return (
+                    <p key={r.id}>
+                      Imported {r.format.replaceAll('_', ' ').toLowerCase()} · quarantined · {r.summary}
+                    </p>
+                  );
+                return null;
+              })}
+            </>
+          )}
+          <h3>Stage assignments</h3>
+          {assignments.map(a => {
+            const job = state.jobs?.find(j => j.assignmentId === a.id);
+            return (
+              <article key={a.id}>
+                <b>
+                  {a.research?.stage} · {a.research?.function}
+                </b>
+                <p>
+                  {state.agents.find(p => p.id === a.agentId)?.name} · {job?.state} · {job?.evidence}
+                </p>
+                <details>
+                  <summary>Exact delivered scope</summary>
+                  <code>{a.research?.contextHash}</code>
+                  <ul>
+                    {state.snapshots
+                      ?.find(s => s.id === a.snapshotId)
+                      ?.files.map(f => (
+                        <li key={f.path}>
+                          {f.path} · {f.bytes} bytes
+                        </li>
+                      ))}
+                  </ul>
+                </details>
+                {!archived && (
+                  <>
+                    <button
+                      className="secondary"
+                      disabled={readOnly || job?.state !== 'INTENT' || !status?.canPrepare}
+                      onClick={() => void act({ type: 'submit', assignmentId: a.id })}
+                    >
+                      Submit verified job
+                    </button>
+                    <button
+                      className="secondary"
+                      disabled={readOnly || !job || ['COMPLETED', 'FAILED'].includes(job.state)}
+                      onClick={() => void run(() => window.office.observeJob({ assignmentId: a.id }))}
+                    >
+                      Observe job
+                    </button>
+                    <button
+                      className="secondary"
+                      disabled={
+                        readOnly ||
+                        job?.state !== 'COMPLETED' ||
+                        a.research?.stage !== branch.stage ||
+                        a.research?.branchRevision !== branch.revision ||
+                        !!status?.scheduleBlockers.some(b => b.includes('execution and advancement are blocked'))
+                      }
+                      onClick={() => void act({ type: 'collect', assignmentId: a.id })}
+                    >
+                      Collect completed report
+                    </button>
+                    <button
+                      className="secondary"
+                      disabled={
+                        readOnly ||
+                        !artifactId ||
+                        a.research?.stage !== branch.stage ||
+                        a.research?.branchRevision !== branch.revision
+                      }
+                      onClick={() => void act({ type: 'importStageReport', assignmentId: a.id, artifactId })}
+                    >
+                      Import stage report
+                    </button>
+                  </>
+                )}
+              </article>
+            );
+          })}
+          <h3>Independent reviews</h3>
+          {branch.stage === 'S7' &&
+            !archived &&
+            assignments
+              .filter(a => a.research?.stage === 'S7')
+              .map(a => (
+                <React.Fragment key={a.id}>
+                  <button
+                    className="secondary"
+                    disabled={readOnly || records.filter(r => r.kind === 'REVIEW_REPORT' && r.opened).length !== 2}
+                    onClick={() => void act({ type: 'rebuttal', assignmentId: a.id })}
+                  >
+                    Request bounded rebuttal · {state.agents.find(p => p.id === a.agentId)?.name}
+                  </button>
+                  <button
+                    className="secondary"
+                    disabled={
+                      readOnly ||
+                      !artifactId ||
+                      records.filter(r => r.kind === 'REVIEW_REPORT' && r.opened).length !== 2
+                    }
+                    onClick={() => void act({ type: 'rebuttal', assignmentId: a.id, artifactId })}
+                  >
+                    Import bounded rebuttal artifact · {state.agents.find(p => p.id === a.agentId)?.name}
+                  </button>
+                </React.Fragment>
+              ))}
+          {records
+            .filter(r => r.kind === 'REVIEW_ROUND')
+            .map(r => (
+              <p key={r.id}>
+                {r.kind === 'REVIEW_ROUND' && r.verification === 'HOSTED'
+                  ? 'Independent hosted isolation receipt'
+                  : 'Local fixture isolation only'}{' '}
+                · round {r.id}
+              </p>
+            ))}
+          {records
+            .filter(r => r.kind === 'SEPARATED_REVIEW')
+            .map(
+              r =>
+                r.kind === 'SEPARATED_REVIEW' && (
+                  <p key={r.id}>
+                    Office-separated review, independence unverified · {r.stage} · round {r.id} · expires {r.expiresAt}
+                  </p>
+                ),
+            )}
+          {records
+            .filter(r => r.kind === 'REVIEW_REPORT')
+            .map(
+              r =>
+                r.kind === 'REVIEW_REPORT' && (
+                  <article key={r.id}>
+                    <b>{r.opened ? r.verdict : 'First report sealed'}</b>
+                    <p>
+                      {r.opened ? r.detail : 'Other reviews remain unavailable until every first report is immutable.'}
+                    </p>
+                    <small>
+                      {r.independence} · {r.reportHash}
+                    </small>
+                  </article>
+                ),
+            )}
+          {branch.stage === 'S7' && !archived && (
+            <>
+              <button
+                className="secondary"
+                disabled={readOnly}
+                onClick={() =>
+                  void act({
+                    type: 'adjudicate',
+                    branchId: branch.id,
+                    expectedRevision: branch.revision,
+                    followUp: false,
+                  })
+                }
+              >
+                Adjudicate completed round
+              </button>
+              <button
+                className="secondary"
+                disabled={readOnly}
+                onClick={() =>
+                  void act({
+                    type: 'adjudicate',
+                    branchId: branch.id,
+                    expectedRevision: branch.revision,
+                    followUp: true,
+                  })
+                }
+              >
+                Request one decisive test
+              </button>
+            </>
+          )}
+          <h3>Holdout custody</h3>
+          <p>
+            Registration stores bytes outside ordinary evidence. Evaluation spends the frozen candidate/query allowance
+            before delivery. Live isolation requires independent custodian evidence.
+          </p>
+          {!archived && (
+            <form
+              onSubmit={e => {
+                e.preventDefault();
+                const f = e.currentTarget;
+                void act({
+                  type: 'holdoutRegister',
+                  branchId: branch.id,
+                  name: field(f, 'name'),
+                  timezoneOffsetMinutes: Number(field(f, 'offset')),
+                  allowancePerPeriod: Number(field(f, 'allowance')),
+                });
+              }}
+            >
+              <label>
+                Holdout name
+                <input name="name" required />
+              </label>
+              <label>
+                Quarter timezone offset (minutes)
+                <input name="offset" type="number" min="-840" max="840" defaultValue="0" />
+              </label>
+              <label>
+                Quarter allowance
+                <input name="allowance" type="number" min="1" max="16" defaultValue="1" />
+              </label>
+              <button className="primary" disabled={readOnly}>
+                Choose holdout file and register
+              </button>
+            </form>
+          )}
+          {branch.stage === 'S8' && !archived && (
+            <>
+              <label>
+                Registered holdout
+                <select value={holdoutId} onChange={e => setHoldoutId(e.target.value)}>
+                  <option value="">Select holdout</option>
+                  {records
+                    .filter(r => r.kind === 'HOLDOUT')
+                    .map(
+                      r =>
+                        r.kind === 'HOLDOUT' && (
+                          <option key={r.id} value={r.holdout.id}>
+                            {r.holdout.name}
+                          </option>
+                        ),
+                    )}
+                </select>
+              </label>
+              <label>
+                Verified refit artifact SHA-256
+                <input value={refit} onChange={e => setRefit(e.target.value)} />
+              </label>
+              <button
+                disabled={readOnly || !holdoutId || !artifactId || !/^[a-f0-9]{64}$/.test(refit)}
+                onClick={() =>
+                  void act({
+                    type: 'holdoutReserve',
+                    branchId: branch.id,
+                    holdoutId,
+                    refitHash: refit,
+                    queryArtifactId: artifactId,
+                  })
+                }
+                className="primary"
+              >
+                Reserve one exposure
+              </button>
+              <label>
+                Reservation
+                <select value={reservationId} onChange={e => setReservationId(e.target.value)}>
+                  <option value="">Select reservation</option>
+                  {records
+                    .filter(r => r.kind === 'RESERVATION')
+                    .map(
+                      r =>
+                        r.kind === 'RESERVATION' && (
+                          <option key={r.id} value={r.reservation.id}>
+                            {r.reservation.id.slice(0, 8)} · {r.reservation.state}
+                          </option>
+                        ),
+                    )}
+                </select>
+              </label>
+              <button
+                className="secondary"
+                disabled={readOnly || !reservationId || !artifactId}
+                onClick={() =>
+                  void act({ type: 'holdoutEvaluate', branchId: branch.id, reservationId, queryArtifactId: artifactId })
+                }
+              >
+                Request holdout evaluation
+              </button>
+              <button
+                className="secondary"
+                disabled={readOnly || !reservationId}
+                onClick={() => void act({ type: 'holdoutExport', branchId: branch.id, reservationId })}
+              >
+                Export to user custody · consumes exposure
+              </button>
+              <button
+                className="secondary"
+                disabled={readOnly || !reservationId || !artifactId}
+                onClick={() => void act({ type: 'holdoutImport', branchId: branch.id, reservationId, artifactId })}
+              >
+                Import user-attested custody report
+              </button>
+            </>
+          )}
+          <section aria-label="Shadow and monitoring">
+            <h3>Shadow and monitoring</h3>
+            <p>
+              Simulated fills and separately sourced execution imports remain distinct. Qualification does not authorize
+              capital deployment.
+            </p>
+            {!archived && ['S9', 'S10'].includes(branch.stage) && (
+              <>
+                <button
+                  className="secondary"
+                  disabled={readOnly || !selectedArtifact || branch.outcome !== 'IN_PROGRESS'}
+                  onClick={() =>
+                    void act({
+                      type: 'shadowIngest',
+                      branchId: branch.id,
+                      artifactId,
+                      expectedRevision: branch.revision,
+                    })
+                  }
+                >
+                  Ingest shadow batch
+                </button>
+                <button
+                  className="secondary"
+                  disabled={readOnly || branch.outcome !== 'IN_PROGRESS'}
+                  onClick={() => void act({ type: 'monitor', branchId: branch.id, expectedRevision: branch.revision })}
+                >
+                  Evaluate monitoring window
+                </button>
+              </>
+            )}
+            {records
+              .filter(r => r.kind === 'SHADOW_BATCH')
+              .map(
+                r =>
+                  r.kind === 'SHADOW_BATCH' && (
+                    <p key={r.id}>
+                      {r.batchType} · {r.rows} rows · user-imported · admitted {r.createdAt}
+                    </p>
+                  ),
+              )}
+            {records
+              .filter(r => r.kind === 'MONITOR_VERDICT')
+              .map(
+                r =>
+                  r.kind === 'MONITOR_VERDICT' && (
+                    <article key={r.id}>
+                      <b>
+                        {r.outcome} {r.killed ? '· KILL' : r.alarm ? '· DRIFT ALARM' : ''}
+                      </b>
+                      <p>{r.detail}</p>
+                      <p>
+                        {r.samples} samples · {(100 * r.missingShare).toFixed(1)}% missing · metric{' '}
+                        {r.metric ?? 'UNKNOWN'}
+                      </p>
+                      <small>USER_IMPORTED · independent G-SHADOW still required</small>
+                    </article>
+                  ),
+              )}
+          </section>
+          <h3>Lineage trials</h3>
+          <ul className="trial-list">
+            {trials.map(t => (
+              <li key={t.id}>
+                <b>{t.outcome}</b>
+                <span>{t.description}</span>
+              </li>
+            ))}
+          </ul>
+          {trialCursor && (
+            <button className="secondary" onClick={() => void more('trials', trialCursor!)}>
+              More lineage trials
+            </button>
+          )}
+          {insights && (
+            <>
+              <h3>Prediction calibration</h3>
+              <p>{insights.calibration.detail}</p>
+              <h3>Method and version counts</h3>
+              {insights.methods.map(m => (
+                <p key={m.name}>
+                  {m.name}: {m.detail}
+                </p>
+              ))}
+              <h3>Re-entry ancestry</h3>
+              {insights.ancestry.map(n => (
+                <p key={n.branch.id}>
+                  {n.branch.name} · {n.branch.outcome}
+                  {n.retiredReason ? ' · ' + n.retiredReason : ''}
+                </p>
+              ))}
+            </>
+          )}
+          {!archived && (
+            <form
+              onSubmit={e => {
+                e.preventDefault();
+                const f = e.currentTarget;
+                void command({
+                  type: 'research.amendBranch',
+                  idempotencyKey: key(),
+                  branchId: branch.id,
+                  expectedRevision: branch.revision,
+                  name: field(f, 'name'),
+                  reason: field(f, 'reason'),
+                });
+              }}
+            >
+              <label>
+                Amended branch name
+                <input name="name" required />
+              </label>
+              <label>
+                Reason for re-entry or revision
+                <input name="reason" required />
+              </label>
+              <button className="primary" disabled={readOnly}>
+                Create linked revision
+              </button>
+              <button
+                type="button"
+                className="secondary"
+                disabled={readOnly || branch.outcome === 'RETIRED'}
+                onClick={() =>
+                  void command({
+                    type: 'research.settleBranch',
+                    idempotencyKey: key(),
+                    branchId: branch.id,
+                    expectedRevision: branch.revision,
+                    outcome: 'RETIRED',
+                    reason: 'Explicit retirement from the research workflow.',
+                  })
+                }
+              >
+                Retire branch
+              </button>
+            </form>
+          )}
+          {recordCursor && (
+            <button className="secondary" onClick={() => void more('pipeline', recordCursor!)}>
+              More research evidence
+            </button>
+          )}
+        </>
+      )}
+      {status?.capabilities && (
+        <section aria-label="Capability readiness" className="readiness">
+          <h3>Readiness</h3>
+          <ul className="capability-list">
+            {CAPABILITY_LABELS.map(([key, label]) => {
+              const cap = status.capabilities?.[key];
+              return cap ? (
+                <li key={key} data-state={cap.state}>
+                  <b>{label}</b>
+                  <span className="cap-state">
+                    {cap.state === 'NOT_CONFIGURED'
+                      ? 'Optional · not configured'
+                      : cap.state.replaceAll('_', ' ').toLowerCase()}
+                  </span>
+                  <span className="cap-detail">{cap.detail}</span>
+                </li>
+              ) : null;
+            })}
+          </ul>
+        </section>
+      )}
+      <label>
+        Evidence reader
+        <select value={readers.some(a => a.id === agentId) ? agentId : ''} onChange={e => setAgentId(e.target.value)}>
+          <option value="">Select a granted profile</option>
+          {readers.map(a => (
+            <option key={a.id} value={a.id}>
+              {a.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      {readers.some(a => a.id === agentId) && (
+        <EvidencePanel key={projectId + ':' + agentId} projectId={projectId} agentId={agentId} />
+      )}
+    </section>
+  );
 }
