@@ -11,6 +11,8 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit",
+    "format": "prettier --write \"src/**/*.{ts,tsx,css}\" \"tests/**/*.ts\" \"scripts/**/*.{mjs,ts}\"",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\" \"tests/**/*.ts\" \"scripts/**/*.{mjs,ts}\"",
     "test": "tsx --test --test-concurrency=4 tests/*.test.ts",
     "start": "electron .",
     "package": "node scripts/package.mjs",
@@ -36,6 +38,7 @@
     "esbuild": "0.28.2",
     "playwright": "1.63.0",
     "pngjs": "7.0.0",
+    "prettier": "3.9.9",
     "tsx": "4.23.13",
     "typescript": "7.0.2"
   }
