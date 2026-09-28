@@ -275,6 +275,12 @@ export class Subscriptions {
      * silently trusted.
      */
     private recordedAccount?: (provider: Provider) => { identity: string; lastCheckedAt: string } | undefined,
+    /**
+     * The local API-key store's read surface (LR-15). When a provider has a saved key, that key IS
+     * the auth mode: observe() answers a configured-but-unverified result without contacting the
+     * provider, so no status/login probe ever receives the key material.
+     */
+    private apiKeys?: { providerKeyState(provider: Provider): { saved: boolean; savedAt?: string } },
   ) {
     mkdirSync(root, { recursive: true });
     try {
@@ -579,6 +585,47 @@ export class Subscriptions {
    * material with an exact source, and can never enable an action on its own.
    */
   async observe(provider: Provider): Promise<{ connection: Connection; observation: AccountObservation }> {
+    // API-key mode: a saved local key is the auth mode itself. The office reports the configured
+    // credential honestly — never SIGNED_IN, since nothing verified it — and spawns no provider CLI.
+    if (this.apiKeys?.providerKeyState(provider).saved) {
+      const at = new Date().toISOString();
+      const note = 'API key saved locally (encrypted with Windows DPAPI). The provider was not contacted.';
+      const connection: Connection = {
+        provider,
+        connected: false,
+        account: '',
+        models: [],
+        windows: [],
+        checkedAt: at,
+        note,
+      };
+      const observation = observationSchema.parse({
+        provider,
+        // No account identity was observed: identity stays empty and never becomes a minted handle.
+        identity: '',
+        credentialContext: 'api-key-local',
+        state: 'UNKNOWN',
+        allowance: [],
+        note,
+        toolVersion: 'unknown',
+        transport: 'NONE',
+        environment: '',
+        models: [],
+        operations: [
+          {
+            operation: 'ACCOUNT_STATUS',
+            level: 'UNKNOWN',
+            detail: note,
+            evidence: 'DOCUMENTED',
+            verifiedAt: at,
+            source: 'local API-key entry',
+          },
+        ],
+        source: 'local API-key entry',
+        observedAt: at,
+      } satisfies AccountObservation);
+      return { connection, observation };
+    }
     const connection = await this.status(provider);
     let toolVersion = 'unknown';
     try {

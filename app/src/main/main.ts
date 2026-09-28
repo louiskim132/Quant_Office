@@ -58,8 +58,12 @@ function resolveSelectionRoot(root: string): string {
 }
 
 import { Subscriptions, providerSchema, subscriptionEnvironment } from './subscriptions.js';
+import { Secrets, agentEnvironment } from './secrets.js';
+import type { Connection, Provider } from '../shared/types.js';
 import { describeError, writeLog } from './diagnostics.js';
 let subscriptions: Subscriptions;
+/** The local secrets store — userData root, outside the workspace, so restores never touch it. */
+let secrets: Secrets;
 let win: BrowserWindow | null = null;
 let store: OfficeStore;
 let artifacts: ArtifactService;
@@ -177,6 +181,8 @@ async function start() {
   store = new OfficeStore(path.join(workspace, 'workspace.sqlite'), { includeHistoryInResults: false });
   artifacts = new ArtifactService(store, workspace);
   evidence = new EvidenceService(store, workspace);
+  // secrets.dat lives at the userData root — a sibling of workspace/, never inside it.
+  secrets = new Secrets(root, undefined, line => writeLog(logDir(), 'WARN', line));
   subscriptions = new Subscriptions(
     path.join(root, 'connections'),
     url => shell.openExternal(url),
@@ -186,6 +192,7 @@ async function start() {
       [...(store.snapshot().connections ?? [])]
         .reverse()
         .find(c => c.provider === provider && c.state === 'SIGNED_IN' && c.identity),
+    secrets,
   );
   // The interim transport is the labeled handoff. Automatic dispatch stays gated on verified evidence.
   controller = buildController();
@@ -465,6 +472,36 @@ function register() {
     if (value !== undefined) throw new Error('Unexpected data');
     subscriptions.cancel();
   });
+  /** The auth-mode fields IPC adds to a returned Connection — never persisted, never the key. */
+  const withAuthMode = (provider: Provider, connection: Connection): Connection => {
+    const key = secrets.providerKeyState(provider);
+    connection.authMode = key.saved ? 'api-key' : 'subscription';
+    if (key.savedAt) connection.keySavedAt = key.savedAt;
+    return connection;
+  };
+  handle('office:provider-api-key-set', async value => {
+    const input = z.object({ provider: providerSchema, key: z.string() }).strict().parse(value);
+    const key = input.key.trim();
+    if (!key || key.length > 512 || /\s/.test(key))
+      throw new Error('Enter a single-line API key no longer than 512 characters.');
+    try {
+      secrets.saveProviderKey(input.provider, key);
+    } catch (error) {
+      // The saved store's own messages carry no key material; the guard keeps it that way even if
+      // a lower layer ever echoed its input back.
+      const message = (error instanceof Error ? error.message : 'unknown error').replaceAll(key, '…');
+      throw new Error(`The key could not be saved: ${message}`);
+    }
+    changed();
+    return { ok: true };
+  });
+  handle('office:provider-api-key-remove', async value => {
+    const provider = providerSchema.parse(value);
+    secrets.removeProviderKey(provider);
+    changed();
+    return { ok: true };
+  });
+  handle('office:provider-key-state', async value => secrets.providerKeyState(providerSchema.parse(value)));
   handle('office:connection-status', async value => {
     const provider = providerSchema.parse(value);
     const { connection, observation } = await subscriptions.observe(provider);
@@ -476,7 +513,7 @@ function register() {
       connection.note =
         `${connection.note} Durable record not saved: ${error instanceof Error ? error.message : 'unknown error'}`.trim();
     }
-    return connection;
+    return withAuthMode(provider, connection);
   });
   handle('office:provider-login', async value => {
     const provider = providerSchema.parse(value);
@@ -490,7 +527,7 @@ function register() {
       connection.note =
         `${connection.note} Durable record not saved: ${error instanceof Error ? error.message : 'unknown error'}`.trim();
     }
-    return connection;
+    return withAuthMode(provider, connection);
   });
   handle('office:provider-tool', async value => {
     const provider = providerSchema.parse(value);
@@ -1478,15 +1515,16 @@ function buildController(): AssignmentController {
   // LOCAL_CLI_EXEC resolves through the same persisted binding, to the office-spawned adapter.
   // Both layout slots hold the exec adapter: a record misbound to the worktree layout lands on it
   // anyway and fails closed on its own flat-packet check instead of silently changing transport.
-  // The child's environment is the adapter's own subscriptionEnvironment() default — the scrub
-  // that removes ACP_* and billing overrides before the CLI sees them.
+  // The child's environment is built per provider: the subscriptionEnvironment() scrub that
+  // removes ACP_* and billing overrides, plus the one provider key variable when the user saved
+  // their own key locally (LR-15). The secrets store is injected — the adapter never imports it.
   exec = new LocalCliExecAdapter(
     () => path.join(workspace(), 'local-sessions'),
     provider => subscriptions.toolPath(provider),
     undefined,
     undefined,
     undefined,
-    undefined,
+    provider => agentEnvironment(provider, secrets),
     undefined,
     undefined,
     agentId => store.snapshot().agents.find(a => a.id === agentId)?.provider,
@@ -1513,6 +1551,9 @@ function buildController(): AssignmentController {
     // The evidence drop-box edge: caller identity is bound from the assignment record inside the
     // adapter — an agent's query file can never choose whose grants are checked.
     (caller, line) => handleEvidenceFrame(evidence, caller, line),
+    undefined,
+    // The launch record states which credential context the spawn used — metadata only, never a key.
+    provider => (secrets.providerKeyState(provider).saved ? 'api-key' : 'subscription'),
   );
   const execRoute = new LocalSessionRouter(
     jobId => store.localSessionForJob(jobId),
