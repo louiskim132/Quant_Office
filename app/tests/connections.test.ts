@@ -144,7 +144,12 @@ test('unchanged refreshes do not grow history; a changed catalog adds a new immu
   );
   assert.equal(changed.capabilities!.length, 2);
   assert.notEqual(changed.capabilities![0].contentHash, changed.capabilities![1].contentHash);
-  assert.equal(changed.capabilities![0].models.length, 1, 'earlier evidence is never rewritten');
+  assert.equal(
+    changed.capabilities![0].models.length,
+    0,
+    'the projection keeps one catalog per connection (LR-6); the event log keeps the original',
+  );
+  assert.equal(changed.capabilities![0].modelsOmitted, true);
   assert.equal(
     currentConnection(changed, 'claude')!.revision,
     1,
