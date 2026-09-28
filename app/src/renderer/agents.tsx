@@ -12,7 +12,7 @@ import type {
   ToolProfile,
 } from '../shared/types';
 import { suggestedEfforts, PROVIDER_MODEL_SUGGESTIONS, effortIsIndependentAxis } from '../shared/effort';
-import { providerReadiness } from '../shared/readiness';
+import { providerReadiness, currentConnection } from '../shared/readiness';
 import { LocalConsumption } from './activity';
 import { TRANSPORT_PROBE_CONTAINMENT } from '../shared/transport';
 import './agents.css';
@@ -582,13 +582,49 @@ const actionNames: [keyof ReadinessActions, string][] = [
 export function ProviderConnections({ state }: { state: AppState }) {
   const [busy, setBusy] = useState<Partial<Record<Provider, 'check' | 'signin'>>>({}),
     [errors, setErrors] = useState<Partial<Record<Provider, string>>>({}),
-    [live, setLive] = useState<Partial<Record<Provider, string>>>({});
+    [live, setLive] = useState<Partial<Record<Provider, Connection>>>({}),
+    // The auth mode a key save/remove established in this session — it outranks a stale recorded
+    // observation until the next provider check records the new context.
+    [authMode, setAuthMode] = useState<Partial<Record<Provider, 'subscription' | 'api-key'>>>({});
+  const applyConnection = (provider: Provider, connection: Connection) => {
+    setLive(l => ({ ...l, [provider]: connection }));
+    if (connection.authMode) setAuthMode(a => ({ ...a, [provider]: connection.authMode }));
+  };
+  // A silent re-check for a recorded api-key provider: the check spawns nothing in api-key mode and
+  // returns keySavedAt, and it corrects the card if the key file was removed outside the app.
+  async function refresh(provider: Provider) {
+    try {
+      applyConnection(provider, await window.office.connectionStatus(provider));
+    } catch {
+      /* a failed refresh leaves the recorded state standing — it never masks as verified */
+    }
+  }
+  // Saved-key presence is the auth mode — it is probed once per provider per mount so a key saved
+  // just before a shutdown (before any observation could record its context) still renders api-key
+  // state on the next launch. A stale resolve can never re-enable a mode this session reverted.
+  const probed = useRef<Provider[]>([]);
+  useEffect(() => {
+    for (const provider of ['claude', 'openai', 'devin'] as Provider[]) {
+      if (!probed.current.includes(provider)) {
+        probed.current.push(provider);
+        void window.office
+          .providerKeyState(provider)
+          .then(saved => {
+            if (!saved.saved) return;
+            setAuthMode(a => (a[provider] ? a : { ...a, [provider]: 'api-key' }));
+            void refresh(provider);
+          })
+          .catch(() => {});
+      }
+      if (!live[provider] && currentConnection(state, provider)?.credentialContext === 'api-key-local')
+        void refresh(provider);
+    }
+  });
   async function check(provider: Provider) {
     setBusy(b => ({ ...b, [provider]: 'check' }));
     setErrors(e => ({ ...e, [provider]: '' }));
     try {
-      const connection = await window.office.connectionStatus(provider);
-      setLive(l => ({ ...l, [provider]: connection.checkedAt }));
+      applyConnection(provider, await window.office.connectionStatus(provider));
     } catch (e) {
       setErrors(old => ({ ...old, [provider]: (e as Error).message }));
     } finally {
@@ -601,12 +637,22 @@ export function ProviderConnections({ state }: { state: AppState }) {
     setBusy(b => ({ ...b, [provider]: 'signin' }));
     setErrors(e => ({ ...e, [provider]: '' }));
     try {
-      const connection = await window.office.loginProvider(provider);
-      setLive(l => ({ ...l, [provider]: connection.checkedAt }));
+      applyConnection(provider, await window.office.loginProvider(provider));
     } catch (e) {
       setErrors(old => ({ ...old, [provider]: (e as Error).message }));
     } finally {
       setBusy(b => ({ ...b, [provider]: undefined }));
+    }
+  }
+  async function removeKey(provider: Provider) {
+    setErrors(e => ({ ...e, [provider]: '' }));
+    try {
+      await window.office.removeProviderApiKey(provider);
+      // The key is gone — subscription mode again. Re-checking the account runs the real CLI probe.
+      setAuthMode(a => ({ ...a, [provider]: 'subscription' }));
+      await check(provider);
+    } catch (e) {
+      setErrors(old => ({ ...old, [provider]: (e as Error).message }));
     }
   }
   return (
@@ -619,7 +665,14 @@ export function ProviderConnections({ state }: { state: AppState }) {
       {(['claude', 'openai', 'devin'] as Provider[]).map(provider => {
         const readiness = providerReadiness(state, provider, { execution: 'LOCAL' });
         const snapshot = state.capabilities?.filter(c => c.provider === provider).at(-1);
-        const checked = live[provider];
+        const checked = live[provider]?.checkedAt;
+        const recorded = currentConnection(state, provider);
+        // Presence of a saved key is the mode (LR-15): the live check's authMode wins, then this
+        // session's save/remove, then the last recorded observation's credential context.
+        const apiKeyMode =
+          (authMode[provider] ??
+            live[provider]?.authMode ??
+            (recorded?.credentialContext === 'api-key-local' ? 'api-key' : 'subscription')) === 'api-key';
         return (
           <div className="setting-row connection-row" key={provider}>
             <div>
@@ -641,16 +694,42 @@ export function ProviderConnections({ state }: { state: AppState }) {
                 </p>
               )}
               <p className="provider-summary">
-                <b>This computer (local CLI):</b>{' '}
-                {readiness.signedIn
-                  ? readiness.ready
-                    ? 'ready.'
-                    : `signed in; ${readiness.blockers[0] ?? 'not yet verified by a run.'}`
-                  : 'not signed in — sign in with the provider CLI, then Refresh.'}{' '}
-                <b>Provider-hosted:</b> not available in this version.
+                {apiKeyMode ? (
+                  <>
+                    <b>API key saved</b> — the provider was not contacted. <b>Provider-hosted:</b> not available in this
+                    version.
+                  </>
+                ) : (
+                  <>
+                    <b>This computer (local CLI):</b>{' '}
+                    {readiness.signedIn
+                      ? readiness.ready
+                        ? 'ready.'
+                        : `signed in; ${readiness.blockers[0] ?? 'not yet verified by a run.'}`
+                      : 'not signed in — sign in with the provider CLI, then Refresh.'}{' '}
+                    <b>Provider-hosted:</b> not available in this version.
+                  </>
+                )}
               </p>
               <details>
                 <summary>Technical details</summary>
+                {apiKeyMode && (
+                  <>
+                    <p className="muted">
+                      {live[provider]?.keySavedAt ? `Saved ${formatDateTime(live[provider].keySavedAt!)} · ` : ''}stored
+                      encrypted with Windows DPAPI · the provider was not contacted.
+                    </p>
+                    <p>
+                      <button
+                        className="secondary"
+                        disabled={busy[provider] === 'check'}
+                        onClick={() => void removeKey(provider)}
+                      >
+                        Remove key
+                      </button>
+                    </p>
+                  </>
+                )}
                 <div className="badge-groups">
                   <div className="badge-group">
                     <span className="mini-label">Account</span>
@@ -717,29 +796,98 @@ export function ProviderConnections({ state }: { state: AppState }) {
                 <p className="muted">{TRANSPORT_PROBE_CONTAINMENT.status}</p>
               )}
             </div>
-            <div className="button-row">
-              <button className="secondary" disabled={!!busy[provider]} onClick={() => void check(provider)}>
-                {busy[provider] === 'check' ? 'Checking…' : 'Check account'}
-              </button>
-              {!readiness.signedIn && busy[provider] !== 'signin' && (
-                <button className="secondary" disabled={!!busy[provider]} onClick={() => void signIn(provider)}>
-                  Sign in
+            <div className="connection-actions">
+              <div className="button-row">
+                <button className="secondary" disabled={!!busy[provider]} onClick={() => void check(provider)}>
+                  {busy[provider] === 'check' ? 'Checking…' : 'Check account'}
                 </button>
-              )}
-              {busy[provider] === 'signin' && (
-                <button className="secondary" onClick={() => void window.office.cancelAgent()}>
-                  Cancel sign-in
-                </button>
-              )}
-              {provider === 'claude' && (
-                <button className="text-button" disabled title={TRANSPORT_PROBE_CONTAINMENT.status}>
-                  Verify cloud transport…
-                </button>
+                {!readiness.signedIn && busy[provider] !== 'signin' && (
+                  <button className="secondary" disabled={!!busy[provider]} onClick={() => void signIn(provider)}>
+                    Sign in
+                  </button>
+                )}
+                {busy[provider] === 'signin' && (
+                  <button className="secondary" onClick={() => void window.office.cancelAgent()}>
+                    Cancel sign-in
+                  </button>
+                )}
+                {provider === 'claude' && (
+                  <button className="text-button" disabled title={TRANSPORT_PROBE_CONTAINMENT.status}>
+                    Verify cloud transport…
+                  </button>
+                )}
+              </div>
+              {!apiKeyMode && (
+                <ApiKeyEntry
+                  provider={provider}
+                  onSaved={() => {
+                    setAuthMode(a => ({ ...a, [provider]: 'api-key' }));
+                    void refresh(provider);
+                  }}
+                />
               )}
             </div>
           </div>
         );
       })}
     </div>
+  );
+}
+
+/**
+ * The subscription-mode entry to api-key mode (LR-15): a collapsed disclosure with the billing
+ * sentence, a password input and Save/Cancel. The key leaves React state the instant Save fires —
+ * it is sent over the office bridge to the encrypted store and never rendered, logged or kept.
+ */
+function ApiKeyEntry({ provider, onSaved }: { provider: Provider; onSaved: () => void }) {
+  const [open, setOpen] = useState(false),
+    [key, setKey] = useState(''),
+    [saving, setSaving] = useState(false),
+    [error, setError] = useState('');
+  async function save() {
+    const value = key.trim();
+    setKey('');
+    setSaving(true);
+    setError('');
+    try {
+      await window.office.setProviderApiKey(provider, value);
+      setOpen(false);
+      onSaved();
+    } catch (e) {
+      // The IPC error message is the validation or save failure — it never contains key material.
+      setError((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+  return (
+    <details
+      className="api-key-entry"
+      open={open}
+      onToggle={event => setOpen((event.target as HTMLDetailsElement).open)}
+    >
+      <summary>Use my own API key</summary>
+      <p className="muted">Enter your own provider API key. Calls are billed to your account by the provider.</p>
+      <input
+        type="password"
+        aria-label={`API key for ${providerNames[provider]}`}
+        autoComplete="off"
+        value={key}
+        onChange={event => setKey(event.target.value)}
+      />
+      <div className="button-row">
+        <button className="secondary" disabled={saving || !key.trim()} onClick={() => void save()}>
+          {saving ? 'Saving…' : 'Save key'}
+        </button>
+        <button className="text-button" disabled={saving} onClick={() => setOpen(false)}>
+          Cancel
+        </button>
+      </div>
+      {error && (
+        <p className="notice error" role="alert">
+          {error}
+        </p>
+      )}
+    </details>
   );
 }

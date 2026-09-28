@@ -250,6 +250,20 @@
   font-size: 12px;
   margin: 4px 0;
 }
+.connection-actions {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  align-self: flex-start;
+}
+.api-key-entry {
+  max-width: 320px;
+}
+.api-key-entry input {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 4px 0 8px;
+}
 .profile-tabs {
   display: grid;
   gap: 10px;
