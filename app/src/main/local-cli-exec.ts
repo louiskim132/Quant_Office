@@ -97,6 +97,8 @@ export interface LaunchRecord {
   /** The exact trust/permission-bypass flags in the argv, verbatim. */
   bypassFlags: string[];
   spawnedAt: string;
+  /** Which credential context the spawn's environment carried — never the key itself. */
+  authMode: 'subscription' | 'api-key';
   cwd: string;
   timeoutMs: number;
   requestedModel: string;
@@ -201,8 +203,11 @@ export class LocalCliExecAdapter implements ProviderAdapter {
         windowsHide: options.windowsHide,
         stdio: options.stdio,
       }),
-    /** The child's environment — scrubbed of agent-shell variables that mask CLI sign-in state. */
-    private readonly environment: () => NodeJS.ProcessEnv = subscriptionEnvironment,
+    /**
+     * The child's environment, built per provider at spawn: the scrubbed subscription environment,
+     * plus the provider's own API-key variable when the user saved one locally (LR-15).
+     */
+    private readonly environment: (provider: Provider) => NodeJS.ProcessEnv = () => subscriptionEnvironment(),
     private readonly timeoutMs: number = DEFAULT_TIMEOUT_MS,
     private readonly discoverRecords: (dir: string, provider: Provider) => Discovery = discover,
     /** Resolves an agent record's provider for plan previews, which run before a binding exists. */
@@ -233,6 +238,12 @@ export class LocalCliExecAdapter implements ProviderAdapter {
     private readonly evidenceFrames?: EvidenceFrameHandler,
     /** The claude launch spacing; tests pass 0. */
     private readonly claudeSpawnGapMs: number = CLAUDE_SPAWN_GAP_MS,
+    /**
+     * Which credential context a spawn's environment carries — recorded on the launch record so the
+     * evidence states which mode dispatched the run. Metadata only; the key itself never enters the
+     * record.
+     */
+    private readonly authMode: (provider: Provider) => 'subscription' | 'api-key' = () => 'subscription',
   ) {}
 
   /** Waits until a claude launch would be at least claudeSpawnGapMs after the previous one. */
@@ -435,7 +446,7 @@ export class LocalCliExecAdapter implements ProviderAdapter {
       child = this.spawnChild(executable, command.args, {
         // The spawn cwd is authoritative — codex -C does not place the model's shell (probe doc).
         cwd: dir,
-        env: this.environment(),
+        env: this.environment(binding.provider),
         windowsHide: true,
         stdio: ['ignore', 'pipe', 'pipe'],
       });
@@ -455,6 +466,7 @@ export class LocalCliExecAdapter implements ProviderAdapter {
       args: command.args.map(arg => (arg === prompt ? `<prompt:${sha256Text(prompt)}>` : arg)),
       bypassFlags: command.bypassFlags,
       spawnedAt: this.now(),
+      authMode: this.authMode(binding.provider),
       cwd: dir,
       timeoutMs: this.timeoutMs,
       requestedModel: context.payload.model,

@@ -269,6 +269,14 @@ export interface Connection {
   windows: UsageWindow[];
   checkedAt: string;
   note: string;
+  /**
+   * Which credential context this provider is configured with — 'api-key' when the user saved
+   * their own provider key locally (LR-15). Filled by the IPC layer from the local secrets store;
+   * never persisted in the observation record.
+   */
+  authMode?: 'subscription' | 'api-key';
+  /** When the stored API key was saved — present only in api-key mode. */
+  keySavedAt?: string;
 }
 export interface WorkLog {
   id: string;
@@ -1153,6 +1161,11 @@ export interface OfficeAPI {
   connectionStatus(provider: Provider): Promise<Connection>;
   /** Run the provider's official sign-in outside the add-agent flow and record the observation. */
   loginProvider(provider: Provider): Promise<Connection>;
+  /** Save the user's own provider API key, encrypted with Windows DPAPI. The key is never returned or logged. */
+  setProviderApiKey(provider: Provider, key: string): Promise<{ ok: true }>;
+  removeProviderApiKey(provider: Provider): Promise<{ ok: true }>;
+  /** Whether a local provider key exists — presence and timestamp only, never key material. */
+  providerKeyState(provider: Provider): Promise<{ saved: boolean; savedAt?: string }>;
   selectProviderTool(provider: Provider): Promise<void>;
   openProviderUsage(provider: Provider): Promise<void>;
   /** Freeze one request's inputs and record the intent to submit. Nothing is transferred. */
