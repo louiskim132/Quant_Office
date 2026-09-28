@@ -1114,7 +1114,7 @@ Ordered implementation packets (organizer owns shared contracts, IPC, dependenci
 
 Exact next local work: implement C10-A attempt preparation/ledger and C10-B contracts on organizer-published packets; retain C9's separate local-session probe and pilot as outstanding. Local fixture work can proceed without changing R5 or waiting for real data. Do not start paid/live provider runs merely because a packet is written.
 
-### C11 — Launch-readiness revision (LR packets) — IN_PROGRESS; LR-0 + LR-1 merged (`232f273`), re-anchored on `e0ce5d9`; LR-2…LR-6 in flight
+### C11 — Launch-readiness revision (LR packets) — IN_PROGRESS; LR-0…LR-11, LR-14 merged (`abbe9a1`), re-anchored on `e0ce5d9`; LR-8 measured — openMs 4,999 ≥ 3,000 → checkpoint design packet needed
 
 Source: the 2026-09-25 commercial launch-readiness review in section 17 (findings L1–L15).
 Base: `origin/main` at or after `e0ce5d9` (rev-3/rev-4 merged; LR-0 merged as PR #18; re-anchored — see C11.0 rule 0). LR-1 is the next packet. New desktop-batch code rounds must branch from this formatted `main`. This slice is written so that a coding model
@@ -2237,7 +2237,7 @@ Status vocabulary: NOT_STARTED, IMPLEMENTED_FOUNDATION, IN_PROGRESS, PARTIALLY_V
 | D1 optional Serena trial | PARTIALLY_IMPLEMENTED, nonblocking | Project-local AGENTS.md and CLAUDE.md pointers plus the Git/worktree policy were added during repository setup on 2026-09-12. The optional Serena comparison and client configuration remain NOT_STARTED; no navigation plugin was installed. |
 | C10 four-plugin office evaluation | MEASURED_LOCAL 2026-09-25 (CLI A/B, scratch installs); no plugin enabled by default | 2026-09-16: section 3.2 and C10 define the trials and `app/benchmarks/plugin-evaluation/`. 2026-09-25: Serena 1.7.0, Ponytail v4.10.0, Graphify 0.9.68 and LightRAG 1.5.7 (Ollama local) trialled alone and stacked on an office implement packet and a 7-item code-navigation task. No plugin or pair saved tokens beyond run-to-run noise; Serena adds ~8.7k tokens per call and is unused unless hinted; stacking adds context and lowered accuracy; LightRAG local indexing failed (5 of 11 files timed out in 2 h). Recommended set: office memory ledger only. See section 17 entry "plugin trials" of this date. |
 | Token diet (pipeline token consumption) | VERIFIED_LOCAL on dev + packaged build; merged via PR #13/#14 (2026-09-25 local) | Branch `fix/token-diet-20260925` (base organizer `9356c2e`). Lean Claude/Codex launches, per-hop deliverables, hop-keyed inherited inputs, worker slices, packet essentials + `finish.py`, split contract, pre-registered analysis plan (`analysisOf`), QUICK round shape, implementation-only REVISE, claude launch spacing. Live: quick ema5 round 574k input tokens (was 2.50M), implementation-only revision 345k (was 3.10M), Codex implement 147k (was 374k). App\ `app.asar` `642139F3…`. Plugin trials done (C10 row). Follow-ups done on `fix/evidence-and-memory-20260925` (PR #14): evidence-surface args documented; memory capture restored and digest mounted at `plan-brief`. App\ `app.asar` `0901A8DF…` — see section 17 entries of this date. |
-| Commercial launch readiness | IN_PROGRESS — LR-0 merged (`e0ce5d9`) + LR-1 merged (`232f273`, PR #21); C11 re-anchored 2026-09-27; LR-2/LR-3/LR-4/LR-5/LR-6 in flight | Private/internal beta only. LR-0 merged as `e0ce5d9` (PR #18), slice re-anchored on `e0ce5d9` 2026-09-27, LR-1 merged as `232f273` (PR #21 — desktop e2e repaired and now runs packaged in CI). In flight as SWE-2 Max packets: LR-2, LR-3, LR-5, LR-6 (RA-unblocked, disjoint files) and LR-4 (unblocked by LR-1). Held for file overlap: LR-9/LR-10 behind LR-4 (`agents.tsx`), LR-11 behind LR-4 (`desktop.e2e.ts`), LR-7 behind LR-6 + LR-2 (`main.ts`), LR-14 behind LR-6 (`store.ts`). LR-6 approved in a lighter form (history untouched, one catalog per account in the quick-access copy, automatic backup, lossless downgrade tool). Launch gate: LR-15 API-key mode, LR-16 separate Windows user, legal review. Signing/installer/updates/fuses deferred to the very last step (free-first). |
+ | Commercial launch readiness | IN_PROGRESS — merged through LR-14 (`a54f29d`); LR-7/LR-10 in flight; LR-8 held behind LR-7 | Private/internal beta only. Merged 2026-09-27 as SWE-2 Max packets on protected main: LR-0 `e0ce5d9` (PR #18), LR-1 `232f273` (#21, packaged e2e in CI), LR-3 `54fd5be` (#23, PROMPT.md long prompts), LR-4 `c3a8a2a` (#24, local-first defaults + risk consent), LR-5 `36ff06e` (#25, inputs-as-data prompt boundary), LR-6 `ef2779a` (#26, projection compaction + schema 4 + downgrade tool), LR-2 `608ea06` (#27, crash diagnostics + bounded local log), LR-11 `fe00e4a` (#29, accessible-name e2e guard), LR-9 `fa3ac70` (#28, plain provider status in Settings), LR-14 `a54f29d` (#30, light default theme via schema 5). In flight: LR-7 (loading window), LR-10 (unified formatters). Held: LR-8 (startup measurement, after LR-7). Launch gate: LR-15 API-key mode, LR-16 separate Windows user, legal review. Signing/installer/updates/fuses deferred to the very last step (free-first). | 
 | OmniRoute routing extension | NOT_STARTED implementation; architecture reviewed 2026-09-11 | Section 3.1 proposes operation-specific model/session/research contracts and an optional bounded free-worker route. Current subscription-only runtime policy remains unchanged; no gateway installation, provider transfer or live compatibility test occurred. Integrate with C2/C4/C7 and retain R5/custody requirements. |
 | R2 | VERIFIED_LOCAL within documented limits | Snapshot/output inventory is shared by backup and restore; both formats restore actual bytes into a new root. OutputService reserves real destinations on prepare/launch and stores versioned verified bytes. Required missing objects refuse backup. Snapshot identity rejects null/wrong request revisions. Remaining constraints: source swap races, recorded-platform Git reconstruction and R5 transport limits. |
 | R3 | VERIFIED_LOCAL | Preserve exact per-operation scope, durable evidence order, independent confinement and frozen account context. No new live capability evidence in this pass. |
@@ -6039,3 +6039,91 @@ for overlapping Find texts rather than dependencies: LR-9/LR-10 behind LR-4 (`ag
 LR-11 behind LR-4 (`desktop.e2e.ts`), LR-7 behind LR-6 + LR-2 (`main.ts`), LR-14 behind LR-6
 (`store.ts`). Worker note: `pnpm` is absent from PATH on this machine — `corepack pnpm@11.19.0`
 is the working invocation (Node 24's bundled corepack; same pin as CI).
+
+### 2026-09-27 — LR-2…LR-14 wave merged through protected route; eight packets integrated
+
+All merges below: SWE-2 Max worker packets (C11.K verbatim, own worktree/branch), organizer review
+of the exact diff against each packet's "Done when", `verify` green on the exact head, merge via
+GitHub only. Branch protection is `strict` — each branch was updated to current `origin/main`
+before merge, so every head verified contains all prior merges.
+
+- **LR-3 → `54fd5be` (PR #23).** Long prompts go through `PROMPT.md` instead of the Windows
+  command line; exported verbatim prompt builder + suffix constant; argument-leak regression test.
+  `verify` on `d4286e0` 8m59s. Mirror asar `9B74651E91341CF96152D6EEA3C170D134A7604D64F4E9891841FBDE07406C07`.
+- **LR-4 → `c3a8a2a` (PR #24).** Add Agent defaults to `LOCAL` + `LOCAL_CLI_EXEC`, provider switches
+  preserve execution mode, and Add stays disabled until the unattended-execution risk consent is
+  checked (runs under the user's Windows permissions — D-1). Worker packaged check: consent gate
+  and local defaults observed in the packaged UI with scratch `QRO_USER_DATA_DIR`. Mirror asar
+  `08A946AB6B5C0B59B7D9F569B2A00246393FA0726001265E12E207BAEFA7BC99`.
+- **LR-5 → `36ff06e` (PR #25).** Packet prompt now declares everything under `inputs/` (including
+  `inputs/inherited/`) as data, not instructions; regression assert added. `verify` on `4beb1d8`
+  11m14s. Mirror asar `CE83FFAAADFE54CE06576FC33E95BAAD05712322B0D4B1C303D8B2F0C1F89EED`.
+- **LR-6 → `ef2779a` (PR #26).** One model catalog per connection in the disposable projection
+  (`modelsOmitted` marker; event log untouched per D-2), `SCHEMA_VERSION` 4, automatic
+  `VACUUM INTO` backup before rebuild, `downgradeWorkspaceToV3` + `app/scripts/downgrade-workspace.ts`.
+  Worker bench: projection 5,855,685 → 172,643 bytes, openMs 38,289 → 1,016, snapshotMs 732 → 5.7;
+  scratch v3 workspace migrated → downgraded → opened by the pre-LR-6 build. `verify` on `1184ba0`
+  9m55s. Mirror asar `D8ECB8B054E3F2745283E5341F51DD5016FDF42F493275018019B04C7E4A1DD3`.
+  **Incident (recorded, resolved):** the worker once launched the new build without
+  `QRO_USER_DATA_DIR`, briefly opening the live workspace (~10 s, migration rolled back on kill).
+  Organizer independently verified the live DB: `user_version=3`, 1,416 events, `integrity=ok`;
+  safety copy preserved outside Git at
+  `Quant Office\Archive\workspace-live-interrupted-v4-migration-backup-20260927.sqlite`. All
+  packets now carry an explicit `QRO_USER_DATA_DIR` + `ELECTRON_RUN_AS_NODE` launch rule.
+- **LR-2 → `608ea06` (PR #27).** `diagnostics.ts` rotating `main.log` (5 MB × 3, never throws) +
+  `describeError`; uncaughtException/unhandledRejection dialog, render-process-gone reload dialog,
+  child-process-gone WARN, startup INFO, Help → Open logs folder. The worker's content was
+  packet-verbatim but uncommitted when its session stalled; the organizer committed/pushed/PR'd it
+  and the worker confirmed the pushed diff byte-identical and filed its full report (908 tests,
+  907 pass). `verify` on `3d99140` 10m4s. Organizer packaged check on the merged build: scratch
+  `logs/main.log` carried the `INFO start` line and crash hooks fired on termination. Mirror asar
+  `08C5825F7DFBFE88F581405476B382B0C3C7697C5F9EB1033E1A3FF5D3FAD676`.
+- **LR-11 → `fe00e4a` (PR #29).** Nine-page accessible-name regression guard in the packaged e2e
+  (`textContent`, inserted above the last close pair per the re-anchor); step 2 found nothing —
+  all sidebar-page buttons already named. Tests-only change; no repackage (LR-1's merge established
+  tests are not package inputs — asar unchanged at `08C5825F…`). `verify` on `77c0366` 10m33s.
+- **LR-9 → `fa3ac70` (PR #28).** Settings shows one plain sentence per provider (local CLI state +
+  "Provider-hosted: not available in this version") above a collapsed "Technical details"; all
+  providers now evaluated with `{ execution: 'LOCAL' }`. Worker packaged Playwright check:
+  collapsed-by-default, reveals on click. `verify` on `5c187f5` 10m52s. Mirror asar
+  `03BD3903EBDE9F42DAE4D1003A87819DEC0061F81087867AFCAE1CC3C2358CE3`.
+- **LR-14 → `a54f29d` (PR #30).** Light default theme through schema 5: `blank()` seeds `light`,
+  `downgradeWorkspaceToV3` accepts v4/v5 and rebuilds the v3 projection with `dark`; the 40-row
+  `office-chat.css` table now follows theme variables (heading bar and shadows untouched). Worker
+  packaged check: fresh profile light, Settings toggle to dark and back, chat panel follows. `verify`
+  on `35b4592` 10m31s. Mirror asar `EDDC52E463534C7A062608F35E001721F97B1D8393578619785C5765119B2DC1`.
+  **User-facing note:** the installed app now carries schema 5 — the next real launch migrates the
+  live workspace (v3 → v5) with an automatic `.before-v5-*.sqlite` backup beside the workspace, and
+  new/unsettled profiles render light (explicit theme choices are preserved via event history).
+
+- **LR-10 → `7b928c5` (PR #31).** New `app/src/renderer/format.ts` (`UI_LOCALE='en-US'`,
+  `formatDateTime`, `formatNumber`); 19 `toLocale*` uses replaced across nine renderer files; the
+  five remaining uses all carry format options and are listed in the PR per step 3. Worker packaged
+  check: Settings provider cards render the new format, nine pages visited, zero page errors.
+  `verify` on `1215b68` 10m53s. Mirror asar `2A11B7393EBFC91BA73BCD6D20C037691102DECC6F70357FBBB2348B2FB1DF3E`.
+- **LR-7 → `abbe9a1` (PR #32).** `build.mjs` emits a CSP-locked `loading.html`; the BrowserWindow
+  block moved to the top of `start()` (after LR-2's writeLog) so `await win.loadFile(loadingHtml)`
+  paints "Opening your workspace…" before the store verifies history; `loadWindowWithRetry` then
+  swaps in the real UI. Worker: packaged e2e passed 3/3 (the re-anchor's `await` holds); step-4
+  timing observed on packaged builds — loading page rendered at ~390 ms (small workspace) / ~1.3 s
+  (600-event), office by ~1.4 s / ~4.1 s. `verify` on `db65a18` 11m49s. Mirror asar
+  `A498E677F61206D3F50A27B79AF7BF4ABAB4C2E06037DF1463134F950BF71B88`.
+
+**Known flake under watch:** two independent workers saw the full unit suite stall in
+`local-cli-exec.test.ts` when suites ran concurrently — `FSWatcher` rename storms on a removed
+session fixture dir; the adapter's session watchers are not disposed before `removeTreeSync`.
+Isolated runs pass in seconds and CI is green; tracked as a test-harness bug, not a product defect.
+
+- **LR-8 — measured (no merge; measure-only packet).** Worker ran `tsx scripts/bench-store.ts
+  1000` on `abbe9a1` (LR-6 + LR-7 merged):
+  `{"observations":1000,"projectionBytes":747045,"writeMs":534208,"openMs":4999,"snapshotMs":12.9}`.
+  `openMs` 4,999 ms ≥ 3,000 → **L2 is not closed**; the projection rebuild on open now costs ~5 s
+  for 1,000 events even after LR-6 compaction. Per the packet's decision table the organizer opens
+  a design packet for an integrity checkpoint: persist (sequence, event hash, projection hash)
+  after each full verification, verify only post-checkpoint events on open, run full verification
+  in the background. Worker also noted `writeMs` ~534 ms/observation (the write path canonicalizes
+  the whole projection per event) — context for the same design.
+
+**Remaining:** every coded LR packet is merged; L2 stays open pending the checkpoint design packet
+(organizer work). Launch gates LR-15/LR-16 still require organizer design first; legal review is
+user-owned. `App\` currently mirrors `abbe9a1` (asar `A498E677…`).
