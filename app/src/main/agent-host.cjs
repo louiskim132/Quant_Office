@@ -177,6 +177,9 @@ function onSpawn(req) {
     });
     return;
   }
+  // Crash-stage evidence: this line lands synchronously before the spawn, so a native host abort
+  // leaves a marker showing the crash reached the spawn stage (vs. scan/watch lifecycle).
+  appendLog(`err-${id}.log`, `agent-host: spawning ${req.exe}\n`);
   let child;
   try {
     // Piped stdio pumped into append-mode log streams — never raw fd stdio: handing open file fds

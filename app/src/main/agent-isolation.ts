@@ -354,7 +354,11 @@ export function qroAgentSpawn(deps: QroAgentSpawnDeps): QroAgentSpawn {
       '$pw = [Console]::In.ReadLine()',
       '$sec = ConvertTo-SecureString $pw -AsPlainText -Force',
       '$cred = New-Object System.Management.Automation.PSCredential($env:QRO_ISO_USER, $sec)',
-      `Start-Process -Credential $cred -FilePath ${quote(nodeExe)} -ArgumentList ${quote(script)},${quote(channelDir)},'${process.pid}' -WindowStyle Hidden -LoadUserProfile -UseNewEnvironment -Wait`,
+      // '--no-maglev' must precede the script: V8 Maglev JIT __fastfail's (0xC0000409) on
+      // CFG/CET-enforcing Windows builds (nodejs/node#62260, e.g. Server 2025 CI). The host is
+      // the only long-lived process in the chain — the sole candidate to tier up to Maglev; the
+      // provider grandchildren are short-lived and can't be flagged anyway.
+      `Start-Process -Credential $cred -FilePath ${quote(nodeExe)} -ArgumentList '--no-maglev',${quote(script)},${quote(channelDir)},'${process.pid}' -WindowStyle Hidden -LoadUserProfile -UseNewEnvironment -Wait`,
     ].join('; ');
     const proc = spawn('powershell.exe', ['-NoProfile', '-Command', bootstrap], {
       env: { ...process.env, QRO_ISO_USER: credential.user },

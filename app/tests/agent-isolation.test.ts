@@ -61,7 +61,9 @@ function sameUserHost(t: test.TestContext): {
   return {
     procs,
     hostLauncher: channelDir => {
-      const proc = spawn(process.execPath, [HOST_SOURCE, channelDir, String(process.pid)], {
+      // '--no-maglev' mirrors the production launcher: V8 Maglev __fastfail's on CFG-enforcing
+      // Windows builds — a long-lived host is the only process in the chain that can tier up.
+      const proc = spawn(process.execPath, ['--no-maglev', HOST_SOURCE, channelDir, String(process.pid)], {
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
       });
@@ -138,6 +140,40 @@ async function deadline<T>(promise: Promise<T>, what: string): Promise<T> {
   }
 }
 
+/**
+ * Reads the channel's own evidence — host-errors.log plus every err-*.log under .host/run-*.
+ * On CI these files are the only window into a host that dies natively with no JS stack.
+ */
+function channelEvidence(agentsRoot: string): string {
+  try {
+    const hostDir = path.join(agentsRoot, '.host');
+    const chunks: string[] = [];
+    for (const run of readdirSync(hostDir).filter(name => name.startsWith('run-'))) {
+      const dir = path.join(hostDir, run);
+      for (const name of readdirSync(dir).filter(name => name === 'host-errors.log' || /^err-.+\.log$/.test(name))) {
+        try {
+          chunks.push(`${run}/${name}: ${readFileSync(path.join(dir, name), 'utf8').slice(0, 400)}`);
+        } catch {
+          /* vanished mid-read */
+        }
+      }
+    }
+    return chunks.join('\n').slice(0, 1600);
+  } catch {
+    return '';
+  }
+}
+
+/** deadline + channel evidence on failure: a wedge or crash reports what the host last wrote. */
+async function settle<T>(promise: Promise<T>, what: string, agentsRoot: string): Promise<T> {
+  try {
+    return await deadline(promise, what);
+  } catch (error) {
+    const evidence = channelEvidence(agentsRoot);
+    throw new Error(`${(error as Error).message}${evidence ? `\nchannel evidence:\n${evidence}` : ''}`);
+  }
+}
+
 const OPTS = (cwd: string, env: NodeJS.ProcessEnv = {}): CliSpawnOptions => ({
   cwd,
   env,
@@ -147,42 +183,51 @@ const OPTS = (cwd: string, env: NodeJS.ProcessEnv = {}): CliSpawnOptions => ({
 
 test('isolated spawn: stdout bytes arrive and exit reports code 0', async t => {
   const dir = root(t);
-  const { spawnAs, sessionDir } = spawnFixture(t, dir);
+  const { spawnAs, agentsRoot, sessionDir } = spawnFixture(t, dir);
   const child = spawnAs(process.execPath, ['-e', 'console.log("hi")'], OPTS(sessionDir));
   const seen = collect(child);
-  const result = await deadline(seen.settled, 'the spawned child to exit');
-  if (result.kind !== 'exit') assert.fail(`the child errored instead of exiting: ${result.error.message}`);
+  const result = await settle(seen.settled, 'the spawned child to exit', agentsRoot);
+  if (result.kind !== 'exit')
+    assert.fail(
+      `the child errored instead of exiting: ${result.error.message}\nchannel evidence:\n${channelEvidence(agentsRoot)}`,
+    );
   assert.equal(result.code, 0);
   assert.ok(seen.out.join('').includes('hi'), `stdout carried the child output: ${seen.out.join('')}`);
 });
 
 test('isolated spawn: stderr bytes arrive on the stderr stream', async t => {
   const dir = root(t);
-  const { spawnAs, sessionDir } = spawnFixture(t, dir);
+  const { spawnAs, agentsRoot, sessionDir } = spawnFixture(t, dir);
   const child = spawnAs(process.execPath, ['-e', 'console.error("oops")'], OPTS(sessionDir));
   const seen = collect(child);
-  const result = await deadline(seen.settled, 'the spawned child to exit');
-  if (result.kind !== 'exit') assert.fail(`the child errored instead of exiting: ${result.error.message}`);
+  const result = await settle(seen.settled, 'the spawned child to exit', agentsRoot);
+  if (result.kind !== 'exit')
+    assert.fail(
+      `the child errored instead of exiting: ${result.error.message}\nchannel evidence:\n${channelEvidence(agentsRoot)}`,
+    );
   assert.ok(seen.err.join('').includes('oops'), `stderr carried the child output: ${seen.err.join('')}`);
 });
 
 test('isolated spawn: kill() delivers a cancel and the child exits', async t => {
   const dir = root(t);
-  const { spawnAs, sessionDir } = spawnFixture(t, dir);
+  const { spawnAs, agentsRoot, sessionDir } = spawnFixture(t, dir);
   const child = spawnAs(process.execPath, ['-e', 'setInterval(()=>{},1e3)'], OPTS(sessionDir));
   const seen = collect(child);
   // Let the request reach the host before cancelling — either order must still converge on exit.
   await new Promise(resolve => setTimeout(resolve, 400));
   assert.equal(child.kill(), true);
-  const result = await deadline(seen.settled, 'the cancelled child to exit');
-  if (result.kind !== 'exit') assert.fail(`the child errored instead of exiting: ${result.error.message}`);
+  const result = await settle(seen.settled, 'the cancelled child to exit', agentsRoot);
+  if (result.kind !== 'exit')
+    assert.fail(
+      `the child errored instead of exiting: ${result.error.message}\nchannel evidence:\n${channelEvidence(agentsRoot)}`,
+    );
   const { code, signal } = result;
   assert.ok(code !== 0 || signal !== null, `a killed child reports a non-clean exit (${code}/${signal})`);
 });
 
 test('isolated spawn: the env whitelist drops office vars and keeps declared keys', async t => {
   const dir = root(t);
-  const { spawnAs, sessionDir } = spawnFixture(t, dir);
+  const { spawnAs, agentsRoot, sessionDir } = spawnFixture(t, dir);
   const child = spawnAs(
     process.execPath,
     [
@@ -192,8 +237,11 @@ test('isolated spawn: the env whitelist drops office vars and keeps declared key
     OPTS(sessionDir, { QRO_X: '1', PATH: 'evil', ANTHROPIC_API_KEY: 'sk-test-1' }),
   );
   const seen = collect(child);
-  const result = await deadline(seen.settled, 'the spawned child to exit');
-  if (result.kind !== 'exit') assert.fail(`the child errored instead of exiting: ${result.error.message}`);
+  const result = await settle(seen.settled, 'the spawned child to exit', agentsRoot);
+  if (result.kind !== 'exit')
+    assert.fail(
+      `the child errored instead of exiting: ${result.error.message}\nchannel evidence:\n${channelEvidence(agentsRoot)}`,
+    );
   const payload = JSON.parse(seen.out.join('').trim());
   assert.equal(payload.qx, '1', 'QRO_* keys cross the channel');
   assert.equal(payload.ak, 'sk-test-1', 'the provider API key crosses the channel');
@@ -202,15 +250,21 @@ test('isolated spawn: the env whitelist drops office vars and keeps declared key
 
 test('isolated spawn: a cwd outside the sessions root is refused as an error', async t => {
   const dir = root(t);
-  const { spawnAs } = spawnFixture(t, dir);
+  const { spawnAs, agentsRoot } = spawnFixture(t, dir);
   const outside = path.join(dir, 'not-a-session');
   mkdirSync(outside, { recursive: true });
   const child = spawnAs(process.execPath, ['-e', 'console.log("never")'], OPTS(outside));
-  const result = await deadline(collect(child).settled, 'the host to refuse the out-of-root cwd');
+  const result = await settle(collect(child).settled, 'the host to refuse the out-of-root cwd', agentsRoot);
   // The refusal must arrive AS an error record carrying the refusal reason — a host crash
   // ('host exited…') also surfaces 'error' but must not satisfy this assertion.
-  if (result.kind !== 'error') assert.fail(`expected a refusal error, got exit code ${result.code}`);
-  assert.match(result.error.message, /outside the agent sessions root|refused/i);
+  if (result.kind !== 'error')
+    assert.fail(
+      `expected a refusal error, got exit code ${result.code}\nchannel evidence:\n${channelEvidence(agentsRoot)}`,
+    );
+  assert.ok(
+    /outside the agent sessions root|refused/i.test(result.error.message),
+    `expected a refusal message, got: ${result.error.message}\nchannel evidence:\n${channelEvidence(agentsRoot)}`,
+  );
 });
 
 test('isolated spawn: a host that never reports ready fails closed with an error', async t => {
@@ -229,8 +283,11 @@ test('isolated spawn: a host that never reports ready fails closed with an error
   });
   t.after(() => spawnAs.shutdown());
   const child = spawnAs(process.execPath, ['-e', 'console.log("never")'], OPTS(sessionDir));
-  const result = await deadline(collect(child).settled, 'the host start failure to surface');
-  if (result.kind !== 'error') assert.fail(`expected a start-failure error, got exit code ${result.code}`);
+  const result = await settle(collect(child).settled, 'the host start failure to surface', agentsRoot);
+  if (result.kind !== 'error')
+    assert.fail(
+      `expected a start-failure error, got exit code ${result.code}\nchannel evidence:\n${channelEvidence(agentsRoot)}`,
+    );
   assert.match(result.error.message, /isolation/i);
 });
 
