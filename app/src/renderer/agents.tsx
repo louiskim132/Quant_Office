@@ -16,6 +16,7 @@ import { providerReadiness } from '../shared/readiness';
 import { LocalConsumption } from './activity';
 import { TRANSPORT_PROBE_CONTAINMENT } from '../shared/transport';
 import './agents.css';
+import { formatDateTime } from './format';
 const roleNames: Record<Role, string> = {
   DIRECTOR: 'Director',
   PM_A: 'PM · Implementation',
@@ -517,7 +518,7 @@ export function SubscriptionUsage({ state }: { state: AppState }) {
                     <span>{w.label}</span>
                     <strong>{w.remainingPercent.toFixed(0)}% remaining</strong>
                     <progress max="100" value={w.remainingPercent} />
-                    <small>Resets {new Date(w.resetsAt * 1000).toLocaleString()}</small>
+                    <small>Resets {formatDateTime(w.resetsAt * 1000)}</small>
                   </div>
                 ))}
               </div>
@@ -532,7 +533,7 @@ export function SubscriptionUsage({ state }: { state: AppState }) {
                 c?.note ||
                 'Refresh to check the official provider tool. Missing values are never estimated.'}
             </p>
-            {c && <small>Checked {new Date(c.checkedAt).toLocaleString()}</small>}
+            {c && <small>Checked {formatDateTime(c.checkedAt)}</small>}
             {provider !== 'devin' && (
               <div>
                 <button
@@ -616,7 +617,7 @@ export function ProviderConnections({ state }: { state: AppState }) {
         actually exercised counts as verified; documentation and sign-in never make work runnable.
       </p>
       {(['claude', 'openai', 'devin'] as Provider[]).map(provider => {
-        const readiness = providerReadiness(state, provider, provider === 'devin' ? { execution: 'LOCAL' } : undefined);
+        const readiness = providerReadiness(state, provider, { execution: 'LOCAL' });
         const snapshot = state.capabilities?.filter(c => c.provider === provider).at(-1);
         const checked = live[provider];
         return (
@@ -628,73 +629,85 @@ export function ProviderConnections({ state }: { state: AppState }) {
               </strong>
               <p>
                 {readiness.identity
-                  ? `${readiness.identity} · last recorded observation ${new Date(readiness.lastObservedAt).toLocaleString()}`
+                  ? `${readiness.identity} · last recorded observation ${formatDateTime(readiness.lastObservedAt)}`
                   : readiness.lastObservedAt
-                    ? `Checked ${new Date(readiness.lastObservedAt).toLocaleString()} — ${snapshot?.operations.find(item => item.operation === 'ACCOUNT_STATUS')?.detail ?? 'no signed-in subscription was reported.'}`
+                    ? `Checked ${formatDateTime(readiness.lastObservedAt)} — ${snapshot?.operations.find(item => item.operation === 'ACCOUNT_STATUS')?.detail ?? 'no signed-in subscription was reported.'}`
                     : 'No account check recorded yet.'}
               </p>
               {checked && checked !== readiness.lastObservedAt && (
                 <p className="muted">
-                  Last live check {new Date(checked).toLocaleString()} was not persisted as a new observation. It cannot
-                  authorize anything.
+                  Last live check {formatDateTime(checked)} was not persisted as a new observation. It cannot authorize
+                  anything.
                 </p>
               )}
-              <div className="badge-groups">
-                <div className="badge-group">
-                  <span className="mini-label">Account</span>
-                  <ul className="readiness-list">
-                    {(
-                      [
-                        ['Signed in', readiness.signedIn],
-                        ['Account fresh', readiness.accountFresh],
-                        ['Model checked', readiness.modelChecked],
-                        ['Dispatch checked', readiness.dispatchChecked],
-                        ['Ready', readiness.ready],
-                      ] as [string, boolean][]
-                    ).map(([label, value]) => (
-                      <li key={label} data-state={value ? 'yes' : 'no'}>
-                        {label}: {value ? 'Yes' : 'No'}
-                      </li>
-                    ))}
-                  </ul>
+              <p className="provider-summary">
+                <b>This computer (local CLI):</b>{' '}
+                {readiness.signedIn
+                  ? readiness.ready
+                    ? 'ready.'
+                    : `signed in; ${readiness.blockers[0] ?? 'not yet verified by a run.'}`
+                  : 'not signed in — sign in with the provider CLI, then Refresh.'}{' '}
+                <b>Provider-hosted:</b> not available in this version.
+              </p>
+              <details>
+                <summary>Technical details</summary>
+                <div className="badge-groups">
+                  <div className="badge-group">
+                    <span className="mini-label">Account</span>
+                    <ul className="readiness-list">
+                      {(
+                        [
+                          ['Signed in', readiness.signedIn],
+                          ['Account fresh', readiness.accountFresh],
+                          ['Model checked', readiness.modelChecked],
+                          ['Dispatch checked', readiness.dispatchChecked],
+                          ['Ready', readiness.ready],
+                        ] as [string, boolean][]
+                      ).map(([label, value]) => (
+                        <li key={label} data-state={value ? 'yes' : 'no'}>
+                          {label}: {value ? 'Yes' : 'No'}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                  <div className="badge-group">
+                    <span className="mini-label">Operations</span>
+                    <ul className="readiness-list">
+                      {actionNames.map(([action, label]) => (
+                        <li key={action} data-state={readiness.actions[action] ? 'yes' : 'no'}>
+                          {label}: {readiness.actions[action] ? 'Allowed' : 'Blocked'}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 </div>
-                <div className="badge-group">
-                  <span className="mini-label">Operations</span>
-                  <ul className="readiness-list">
-                    {actionNames.map(([action, label]) => (
-                      <li key={action} data-state={readiness.actions[action] ? 'yes' : 'no'}>
-                        {label}: {readiness.actions[action] ? 'Allowed' : 'Blocked'}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
-              {snapshot && (
-                <p className="muted">
-                  Tool {snapshot.toolVersion} · transport {snapshot.transport.toLowerCase().replaceAll('_', ' ')} ·{' '}
-                  {snapshot.models.length} model{snapshot.models.length === 1 ? '' : 's'} · source: {snapshot.source}
-                </p>
-              )}
-              {readiness.evidence.filter(item => item.level !== 'ACCOUNT_VERIFIED' || item.expired).length > 0 && (
-                <details>
-                  <summary>Capability evidence</summary>
-                  <ul className="evidence-list">
-                    {readiness.evidence.map(item => (
-                      <li key={item.operation}>
-                        <b>{item.operation.toLowerCase().replaceAll('_', ' ')}</b>:{' '}
-                        {item.level.toLowerCase().replaceAll('_', ' ')} · {item.evidence.toLowerCase()}
-                        {item.model ? ` · model ${item.model}` : ''}
-                        {item.expired ? ' · expired' : ''} — {item.detail} <i>({item.source})</i>
-                      </li>
-                    ))}
-                  </ul>
-                </details>
-              )}
-              {readiness.blockers.map(blocker => (
-                <p className="muted" key={blocker}>
-                  {blocker}
-                </p>
-              ))}
+                {snapshot && (
+                  <p className="muted">
+                    Tool {snapshot.toolVersion} · transport {snapshot.transport.toLowerCase().replaceAll('_', ' ')} ·{' '}
+                    {snapshot.models.length} model{snapshot.models.length === 1 ? '' : 's'} · source: {snapshot.source}
+                  </p>
+                )}
+                {readiness.evidence.filter(item => item.level !== 'ACCOUNT_VERIFIED' || item.expired).length > 0 && (
+                  <details>
+                    <summary>Capability evidence</summary>
+                    <ul className="evidence-list">
+                      {readiness.evidence.map(item => (
+                        <li key={item.operation}>
+                          <b>{item.operation.toLowerCase().replaceAll('_', ' ')}</b>:{' '}
+                          {item.level.toLowerCase().replaceAll('_', ' ')} · {item.evidence.toLowerCase()}
+                          {item.model ? ` · model ${item.model}` : ''}
+                          {item.expired ? ' · expired' : ''} — {item.detail} <i>({item.source})</i>
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+                {readiness.blockers.map(blocker => (
+                  <p className="muted" key={blocker}>
+                    {blocker}
+                  </p>
+                ))}
+              </details>
               {errors[provider] && (
                 <p className="notice error" role="alert">
                   {errors[provider]}

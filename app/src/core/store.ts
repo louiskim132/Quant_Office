@@ -1393,7 +1393,7 @@ function blank(): Projection {
     experiments: [],
     tasks: [],
     artifacts: [],
-    settings: { theme: 'dark', reducedMotion: false, globalBudgetCents: 0 },
+    settings: { theme: 'light', reducedMotion: false, globalBudgetCents: 0 },
   };
 }
 function emptyContract(): ResearchContract {
@@ -1627,8 +1627,8 @@ function appendFinding(state: Projection, finding: MemoryFinding, supersedesFind
 }
 
 /** Deterministic local bookkeeping only. There are deliberately no network or code-execution methods. */
-/** Workspace schema version. 4 = LR-6 projection (one model catalog per connection). */
-export const SCHEMA_VERSION = 4;
+/** Workspace schema version. 4 = LR-6 projection (one model catalog per connection); 5 = light default theme (LR-14). */
+export const SCHEMA_VERSION = 5;
 
 /**
  * LR-6 recovery path: rewrites a version-4 workspace's projection in the version-3 format (every
@@ -1640,10 +1640,12 @@ export function downgradeWorkspaceToV3(file: string): string {
   const db = new DatabaseSync(file);
   try {
     const version = Number((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version);
-    if (version !== 4) throw new Error(`Only a version-4 workspace can be downgraded; this one is version ${version}.`);
+    if (version !== 4 && version !== 5)
+      throw new Error(`Only a version-4 or version-5 workspace can be downgraded; this one is version ${version}.`);
     const backup = `${file}.before-downgrade-${randomUUID()}.sqlite`;
     db.prepare('VACUUM INTO ?').run(backup);
-    let rebuilt = blank();
+    // Version-3 builds started every workspace from the dark theme.
+    let rebuilt: Projection = { ...blank(), settings: { ...blank().settings, theme: 'dark' } };
     for (const row of db.prepare('SELECT record FROM events ORDER BY sequence').all())
       rebuilt = applyChanges(rebuilt, eventSchema.parse(JSON.parse(String(row.record))).payload.changes, {
         compactCatalogs: false,
