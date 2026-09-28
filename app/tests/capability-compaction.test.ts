@@ -11,33 +11,77 @@ import { currentConnection, latestCapability } from '../src/shared/readiness';
 import type { Provider } from '../src/shared/types';
 
 const at = (minutes: number) => new Date(Date.UTC(2026, 8, 7, 12, 0, 0) + minutes * 60000).toISOString();
-const models = Array.from({ length: 400 }, (_, i) => ({ id: `model-${i}`, name: `Model ${i} with a long display name for size` }));
+const models = Array.from({ length: 400 }, (_, i) => ({
+  id: `model-${i}`,
+  name: `Model ${i} with a long display name for size`,
+}));
 function observation(i: number, catalog: { id: string; name: string }[] = models) {
   return {
-    provider: 'claude' as Provider, identity: 'researcher@example.com', credentialContext: 'claude-code-cli', state: 'SIGNED_IN' as const,
-    allowance: [], note: 'Account sign-in verified.', toolVersion: '2.1.236', transport: 'NONE' as const, environment: '', models: catalog,
+    provider: 'claude' as Provider,
+    identity: 'researcher@example.com',
+    credentialContext: 'claude-code-cli',
+    state: 'SIGNED_IN' as const,
+    allowance: [],
+    note: 'Account sign-in verified.',
+    toolVersion: '2.1.236',
+    transport: 'NONE' as const,
+    environment: '',
+    models: catalog,
     operations: [
-      { operation: 'ACCOUNT_STATUS' as const, level: 'ACCOUNT_VERIFIED' as const, detail: 'Signed in.', evidence: 'OBSERVED' as const, verifiedAt: at(i * 10) },
-      { operation: 'CLOUD_SUBMIT' as const, level: 'DOCUMENTED' as const, detail: 'Not verified for this account.', evidence: 'DOCUMENTED' as const, verifiedAt: at(i * 10) },
+      {
+        operation: 'ACCOUNT_STATUS' as const,
+        level: 'ACCOUNT_VERIFIED' as const,
+        detail: 'Signed in.',
+        evidence: 'OBSERVED' as const,
+        verifiedAt: at(i * 10),
+      },
+      {
+        operation: 'CLOUD_SUBMIT' as const,
+        level: 'DOCUMENTED' as const,
+        detail: 'Not verified for this account.',
+        evidence: 'DOCUMENTED' as const,
+        verifiedAt: at(i * 10),
+      },
     ],
     // Alternating sources change the content hash, so every observation records a new snapshot.
-    source: i % 2 ? 'claude auth status' : 'claude auth status (recheck)', observedAt: at(i * 10),
+    source: i % 2 ? 'claude auth status' : 'claude auth status (recheck)',
+    observedAt: at(i * 10),
   };
 }
-const read = <T>(file: string, sql: string): T => { const db = new DatabaseSync(file); try { return db.prepare(sql).get() as T; } finally { db.close(); } };
-const projectionBytes = (file: string) => Number(read<{ n: number }>(file, 'SELECT length(state) AS n FROM projection').n);
+const read = <T>(file: string, sql: string): T => {
+  const db = new DatabaseSync(file);
+  try {
+    return db.prepare(sql).get() as T;
+  } finally {
+    db.close();
+  }
+};
+const projectionBytes = (file: string) =>
+  Number(read<{ n: number }>(file, 'SELECT length(state) AS n FROM projection').n);
 const userVersion = (file: string) => Number(read<{ user_version: number }>(file, 'PRAGMA user_version').user_version);
 /** One hash over every event record, in order — proves the permanent history is byte-identical. */
 const historyHash = (file: string) => {
   const db = new DatabaseSync(file);
-  try { const hash = createHash('sha256'); for (const row of db.prepare('SELECT record FROM events ORDER BY sequence').all()) hash.update(String(row.record)); return hash.digest('hex'); } finally { db.close(); }
+  try {
+    const hash = createHash('sha256');
+    for (const row of db.prepare('SELECT record FROM events ORDER BY sequence').all()) hash.update(String(row.record));
+    return hash.digest('hex');
+  } finally {
+    db.close();
+  }
 };
 const workspace = (name: string) => path.join(mkdtempSync(path.join(tmpdir(), `qro-lr6-${name}-`)), 'workspace.sqlite');
 
 test('LR-6: the projection keeps one model catalog per connection and marks older snapshots', t => {
   const file = workspace('compact');
   let store = new OfficeStore(file);
-  t.after(() => { try { store.close(); } catch { /* already closed */ } });
+  t.after(() => {
+    try {
+      store.close();
+    } catch {
+      /* already closed */
+    }
+  });
   for (let i = 0; i < 200; i++) store.recordAccountObservation(observation(i));
   const state = store.snapshot({ history: false });
   const connection = currentConnection(state, 'claude')!;
@@ -45,7 +89,11 @@ test('LR-6: the projection keeps one model catalog per connection and marks olde
   assert.equal(snapshots.length, 200, 'every snapshot is still recorded');
   assert.equal(latestCapability(state, connection.id)!.models.length, 400, 'the newest snapshot keeps its catalog');
   assert.equal(latestCapability(state, connection.id)!.modelsOmitted, undefined, 'the newest snapshot is not marked');
-  assert.equal(snapshots.filter(item => item.modelsOmitted === true && item.models.length === 0).length, 199, 'older snapshots are marked omitted');
+  assert.equal(
+    snapshots.filter(item => item.modelsOmitted === true && item.models.length === 0).length,
+    199,
+    'older snapshots are marked omitted',
+  );
   assert.ok(projectionBytes(file) < 1_000_000, `projection is ${projectionBytes(file)} bytes`);
   assert.equal(userVersion(file), SCHEMA_VERSION);
   store.close();
@@ -67,19 +115,34 @@ test('LR-6: a genuinely empty catalog on the newest snapshot is not marked omitt
 test('LR-6: a version-3 workspace migrates once, keeps its history byte-identical and leaves a backup', t => {
   const file = workspace('migrate');
   let store = new OfficeStore(file);
-  t.after(() => { try { store.close(); } catch { /* already closed */ } });
+  t.after(() => {
+    try {
+      store.close();
+    } catch {
+      /* already closed */
+    }
+  });
   for (let i = 0; i < 3; i++) store.recordAccountObservation(observation(i));
   store.close();
   // Recreate what a version-3 build wrote: the full catalog on every snapshot, no markers.
   const db = new DatabaseSync(file);
-  const state = JSON.parse(String((db.prepare('SELECT state FROM projection WHERE singleton=1').get() as { state: string }).state));
-  for (const snapshot of state.capabilities) { snapshot.models = models; delete snapshot.modelsOmitted; }
+  const state = JSON.parse(
+    String((db.prepare('SELECT state FROM projection WHERE singleton=1').get() as { state: string }).state),
+  );
+  for (const snapshot of state.capabilities) {
+    snapshot.models = models;
+    delete snapshot.modelsOmitted;
+  }
   db.prepare('UPDATE projection SET state=? WHERE singleton=1').run(canonical(state));
   db.exec('PRAGMA user_version=3');
   db.close();
   const before = historyHash(file);
   store = new OfficeStore(file);
-  assert.equal((store.snapshot({ history: false }).capabilities ?? []).filter(item => item.modelsOmitted).length, 2, 'the migration compacted the old projection');
+  assert.equal(
+    (store.snapshot({ history: false }).capabilities ?? []).filter(item => item.modelsOmitted).length,
+    2,
+    'the migration compacted the old projection',
+  );
   store.close();
   assert.equal(userVersion(file), SCHEMA_VERSION);
   assert.equal(historyHash(file), before, 'the permanent history is byte-identical');
@@ -88,14 +151,24 @@ test('LR-6: a version-3 workspace migrates once, keeps its history byte-identica
   assert.equal(userVersion(path.join(path.dirname(file), backups[0])), 3, 'the copy is the untouched version-3 file');
   store = new OfficeStore(file); // a second open does not migrate again
   store.close();
-  assert.equal(readdirSync(path.dirname(file)).filter(name => name.includes('.before-v')).length, 1, 'running twice does not migrate or back up again');
+  assert.equal(
+    readdirSync(path.dirname(file)).filter(name => name.includes('.before-v')).length,
+    1,
+    'running twice does not migrate or back up again',
+  );
   assert.equal(historyHash(file), before);
 });
 
 test('LR-6: downgradeWorkspaceToV3 restores the old format losslessly, including records made after the upgrade', t => {
   const file = workspace('downgrade');
   let store = new OfficeStore(file);
-  t.after(() => { try { store.close(); } catch { /* already closed */ } });
+  t.after(() => {
+    try {
+      store.close();
+    } catch {
+      /* already closed */
+    }
+  });
   for (let i = 0; i < 4; i++) store.recordAccountObservation(observation(i));
   store.close();
   const before = historyHash(file);
@@ -103,8 +176,16 @@ test('LR-6: downgradeWorkspaceToV3 restores the old format losslessly, including
   assert.ok(existsSync(backup), 'the downgrade copied the file first');
   assert.equal(userVersion(file), 3);
   assert.equal(historyHash(file), before, 'the permanent history is untouched');
-  const state = JSON.parse(String(read<{ state: string }>(file, 'SELECT state FROM projection WHERE singleton=1').state));
-  assert.ok(state.capabilities.every((item: { models: unknown[]; modelsOmitted?: true }) => item.models.length === 400 && item.modelsOmitted === undefined), 'every snapshot has its catalog again');
+  const state = JSON.parse(
+    String(read<{ state: string }>(file, 'SELECT state FROM projection WHERE singleton=1').state),
+  );
+  assert.ok(
+    state.capabilities.every(
+      (item: { models: unknown[]; modelsOmitted?: true }) =>
+        item.models.length === 400 && item.modelsOmitted === undefined,
+    ),
+    'every snapshot has its catalog again',
+  );
   store = new OfficeStore(file); // the current build upgrades it again
   assert.equal(userVersion(file), SCHEMA_VERSION);
   assert.equal(historyHash(file), before);
