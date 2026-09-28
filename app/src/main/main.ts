@@ -178,7 +178,16 @@ async function start() {
   await recoverInterruptedRestore(root);
   const workspace = workspaceDirectory(root);
   await mkdir(workspace, { recursive: true });
-  store = new OfficeStore(path.join(workspace, 'workspace.sqlite'), { includeHistoryInResults: false });
+  store = new OfficeStore(path.join(workspace, 'workspace.sqlite'), {
+    includeHistoryInResults: false,
+    onBackgroundVerifyError: error => {
+      writeLog(logDir(), 'ERROR', `integrity ${describeError(error)}`);
+      dialog.showErrorBox(
+        'Quant Research Office integrity check failed',
+        'The workspace history check running in the background found a problem. Do not trust this session — quit and restore from a backup. Details are in the log folder (Help → Open logs folder).',
+      );
+    },
+  });
   artifacts = new ArtifactService(store, workspace);
   evidence = new EvidenceService(store, workspace);
   // secrets.dat lives at the userData root — a sibling of workspace/, never inside it.
