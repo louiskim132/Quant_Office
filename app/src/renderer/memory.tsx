@@ -11,6 +11,7 @@ import type {
 } from '../shared/types';
 import { Empty, SearchField, label } from './components';
 import './memory.css';
+import { formatDateTime } from './format';
 
 const KINDS: FindingKind[] = ['OBSERVATION', 'HYPOTHESIS', 'RESULT', 'DEFECT', 'DECISION', 'NOTE'];
 const REL_KINDS: RelationshipKind[] = ['SUPPORTS', 'CONTRADICTS', 'RELATES', 'DUPLICATES', 'REFINES'];
@@ -32,7 +33,7 @@ function hashOf(id: string) {
   return h >>> 0;
 }
 const shortHash = (s: string) => `${s.slice(0, 12)}…`;
-const stamp = (iso: string) => new Date(iso).toLocaleString();
+const stamp = (iso: string) => formatDateTime(iso);
 const authorLine = (a: MemoryAuthor) =>
   `${a.surface.toLowerCase().replaceAll('_', ' ')}${a.agentId ? ` · agent ${a.agentId.slice(0, 8)}` : ''}${a.receiptHash ? ` · receipt ${shortHash(a.receiptHash)}` : ''}`;
 

@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import type { Agent, AgentLog, AppState, Connection, Effort, LocalUsage, TokenTotals } from '../shared/types';
 import { suggestedEfforts, PROVIDER_MODEL_SUGGESTIONS, effortIsIndependentAxis } from '../shared/effort';
-const number = (n: number) => n.toLocaleString();
+import { formatDateTime, formatNumber } from './format';
+const number = (n: number) => formatNumber(n);
 function TokenTable({ items }: { items: { label: string; totals: TokenTotals }[] }) {
   return (
     <div className="log-table-wrap">
@@ -87,7 +88,7 @@ export function LocalConsumption() {
             <strong>
               {data.partial ? 'Partial coverage — some records could not be read' : 'Selected files scanned'}
             </strong>{' '}
-            · {new Date(data.scannedAt).toLocaleString()}
+            · {formatDateTime(data.scannedAt)}
           </p>
           <code className="hash">{data.root}</code>
           <TokenTable
@@ -278,7 +279,7 @@ export function ActivityView({ state, fixedAgent }: { state: AppState; fixedAgen
                 </span>
               </div>
               <small>
-                {new Date(l.timestamp).toLocaleString()} · {l.kind.toLowerCase()} · {l.conversationId}
+                {formatDateTime(l.timestamp)} · {l.kind.toLowerCase()} · {l.conversationId}
               </small>
               <pre>{l.text}</pre>
               <details>

@@ -5,6 +5,7 @@ import './office.css';
 import { officeActivity } from '../shared/activity';
 import { Users } from 'lucide-react';
 import { Empty } from './components';
+import { formatDateTime } from './format';
 
 // The scene accepts live assignments only. Historical transcripts never imply current activity.
 export interface LiveOfficeActivity {
@@ -436,7 +437,7 @@ export function ConnectionBinding({
         </div>
         <div>
           <dt>Last verified</dt>
-          <dd>{binding.lastVerifiedAt ? new Date(binding.lastVerifiedAt).toLocaleString() : 'Never'}</dd>
+          <dd>{binding.lastVerifiedAt ? formatDateTime(binding.lastVerifiedAt) : 'Never'}</dd>
         </div>
         <div>
           <dt>Dispatch readiness</dt>

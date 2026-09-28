@@ -4,6 +4,7 @@ import type { AppState, Experiment, FileActionResult, Project } from '../shared/
 import { Empty, label } from './components';
 import { projectJobOutputs } from './job-outputs';
 import './office.css';
+import { formatNumber } from './format';
 
 const date = (d: string) =>
   new Date(d).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
@@ -123,7 +124,7 @@ export function ArtifactsPage({
                     <td>
                       <strong>{a.name}</strong>
                       <small>
-                        {a.size.toLocaleString()} bytes · {a.mediaType}
+                        {formatNumber(a.size)} bytes · {a.mediaType}
                       </small>
                     </td>
                     <td>
@@ -205,7 +206,7 @@ export function ArtifactsPage({
                             <td>
                               <code>{output.path}</code>
                             </td>
-                            <td>{output.bytes.toLocaleString()} bytes</td>
+                            <td>{formatNumber(output.bytes)} bytes</td>
                             <td>
                               <code title={output.sha256}>{output.sha256.slice(0, 12)}…</code>
                             </td>
