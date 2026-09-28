@@ -151,12 +151,34 @@ export class Secrets {
     const entry = this.read().providers[provider];
     return entry ? { saved: true, savedAt: entry.savedAt } : { saved: false };
   }
-  /** Reserved for LR-16's low-privilege agent account — typed and read, unused in LR-15. */
+  /** The LR-16 low-privilege agent account credential — presence IS the isolation mode. */
   hasAgentCredential(): boolean {
     return Boolean(this.read().agentUser);
   }
   agentCredential(): { user: string; password: string; savedAt: string } | null {
     return this.read().agentUser ?? null;
+  }
+  /**
+   * Saves the agent account credential after the consented elevated setup reports ok. The password
+   * is machine-generated for exactly this local account — it is handed to the credential-launch
+   * bootstrap's stdin only and is never logged, rendered or written anywhere else.
+   */
+  saveAgentUser(user: string, password: string): void {
+    if (!user || !password) throw new Error('An agent account name and password are required.');
+    const current = this.read();
+    this.write({ ...current, agentUser: { user, password, savedAt: this.now() } });
+  }
+  /**
+   * Drops the agent credential — the office stops launching agents as the separate account. The
+   * Windows account itself is deliberately left in place (removing it is a Windows admin action,
+   * never something this office does silently).
+   */
+  removeAgentUser(): void {
+    const current = this.read();
+    if (!current.agentUser) return;
+    const next = { ...current };
+    delete next.agentUser;
+    this.write(next);
   }
 }
 

@@ -1166,6 +1166,15 @@ export interface OfficeAPI {
   removeProviderApiKey(provider: Provider): Promise<{ ok: true }>;
   /** Whether a local provider key exists — presence and timestamp only, never key material. */
   providerKeyState(provider: Provider): Promise<{ saved: boolean; savedAt?: string }>;
+  /** Whether the separate low-privilege Windows account for agent sessions is configured (LR-16). */
+  agentIsolationStatus(): Promise<{ configured: boolean }>;
+  /**
+   * The one-time consented elevated setup: creates the QRO-Agent account and grants it the agent
+   * session folders. The UAC prompt is the consent; the renderer sees only success or a failure.
+   */
+  agentIsolationSetup(): Promise<{ ok: true }>;
+  /** Stops launching agents as QRO-Agent. The Windows account itself is left in place. */
+  agentIsolationRemove(): Promise<{ ok: true }>;
   selectProviderTool(provider: Provider): Promise<void>;
   openProviderUsage(provider: Provider): Promise<void>;
   /** Freeze one request's inputs and record the intent to submit. Nothing is transferred. */

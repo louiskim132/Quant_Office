@@ -36,7 +36,7 @@ import './styles.css';
 import { requestQueue } from '../shared/queue';
 import { OfficeScene, AgentRoster, ProfileEditor, ConnectionBinding } from './office';
 import { WorkQueue } from './queue';
-import { AgentSetup, ProviderConnections, SubscriptionUsage } from './agents';
+import { AgentSetup, AgentIsolation, ProviderConnections, SubscriptionUsage } from './agents';
 import { ProjectsView } from './projects';
 import { HistoryView } from './history';
 import { ResearchView } from './research';
@@ -642,6 +642,7 @@ function App() {
           {page === 'Settings' && (
             <>
               <ProviderConnections state={state} />
+              <AgentIsolation />
               <div className="settings-card">
                 <h2>Appearance</h2>
                 <div className="setting-row">
