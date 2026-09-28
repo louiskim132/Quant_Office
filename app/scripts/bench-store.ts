@@ -51,10 +51,20 @@ let store = new OfficeStore(file);
 let started = Date.now();
 for (let i = 0; i < count; i++) store.recordAccountObservation(observation(i));
 const writeMs = Date.now() - started;
+// LR-17: a real session ends with the integrity checkpoint advanced, so the reopen below replays
+// a zero-length tail — the background verification the app schedules must have completed first.
+await store.verifyInBackground();
 store.close();
 started = Date.now();
 store = new OfficeStore(file);
 const openMs = Date.now() - started;
+const probe = new DatabaseSync(file);
+const maxSequence = Number((probe.prepare('SELECT MAX(sequence) AS s FROM events').get() as { s: number }).s);
+const checkpointSequence = Number(
+  (probe.prepare('SELECT sequence FROM integrity_checkpoint WHERE singleton=1').get() as { sequence: number }).sequence,
+);
+probe.close();
+const tailEvents = maxSequence - checkpointSequence;
 started = Date.now();
 for (let i = 0; i < 20; i++) store.snapshot({ history: false });
 const snapshotMs = (Date.now() - started) / 20;
@@ -63,4 +73,4 @@ const db = new DatabaseSync(file);
 const projectionBytes = Number((db.prepare('SELECT length(state) AS n FROM projection').get() as { n: number }).n);
 db.close();
 rmSync(root, { recursive: true, force: true });
-console.log(JSON.stringify({ observations: count, projectionBytes, writeMs, openMs, snapshotMs }));
+console.log(JSON.stringify({ observations: count, projectionBytes, writeMs, openMs, snapshotMs, tailEvents }));

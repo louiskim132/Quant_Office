@@ -50,7 +50,7 @@ function upsertLocationScope(
   return true;
 }
 import { resolve, isAbsolute } from 'node:path';
-import { DatabaseSync, backup as sqliteBackup } from 'node:sqlite';
+import { DatabaseSync, backup as sqliteBackup, type SQLOutputValue } from 'node:sqlite';
 import { z } from 'zod';
 import { independenceClaimBlocker } from '../shared/cooperation.js';
 import { MEMORY_SEATS } from '../shared/local-session.js';
@@ -1355,6 +1355,8 @@ const eventSchema = z
   })
   .strict();
 type StoredEvent = z.infer<typeof eventSchema>;
+/** The verified tip recorded by a completed full verification: prefix events are trusted, the tail is replayed on open. */
+type IntegrityCheckpoint = { sequence: number; eventHash: string; projectionState: string };
 type Projection = Pick<AppState, 'projects' | 'experiments' | 'tasks' | 'artifacts' | 'settings'> & {
   pipeline?: PipelineRecord[];
   evidence?: EvidenceRecord[];
@@ -1627,11 +1629,11 @@ function appendFinding(state: Projection, finding: MemoryFinding, supersedesFind
 }
 
 /** Deterministic local bookkeeping only. There are deliberately no network or code-execution methods. */
-/** Workspace schema version. 4 = LR-6 projection (one model catalog per connection); 5 = light default theme (LR-14). */
-export const SCHEMA_VERSION = 5;
+/** Workspace schema version. 4 = LR-6 projection (one model catalog per connection); 5 = light default theme (LR-14); 6 = integrity checkpoint (LR-17). */
+export const SCHEMA_VERSION = 6;
 
 /**
- * LR-6 recovery path: rewrites a version-4 workspace's projection in the version-3 format (every
+ * LR-6 recovery path: rewrites a version-4, version-5 or version-6 workspace's projection in the version-3 format (every
  * snapshot keeps its model list) so a build from before LR-6 can open it. The event log — every
  * record, including those written after the upgrade — is not touched. A copy of the file is made
  * first; its path is returned. Run it only while no Quant Research Office window has the file open.
@@ -1640,8 +1642,10 @@ export function downgradeWorkspaceToV3(file: string): string {
   const db = new DatabaseSync(file);
   try {
     const version = Number((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version);
-    if (version !== 4 && version !== 5)
-      throw new Error(`Only a version-4 or version-5 workspace can be downgraded; this one is version ${version}.`);
+    if (version !== 4 && version !== 5 && version !== 6)
+      throw new Error(
+        'Only a version-4, version-5 or version-6 workspace can be downgraded; move or rename the current database file to start fresh.',
+      );
     const backup = `${file}.before-downgrade-${randomUUID()}.sqlite`;
     db.prepare('VACUUM INTO ?').run(backup);
     // Version-3 builds started every workspace from the dark theme.
@@ -1653,6 +1657,7 @@ export function downgradeWorkspaceToV3(file: string): string {
     db.exec('BEGIN IMMEDIATE');
     try {
       db.prepare('UPDATE projection SET state=? WHERE singleton=1').run(canonical(rebuilt));
+      db.exec('DROP TABLE IF EXISTS integrity_checkpoint');
       db.exec('PRAGMA user_version=3');
       db.exec('COMMIT');
     } catch (error) {
@@ -1668,9 +1673,11 @@ export function downgradeWorkspaceToV3(file: string): string {
 export class OfficeStore {
   private readonly db: DatabaseSync;
   private closed = false;
+  private needsBackgroundVerify = false;
   private researchIndexReady = false;
   private readonly researchAdmission: ResearchAdmission;
   private readonly includeHistoryInResults: boolean;
+  private readonly backgroundVerifyError: ((error: unknown) => void) | undefined;
 
   constructor(
     private readonly databasePath: string,
@@ -1678,9 +1685,11 @@ export class OfficeStore {
       repairLegacy?: boolean;
       researchTrust?: readonly ResearchTrustPin[];
       includeHistoryInResults?: boolean;
+      onBackgroundVerifyError?: (error: unknown) => void;
     } = {},
   ) {
     this.includeHistoryInResults = options.includeHistoryInResults ?? true;
+    this.backgroundVerifyError = options.onBackgroundVerifyError;
     this.researchAdmission = new ResearchAdmission(options.researchTrust);
     this.db = new DatabaseSync(databasePath);
     try {
@@ -1698,6 +1707,7 @@ export class OfficeStore {
           CREATE TABLE projection(singleton INTEGER PRIMARY KEY CHECK(singleton=1), state TEXT NOT NULL);
           CREATE TABLE commands(idempotency_key TEXT PRIMARY KEY, payload_hash TEXT NOT NULL, event_sequence INTEGER NOT NULL REFERENCES events(sequence));
           CREATE TABLE outbox(event_sequence INTEGER PRIMARY KEY REFERENCES events(sequence), state TEXT NOT NULL CHECK(state IN ('PENDING','ACKNOWLEDGED')));
+          CREATE TABLE integrity_checkpoint(singleton INTEGER PRIMARY KEY CHECK(singleton=1), sequence INTEGER NOT NULL, event_hash TEXT NOT NULL, projection_hash TEXT NOT NULL, projection_state TEXT NOT NULL, recorded_at TEXT NOT NULL);
           CREATE TRIGGER events_no_update BEFORE UPDATE ON events BEGIN SELECT RAISE(ABORT, 'Events are immutable'); END;
           CREATE TRIGGER events_no_delete BEFORE DELETE ON events BEGIN SELECT RAISE(ABORT, 'Events are immutable'); END;
           PRAGMA user_version=1;`);
@@ -1720,7 +1730,27 @@ export class OfficeStore {
         }
         this.db.exec('COMMIT');
       }
-      if (version >= SCHEMA_VERSION) this.verifyIntegrity();
+      if (version >= SCHEMA_VERSION) {
+        const checkpoint = this.readCheckpoint();
+        if (checkpoint) {
+          // LR-17: replay only the events appended after the recorded checkpoint; the full history
+          // is re-verified in the background once the workspace is open.
+          this.verifyTail(checkpoint);
+          this.needsBackgroundVerify = true;
+        } else {
+          // A version-6 workspace should always carry a checkpoint; when the row is missing, fall
+          // back to a full verification. verifyIntegrity's checkpoint write is a bare statement, so
+          // this transaction wraps only that write (verifyIntegrity itself writes nothing else).
+          this.db.exec('BEGIN IMMEDIATE');
+          try {
+            this.verifyIntegrity();
+            this.db.exec('COMMIT');
+          } catch (error) {
+            this.db.exec('ROLLBACK');
+            throw error;
+          }
+        }
+      }
       if (version < 3) {
         this.db.exec(
           'BEGIN IMMEDIATE; CREATE TABLE research_read_index(collection TEXT NOT NULL,id TEXT NOT NULL,project_id TEXT NOT NULL,branch_id TEXT,request_id TEXT,from_id TEXT,to_id TEXT,sequence INTEGER NOT NULL,record TEXT NOT NULL,PRIMARY KEY(collection,id)); CREATE INDEX research_read_scope ON research_read_index(collection,project_id,branch_id,sequence,id); CREATE INDEX research_message_scope ON research_read_index(collection,request_id,sequence,id); PRAGMA user_version=3;',
@@ -1733,6 +1763,15 @@ export class OfficeStore {
         this.db.exec('COMMIT');
       }
       this.researchIndexReady = true;
+      if (version < 6) {
+        // LR-17 integrity checkpoint table. The version-0 init batch already creates it; this covers
+        // workspaces written by older builds. Only the table is created here — the row is written by
+        // the full verification inside the migration transaction below, so a checkpoint is never
+        // recorded ahead of a verified history.
+        this.db.exec(
+          'BEGIN IMMEDIATE; CREATE TABLE IF NOT EXISTS integrity_checkpoint(singleton INTEGER PRIMARY KEY CHECK(singleton=1), sequence INTEGER NOT NULL, event_hash TEXT NOT NULL, projection_hash TEXT NOT NULL, projection_state TEXT NOT NULL, recorded_at TEXT NOT NULL); COMMIT',
+        );
+      }
       if (version < SCHEMA_VERSION) {
         // One-time projection rebuild (LR-6). An existing workspace is copied first; the rebuild and
         // the version bump commit together, so an interrupted migration leaves the old file intact.
@@ -1784,6 +1823,10 @@ export class OfficeStore {
         );
         this.verifyIntegrity();
       }
+      if (this.needsBackgroundVerify)
+        setImmediate(() => {
+          void this.verifyInBackground().catch(error => this.backgroundVerifyError?.(error));
+        });
     } catch (error) {
       this.db.close();
       this.closed = true;
@@ -1832,15 +1875,19 @@ export class OfficeStore {
     return this.db
       .prepare('SELECT sequence,id,record FROM events ORDER BY sequence')
       .all()
-      .map(row => {
-        const parsed = eventSchema.parse(JSON.parse(String(row.record)));
-        if (canonical(parsed) !== row.record) throw new Error('Event record is not canonical JSON');
-        if (parsed.sequence !== Number(row.sequence) || parsed.id !== row.id)
-          throw new Error('Event identity integrity failure');
-        return parsed;
-      });
+      .map(row => this.parseEventRow(row));
   }
-  private verifyIntegrity(rewriteProjection = false): void {
+  /** One stored row → a schema-valid canonical event, or a thrown integrity error. Shared by every verifier. */
+  private parseEventRow(row: Record<string, SQLOutputValue>): StoredEvent {
+    const record = String(row.record);
+    const parsed = eventSchema.parse(JSON.parse(record));
+    if (canonical(parsed) !== record) throw new Error('Event record is not canonical JSON');
+    if (parsed.sequence !== Number(row.sequence) || parsed.id !== row.id)
+      throw new Error('Event identity integrity failure');
+    return parsed;
+  }
+  /** The cheap structural checks every integrity pass starts from: page health, foreign keys, append-only triggers. */
+  private checkStorageIntegrity(): void {
     const check = this.db.prepare('PRAGMA integrity_check').get() as { integrity_check: string };
     if (check.integrity_check !== 'ok' || this.db.prepare('PRAGMA foreign_key_check').all().length)
       throw new Error('SQLite integrity failure');
@@ -1850,32 +1897,114 @@ export class OfficeStore {
       )
       .all();
     if (triggers.length !== 2) throw new Error('Append-only event protection integrity failure');
+  }
+  /**
+   * The per-event rules every verifier applies, so the tail and full paths cannot drift: the event
+   * must continue the hash chain (`sequence` and `previousHash` follow the event before it), a
+   * command payload must have its receipt in `commands`, and every event must have an outbox row.
+   */
+  private checkEventChain(
+    event: StoredEvent,
+    expectedSequence: number,
+    expectedPreviousHash: string,
+    receiptIds: Set<string>,
+  ): void {
+    const { hash: eventHash, ...body } = event;
+    if (
+      event.sequence !== expectedSequence ||
+      event.previousHash !== expectedPreviousHash ||
+      eventHash !== canonicalHash(body)
+    )
+      throw new Error(`Event hash chain integrity failure at sequence ${expectedSequence}`);
+    if (event.payload.command) {
+      const key = event.payload.command.idempotencyKey;
+      if (receiptIds.has(key)) throw new Error('Duplicate idempotency key in event history');
+      receiptIds.add(key);
+      const receipt = this.db
+        .prepare('SELECT payload_hash,event_sequence FROM commands WHERE idempotency_key=?')
+        .get(key);
+      if (
+        !receipt ||
+        receipt.payload_hash !== canonicalHash(event.payload.command) ||
+        Number(receipt.event_sequence) !== event.sequence
+      )
+        throw new Error('Command receipt integrity failure');
+    }
+    if (!this.db.prepare('SELECT event_sequence FROM outbox WHERE event_sequence=?').get(event.sequence))
+      throw new Error('Snapshot outbox integrity failure');
+  }
+  /** The newest event in the log: its sequence and hash anchor the next verification. */
+  private tipEvent(): { sequence: number; hash: string } | null {
+    const row = this.db.prepare('SELECT sequence,record FROM events ORDER BY sequence DESC LIMIT 1').get();
+    if (!row) return null;
+    const event = eventSchema.parse(JSON.parse(String(row.record)));
+    return { sequence: event.sequence, hash: event.hash };
+  }
+  /**
+   * Records the verified tip. Bare statement on purpose — callers own the transaction so this can
+   * commit with the migration's rebuild or stand alone behind a completed verification.
+   */
+  private writeCheckpoint(sequence: number, eventHash: string, projectionState: string): void {
+    this.db
+      .prepare(
+        'INSERT OR REPLACE INTO integrity_checkpoint(singleton,sequence,event_hash,projection_hash,projection_state,recorded_at) VALUES(1,?,?,?,?,?)',
+      )
+      .run(sequence, eventHash, canonicalHash(projectionState), projectionState, new Date().toISOString());
+  }
+  private readCheckpoint(): IntegrityCheckpoint | null {
+    const row = this.db
+      .prepare(
+        'SELECT sequence,event_hash,projection_hash,projection_state FROM integrity_checkpoint WHERE singleton=1',
+      )
+      .get() as { sequence: number; event_hash: string; projection_hash: string; projection_state: string } | undefined;
+    if (!row) return null;
+    const projectionState = String(row.projection_state);
+    const parsed = JSON.parse(projectionState);
+    if (canonical(parsed) !== projectionState || canonicalHash(projectionState) !== row.projection_hash)
+      throw new Error('Integrity checkpoint integrity failure');
+    return { sequence: Number(row.sequence), eventHash: String(row.event_hash), projectionState };
+  }
+  /**
+   * LR-17 fast open: the checkpoint certifies the prefix through `checkpoint.sequence`, so only the
+   * tail is replayed. The anchor event's stored hash must match the checkpoint, and rebuilding the
+   * checkpoint's projection state through the tail events must reproduce the stored projection —
+   * the stored projection already includes the tail, so equality is the verification.
+   */
+  private verifyTail(checkpoint: IntegrityCheckpoint): void {
+    this.checkStorageIntegrity();
+    if (checkpoint.sequence > 0) {
+      const anchor = this.db.prepare('SELECT id,record FROM events WHERE sequence=?').get(checkpoint.sequence);
+      if (!anchor || eventSchema.parse(JSON.parse(String(anchor.record))).hash !== checkpoint.eventHash)
+        throw new Error('Integrity checkpoint anchor failure');
+    } else if (checkpoint.eventHash !== ZERO_HASH) {
+      throw new Error('Integrity checkpoint anchor failure');
+    }
+    let rebuilt = JSON.parse(checkpoint.projectionState) as Projection;
+    let previous = checkpoint.eventHash;
+    let expectedSequence = checkpoint.sequence + 1;
+    const receiptIds = new Set<string>();
+    for (const row of this.db
+      .prepare('SELECT sequence,id,record FROM events WHERE sequence > ? ORDER BY sequence')
+      .iterate(checkpoint.sequence)) {
+      const event = this.parseEventRow(row);
+      this.checkEventChain(event, expectedSequence, previous, receiptIds);
+      rebuilt = applyChanges(rebuilt, event.payload.changes);
+      previous = event.hash;
+      expectedSequence = event.sequence + 1;
+    }
+    if (canonical(rebuilt) !== canonical(this.readProjection()))
+      throw new Error('Workspace projection integrity failure');
+  }
+  private verifyIntegrity(rewriteProjection = false): void {
+    this.checkStorageIntegrity();
     const events = this.allEvents();
     let previous = ZERO_HASH;
     let rebuilt = blank();
     const receiptIds = new Set<string>();
     for (const [index, event] of events.entries()) {
-      const { hash: eventHash, ...body } = event;
-      if (event.sequence !== index + 1 || event.previousHash !== previous || eventHash !== canonicalHash(body))
-        throw new Error(`Event hash chain integrity failure at sequence ${index + 1}`);
+      this.checkEventChain(event, index + 1, previous, receiptIds);
       rebuilt = applyChanges(rebuilt, event.payload.changes);
-      previous = eventHash;
-      if (event.payload.command) {
-        const key = event.payload.command.idempotencyKey;
-        if (receiptIds.has(key)) throw new Error('Duplicate idempotency key in event history');
-        receiptIds.add(key);
-        const receipt = this.db
-          .prepare('SELECT payload_hash,event_sequence FROM commands WHERE idempotency_key=?')
-          .get(key);
-        if (
-          !receipt ||
-          receipt.payload_hash !== canonicalHash(event.payload.command) ||
-          Number(receipt.event_sequence) !== event.sequence
-        )
-          throw new Error('Command receipt integrity failure');
-      }
-      if (!this.db.prepare('SELECT event_sequence FROM outbox WHERE event_sequence=?').get(event.sequence))
-        throw new Error('Snapshot outbox integrity failure');
+      previous = event.hash;
     }
     if (Number(this.db.prepare('SELECT COUNT(*) AS count FROM commands').get()!.count) !== receiptIds.size)
       throw new Error('Unexpected command receipts');
@@ -1884,6 +2013,71 @@ export class OfficeStore {
       // chain above was verified; the projection is derived data.
       if (!rewriteProjection) throw new Error('Workspace projection integrity failure');
       this.db.prepare('UPDATE projection SET state=? WHERE singleton=1').run(canonical(rebuilt));
+    }
+    // A completed full verification certifies the history through the tip; the next open replays
+    // only what lands after this checkpoint.
+    const tip = this.tipEvent();
+    this.writeCheckpoint(tip?.sequence ?? 0, tip?.hash ?? ZERO_HASH, canonical(rebuilt));
+  }
+  /**
+   * The same full verification as verifyIntegrity, chunked so the event loop stays responsive. It
+   * runs after a checkpointed open (the tail-only fast path) or on demand, and on success advances
+   * the checkpoint to the tip it captured before scanning. Resolves without verifying when the
+   * store is closed mid-run — closing during a background pass is normal.
+   */
+  async verifyInBackground(): Promise<void> {
+    if (this.closed) return;
+    this.checkStorageIntegrity();
+    const tip = Number((this.db.prepare('SELECT MAX(sequence) AS s FROM events').get() as { s: number | null }).s ?? 0);
+    const cursor = this.db
+      .prepare('SELECT sequence,id,record FROM events WHERE sequence <= ? ORDER BY sequence')
+      .iterate(tip);
+    let previous = ZERO_HASH;
+    let expectedSequence = 1;
+    let rebuilt = blank();
+    const receiptIds = new Set<string>();
+    let scanned = 0;
+    try {
+      // Manual iteration: the loop must never call next() on a statement that close() finalized.
+      while (!this.closed) {
+        const next = cursor.next();
+        if (next.done) break;
+        const event = this.parseEventRow(next.value);
+        this.checkEventChain(event, expectedSequence, previous, receiptIds);
+        rebuilt = applyChanges(rebuilt, event.payload.changes);
+        previous = event.hash;
+        expectedSequence = event.sequence + 1;
+        if (++scanned % 25 === 0) await new Promise(resolve => setImmediate(resolve));
+      }
+    } finally {
+      try {
+        cursor.return?.();
+      } catch {
+        /* the statement is already finalized once the store is closed */
+      }
+    }
+    if (this.closed) return;
+    // The scan verified events through `tip`, but the aggregate reads below see live tables. If a
+    // commit appended an event mid-scan, this pass is inconclusive — resolve without advancing the
+    // checkpoint and let the next open retry, rather than raise a false integrity failure on a
+    // healthy workspace. Everything after this check is synchronous, so nothing can interleave.
+    const currentTip = Number(
+      (this.db.prepare('SELECT MAX(sequence) AS s FROM events').get() as { s: number | null }).s ?? 0,
+    );
+    if (currentTip !== tip) return;
+    if (Number(this.db.prepare('SELECT COUNT(*) AS count FROM commands').get()!.count) !== receiptIds.size)
+      throw new Error('Unexpected command receipts');
+    if (canonical(rebuilt) !== canonical(this.readProjection()))
+      throw new Error('Workspace projection integrity failure');
+    // The checkpoint advance is its own tiny transaction — synchronous on this connection, never
+    // held open across an await and never nested inside another transaction.
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      this.writeCheckpoint(tip, previous, canonical(rebuilt));
+      this.db.exec('COMMIT');
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
     }
   }
 
