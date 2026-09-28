@@ -12,7 +12,7 @@ jobs:
   verify:
     name: verify
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -38,4 +38,12 @@ jobs:
       - name: Build
         working-directory: app
         run: pnpm build
-      # Desktop/package acceptance is run by the organizer on Windows before release.
+      - name: Package
+        working-directory: app
+        run: node scripts/package.mjs
+      - name: Desktop end-to-end
+        working-directory: app
+        shell: pwsh
+        run: |
+          $env:QRO_EXECUTABLE = "$PWD\release\Quant Research Office-win32-x64\Quant Research Office.exe"
+          pnpm exec tsx tests/desktop.e2e.ts
