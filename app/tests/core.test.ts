@@ -92,7 +92,7 @@ test('fresh workspace has no agents, spend, approvals, reviews, projects, or syn
     reviews: [],
     events: [],
     agents: [],
-    settings: { theme: 'dark', reducedMotion: false, globalBudgetCents: 0 },
+    settings: { theme: 'light', reducedMotion: false, globalBudgetCents: 0 },
     spend: { actualCents: 0, reservedCents: 0 },
   });
 });
