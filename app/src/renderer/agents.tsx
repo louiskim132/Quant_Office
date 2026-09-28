@@ -45,7 +45,8 @@ export function AgentSetup({ onAdded }: { onAdded: (state: AppState, execution?:
       role: 'WORKER',
       instructions: '',
       effort: 'default',
-      execution: 'HOSTED_SETUP_REQUIRED',
+      execution: 'LOCAL',
+      localRoute: 'LOCAL_CLI_EXEC',
       toolProfile: 'STANDARD',
     },
   );
@@ -53,6 +54,10 @@ export function AgentSetup({ onAdded }: { onAdded: (state: AppState, execution?:
     [connection, setConnection] = useState<Connection | null>(null),
     [busy, setBusy] = useState(false),
     [error, setError] = useState('');
+  const [riskAccepted, setRiskAccepted] = useState(false);
+  const spawnsLocally =
+    (draft.provider === 'devin' ? 'LOCAL' : draft.execution) === 'LOCAL' &&
+    (draft.localRoute ?? 'LOCAL_CLI_EXEC') === 'LOCAL_CLI_EXEC';
   const operation = useRef(0);
   useEffect(
     () => () => {
@@ -197,7 +202,7 @@ export function AgentSetup({ onAdded }: { onAdded: (state: AppState, execution?:
                       : provider === 'claude'
                         ? 'opus'
                         : '',
-                  execution: provider === 'devin' ? 'LOCAL' : 'HOSTED_SETUP_REQUIRED',
+                  execution: provider === 'devin' ? 'LOCAL' : (draft.execution ?? 'LOCAL'),
                 });
                 void hydrate(provider);
               }}
@@ -212,7 +217,7 @@ export function AgentSetup({ onAdded }: { onAdded: (state: AppState, execution?:
             <select
               aria-label="Execution environment"
               disabled={draft.provider === 'devin'}
-              value={draft.provider === 'devin' ? 'LOCAL' : (draft.execution ?? 'HOSTED_SETUP_REQUIRED')}
+              value={draft.provider === 'devin' ? 'LOCAL' : (draft.execution ?? 'LOCAL')}
               onChange={e => edit({ execution: e.target.value as ExecutionEnvironment })}
             >
               {draft.provider !== 'devin' && (
@@ -231,17 +236,27 @@ export function AgentSetup({ onAdded }: { onAdded: (state: AppState, execution?:
               Local transport
               <select
                 aria-label="Local transport"
-                value={draft.localRoute ?? 'LOCAL_MAILBOX'}
+                value={draft.localRoute ?? 'LOCAL_CLI_EXEC'}
                 onChange={e => edit({ localRoute: e.target.value as AgentDraft['localRoute'] })}
               >
                 <option value="LOCAL_MAILBOX">Manual packet — you launch the session</option>
                 <option value="LOCAL_CLI_EXEC">Office-spawned CLI — unattended run</option>
               </select>
               <small>
-                {(draft.localRoute ?? 'LOCAL_MAILBOX') === 'LOCAL_CLI_EXEC'
+                {(draft.localRoute ?? 'LOCAL_CLI_EXEC') === 'LOCAL_CLI_EXEC'
                   ? 'The office spawns the provider CLI on this machine and owns the process (cancel kills it); not provider-hosted, isolated or independently attested.'
                   : 'The office writes the packet; you run the session yourself in the official tool. Not provider-hosted, isolated or independently attested.'}
               </small>
+            </label>
+          )}
+          {spawnsLocally && (
+            <label className="field consent">
+              <span>
+                <input type="checkbox" checked={riskAccepted} onChange={e => setRiskAccepted(e.target.checked)} /> I
+                understand that this agent runs unattended on this computer with my Windows account's permissions. It
+                can read, change and delete files my account can reach, and run programs. Files it reads are not a
+                security boundary.
+              </span>
             </label>
           )}
           <label className="field">
@@ -413,7 +428,10 @@ export function AgentSetup({ onAdded }: { onAdded: (state: AppState, execution?:
           <button type="button" className="secondary" disabled={busy || !!ticket} onClick={() => void refresh()}>
             Refresh models &amp; account
           </button>
-          <button className="primary" disabled={busy || (!ticket && !draft.model.trim())}>
+          <button
+            className="primary"
+            disabled={busy || (!ticket && !draft.model.trim()) || (!ticket && spawnsLocally && !riskAccepted)}
+          >
             {ticket ? 'Confirm' : 'Add'}
           </button>
         </div>
