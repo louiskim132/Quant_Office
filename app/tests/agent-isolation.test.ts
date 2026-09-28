@@ -14,6 +14,7 @@ import {
   type IsolationBundle,
   type QroAgentSpawn,
 } from '../src/main/agent-isolation';
+import { evaluateAgentIsolationAcceptance } from '../src/main/agent-isolation-acceptance';
 import { Secrets, type SecretBox } from '../src/main/secrets';
 import type { CliChild, CliSpawnOptions } from '../src/main/local-cli-exec';
 
@@ -437,6 +438,63 @@ test('credential bootstrap starts in the agent-accessible host directory', () =>
   const source = readFileSync(path.resolve(import.meta.dirname, '../src/main/agent-isolation.ts'), 'utf8');
   assert.match(source, /cwd: hostDir/);
   assert.match(source, /-LoadUserProfile -UseNewEnvironment -Wait/);
+});
+
+test('LR-16 acceptance passes only on successful identity, group, path-denial, and boundary probes', () => {
+  const checks = evaluateAgentIsolationAcceptance(AGENT_USERNAME, [
+    { label: 'whoami', code: 0, signal: null, out: `LAPTOP\\${AGENT_USERNAME}\n`, err: '' },
+    {
+      label: 'whoami /groups',
+      code: 0,
+      signal: null,
+      out: 'Everyone S-1-1-0\nBUILTIN\\Users S-1-5-32-545\n',
+      err: '',
+    },
+    {
+      label: 'office profile read',
+      code: 1,
+      signal: null,
+      out: '',
+      err: 'Access is denied.\n',
+    },
+    {
+      label: 'cwd escape C:\\',
+      code: null,
+      signal: null,
+      out: '',
+      err: '',
+      error: 'refused: cwd is outside the agent sessions root',
+    },
+  ]);
+  assert.deepEqual(Object.values(checks), [true, true, true, true, true]);
+});
+
+test('LR-16 acceptance fails closed when the host did not launch', () => {
+  const launchError = 'Agent isolation host failed to start: the host launcher exited (code 1)';
+  const checks = evaluateAgentIsolationAcceptance(AGENT_USERNAME, [
+    { label: 'whoami', code: null, signal: null, out: '', err: '', error: launchError },
+    { label: 'whoami /groups', code: null, signal: null, out: '', err: '', error: launchError },
+    { label: 'office profile read', code: null, signal: null, out: '', err: '', error: launchError },
+    { label: 'cwd escape C:\\', code: null, signal: null, out: '', err: '', error: launchError },
+  ]);
+  assert.deepEqual(Object.values(checks), [false, false, false, false, false]);
+});
+
+test('LR-16 acceptance requires explicit denial and the host boundary refusal', () => {
+  const checks = evaluateAgentIsolationAcceptance(AGENT_USERNAME, [
+    { label: 'whoami', code: 0, signal: null, out: `LAPTOP\\${AGENT_USERNAME}\n`, err: '' },
+    { label: 'whoami /groups', code: 0, signal: null, out: 'BUILTIN\\Users S-1-5-32-545\n', err: '' },
+    { label: 'office profile read', code: 1, signal: null, out: 'The system cannot find the path specified.', err: '' },
+    {
+      label: 'cwd escape C:\\',
+      code: null,
+      signal: null,
+      out: '',
+      err: '',
+      error: 'Agent isolation host failed to start: Access is denied',
+    },
+  ]);
+  assert.deepEqual(Object.values(checks), [true, true, true, false, false]);
 });
 
 test('setup: a BOM-prefixed result (Windows PowerShell 5.1 UTF8) still lands the credential', async t => {
