@@ -1,6 +1,6 @@
 # Quant Research Office — single implementation roadmap
 
-Current review, 2026-09-28: C11 development exit criteria are met through LR-17; L2 is closed at 132 ms. LR-16 implementation and launcher follow-ups are merged (#37–#40), but real elevated QRO-Agent acceptance remains unverified: the scratch probes could not start in the Codex-managed Windows process environment. Provider-terms legal review is user-owned and still pending; signing, installer, updates, fuses and clean-machine release validation remain deferred under D-3. The installed `App\` mirrors `ba9b72d` and its `app.asar` SHA-256 is `4CF93A09D322A6CF4EBE6171A5514E895C6B782E94CA540ECCDBF8C502CADB8D`. See section 11 and section 17 for evidence and remaining gates. Older opening updates below are historical.
+Current review, 2026-09-28: C11 development exit criteria are met through LR-17; L2 is closed at 132 ms. LR-16 implementation and launcher follow-ups are merged (#37–#40), but real elevated QRO-Agent acceptance remains unverified: the scratch probes could not start in the Codex-managed Windows process environment. Fail-closed evidence evaluation now has regression coverage. A safe standalone runner is not checked in because account setup outside the app would rotate the Windows account password without updating the app's DPAPI-protected secret. Acceptance must run from a normal desktop app-backed process, then record scratch evidence. A current official-source terms scan is recorded in records/reviews/provider-terms-review-prep-2026-09-28.md; it flags unresolved consumer automation and securities-research questions for counsel. Provider-terms legal approval remains user-owned and pending. Signing, installer, updates, fuses and clean-machine release validation remain deferred under D-3. The installed App copy mirrors ba9b72d and app.asar SHA-256 is 4CF93A09D322A6CF4EBE6171A5514E895C6B782E94CA540ECCDBF8C502CADB8D. See section 11 and section 17 for evidence and remaining gates. Older opening updates below are historical.
 
 Current status update, 2026-09-24: `origin/main` carries the communication pipeline (comm-pipe-1..3, sealed round plus user decision) and the complete M-memory workstream (office-mem-1/2). A packaged-app audit found and fixed four user-visible defects on branch `fix/memory-page-bugs-20260924` (see the dated entry of that name at the end of this file). **Where status lives:** the section 11 tables, plus the dated progress log in section 17 at the end of this file. The newest entry is last. Open items: the C8 user-run Colab pilot, P3 live acceptance of a real user decision, REVISE re-mint, external memory-engine evaluation, C10 comparisons and every hosted gate.
 
@@ -5914,8 +5914,8 @@ Scope: read-only inspection of Devin session `glowing-thunder` (title `Quant_Off
 | Startup — LR-6 → LR-7 → LR-8 | Compact the disposable catalog projection without altering history; show the loading window before store work; measure startup. Source still constructs OfficeStore before BrowserWindow. | Scratch-workspace round-trip/downgrade tests and repeated startup measurements. The reported 166-second launch may include host contention; it does not rule out the separately measured store/startup defect. Never reset live data to improve timing. |
 | Coverage — desktop organizer | Exercise typed withheld-path entry in the packaged UI against scratch data: save a directory prefix, reload, verify persistence, remove it, and confirm BLIND excludes / FULL includes the expected files. | Exact build hash, UI actions, saved state and packet-path evidence. Existing packet-blinding checks do not prove this new editor was exercised. |
 | Coverage — desktop organizer | When a live provider test is explicitly authorized, exercise two Claude test agents launching in one phase. | Record agent/model/effort, actual spawn timestamps, at least the configured four-second spacing and completion/recovery results. The one-Claude QUICK roster cannot close this gap. |
-| Remaining C11 packets | None; LR-0…LR-11 and LR-14…LR-17 are merged and development exit criteria are met. | Launch gates remain LR-16 real isolated-user acceptance and the user-owned provider-terms legal review; D-3 stays deferred. |
-| External/user gates | Keep C8 manual Colab return, R5 hosted evidence, LR-16 real isolated-user acceptance and provider-terms legal review separately tracked. | Their own evidence; none is closed by local tests. Signing/installer/updates/fuses remain deferred under D-3. |
+| Remaining C11 packets | None; LR-0…LR-11 and LR-14…LR-17 are merged and development exit criteria are met. | Launch gates remain LR-16 real isolated-user acceptance and counsel's provider-terms decision. Fail-closed evidence evaluation is covered; D-3 stays deferred. |
+| External/user gates | Keep C8 manual Colab return, R5 hosted evidence, LR-16 real isolated-user acceptance and provider-terms legal review separately tracked. | LR-16 acceptance must run through a normal desktop app-backed process so its DPAPI credential stays synchronized; the legal source packet does not substitute for counsel approval. Their own evidence; none is closed by local tests. Signing/installer/updates/fuses remain deferred under D-3. |
 
 Do not publish findings-rev-5 without a reproducible new defect. Scratch acceptance can proceed independently of formatting, but it writes scratch state and may launch agents: it is not literally read-only and does not authorize live-data mutation or paid/provider runs. Any resulting code packet should be based on the formatted main after RA.
 
@@ -6182,3 +6182,27 @@ user-owned. `App\` currently mirrors `abbe9a1` (asar `A498E677…`).
 - **Real acceptance is not established.** The scratch setup configured QRO-Agent, but the four probes never ran: host startup failed in the Codex-managed Windows process environment with Node's `ncrypto::CSPRNG(nullptr, 0)` assertion and PowerShell `Access is denied`. A separate Node launch under `-UseNewEnvironment` reproduced the CSPRNG error in this shell. The harness treats some host-start errors as passing for the negative checks, so those lines are not valid evidence. Rerun the real elevated acceptance in a normal desktop process environment before closing LR-16.
 - **Installed package:** rebuilt from merged `ba9b72d` and mirrored file-for-file into `Quant Office\App\`; all 95 files matched. `resources/app.asar` SHA-256: `4CF93A09D322A6CF4EBE6171A5514E895C6B782E94CA540ECCDBF8C502CADB8D`. The app was closed during mirroring; live Office user data was not touched.
 - **Still open:** LR-16 real elevated acceptance and the user-owned provider-terms legal review. C11 development exit criteria and L2 are complete; D-3 remains deferred.
+
+### 2026-09-28 — LR-16 acceptance evidence made fail-closed; provider review prepared
+
+- **Acceptance evidence and regression coverage:** Added a pure evidence evaluator in
+  `app/src/main/agent-isolation-acceptance.ts`. It requires a successful `whoami`, exact QRO-Agent
+  identity, non-admin group output, explicit access-denied text for the office profile, and the
+  host's exact cwd-boundary refusal. Process-launch errors, timeouts and missing output cannot
+  count as negative-test success. Three tests cover passing evidence, host-launch failures and
+  missing denial/boundary evidence. Focused LR-16 tests: 19 passed. Full app suite: 948 passed,
+  0 failed, 1 skipped (949 total; 8m14s); typecheck, Prettier check and build passed. A standalone
+  runner was withheld after review found its setup path would rotate the machine's QRO-Agent
+  password while keeping the replacement only in memory, desynchronizing the app's DPAPI-protected
+  credential. The real-account acceptance remains **not run**; execute it through a normal desktop
+  app-backed process with scratch probe data, then retain the LR-16 gate as open until every check
+  passes.
+- **Terms review preparation:** Added
+  `records/reviews/provider-terms-review-prep-2026-09-28.md`, based on official OpenAI,
+  Anthropic and Cognition terms/help pages checked 2026-09-28. It identifies account-mode,
+  automated CLI/output capture, financial-research, product-embedding and data-handling questions
+  for qualified counsel. This is issue spotting only; provider-terms approval remains open and the
+  product stays private/internal beta until counsel records a provider-by-provider decision.
+- **Changed files:** `app/src/main/agent-isolation-acceptance.ts`,
+  `app/tests/agent-isolation.test.ts`, this roadmap, and the counsel prep record. C11 development
+  exit criteria remain met; D-3 remains deferred.
