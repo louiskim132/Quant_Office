@@ -353,7 +353,9 @@ export function qroAgentSpawn(deps: QroAgentSpawnDeps): QroAgentSpawn {
     const quote = (value: string) => `'${value.replaceAll("'", "''")}'`;
     const bootstrap = [
       '$pw = [Console]::In.ReadLine()',
-      '$sec = ConvertTo-SecureString $pw -AsPlainText -Force',
+      // Build the SecureString with .NET directly. Some managed Windows PowerShell environments
+      // can discover Microsoft.PowerShell.Security but fail to import it in this bootstrap.
+      '$sec = New-Object System.Security.SecureString; foreach ($ch in $pw.ToCharArray()) { $sec.AppendChar($ch) }; $sec.MakeReadOnly()',
       '$cred = New-Object System.Management.Automation.PSCredential($env:QRO_ISO_USER, $sec)',
       // '--no-maglev' must precede the script: V8 Maglev JIT __fastfail's (0xC0000409) on
       // CFG/CET-enforcing Windows builds (nodejs/node#62260, e.g. Server 2025 CI). The host is
@@ -362,6 +364,9 @@ export function qroAgentSpawn(deps: QroAgentSpawnDeps): QroAgentSpawn {
       `Start-Process -Credential $cred -FilePath ${quote(nodeExe)} -ArgumentList '--no-maglev',${quote(script)},${quote(channelDir)},'${process.pid}' -WindowStyle Hidden -LoadUserProfile -UseNewEnvironment -Wait`,
     ].join('; ');
     const proc = spawn('powershell.exe', ['-NoProfile', '-Command', bootstrap], {
+      // Start-Process inherits its caller's working directory. Keep that directory inside the
+      // ACL-granted host tree so the low-privilege account can create the process successfully.
+      cwd: hostDir,
       env: { ...process.env, QRO_ISO_USER: credential.user },
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
