@@ -338,6 +338,31 @@ try {
     /no job record/,
   );
   // Seed an inert profile only while the app is closed; no provider authentication or request occurs.
+  for (const name of [
+    'Office',
+    'Agents',
+    'Projects',
+    'Reviews',
+    'Artifacts',
+    'Memory',
+    'History',
+    'Usage',
+    'Settings',
+  ]) {
+    await page.getByRole('button', { name, exact: true }).first().click();
+    const unnamed = await page.evaluate(() =>
+      [...document.querySelectorAll('button')]
+        .filter(
+          b =>
+            b.offsetParent !== null &&
+            !(b.textContent ?? '').trim() &&
+            !b.getAttribute('aria-label') &&
+            !b.getAttribute('title'),
+        )
+        .map(b => b.outerHTML.slice(0, 160)),
+    );
+    assert.deepEqual(unnamed, [], `${name} page has buttons without an accessible name`);
+  }
   await application!.close();
   application = undefined;
   const fixtureStore = new OfficeStore(path.join(data, 'workspace', 'workspace.sqlite'));
