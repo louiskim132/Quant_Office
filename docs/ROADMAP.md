@@ -2237,7 +2237,7 @@ Status vocabulary: NOT_STARTED, IMPLEMENTED_FOUNDATION, IN_PROGRESS, PARTIALLY_V
 | D1 optional Serena trial | PARTIALLY_IMPLEMENTED, nonblocking | Project-local AGENTS.md and CLAUDE.md pointers plus the Git/worktree policy were added during repository setup on 2026-09-12. The optional Serena comparison and client configuration remain NOT_STARTED; no navigation plugin was installed. |
 | C10 four-plugin office evaluation | MEASURED_LOCAL 2026-09-25 (CLI A/B, scratch installs); no plugin enabled by default | 2026-09-16: section 3.2 and C10 define the trials and `app/benchmarks/plugin-evaluation/`. 2026-09-25: Serena 1.7.0, Ponytail v4.10.0, Graphify 0.9.68 and LightRAG 1.5.7 (Ollama local) trialled alone and stacked on an office implement packet and a 7-item code-navigation task. No plugin or pair saved tokens beyond run-to-run noise; Serena adds ~8.7k tokens per call and is unused unless hinted; stacking adds context and lowered accuracy; LightRAG local indexing failed (5 of 11 files timed out in 2 h). Recommended set: office memory ledger only. See section 17 entry "plugin trials" of this date. |
 | Token diet (pipeline token consumption) | VERIFIED_LOCAL on dev + packaged build; merged via PR #13/#14 (2026-09-25 local) | Branch `fix/token-diet-20260925` (base organizer `9356c2e`). Lean Claude/Codex launches, per-hop deliverables, hop-keyed inherited inputs, worker slices, packet essentials + `finish.py`, split contract, pre-registered analysis plan (`analysisOf`), QUICK round shape, implementation-only REVISE, claude launch spacing. Live: quick ema5 round 574k input tokens (was 2.50M), implementation-only revision 345k (was 3.10M), Codex implement 147k (was 374k). App\ `app.asar` `642139F3…`. Plugin trials done (C10 row). Follow-ups done on `fix/evidence-and-memory-20260925` (PR #14): evidence-surface args documented; memory capture restored and digest mounted at `plan-brief`. App\ `app.asar` `0901A8DF…` — see section 17 entries of this date. |
- | Commercial launch readiness | IN_PROGRESS — merged through LR-14 (`a54f29d`); LR-7/LR-10 in flight; LR-8 held behind LR-7 | Private/internal beta only. Merged 2026-09-27 as SWE-2 Max packets on protected main: LR-0 `e0ce5d9` (PR #18), LR-1 `232f273` (#21, packaged e2e in CI), LR-3 `54fd5be` (#23, PROMPT.md long prompts), LR-4 `c3a8a2a` (#24, local-first defaults + risk consent), LR-5 `36ff06e` (#25, inputs-as-data prompt boundary), LR-6 `ef2779a` (#26, projection compaction + schema 4 + downgrade tool), LR-2 `608ea06` (#27, crash diagnostics + bounded local log), LR-11 `fe00e4a` (#29, accessible-name e2e guard), LR-9 `fa3ac70` (#28, plain provider status in Settings), LR-14 `a54f29d` (#30, light default theme via schema 5). In flight: LR-7 (loading window), LR-10 (unified formatters). Held: LR-8 (startup measurement, after LR-7). Launch gate: LR-15 API-key mode, LR-16 separate Windows user, legal review. Signing/installer/updates/fuses deferred to the very last step (free-first). | 
+ | Commercial launch readiness | IN_PROGRESS — coded series merged through LR-17 (`90c0e45`); L2 closed (openMs 132 ms); launch gates LR-16 (in flight) and legal review (user-owned) remain | Private/internal beta only. Merged 2026-09-27 as SWE-2 Max packets on protected main: LR-0 `e0ce5d9` (PR #18), LR-1 `232f273` (#21, packaged e2e in CI), LR-3 `54fd5be` (#23, PROMPT.md long prompts), LR-4 `c3a8a2a` (#24, local-first defaults + risk consent), LR-5 `36ff06e` (#25, inputs-as-data prompt boundary), LR-6 `ef2779a` (#26, projection compaction + schema 4 + downgrade tool), LR-2 `608ea06` (#27, crash diagnostics + bounded local log), LR-11 `fe00e4a` (#29, accessible-name e2e guard), LR-9 `fa3ac70` (#28, plain provider status in Settings), LR-14 `a54f29d` (#30, light default theme via schema 5), LR-10 `7b928c5` (#31, unified format.ts), LR-7 `abbe9a1` (#32, loading window), LR-15 `b4c71ec` (#34, API-key mode, safeStorage/DPAPI, schema-free), LR-17 `90c0e45` (#35, integrity checkpoint via schema 6 — open replays only the post-checkpoint tail and a chunked background full verify advances it; `bench-store.ts 1000` openMs 132 ms closes L2). Launch gate remaining: LR-16 separate Windows user (worker in flight), then legal review of provider terms (user-owned). Signing/installer/updates/fuses and clean-machine release validation stay deferred under D-3. `App\` mirrors `90c0e45` (asar `704BFE0B…`). | 
 | OmniRoute routing extension | NOT_STARTED implementation; architecture reviewed 2026-09-11 | Section 3.1 proposes operation-specific model/session/research contracts and an optional bounded free-worker route. Current subscription-only runtime policy remains unchanged; no gateway installation, provider transfer or live compatibility test occurred. Integrate with C2/C4/C7 and retain R5/custody requirements. |
 | R2 | VERIFIED_LOCAL within documented limits | Snapshot/output inventory is shared by backup and restore; both formats restore actual bytes into a new root. OutputService reserves real destinations on prepare/launch and stores versioned verified bytes. Required missing objects refuse backup. Snapshot identity rejects null/wrong request revisions. Remaining constraints: source swap races, recorded-platform Git reconstruction and R5 transport limits. |
 | R3 | VERIFIED_LOCAL | Preserve exact per-operation scope, durable evidence order, independent confinement and frozen account context. No new live capability evidence in this pass. |
@@ -6127,3 +6127,51 @@ Isolated runs pass in seconds and CI is green; tracked as a test-harness bug, no
 **Remaining:** every coded LR packet is merged; L2 stays open pending the checkpoint design packet
 (organizer work). Launch gates LR-15/LR-16 still require organizer design first; legal review is
 user-owned. `App\` currently mirrors `abbe9a1` (asar `A498E677…`).
+
+- 2026-09-27 — LR-15 and LR-17 merged through the protected route; the development-phase exit
+  criteria for C11 are now all met (e2e green in CI, `bench-store.ts 1000` openMs < 3,000 ms).
+  - **LR-15 (PR #34 → `b4c71ec`, worker SWE-2 Max):** per-provider API-key mode beside the
+    existing subscription mode. New `app/src/main/secrets.ts` stores keys in
+    `<userData>\secrets.dat` — Electron `safeStorage` (Windows DPAPI) ciphertext, atomic-ish
+    tmp+rename writes, fail-closed when encryption is unavailable, corrupt files renamed aside to
+    `secrets.broken-*.dat` and read empty. Presence of a saved key IS the mode: `observe()`
+    short-circuits to an honest `api-key-local` observation (`UNKNOWN`/`DOCUMENTED`, empty
+    identity, zero provider spawns); `agentEnvironment(provider)` injects exactly one var
+    (`ANTHROPIC_API_KEY`/`OPENAI_API_KEY`/`DEVIN_API_KEY`) at the agent-spawn seam only;
+    `LaunchRecord.authMode` records which credential context ran (metadata, never the key). IPC
+    validates keys (≤512 chars, single-line) and redacts key material from thrown errors; Settings
+    gained the "Use my own API key" disclosure with the required own-billing copy, password input
+    with accessible label, saved-state + Remove-key UI. No developer credentials exist or are
+    referenced. Tests: 925 pass incl. the redaction sweep (no key bytes in events/snapshot/logs)
+    and zero-spawn api-key observe. Packaged check on scratch userData: save → restart →
+    persisted → remove → subscription UI restored. Deviation recorded: `office:provider-key-state`
+    IPC added (the third key op the packet specified). Flagged for follow-up (pre-existing, out of
+    scope): `artifacts.backup()` reads `manifest.lastEvent` from the live store after copying —
+    a concurrent event append can throw `Backup lineage tip does not match its manifest.`
+  - **LR-17 (PR #35 → `90c0e45`, worker SWE-2 Max):** the LR-8-prescribed integrity checkpoint.
+    Schema 6 adds `integrity_checkpoint` (sequence, event hash, projection hash + verified
+    projection state). `verifyIntegrity` writes the checkpoint after each completed full pass;
+    open replays only post-checkpoint events (`verifyTail` — anchor-hash check + shared
+    `checkEventChain`/`checkStorageIntegrity`/`parseEventRow` helpers so tail and full paths cannot
+    drift) and schedules `verifyInBackground` (chunked, 25-event yields, mid-scan-append guard,
+    aborts cleanly on close); background failure logs and raises the error dialog via
+    `onBackgroundVerifyError`. `downgradeWorkspaceToV3` accepts v4/v5/v6 and drops the table.
+    `bench-store.ts 1000` on the merged code:
+    `{"observations":1000,"projectionBytes":747045,"writeMs":831324,"openMs":132,"snapshotMs":17.55,"tailEvents":0}`
+    — `openMs` 132 ms < 3,000 ms → **L2 closed**. (`writeMs` ~832 s for 1,000 events is the
+    pre-existing O(n²) write path; a separate scalability concern, not an open-time gate.)
+  - **App\ mirror:** `90c0e45`, asar `704BFE0B…` (verified file-for-file after each merge).
+  - **Test roster reset (user-directed, live workspace):** all seven seats cleared via
+    `agent.remove`/`agent.delete` and re-created through the real `connect→confirm` flow as
+    devin/swe-2-max/default LOCAL+LOCAL_CLI_EXEC, bound to the user's own signed-in Devin account
+    (`devin auth status`/`devin models list` probed live for each binding — real evidence, no
+    fabricated identities). Live DB migrated v3→v6 on open with the migration's own
+    `workspace.sqlite.before-v6-*.sqlite` copy; organizer backup preserved at
+    `Archive\workspace-live-before-agent-reset-20260927.sqlite`; integrity_check ok; checkpoint at
+    seq 1416 covers pre-reset history. All future acceptance/test agents run SWE-2 Max unless the
+    user says otherwise; orchestration workers are SWE-2 Max.
+  - **Remaining launch gates:** LR-16 separate-Windows-user design packet is written and a worker
+    is in flight (`feat/lr16-agent-isolation`); the real elevated end-to-end (create QRO-Agent →
+    isolated dispatch → whoami/access-denied checks) is organizer acceptance after merge. Legal
+    review of provider terms is user-owned and still pending. D-3 (signing, installer, updates,
+    fuses, clean-machine validation) remains deferred until the user reopens it.
