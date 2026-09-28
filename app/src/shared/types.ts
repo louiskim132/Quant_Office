@@ -430,6 +430,8 @@ export interface ProviderCapabilitySnapshot {
   source: string;
   contentHash: string;
   observedAt: string;
+  /** Set only in the projection: this older snapshot's model list was omitted (LR-6); the event log still holds it. */
+  modelsOmitted?: true;
 }
 /** Each action is decided on its own evidence. They are deliberately never collapsed into one optimistic boolean. */
 export interface ReadinessActions {
