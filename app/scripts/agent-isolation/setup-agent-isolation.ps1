@@ -85,7 +85,12 @@ if ($b) {
   }
 }
 try {
-  $result | ConvertTo-Json -Compress | Set-Content -LiteralPath $ResultPath -Encoding UTF8
+  # BOM-free UTF-8: Windows PowerShell 5.1's `-Encoding UTF8` emits a BOM that JSON.parse rejects.
+  [System.IO.File]::WriteAllText(
+    $ResultPath,
+    ($result | ConvertTo-Json -Compress),
+    (New-Object System.Text.UTF8Encoding($false))
+  )
 } catch {
   # Nothing left to report through — the office treats a missing result as a failed setup.
 }
