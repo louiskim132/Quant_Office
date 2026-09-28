@@ -52,6 +52,13 @@ const PROMPT_SUFFIX =
  * that died with "another Claude Code process is refreshing it", a whole wasted hop each time.
  */
 export const CLAUDE_SPAWN_GAP_MS = 4000;
+/**
+ * Longest prompt passed as an argv string. Windows caps a whole command line at 32,767 characters,
+ * so a longer prompt is written to PROMPT_FILE inside the packet and the argv carries PROMPT_POINTER.
+ */
+export const MAX_ARGV_PROMPT_CHARS = 24_000;
+export const PROMPT_FILE = 'PROMPT.md';
+export const PROMPT_POINTER = `Your full task is in ${PROMPT_FILE} in this directory. Read it first and follow it exactly; it replaces this line.`;
 /** A run that has not reported is killed after this long — an office decision, not a provider timeout. */
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
 /** Buffered child output is evidence, not a transcript — bounded so a chatty process cannot grow memory. */
@@ -395,7 +402,12 @@ export class LocalCliExecAdapter implements ProviderAdapter {
         );
       }
     }
-    const prompt = `${context.payload.text}\n\n${packetPromptBlock(prepared, context.assignment.pipelineKey)}`;
+    const fullPrompt = `${context.payload.text}\n\n${packetPromptBlock(prepared, context.assignment.pipelineKey)}`;
+    let prompt = fullPrompt;
+    if (fullPrompt.length > MAX_ARGV_PROMPT_CHARS) {
+      this.io.writeNew(dir, PROMPT_FILE, Buffer.from(fullPrompt, 'utf8'));
+      prompt = PROMPT_POINTER;
+    }
     const command = this.providerCommand(
       binding.provider,
       prompt,

@@ -99,7 +99,7 @@ try {
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [dir] });
   }, data);
   await page.getByRole('button', { name: 'Choose folder', exact: true }).click();
-  await page.getByText(/Everything in this folder is shared when a request is prepared/).waitFor();
+  await page.getByText(/Everything in this folder is shared/).waitFor();
   assert.equal(await page.getByRole('button', { name: 'Choose input files' }).count(), 0);
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await page.getByText(/Saved\. Nothing has been transferred/).waitFor();
@@ -283,6 +283,10 @@ try {
       'localSessionSummary',
       'localLaunchPlan',
       'localSessionArchive',
+      'jobOutputPreview',
+      'memoryGraph',
+      'retryPipelineHop',
+      'searchMemory',
     ].sort(),
   );
   const globals = await page.evaluate(() => ({
