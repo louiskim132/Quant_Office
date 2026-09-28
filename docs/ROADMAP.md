@@ -1114,7 +1114,7 @@ Ordered implementation packets (organizer owns shared contracts, IPC, dependenci
 
 Exact next local work: implement C10-A attempt preparation/ledger and C10-B contracts on organizer-published packets; retain C9's separate local-session probe and pilot as outstanding. Local fixture work can proceed without changing R5 or waiting for real data. Do not start paid/live provider runs merely because a packet is written.
 
-### C11 — Launch-readiness revision (LR packets) — IN_PROGRESS; LR-0 merged, re-anchored on `e0ce5d9`, LR-1 next
+### C11 — Launch-readiness revision (LR packets) — IN_PROGRESS; LR-0 + LR-1 merged (`232f273`), re-anchored on `e0ce5d9`; LR-2…LR-6 in flight
 
 Source: the 2026-09-25 commercial launch-readiness review in section 17 (findings L1–L15).
 Base: `origin/main` at or after `e0ce5d9` (rev-3/rev-4 merged; LR-0 merged as PR #18; re-anchored — see C11.0 rule 0). LR-1 is the next packet. New desktop-batch code rounds must branch from this formatted `main`. This slice is written so that a coding model
@@ -2237,7 +2237,7 @@ Status vocabulary: NOT_STARTED, IMPLEMENTED_FOUNDATION, IN_PROGRESS, PARTIALLY_V
 | D1 optional Serena trial | PARTIALLY_IMPLEMENTED, nonblocking | Project-local AGENTS.md and CLAUDE.md pointers plus the Git/worktree policy were added during repository setup on 2026-09-12. The optional Serena comparison and client configuration remain NOT_STARTED; no navigation plugin was installed. |
 | C10 four-plugin office evaluation | MEASURED_LOCAL 2026-09-25 (CLI A/B, scratch installs); no plugin enabled by default | 2026-09-16: section 3.2 and C10 define the trials and `app/benchmarks/plugin-evaluation/`. 2026-09-25: Serena 1.7.0, Ponytail v4.10.0, Graphify 0.9.68 and LightRAG 1.5.7 (Ollama local) trialled alone and stacked on an office implement packet and a 7-item code-navigation task. No plugin or pair saved tokens beyond run-to-run noise; Serena adds ~8.7k tokens per call and is unused unless hinted; stacking adds context and lowered accuracy; LightRAG local indexing failed (5 of 11 files timed out in 2 h). Recommended set: office memory ledger only. See section 17 entry "plugin trials" of this date. |
 | Token diet (pipeline token consumption) | VERIFIED_LOCAL on dev + packaged build; merged via PR #13/#14 (2026-09-25 local) | Branch `fix/token-diet-20260925` (base organizer `9356c2e`). Lean Claude/Codex launches, per-hop deliverables, hop-keyed inherited inputs, worker slices, packet essentials + `finish.py`, split contract, pre-registered analysis plan (`analysisOf`), QUICK round shape, implementation-only REVISE, claude launch spacing. Live: quick ema5 round 574k input tokens (was 2.50M), implementation-only revision 345k (was 3.10M), Codex implement 147k (was 374k). App\ `app.asar` `642139F3…`. Plugin trials done (C10 row). Follow-ups done on `fix/evidence-and-memory-20260925` (PR #14): evidence-surface args documented; memory capture restored and digest mounted at `plan-brief`. App\ `app.asar` `0901A8DF…` — see section 17 entries of this date. |
-| Commercial launch readiness | IN_PROGRESS — LR-0 merged (`e0ce5d9`); C11 re-anchored 2026-09-27; LR-1 next | Private/internal beta only. Next: LR-1 by the coding model (C11.K prompt), then LR-2…LR-11 and LR-14 in the C11.1 order — LR-0 merged as `e0ce5d9` (PR #18) and the slice was re-anchored on `e0ce5d9` 2026-09-27. LR-6 approved in a lighter form (history untouched, one catalog per account in the quick-access copy, automatic backup, lossless downgrade tool). Launch gate: LR-15 API-key mode, LR-16 separate Windows user, legal review. Signing/installer/updates/fuses deferred to the very last step (free-first). |
+| Commercial launch readiness | IN_PROGRESS — LR-0 merged (`e0ce5d9`) + LR-1 merged (`232f273`, PR #21); C11 re-anchored 2026-09-27; LR-2/LR-3/LR-4/LR-5/LR-6 in flight | Private/internal beta only. LR-0 merged as `e0ce5d9` (PR #18), slice re-anchored on `e0ce5d9` 2026-09-27, LR-1 merged as `232f273` (PR #21 — desktop e2e repaired and now runs packaged in CI). In flight as SWE-2 Max packets: LR-2, LR-3, LR-5, LR-6 (RA-unblocked, disjoint files) and LR-4 (unblocked by LR-1). Held for file overlap: LR-9/LR-10 behind LR-4 (`agents.tsx`), LR-11 behind LR-4 (`desktop.e2e.ts`), LR-7 behind LR-6 + LR-2 (`main.ts`), LR-14 behind LR-6 (`store.ts`). LR-6 approved in a lighter form (history untouched, one catalog per account in the quick-access copy, automatic backup, lossless downgrade tool). Launch gate: LR-15 API-key mode, LR-16 separate Windows user, legal review. Signing/installer/updates/fuses deferred to the very last step (free-first). |
 | OmniRoute routing extension | NOT_STARTED implementation; architecture reviewed 2026-09-11 | Section 3.1 proposes operation-specific model/session/research contracts and an optional bounded free-worker route. Current subscription-only runtime policy remains unchanged; no gateway installation, provider transfer or live compatibility test occurred. Integrate with C2/C4/C7 and retain R5/custody requirements. |
 | R2 | VERIFIED_LOCAL within documented limits | Snapshot/output inventory is shared by backup and restore; both formats restore actual bytes into a new root. OutputService reserves real destinations on prepare/launch and stores versioned verified bytes. Required missing objects refuse backup. Snapshot identity rejects null/wrong request revisions. Remaining constraints: source swap races, recorded-platform Git reconstruction and R5 transport limits. |
 | R3 | VERIFIED_LOCAL | Preserve exact per-operation scope, durable evidence order, independent confinement and frozen account context. No new live capability evidence in this pass. |
@@ -6012,3 +6012,30 @@ unexercised office-driven lifecycle, not absent transport code — the adapter d
 `['devin','claude','openai']` and `mapToolFlags` builds the codex argv.
 
 Next: LR-1 by a SWE-2 Max coding worker (C11.K prompt verbatim), then the C11.1 order.
+
+### 2026-09-27 — LR-1 merged (`232f273`); desktop e2e now runs packaged in CI; worker wave dispatched
+
+**LR-1 by Devin SWE-2 Max** (orchestrator session `593fc35b`, packet
+`repo-sessions/next-batch-001/LR_Series/lr1/PACKET.md`, C11.K prompt verbatim). Organizer
+review of [PR #21](https://github.com/louiskim132/Quant_Office/pull/21) against the packet's
+"Done when": the diff contains exactly the two permitted fixes — the shortened shared-folder
+regex and the four re-verified missing bridge keys (`jobOutputPreview`, `memoryGraph`,
+`retryPipelineHop`, `searchMemory`) — plus the verbatim `Package` /
+`Desktop end-to-end` CI steps and `timeout-minutes` 20→40; only the two packet files changed.
+CI `verify` on head `525f926` ran the new steps green ("Desktop end-to-end checks passed.");
+the worker reported three consecutive local packaged runs. Branch updated with `origin/main`
+(clean merge, docs-only PR #20), verify re-passed on `d18676c` (10m39s), merged as `232f273`.
+
+**Repackage + mirror.** The merged tree (`d18676c` ≡ `232f273`) was built and packaged in the
+worker worktree; `release` was mirrored to `Quant Office\App\` (app verified closed first).
+`App\resources\app.asar` SHA-256 `12AC44C80B93DEE38C02BCFBB0E83F99ACDAC69A92AB1E87289BA39A85B94F8D`
+— byte-identical to the LR-0 package, as expected since LR-1 changed only tests and CI, not
+packaged inputs. The previous install's asar `44091982…` (pre-LR0 build) is now refreshed.
+
+**Worker wave dispatched** (one SWE-2 Max session per packet, C11.K verbatim, own
+worktree/branch): LR-2 `ce7f6368`, LR-3 `f92bb82f`, LR-5 `dda2d554`, LR-6 `edd27cd3` — all
+RA-unblocked with disjoint file sets — and LR-4 `85c25faf`, unblocked by LR-1's merge. Held
+for overlapping Find texts rather than dependencies: LR-9/LR-10 behind LR-4 (`agents.tsx`),
+LR-11 behind LR-4 (`desktop.e2e.ts`), LR-7 behind LR-6 + LR-2 (`main.ts`), LR-14 behind LR-6
+(`store.ts`). Worker note: `pnpm` is absent from PATH on this machine — `corepack pnpm@11.19.0`
+is the working invocation (Node 24's bundled corepack; same pin as CI).
