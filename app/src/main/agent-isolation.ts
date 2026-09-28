@@ -504,7 +504,12 @@ export function qroAgentSpawn(deps: QroAgentSpawnDeps): QroAgentSpawn {
       this.timer = setInterval(() => this.poll(), pollMs);
       this.timer.unref?.();
       try {
-        this.watcher = watch(channelDir, (_event, name) => {
+        // The watch target must be the realpath'd dir: libuv's win fs-event asserts
+        // !_wcsnicmp(filename, dir, dirlen) when the watched path carries an 8.3 short-name
+        // (e.g. %TEMP% = C:\Users\RUNNER~1\… on CI) and the abort kills the process — the same
+        // convention local-cli-exec.ts already uses. Events report basenames only, so the
+        // canonicalized watch still matches this child's files.
+        this.watcher = watch(realpathSync.native(channelDir), (_event, name) => {
           if (name === `out-${this.id}.log` || name === `err-${this.id}.log` || name === `exit-${this.id}.json`)
             this.poll();
         });
