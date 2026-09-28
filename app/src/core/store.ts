@@ -1408,7 +1408,8 @@ function emptyContract(): ResearchContract {
     limitations: '',
   };
 }
-function applyChanges(current: Projection, changes: Change[]): Projection {
+function applyChanges(current: Projection, changes: Change[], options: { compactCatalogs?: boolean } = {}): Projection {
+  const compactCatalogs = options.compactCatalogs ?? true;
   const next = structuredClone(current);
   const indexes = new Map<string, Map<string, number>>();
   for (const change of changes) {
@@ -1539,6 +1540,15 @@ function applyChanges(current: Projection, changes: Change[]): Projection {
         lookup.set(change.value.id, items.length);
         items.push(structuredClone(change.value));
       } else items[index] = structuredClone(change.value);
+      // LR-6: the projection keeps one model catalog per connection — the newest snapshot's. Older
+      // snapshots keep every other field and are marked modelsOmitted; the event log keeps them whole.
+      if (compactCatalogs && change.collection === 'capabilities' && index === -1) {
+        const added = change.value as ProviderCapabilitySnapshot;
+        const list = items as ProviderCapabilitySnapshot[];
+        for (let i = 0; i < list.length - 1; i++)
+          if (list[i].connectionId === added.connectionId && !list[i].modelsOmitted)
+            list[i] = { ...list[i], models: [], modelsOmitted: true };
+      }
     }
   }
   for (const item of [
@@ -1617,6 +1627,42 @@ function appendFinding(state: Projection, finding: MemoryFinding, supersedesFind
 }
 
 /** Deterministic local bookkeeping only. There are deliberately no network or code-execution methods. */
+/** Workspace schema version. 4 = LR-6 projection (one model catalog per connection). */
+export const SCHEMA_VERSION = 4;
+
+/**
+ * LR-6 recovery path: rewrites a version-4 workspace's projection in the version-3 format (every
+ * snapshot keeps its model list) so a build from before LR-6 can open it. The event log — every
+ * record, including those written after the upgrade — is not touched. A copy of the file is made
+ * first; its path is returned. Run it only while no Quant Research Office window has the file open.
+ */
+export function downgradeWorkspaceToV3(file: string): string {
+  const db = new DatabaseSync(file);
+  try {
+    const version = Number((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version);
+    if (version !== 4) throw new Error(`Only a version-4 workspace can be downgraded; this one is version ${version}.`);
+    const backup = `${file}.before-downgrade-${randomUUID()}.sqlite`;
+    db.prepare('VACUUM INTO ?').run(backup);
+    let rebuilt = blank();
+    for (const row of db.prepare('SELECT record FROM events ORDER BY sequence').all())
+      rebuilt = applyChanges(rebuilt, eventSchema.parse(JSON.parse(String(row.record))).payload.changes, {
+        compactCatalogs: false,
+      });
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      db.prepare('UPDATE projection SET state=? WHERE singleton=1').run(canonical(rebuilt));
+      db.exec('PRAGMA user_version=3');
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+    return backup;
+  } finally {
+    db.close();
+  }
+}
+
 export class OfficeStore {
   private readonly db: DatabaseSync;
   private closed = false;
@@ -1638,7 +1684,7 @@ export class OfficeStore {
     try {
       this.db.exec('PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;');
       const version = Number((this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version);
-      if (version !== 0 && version !== 1 && version !== 2 && version !== 3)
+      if (version < 0 || version > SCHEMA_VERSION)
         throw new Error(`Unsupported database schema version ${version}; use a compatible application`);
       if (version === 0) {
         const existing = this.db
@@ -1672,7 +1718,7 @@ export class OfficeStore {
         }
         this.db.exec('COMMIT');
       }
-      this.verifyIntegrity();
+      if (version >= SCHEMA_VERSION) this.verifyIntegrity();
       if (version < 3) {
         this.db.exec(
           'BEGIN IMMEDIATE; CREATE TABLE research_read_index(collection TEXT NOT NULL,id TEXT NOT NULL,project_id TEXT NOT NULL,branch_id TEXT,request_id TEXT,from_id TEXT,to_id TEXT,sequence INTEGER NOT NULL,record TEXT NOT NULL,PRIMARY KEY(collection,id)); CREATE INDEX research_read_scope ON research_read_index(collection,project_id,branch_id,sequence,id); CREATE INDEX research_message_scope ON research_read_index(collection,request_id,sequence,id); PRAGMA user_version=3;',
@@ -1685,6 +1731,21 @@ export class OfficeStore {
         this.db.exec('COMMIT');
       }
       this.researchIndexReady = true;
+      if (version < SCHEMA_VERSION) {
+        // One-time projection rebuild (LR-6). An existing workspace is copied first; the rebuild and
+        // the version bump commit together, so an interrupted migration leaves the old file intact.
+        if (version > 0 && databasePath !== ':memory:')
+          this.db.prepare('VACUUM INTO ?').run(`${databasePath}.before-v${SCHEMA_VERSION}-${randomUUID()}.sqlite`);
+        this.db.exec('BEGIN IMMEDIATE');
+        try {
+          this.verifyIntegrity(true);
+          this.db.exec(`PRAGMA user_version=${SCHEMA_VERSION}`);
+          this.db.exec('COMMIT');
+        } catch (error) {
+          this.db.exec('ROLLBACK');
+          throw error;
+        }
+      }
       this.db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;');
       const oldState = this.readProjection();
       const canceled = oldState.experiments.filter(
@@ -1777,7 +1838,7 @@ export class OfficeStore {
         return parsed;
       });
   }
-  private verifyIntegrity(): void {
+  private verifyIntegrity(rewriteProjection = false): void {
     const check = this.db.prepare('PRAGMA integrity_check').get() as { integrity_check: string };
     if (check.integrity_check !== 'ok' || this.db.prepare('PRAGMA foreign_key_check').all().length)
       throw new Error('SQLite integrity failure');
@@ -1816,8 +1877,12 @@ export class OfficeStore {
     }
     if (Number(this.db.prepare('SELECT COUNT(*) AS count FROM commands').get()!.count) !== receiptIds.size)
       throw new Error('Unexpected command receipts');
-    if (canonical(rebuilt) !== canonical(this.readProjection()))
-      throw new Error('Workspace projection integrity failure');
+    if (canonical(rebuilt) !== canonical(this.readProjection())) {
+      // Only the one-time migration may replace the stored projection, and only after the hash
+      // chain above was verified; the projection is derived data.
+      if (!rewriteProjection) throw new Error('Workspace projection integrity failure');
+      this.db.prepare('UPDATE projection SET state=? WHERE singleton=1').run(canonical(rebuilt));
+    }
   }
 
   snapshot(options: { history?: boolean } = {}): AppState {
