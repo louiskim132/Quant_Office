@@ -7,7 +7,14 @@ import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import { removeTreeSync } from '../src/main/fsx';
 import { buildProviderPayload, NotLaunchedError, type SubmitContext } from '../src/main/controller';
-import { LocalCliExecAdapter, type CliSpawn, type CliSpawnOptions } from '../src/main/local-cli-exec';
+import {
+  LocalCliExecAdapter,
+  MAX_ARGV_PROMPT_CHARS,
+  PROMPT_FILE,
+  PROMPT_POINTER,
+  type CliSpawn,
+  type CliSpawnOptions,
+} from '../src/main/local-cli-exec';
 import { CONTRACT_FILE, PACKET_FILE, RESULT_FILE } from '../src/main/local-packet';
 import { PACKET_HASH_FILE, PACKET_READY_FILE } from '../src/main/local-packet';
 import { CLAUDE_DEFAULT_TOOLS, CLAUDE_ISOLATION_FLAGS, CODEX_DISABLED_FEATURES } from '../src/main/tool-flags';
@@ -774,6 +781,7 @@ test('consecutive claude launches are spaced so concurrent sessions do not race 
     undefined,
     gap,
   );
+  t.after(() => adapter.disposeAll());
   const second = {
     ...f.binding,
     id: randomUUID(),
@@ -790,4 +798,22 @@ test('consecutive claude launches are spaced so concurrent sessions do not race 
     spawnedAt[1] - spawnedAt[0] >= gap - 5,
     `the second claude spawn waited ${spawnedAt[1] - spawnedAt[0]}ms, at least the ${gap}ms gap`,
   );
+});
+
+test('a prompt longer than the argv bound rides in PROMPT.md and the argv carries a pointer', async t => {
+  const f = fixture(t, { provider: 'claude' });
+  const longText = 'x'.repeat(MAX_ARGV_PROMPT_CHARS + 1000);
+  await f.adapter.submit({ ...f.context, payload: { ...f.context.payload, text: longText } });
+  assert.equal(f.calls.length, 1);
+  assert.equal(f.calls[0].args[1], PROMPT_POINTER, 'the argv carries the short pointer, not the long prompt');
+  const written = readFileSync(path.join(f.dir, PROMPT_FILE), 'utf8');
+  assert.ok(written.startsWith(longText), 'PROMPT.md holds the full prompt, payload first');
+  assert.ok(written.includes('## Packet essentials (office-generated)'), 'the packet essentials follow the payload');
+});
+
+test('a prompt within the argv bound is passed directly and writes no PROMPT.md', async t => {
+  const f = fixture(t, { provider: 'claude' });
+  await submitted(f);
+  assert.notEqual(f.calls[0].args[1], PROMPT_POINTER);
+  assert.equal(existsSync(path.join(f.dir, PROMPT_FILE)), false);
 });
