@@ -146,7 +146,8 @@ function scrubFile(file: string): void {
 
 function readIsolationResult(resultPath: string): IsolationResult | null {
   try {
-    const parsed = JSON.parse(readFileSync(resultPath, 'utf8')) as Partial<IsolationResult>;
+    // Windows PowerShell 5.1's `Set-Content -Encoding UTF8` emits a BOM — strip it before parse.
+    const parsed = JSON.parse(readFileSync(resultPath, 'utf8').replace(/^\uFEFF/, '')) as Partial<IsolationResult>;
     return typeof parsed?.ok === 'boolean'
       ? (parsed as IsolationResult)
       : { ok: false, error: 'the result file was not an isolation setup report' };
