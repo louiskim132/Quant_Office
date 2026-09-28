@@ -433,6 +433,31 @@ test('setup script adds the isolated account to the standard Users group', () =>
   assert.match(source, /net localgroup Users \$user \/add/);
 });
 
+test('setup: a BOM-prefixed result (Windows PowerShell 5.1 UTF8) still lands the credential', async t => {
+  const dir = root(t);
+  const tmp = path.join(dir, 'tmp');
+  mkdirSync(tmp, { recursive: true });
+  const script = path.join(dir, 'setup-agent-isolation.ps1');
+  writeFileSync(script, '# stub\n');
+  const secrets = new Secrets(dir, stubBox());
+  await setupAgentIsolation({
+    userData: dir,
+    secrets,
+    toolPath: provider => `C:\\tools\\${provider}\\tool.exe`,
+    nodeExe: () => 'C:\\Program Files\\nodejs\\node.exe',
+    tmpdir: () => tmp,
+    uuid: () => 'bom-uuid',
+    scriptPath: script,
+    elevate: async (_scriptPath, bundlePath) => {
+      const bundle = JSON.parse(readFileSync(bundlePath, 'utf8')) as IsolationBundle;
+      // powershell.exe is Windows PowerShell 5.1 — Set-Content -Encoding UTF8 emits a BOM.
+      writeFileSync(bundle.resultPath, '\uFEFF' + JSON.stringify({ ok: true, created: true, granted: [] }));
+      return 0;
+    },
+  });
+  assert.equal(secrets.hasAgentCredential(), true, 'a BOM-marked result is still a valid report');
+});
+
 test('setup: a failed elevated step throws and persists no credential', async t => {
   const dir = root(t);
   const tmp = path.join(dir, 'tmp');
