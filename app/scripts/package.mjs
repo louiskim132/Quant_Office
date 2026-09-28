@@ -39,6 +39,9 @@ await writeFile(
   ),
 );
 await cp(resolve(root, 'research-templates'), resolve(stage, 'research-templates'), { recursive: true });
+// The elevated agent-isolation setup script (LR-16) ships inside the packaged app; the office
+// copies it to a temp file before invoking it, so riding inside the asar is sufficient.
+await cp(resolve(root, 'scripts/agent-isolation'), resolve(stage, 'scripts/agent-isolation'), { recursive: true });
 // The PTY transport is a real native package: copy it, symlinks dereferenced, and keep its
 // binaries outside the asar so Electron can load them.
 const ptyEntry = (() => {

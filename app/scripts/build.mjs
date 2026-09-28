@@ -1,5 +1,5 @@
 import { build } from 'esbuild';
-import { mkdir, writeFile, readFile } from 'node:fs/promises';
+import { copyFile, mkdir, writeFile, readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { PNG } from 'pngjs';
 
@@ -41,6 +41,10 @@ await Promise.all([
     define: { 'process.env.NODE_ENV': '"production"' },
   }),
 ]);
+// The agent-isolation host (LR-16) ships unbundled next to main.cjs — it is copied into the
+// ACL'd sessions root at runtime and executed by plain node.exe under the QRO-Agent account, so
+// it must stay a standalone node-stdlib script rather than part of the esbuild bundle.
+await copyFile(resolve(root, 'src/main/agent-host.cjs'), resolve(root, 'dist/main/agent-host.cjs'));
 await writeFile(
   resolve(root, 'dist/renderer/index.html'),
   `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; object-src 'none'"><title>Quant Research Office</title><link rel="stylesheet" href="./app.css"></head><body><div id="root"></div><script src="./app.js"></script></body></html>`,

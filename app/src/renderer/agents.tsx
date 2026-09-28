@@ -891,3 +891,125 @@ function ApiKeyEntry({ provider, onSaved }: { provider: Provider; onSaved: () =>
     </details>
   );
 }
+
+/**
+ * The LR-16 agent isolation card on the provider-settings surface. Configured state comes only
+ * from the main process (the saved credential's presence — never its content). Setup runs the
+ * consented elevated step; removal stops isolated launches but deliberately leaves the Windows
+ * account itself in place.
+ */
+export function AgentIsolation() {
+  const [configured, setConfigured] = useState<boolean | null>(null),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState(''),
+    [notice, setNotice] = useState('');
+  useEffect(() => {
+    let stale = false;
+    void window.office
+      .agentIsolationStatus()
+      .then(status => {
+        if (!stale) setConfigured(status.configured);
+      })
+      .catch(() => {
+        if (!stale) setConfigured(false);
+      });
+    return () => {
+      stale = true;
+    };
+  }, []);
+  async function setup() {
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      await window.office.agentIsolationSetup();
+      setConfigured(true);
+      setNotice('Agent isolation is set up. New agent launches now run as the QRO-Agent account.');
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function remove() {
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      await window.office.agentIsolationRemove();
+      setConfigured(false);
+      setNotice('Agent isolation removed. New agent launches run as your Windows account again.');
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="settings-card">
+      <h2>Agent isolation</h2>
+      {configured === null && <p className="muted">Checking isolation status…</p>}
+      {configured === false && (
+        <div className="setting-row">
+          <div>
+            <strong>Separate Windows account</strong>
+            <p>
+              Agents currently run as your Windows account. Set up a separate low-privilege account so agents can only
+              reach their own session folders.
+            </p>
+            <p className="muted">
+              While isolation is on, agents authenticate with your saved API keys — subscription sign-ins stay in your
+              profile.
+            </p>
+          </div>
+          <button
+            className="secondary"
+            disabled={busy}
+            aria-label="Set up agent isolation"
+            aria-busy={busy}
+            onClick={() => void setup()}
+          >
+            {busy ? 'Setting up…' : 'Set up agent isolation'}
+          </button>
+        </div>
+      )}
+      {configured === true && (
+        <div className="setting-row">
+          <div>
+            <strong>Separate Windows account</strong>
+            <p>Agents run as Windows user QRO-Agent with access limited to agent session folders.</p>
+            <p className="muted">
+              While isolation is on, agents authenticate with your saved API keys — subscription sign-ins stay in your
+              profile.
+            </p>
+          </div>
+          <div>
+            <button
+              className="secondary"
+              disabled={busy}
+              aria-label="Remove agent isolation"
+              aria-busy={busy}
+              onClick={() => void remove()}
+            >
+              {busy ? 'Removing…' : 'Remove isolation'}
+            </button>
+            <p className="muted">
+              This stops launching agents as QRO-Agent. The Windows account itself is left in place; remove it in
+              Windows settings if you want it gone.
+            </p>
+          </div>
+        </div>
+      )}
+      {error && (
+        <p className="notice error" role="alert">
+          {error}
+        </p>
+      )}
+      {notice && (
+        <p className="notice success" role="status">
+          {notice}
+        </p>
+      )}
+    </div>
+  );
+}

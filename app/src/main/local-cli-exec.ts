@@ -99,6 +99,11 @@ export interface LaunchRecord {
   spawnedAt: string;
   /** Which credential context the spawn's environment carried — never the key itself. */
   authMode: 'subscription' | 'api-key';
+  /**
+   * Which Windows account ran the CLI — 'self' for the office's own account, 'qro-agent' when the
+   * isolated low-privilege account hosted it (LR-16). Evidence, never secrets.
+   */
+  runAs: 'self' | 'qro-agent';
   cwd: string;
   timeoutMs: number;
   requestedModel: string;
@@ -244,6 +249,12 @@ export class LocalCliExecAdapter implements ProviderAdapter {
      * record.
      */
     private readonly authMode: (provider: Provider) => 'subscription' | 'api-key' = () => 'subscription',
+    /**
+     * The isolated spawn surface (LR-16). When present, the agent CLI is dispatched through the
+     * QRO-Agent host instead of a direct spawn — and the run must authenticate with a saved API
+     * key, because the office user's subscription sign-ins do not exist in the agent's profile.
+     */
+    private readonly spawnAs?: CliSpawn,
   ) {}
 
   /** Waits until a claude launch would be at least claudeSpawnGapMs after the previous one. */
@@ -359,6 +370,13 @@ export class LocalCliExecAdapter implements ProviderAdapter {
         `A LOCAL_CLI_EXEC submission requires a flat office-local-session@2 binding; this record describes ${binding.layout} packetVersion ${binding.packetVersion}.`,
       );
     const dir = path.resolve(this.sessionsRoot(), binding.storageRelativePath);
+    // The isolation credential boundary (LR-16): spawned CLIs inherit the agent account's
+    // profile, where the office user's subscription sign-ins do not exist — so an isolated run
+    // must authenticate with the provider API key saved in Settings. No key, no dispatch.
+    if (this.spawnAs && this.authMode(binding.provider) !== 'api-key')
+      throw new NotLaunchedError(
+        `Agent isolation is on and no API key is saved for ${binding.provider} — add one in Settings.`,
+      );
     // Everything before the spawn is a NotLaunchedError: a packet that was never written or a
     // probe that refused means no child could have come into existence — there is no provider
     // ambiguity to report, and the controller records that honestly rather than UNKNOWN.
@@ -443,7 +461,9 @@ export class LocalCliExecAdapter implements ProviderAdapter {
     if (binding.provider === 'claude' && this.claudeSpawnGapMs > 0) await this.claudeLaunchSlot();
     let child: CliChild;
     try {
-      child = this.spawnChild(executable, command.args, {
+      // When agent isolation is configured the agent host (QRO-Agent) performs the spawn; the
+      // child surface is identical — stdio rides the ACL'd channel files instead of pipes.
+      child = (this.spawnAs ?? this.spawnChild)(executable, command.args, {
         // The spawn cwd is authoritative — codex -C does not place the model's shell (probe doc).
         cwd: dir,
         env: this.environment(binding.provider),
@@ -467,6 +487,7 @@ export class LocalCliExecAdapter implements ProviderAdapter {
       bypassFlags: command.bypassFlags,
       spawnedAt: this.now(),
       authMode: this.authMode(binding.provider),
+      runAs: this.spawnAs ? 'qro-agent' : 'self',
       cwd: dir,
       timeoutMs: this.timeoutMs,
       requestedModel: context.payload.model,

@@ -59,6 +59,7 @@ function resolveSelectionRoot(root: string): string {
 
 import { Subscriptions, providerSchema, subscriptionEnvironment } from './subscriptions.js';
 import { Secrets, agentEnvironment } from './secrets.js';
+import { qroAgentSpawn, setupAgentIsolation, type QroAgentSpawn } from './agent-isolation.js';
 import type { Connection, Provider } from '../shared/types.js';
 import { describeError, writeLog } from './diagnostics.js';
 let subscriptions: Subscriptions;
@@ -79,6 +80,8 @@ let activeWorkspaceCalls = 0;
 let workspaceLocked = false;
 let controller: AssignmentController;
 let exec: LocalCliExecAdapter | undefined;
+/** The QRO-Agent host's spawn surface and shutdown handle — set only while isolation is live. */
+let agentHost: QroAgentSpawn | undefined;
 let pipeline: PipelineService;
 let custody: HoldoutCustody;
 let dispatchBusy = false;
@@ -142,6 +145,7 @@ else {
     });
   app.on('window-all-closed', () => app.quit());
   app.on('before-quit', () => {
+    agentHost?.shutdown();
     exec?.disposeAll();
     subscriptions?.close();
     if (store) store.close();
@@ -511,6 +515,34 @@ function register() {
     return { ok: true };
   });
   handle('office:provider-key-state', async value => secrets.providerKeyState(providerSchema.parse(value)));
+  // LR-16 agent isolation: status is the credential's presence only — the renderer never sees the
+  // password, and the account itself is created/left behind by the consented elevated script.
+  handle('office:agent-isolation-status', async value => {
+    noInput(value);
+    return { configured: secrets.hasAgentCredential() };
+  });
+  handle('office:agent-isolation-setup', async value => {
+    noInput(value);
+    await setupAgentIsolation({
+      userData: app.getPath('userData'),
+      secrets,
+      toolPath: provider => subscriptions.toolPath(provider),
+      log: line => writeLog(logDir(), 'WARN', line),
+    });
+    // The credential just landed — rebuild so the exec adapter picks up the isolated spawn surface.
+    controller = buildController();
+    changed();
+    return { ok: true };
+  });
+  handle('office:agent-isolation-remove', async value => {
+    noInput(value);
+    secrets.removeAgentUser();
+    // Rebuild drops the isolated spawn surface; the Windows account itself is left in place by
+    // design (removing it is the user's Windows admin action, never a silent office effect).
+    controller = buildController();
+    changed();
+    return { ok: true };
+  });
   handle('office:connection-status', async value => {
     const provider = providerSchema.parse(value);
     const { connection, observation } = await subscriptions.observe(provider);
@@ -1510,6 +1542,20 @@ function rejectInternalDestination(destination: string) {
 /** One place that wires the controller, so start-up and post-restore rebuild stay identical. */
 function buildController(): AssignmentController {
   const workspace = () => workspaceDirectory(app.getPath('userData'));
+  // A rebuilt controller drops the previous host channel — ask the old QRO-Agent host to kill its
+  // children and exit before its requests dir is orphaned. The host also self-exits if the office
+  // pid dies, so a missed shutdown costs it at most one watchdog tick.
+  agentHost?.shutdown();
+  agentHost = undefined;
+  // LR-16: when the agent account credential exists, agent CLIs spawn through the QRO-Agent host
+  // instead of under the office account. `QRO_AGENT_ISOLATION=off` is the documented dev/test/CI
+  // escape hatch; with no credential the adapter self-spawns and records runAs 'self' either way.
+  if (secrets.hasAgentCredential() && process.env.QRO_AGENT_ISOLATION !== 'off')
+    agentHost = qroAgentSpawn({
+      secrets,
+      agentsRoot: path.join(workspace(), 'local-sessions'),
+      log: line => writeLog(logDir(), 'WARN', line),
+    });
   const outputs = new OutputService(store, workspace());
   const handoff = new TerminalHandoffAdapter({ executable: () => subscriptions.toolPath('claude') });
   const flat = new LocalMailboxAdapter(() => path.join(workspace(), 'local-sessions'));
@@ -1563,6 +1609,10 @@ function buildController(): AssignmentController {
     undefined,
     // The launch record states which credential context the spawn used — metadata only, never a key.
     provider => (secrets.providerKeyState(provider).saved ? 'api-key' : 'subscription'),
+    // LR-16: the isolated spawn surface, present only when a QRO-Agent credential is saved and the
+    // escape hatch is not set. When it is, dispatches without a saved API key are refused — the
+    // office profile's subscription sign-ins do not exist in the agent account's profile.
+    agentHost,
   );
   const execRoute = new LocalSessionRouter(
     jobId => store.localSessionForJob(jobId),
