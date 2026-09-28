@@ -20,7 +20,7 @@
  * filename order. Replies are files written tmp-then-rename the same way so a reader never sees
  * a torn record:
  *   ready-<sessionId>.json {pid, user}   written once on startup (sessionId = basename(sessionDir))
- *   out-<id>.log / err-<id>.log          spawned child's stdout/stderr, append fds
+ *   out-<id>.log / err-<id>.log          spawned child's stdout/stderr, pumped to append streams
  *   exit-<id>.json  {code, signal}       written when the child exits
  *                   {code:null, signal:null, error}  spawn refused or spawn failure — the child
  *                   never ran
@@ -46,7 +46,9 @@ const ALLOWED_ENV = /^(ANTHROPIC_API_KEY|OPENAI_API_KEY|CODEX_API_KEY|DEVIN_API_
 
 const REQ = /^req-.+\.json$/;
 const children = new Map(); // id → ChildProcess
-const outFds = new Map(); // id → {out, err} host-side fd copies, closed on exit
+const outStreams = new Map(); // id → {out, err} append-mode write streams, closed after exit
+const pendingExits = new Map(); // id → {code, signal} waiting on the log streams to flush
+const exitTimers = new Map(); // id → the bounded flush fallback
 const seen = new Set(); // request filenames already acted on
 const cancelled = new Set(); // ids the office cancelled — survives cancel-before-spawn ordering
 let shuttingDown = false;
@@ -92,16 +94,38 @@ function sanitizeEnv(env) {
   return out;
 }
 
-function closeFds(id) {
-  const fds = outFds.get(id);
-  if (!fds) return;
-  outFds.delete(id);
-  for (const fd of [fds.out, fds.err])
+function closeStreams(id) {
+  const streams = outStreams.get(id);
+  if (!streams) return;
+  outStreams.delete(id);
+  for (const stream of [streams.out, streams.err])
     try {
-      fs.closeSync(fd);
+      stream.destroy();
     } catch {
       /* already closed */
     }
+}
+
+/**
+ * exit-<id>.json lands only after both pumped logs have flushed — the office drains on sight of
+ * the record, so tail bytes still in the pipe must not arrive after it. The bounded timer covers
+ * a stream that never closes: a possibly-truncated tail beats no record at all.
+ */
+function flushExit(id, force = false) {
+  const record = pendingExits.get(id);
+  if (!record) return;
+  const streams = outStreams.get(id);
+  if (streams && !force)
+    for (const stream of [streams.out, streams.err])
+      if (!stream.destroyed && !stream.closed && !stream.writableFinished) return;
+  pendingExits.delete(id);
+  const timer = exitTimers.get(id);
+  if (timer) {
+    clearTimeout(timer);
+    exitTimers.delete(id);
+  }
+  closeStreams(id);
+  writeJson(`exit-${id}.json`, record);
 }
 
 function onSpawn(req) {
@@ -129,11 +153,23 @@ function onSpawn(req) {
     writeJson(`exit-${id}.json`, { code: null, signal: null, error: 'refused: malformed spawn request' });
     return;
   }
-  let outFd, errFd;
+  const outPath = path.join(sessionDir, `out-${id}.log`);
+  const errPath = path.join(sessionDir, `err-${id}.log`);
+  // Writability probe BEFORE the child exists — the refusal stays synchronous and byte-identical.
+  let probeFd;
   try {
-    outFd = fs.openSync(path.join(sessionDir, `out-${id}.log`), 'a');
-    errFd = fs.openSync(path.join(sessionDir, `err-${id}.log`), 'a');
+    probeFd = fs.openSync(outPath, 'a');
+    fs.closeSync(probeFd);
+    probeFd = fs.openSync(errPath, 'a');
+    fs.closeSync(probeFd);
+    probeFd = undefined;
   } catch (error) {
+    if (probeFd !== undefined)
+      try {
+        fs.closeSync(probeFd);
+      } catch {
+        /* already closed */
+      }
     writeJson(`exit-${id}.json`, {
       code: null,
       signal: null,
@@ -141,31 +177,52 @@ function onSpawn(req) {
     });
     return;
   }
-  outFds.set(id, { out: outFd, err: errFd });
   let child;
   try {
+    // Piped stdio pumped into append-mode log streams — never raw fd stdio: handing open file fds
+    // to uv_spawn from a console-less host aborts natively on Windows (0xC0000409 seen on CI).
     child = spawn(req.exe, req.argv.map(String), {
       cwd: path.resolve(req.cwd),
       // Only whitelisted office env crosses; everything else is this account's own environment.
       env: { ...process.env, ...sanitizeEnv(req.env) },
-      stdio: ['ignore', outFd, errFd],
+      stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
     });
   } catch (error) {
-    closeFds(id);
     writeJson(`exit-${id}.json`, { code: null, signal: null, error: `spawn failed: ${error.message}` });
     return;
   }
+  const outStream = fs.createWriteStream(outPath, { flags: 'a' });
+  const errStream = fs.createWriteStream(errPath, { flags: 'a' });
+  for (const [tag, stream] of [
+    ['out', outStream],
+    ['err', errStream],
+  ]) {
+    // An errored or closed log stream can be the last thing an exit record waits on.
+    stream.on('error', error => {
+      appendLog('host-errors.log', `agent-host: log stream ${tag}-${id}.log failed: ${error.message}\n`);
+      flushExit(id, true);
+    });
+    stream.on('close', () => flushExit(id));
+  }
+  outStreams.set(id, { out: outStream, err: errStream });
+  child.stdout.pipe(outStream);
+  child.stderr.pipe(errStream);
   children.set(id, child);
   child.on('error', error => {
-    writeJson(`exit-${id}.json`, { code: null, signal: null, error: `spawn failed: ${error.message}` });
     children.delete(id);
-    closeFds(id);
+    writeJson(`exit-${id}.json`, { code: null, signal: null, error: `spawn failed: ${error.message}` });
+    closeStreams(id);
   });
   child.on('exit', (code, signal) => {
-    if (children.delete(id)) writeJson(`exit-${id}.json`, { code, signal });
-    closeFds(id);
+    if (!children.delete(id)) return; // an 'error' record already told the truth
+    pendingExits.set(id, { code, signal });
+    const timer = setTimeout(() => flushExit(id, true), 10_000);
+    timer.unref();
+    exitTimers.set(id, timer);
+    flushExit(id);
   });
+  child.on('close', () => flushExit(id));
 }
 
 function taskkillTree(pid) {

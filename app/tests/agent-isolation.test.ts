@@ -108,6 +108,16 @@ function collect(child: CliChild) {
       child.on('exit', (code, signal) => resolve({ code, signal })),
     ),
     errored: new Promise<Error>(resolve => child.on('error', error => resolve(error))),
+    /**
+     * Whichever lifecycle event lands FIRST — a host-side spawn refusal/failure surfaces as
+     * 'error' with the real message instead of silently outwaiting an 'exit' that never comes.
+     */
+    settled: new Promise<
+      { kind: 'exit'; code: number | null; signal: NodeJS.Signals | null } | { kind: 'error'; error: Error }
+    >(resolve => {
+      child.on('exit', (code, signal) => resolve({ kind: 'exit', code, signal }));
+      child.on('error', error => resolve({ kind: 'error', error }));
+    }),
   };
 }
 
@@ -140,8 +150,9 @@ test('isolated spawn: stdout bytes arrive and exit reports code 0', async t => {
   const { spawnAs, sessionDir } = spawnFixture(t, dir);
   const child = spawnAs(process.execPath, ['-e', 'console.log("hi")'], OPTS(sessionDir));
   const seen = collect(child);
-  const { code } = await deadline(seen.exited, 'the spawned child to exit');
-  assert.equal(code, 0);
+  const result = await deadline(seen.settled, 'the spawned child to exit');
+  if (result.kind !== 'exit') assert.fail(`the child errored instead of exiting: ${result.error.message}`);
+  assert.equal(result.code, 0);
   assert.ok(seen.out.join('').includes('hi'), `stdout carried the child output: ${seen.out.join('')}`);
 });
 
@@ -150,7 +161,8 @@ test('isolated spawn: stderr bytes arrive on the stderr stream', async t => {
   const { spawnAs, sessionDir } = spawnFixture(t, dir);
   const child = spawnAs(process.execPath, ['-e', 'console.error("oops")'], OPTS(sessionDir));
   const seen = collect(child);
-  await deadline(seen.exited, 'the spawned child to exit');
+  const result = await deadline(seen.settled, 'the spawned child to exit');
+  if (result.kind !== 'exit') assert.fail(`the child errored instead of exiting: ${result.error.message}`);
   assert.ok(seen.err.join('').includes('oops'), `stderr carried the child output: ${seen.err.join('')}`);
 });
 
@@ -162,7 +174,9 @@ test('isolated spawn: kill() delivers a cancel and the child exits', async t => 
   // Let the request reach the host before cancelling — either order must still converge on exit.
   await new Promise(resolve => setTimeout(resolve, 400));
   assert.equal(child.kill(), true);
-  const { code, signal } = await deadline(seen.exited, 'the cancelled child to exit');
+  const result = await deadline(seen.settled, 'the cancelled child to exit');
+  if (result.kind !== 'exit') assert.fail(`the child errored instead of exiting: ${result.error.message}`);
+  const { code, signal } = result;
   assert.ok(code !== 0 || signal !== null, `a killed child reports a non-clean exit (${code}/${signal})`);
 });
 
@@ -178,7 +192,8 @@ test('isolated spawn: the env whitelist drops office vars and keeps declared key
     OPTS(sessionDir, { QRO_X: '1', PATH: 'evil', ANTHROPIC_API_KEY: 'sk-test-1' }),
   );
   const seen = collect(child);
-  await deadline(seen.exited, 'the spawned child to exit');
+  const result = await deadline(seen.settled, 'the spawned child to exit');
+  if (result.kind !== 'exit') assert.fail(`the child errored instead of exiting: ${result.error.message}`);
   const payload = JSON.parse(seen.out.join('').trim());
   assert.equal(payload.qx, '1', 'QRO_* keys cross the channel');
   assert.equal(payload.ak, 'sk-test-1', 'the provider API key crosses the channel');
@@ -191,8 +206,11 @@ test('isolated spawn: a cwd outside the sessions root is refused as an error', a
   const outside = path.join(dir, 'not-a-session');
   mkdirSync(outside, { recursive: true });
   const child = spawnAs(process.execPath, ['-e', 'console.log("never")'], OPTS(outside));
-  const error = await deadline(collect(child).errored, 'the host to refuse the out-of-root cwd');
-  assert.match(error.message, /outside the agent sessions root|refused/i);
+  const result = await deadline(collect(child).settled, 'the host to refuse the out-of-root cwd');
+  // The refusal must arrive AS an error record carrying the refusal reason — a host crash
+  // ('host exited…') also surfaces 'error' but must not satisfy this assertion.
+  if (result.kind !== 'error') assert.fail(`expected a refusal error, got exit code ${result.code}`);
+  assert.match(result.error.message, /outside the agent sessions root|refused/i);
 });
 
 test('isolated spawn: a host that never reports ready fails closed with an error', async t => {
@@ -211,8 +229,9 @@ test('isolated spawn: a host that never reports ready fails closed with an error
   });
   t.after(() => spawnAs.shutdown());
   const child = spawnAs(process.execPath, ['-e', 'console.log("never")'], OPTS(sessionDir));
-  const error = await deadline(collect(child).errored, 'the host start failure to surface');
-  assert.match(error.message, /isolation/i);
+  const result = await deadline(collect(child).settled, 'the host start failure to surface');
+  if (result.kind !== 'error') assert.fail(`expected a start-failure error, got exit code ${result.code}`);
+  assert.match(result.error.message, /isolation/i);
 });
 
 test('secrets: the agent credential round-trips through the stub SecretBox', () => {
