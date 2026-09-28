@@ -58,6 +58,7 @@ function resolveSelectionRoot(root: string): string {
 }
 
 import { Subscriptions, providerSchema, subscriptionEnvironment } from './subscriptions.js';
+import { describeError, writeLog } from './diagnostics.js';
 let subscriptions: Subscriptions;
 let win: BrowserWindow | null = null;
 let store: OfficeStore;
@@ -90,6 +91,26 @@ if (selectedRoot) {
 // One stable application identity so the taskbar groups dev and packaged windows under the
 // same icon rather than falling back to the Electron binary's generic one.
 app.setAppUserModelId('Quant Research Office');
+const logDir = () => path.join(app.getPath('userData'), 'logs');
+let crashDialogShown = false;
+const reportCrash = (kind: string, error: unknown) => {
+  writeLog(logDir(), 'ERROR', `${kind} ${describeError(error)}`);
+  if (crashDialogShown || !app.isReady()) return;
+  crashDialogShown = true;
+  dialog.showErrorBox(
+    'Quant Research Office hit an unexpected error',
+    'Your workspace is saved. The error was written to the log folder (Help → Open logs folder). If the office misbehaves, restart it.',
+  );
+};
+process.on('uncaughtException', error => reportCrash('uncaughtException', error));
+process.on('unhandledRejection', reason => reportCrash('unhandledRejection', reason));
+app.on('child-process-gone', (_event, details) =>
+  writeLog(
+    logDir(),
+    'WARN',
+    `child-process-gone type=${details.type} reason=${details.reason} exit=${details.exitCode}`,
+  ),
+);
 const hasLock = app.requestSingleInstanceLock();
 if (!hasLock) app.quit();
 else {
@@ -103,6 +124,7 @@ else {
     .whenReady()
     .then(start)
     .catch(error => {
+      writeLog(logDir(), 'ERROR', `startup ${describeError(error)}`);
       // A schema-replay failure almost always means this build is older than the one that wrote the
       // workspace — the strict event schemas fail closed on values they do not know. Say that plainly
       // instead of dumping the raw validation issues.
@@ -121,6 +143,7 @@ else {
   });
 }
 async function start() {
+  writeLog(logDir(), 'INFO', `start version=${app.getVersion()} packaged=${app.isPackaged}`);
   const root = app.getPath('userData');
   await mkdir(root, { recursive: true });
   await recoverInterruptedRestore(root);
@@ -196,6 +219,17 @@ async function start() {
         label: 'View',
         submenu: [{ role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { role: 'togglefullscreen' }],
       },
+      {
+        label: 'Help',
+        submenu: [
+          {
+            label: 'Open logs folder',
+            click: () => {
+              void shell.openPath(logDir());
+            },
+          },
+        ],
+      },
     ]),
   );
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -213,6 +247,23 @@ async function start() {
   });
   win.on('closed', () => {
     win = null;
+  });
+  win.webContents.on('render-process-gone', (_event, details) => {
+    writeLog(logDir(), 'ERROR', `render-process-gone reason=${details.reason} exit=${details.exitCode}`);
+    if (details.reason === 'clean-exit' || !win) return;
+    void dialog
+      .showMessageBox(win, {
+        type: 'error',
+        message: 'The office window stopped unexpectedly.',
+        detail: 'Your workspace is saved. Reload to continue. Details are in the log folder (Help → Open logs folder).',
+        buttons: ['Reload', 'Quit'],
+        defaultId: 0,
+        cancelId: 1,
+      })
+      .then(({ response }) => {
+        if (response === 0) win?.reload();
+        else app.quit();
+      });
   });
   // Interrupted work is reconciled while the window is already visible but before the renderer
   // loads; a crash never resubmits or invents an outcome, and no page exists to serve IPC yet.
