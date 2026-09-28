@@ -79,6 +79,7 @@ let pipeline: PipelineService;
 let custody: HoldoutCustody;
 let dispatchBusy = false;
 const html = path.join(__dirname, '../renderer/index.html');
+const loadingHtml = path.join(__dirname, '../renderer/loading.html');
 const expectedURL = pathToFileURL(html).href;
 const id = z.string().uuid();
 const importSchema = z
@@ -144,6 +145,30 @@ else {
 }
 async function start() {
   writeLog(logDir(), 'INFO', `start version=${app.getVersion()} packaged=${app.isPackaged}`);
+  // The .ico keeps window and taskbar pinned to the same artwork the packager embeds in the exe;
+  // the .png remains for platforms without multi-size ico support.
+  const appIcon = path.join(__dirname, process.platform === 'win32' ? '../assets/icon.ico' : '../assets/icon.png');
+  win = new BrowserWindow({
+    width: 1440,
+    height: 1000,
+    minWidth: 1050,
+    minHeight: 720,
+    title: 'Quant Research Office',
+    backgroundColor: '#101414',
+    show: true,
+    autoHideMenuBar: true,
+    icon: appIcon,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
+      devTools: !app.isPackaged,
+    },
+  });
+  await win.loadFile(loadingHtml).catch(() => undefined);
   const root = app.getPath('userData');
   await mkdir(root, { recursive: true });
   await recoverInterruptedRestore(root);
@@ -176,29 +201,6 @@ async function start() {
       cancel:
         !details.url.startsWith('file:') && !details.url.startsWith('devtools:') && !details.url.startsWith('data:'),
     });
-  });
-  // The .ico keeps window and taskbar pinned to the same artwork the packager embeds in the exe;
-  // the .png remains for platforms without multi-size ico support.
-  const appIcon = path.join(__dirname, process.platform === 'win32' ? '../assets/icon.ico' : '../assets/icon.png');
-  win = new BrowserWindow({
-    width: 1440,
-    height: 1000,
-    minWidth: 1050,
-    minHeight: 720,
-    title: 'Quant Research Office',
-    backgroundColor: '#101414',
-    show: true,
-    autoHideMenuBar: true,
-    icon: appIcon,
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.cjs'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      webSecurity: true,
-      allowRunningInsecureContent: false,
-      devTools: !app.isPackaged,
-    },
   });
   Menu.setApplicationMenu(
     Menu.buildFromTemplate([
