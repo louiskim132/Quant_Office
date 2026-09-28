@@ -425,7 +425,7 @@ function App() {
             <span className="status-dot" />
             Local workspace
           </div>
-          <p>Research runs on provider infrastructure.</p>
+          <p>Agents run on this computer through the official provider CLIs.</p>
           <span className="version">DESKTOP · {info?.version || 'INITIAL RELEASE'}</span>
         </div>
       </aside>
