@@ -423,6 +423,16 @@ test('setup: a synthetic ok result lands the credential; bundle and result are s
   );
 });
 
+test('setup script adds the isolated account to the standard Users group', () => {
+  const source = readFileSync(
+    path.resolve(import.meta.dirname, '../scripts/agent-isolation/setup-agent-isolation.ps1'),
+    'utf8',
+  );
+  assert.match(source, /Get-LocalGroupMember -Group 'Users'/);
+  assert.match(source, /Add-LocalGroupMember -Group 'Users' -Member \$user/);
+  assert.match(source, /net localgroup Users \$user \/add/);
+});
+
 test('setup: a BOM-prefixed result (Windows PowerShell 5.1 UTF8) still lands the credential', async t => {
   const dir = root(t);
   const tmp = path.join(dir, 'tmp');

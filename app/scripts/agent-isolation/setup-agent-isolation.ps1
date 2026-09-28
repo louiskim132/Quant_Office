@@ -57,11 +57,29 @@ if ($b) {
         if ($LASTEXITCODE -ne 0) { throw "net user failed to set the $user password (code $LASTEXITCODE)" }
       }
     }
+    # New-LocalUser does not guarantee membership in the standard Users group. Without that
+    # baseline group, Windows can refuse the credential logon used by Start-Process -Credential.
+    $sid = (New-Object System.Security.Principal.NTAccount($user)).Translate(
+      [System.Security.Principal.SecurityIdentifier]).Value
+    if (Get-Command Get-LocalGroupMember -ErrorAction SilentlyContinue) {
+      $userSids = @(Get-LocalGroupMember -Group 'Users' -ErrorAction SilentlyContinue |
+        ForEach-Object { $_.SID.Value })
+      $inUsers = $userSids -contains $sid
+    } else {
+      $inUsers = @((net localgroup Users) |
+        Where-Object { $_ -eq $user -or $_ -like "*\$user" }).Count -gt 0
+    }
+    if (-not $inUsers) {
+      if (Get-Command Add-LocalGroupMember -ErrorAction SilentlyContinue) {
+        Add-LocalGroupMember -Group 'Users' -Member $user
+      } else {
+        net localgroup Users $user /add | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "net localgroup Users failed to add $user (code $LASTEXITCODE)" }
+      }
+    }
     # A local account that can administer the machine defeats the isolation boundary — refuse it.
     $admin = $false
     if (Get-Command Get-LocalGroupMember -ErrorAction SilentlyContinue) {
-      $sid = (New-Object System.Security.Principal.NTAccount($user)).Translate(
-        [System.Security.Principal.SecurityIdentifier]).Value
       $admin = @(Get-LocalGroupMember -Group 'Administrators' -ErrorAction SilentlyContinue |
         ForEach-Object { $_.SID.Value }) -contains $sid
     } else {
