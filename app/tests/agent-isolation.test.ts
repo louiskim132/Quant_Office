@@ -151,7 +151,9 @@ function channelEvidence(agentsRoot: string): string {
     const chunks: string[] = [];
     for (const run of readdirSync(hostDir).filter(name => name.startsWith('run-'))) {
       const dir = path.join(hostDir, run);
-      for (const name of readdirSync(dir).filter(name => name === 'host-errors.log' || name === 'host-trace.log' || /^err-.+\.log$/.test(name))) {
+      for (const name of readdirSync(dir).filter(
+        name => name === 'host-errors.log' || name === 'host-trace.log' || /^err-.+\.log$/.test(name),
+      )) {
         try {
           chunks.push(`${run}/${name}: ${readFileSync(path.join(dir, name), 'utf8').slice(0, 400)}`);
         } catch {
