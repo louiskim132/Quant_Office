@@ -4,6 +4,7 @@ import type { LocalSessionSummary, LocalLaunchPlan } from '../shared/local-sessi
 import { agentDispatchReadiness } from '../shared/readiness';
 import { requestJobs } from '../shared/queue';
 import { dependencyStatus } from '../shared/cooperation';
+import { formatDateTime } from './format';
 
 const jobLabels: Record<ProviderJob['state'], string> = {
   INTENT: 'Prepared · nothing submitted',
@@ -583,7 +584,7 @@ export function RequestDispatch({
           <ul className="evidence-list">
             {events.map(event => (
               <li key={event.id}>
-                <b>{event.kind.toLowerCase()}</b> {new Date(event.occurredAt).toLocaleString()} — {event.text}
+                <b>{event.kind.toLowerCase()}</b> {formatDateTime(event.occurredAt)} — {event.text}
               </li>
             ))}
           </ul>

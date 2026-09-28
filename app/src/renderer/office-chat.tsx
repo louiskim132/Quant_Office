@@ -3,6 +3,7 @@ import { ArrowDown, MessageCircle, RefreshCw, Users } from 'lucide-react';
 import type { AppState } from '../shared/types';
 import type { OfficeChatEntry, OfficeChatPage } from '../shared/office-chat';
 import './office-chat.css';
+import { formatDateTime } from './format';
 
 const time = (value: string) => new Date(value).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 const day = (value: string) => {
@@ -309,7 +310,7 @@ export function OfficeChat({ state }: { state: AppState }) {
                             ? 'Office record'
                             : 'Provider reported'}
                       </span>
-                      <time dateTime={entry.timestamp} title={new Date(entry.timestamp).toLocaleString()}>
+                      <time dateTime={entry.timestamp} title={formatDateTime(entry.timestamp)}>
                         {time(entry.timestamp)}
                       </time>
                     </footer>

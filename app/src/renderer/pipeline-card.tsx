@@ -3,6 +3,7 @@ import type { AppState, Command, PipelineShape, ProviderJob, Request } from '../
 import { latestJobFor } from '../core/jobs';
 import './pipeline.css';
 import './office.css';
+import { formatDateTime } from './format';
 
 const TERMINAL = ['COMPLETED', 'FAILED', 'CANCEL_ACKNOWLEDGED'];
 const RUNNING = ['SUBMITTING', 'ACCEPTED', 'RUNNING', 'UNKNOWN', 'CANCEL_REQUESTED'];
@@ -240,7 +241,7 @@ export function PipelineCard({
             <ul className="evidence-list">
               {notes.map(item => (
                 <li key={item.id}>
-                  {item.text} <span className="muted">— {new Date(item.createdAt).toLocaleString()}</span>
+                  {item.text} <span className="muted">— {formatDateTime(item.createdAt)}</span>
                 </li>
               ))}
             </ul>
@@ -486,8 +487,7 @@ export function PipelineCard({
           <>
             <p className="muted">
               Decision recorded: {pipeline.decision.decision.toLowerCase()} · bound to report receipt{' '}
-              {pipeline.decision.headReceiptHash.slice(0, 16)}… ·{' '}
-              {new Date(pipeline.decision.decidedAt).toLocaleString()}
+              {pipeline.decision.headReceiptHash.slice(0, 16)}… · {formatDateTime(pipeline.decision.decidedAt)}
               {pipeline.decision.note ? ` — “${pipeline.decision.note}”` : ''}
             </p>
             {pipeline.decision.decision === 'REVISE' &&

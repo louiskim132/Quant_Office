@@ -16,6 +16,7 @@ import { providerReadiness } from '../shared/readiness';
 import { LocalConsumption } from './activity';
 import { TRANSPORT_PROBE_CONTAINMENT } from '../shared/transport';
 import './agents.css';
+import { formatDateTime } from './format';
 const roleNames: Record<Role, string> = {
   DIRECTOR: 'Director',
   PM_A: 'PM · Implementation',
@@ -517,7 +518,7 @@ export function SubscriptionUsage({ state }: { state: AppState }) {
                     <span>{w.label}</span>
                     <strong>{w.remainingPercent.toFixed(0)}% remaining</strong>
                     <progress max="100" value={w.remainingPercent} />
-                    <small>Resets {new Date(w.resetsAt * 1000).toLocaleString()}</small>
+                    <small>Resets {formatDateTime(w.resetsAt * 1000)}</small>
                   </div>
                 ))}
               </div>
@@ -532,7 +533,7 @@ export function SubscriptionUsage({ state }: { state: AppState }) {
                 c?.note ||
                 'Refresh to check the official provider tool. Missing values are never estimated.'}
             </p>
-            {c && <small>Checked {new Date(c.checkedAt).toLocaleString()}</small>}
+            {c && <small>Checked {formatDateTime(c.checkedAt)}</small>}
             {provider !== 'devin' && (
               <div>
                 <button
@@ -628,15 +629,15 @@ export function ProviderConnections({ state }: { state: AppState }) {
               </strong>
               <p>
                 {readiness.identity
-                  ? `${readiness.identity} · last recorded observation ${new Date(readiness.lastObservedAt).toLocaleString()}`
+                  ? `${readiness.identity} · last recorded observation ${formatDateTime(readiness.lastObservedAt)}`
                   : readiness.lastObservedAt
-                    ? `Checked ${new Date(readiness.lastObservedAt).toLocaleString()} — ${snapshot?.operations.find(item => item.operation === 'ACCOUNT_STATUS')?.detail ?? 'no signed-in subscription was reported.'}`
+                    ? `Checked ${formatDateTime(readiness.lastObservedAt)} — ${snapshot?.operations.find(item => item.operation === 'ACCOUNT_STATUS')?.detail ?? 'no signed-in subscription was reported.'}`
                     : 'No account check recorded yet.'}
               </p>
               {checked && checked !== readiness.lastObservedAt && (
                 <p className="muted">
-                  Last live check {new Date(checked).toLocaleString()} was not persisted as a new observation. It cannot
-                  authorize anything.
+                  Last live check {formatDateTime(checked)} was not persisted as a new observation. It cannot authorize
+                  anything.
                 </p>
               )}
               <p className="provider-summary">

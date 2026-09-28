@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import type { Agent, AppState, Assignment, JobEvent, Message, ProviderJob, Request, WorkLog } from '../shared/types';
 import { agentDispatchReadiness } from '../shared/readiness';
+import { formatDateTime } from './format';
 
 /**
  * One frozen assignment and the job that runs it. The applied self-report comes from the bounded
@@ -207,7 +208,7 @@ export function ProfileTabs({
               <ul className="evidence-list">
                 {events.map(event => (
                   <li key={event.id}>
-                    {new Date(event.occurredAt).toLocaleString()} — {event.text}
+                    {formatDateTime(event.occurredAt)} — {event.text}
                   </li>
                 ))}
               </ul>
@@ -224,9 +225,7 @@ export function ProfileTabs({
               <p>{message.body}</p>
               <p className="muted">
                 {message.fromAgentId === agent.id ? 'sent' : 'received'} ·{' '}
-                {message.deliveredAt
-                  ? `delivered ${new Date(message.deliveredAt).toLocaleString()}`
-                  : 'no delivery receipt yet'}
+                {message.deliveredAt ? `delivered ${formatDateTime(message.deliveredAt)}` : 'no delivery receipt yet'}
               </p>
             </article>
           ))}
@@ -253,7 +252,7 @@ export function ProfileTabs({
           <ul className="evidence-list">
             {logs.map(log => (
               <li key={log.id}>
-                <b>{new Date(log.timestamp).toLocaleString()}</b> — {log.text.slice(0, 400)}
+                <b>{formatDateTime(log.timestamp)}</b> — {log.text.slice(0, 400)}
               </li>
             ))}
           </ul>
