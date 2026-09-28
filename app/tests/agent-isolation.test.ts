@@ -433,6 +433,12 @@ test('setup script adds the isolated account to the standard Users group', () =>
   assert.match(source, /net localgroup Users \$user \/add/);
 });
 
+test('credential bootstrap starts in the agent-accessible host directory', () => {
+  const source = readFileSync(path.resolve(import.meta.dirname, '../src/main/agent-isolation.ts'), 'utf8');
+  assert.match(source, /cwd: hostDir/);
+  assert.match(source, /-LoadUserProfile -UseNewEnvironment -Wait/);
+});
+
 test('setup: a BOM-prefixed result (Windows PowerShell 5.1 UTF8) still lands the credential', async t => {
   const dir = root(t);
   const tmp = path.join(dir, 'tmp');
