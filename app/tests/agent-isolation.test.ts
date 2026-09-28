@@ -65,7 +65,10 @@ function sameUserHost(t: test.TestContext): {
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
       });
-      proc.unref();
+      // Deliberately NOT unref'd: every handle inside the channel is unref'd by design, so on a
+      // loaded scheduler the loop could transiently hold zero ref'd handles while a test await is
+      // pending — node then parks the file forever (the CI wedge this file hit). The live host
+      // proc keeps the loop honest, and t.after still kills it so the process exits cleanly.
       procs.push(proc);
       return proc;
     },
@@ -108,6 +111,23 @@ function collect(child: CliChild) {
   };
 }
 
+/**
+ * Every host-driven await races a REF'd deadline timer: it holds the event loop open while the
+ * channel settles, so a wedged host/protocol reports a fast explicit failure here instead of
+ * node:test parking the file with zero ref'd handles (the exact CI symptom this guards).
+ */
+async function deadline<T>(promise: Promise<T>, what: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(`timed out after 15s waiting for ${what}`)), 15_000);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 const OPTS = (cwd: string, env: NodeJS.ProcessEnv = {}): CliSpawnOptions => ({
   cwd,
   env,
@@ -120,7 +140,7 @@ test('isolated spawn: stdout bytes arrive and exit reports code 0', async t => {
   const { spawnAs, sessionDir } = spawnFixture(t, dir);
   const child = spawnAs(process.execPath, ['-e', 'console.log("hi")'], OPTS(sessionDir));
   const seen = collect(child);
-  const { code } = await seen.exited;
+  const { code } = await deadline(seen.exited, 'the spawned child to exit');
   assert.equal(code, 0);
   assert.ok(seen.out.join('').includes('hi'), `stdout carried the child output: ${seen.out.join('')}`);
 });
@@ -130,7 +150,7 @@ test('isolated spawn: stderr bytes arrive on the stderr stream', async t => {
   const { spawnAs, sessionDir } = spawnFixture(t, dir);
   const child = spawnAs(process.execPath, ['-e', 'console.error("oops")'], OPTS(sessionDir));
   const seen = collect(child);
-  await seen.exited;
+  await deadline(seen.exited, 'the spawned child to exit');
   assert.ok(seen.err.join('').includes('oops'), `stderr carried the child output: ${seen.err.join('')}`);
 });
 
@@ -142,7 +162,7 @@ test('isolated spawn: kill() delivers a cancel and the child exits', async t => 
   // Let the request reach the host before cancelling — either order must still converge on exit.
   await new Promise(resolve => setTimeout(resolve, 400));
   assert.equal(child.kill(), true);
-  const { code, signal } = await seen.exited;
+  const { code, signal } = await deadline(seen.exited, 'the cancelled child to exit');
   assert.ok(code !== 0 || signal !== null, `a killed child reports a non-clean exit (${code}/${signal})`);
 });
 
@@ -158,7 +178,7 @@ test('isolated spawn: the env whitelist drops office vars and keeps declared key
     OPTS(sessionDir, { QRO_X: '1', PATH: 'evil', ANTHROPIC_API_KEY: 'sk-test-1' }),
   );
   const seen = collect(child);
-  await seen.exited;
+  await deadline(seen.exited, 'the spawned child to exit');
   const payload = JSON.parse(seen.out.join('').trim());
   assert.equal(payload.qx, '1', 'QRO_* keys cross the channel');
   assert.equal(payload.ak, 'sk-test-1', 'the provider API key crosses the channel');
@@ -171,7 +191,7 @@ test('isolated spawn: a cwd outside the sessions root is refused as an error', a
   const outside = path.join(dir, 'not-a-session');
   mkdirSync(outside, { recursive: true });
   const child = spawnAs(process.execPath, ['-e', 'console.log("never")'], OPTS(outside));
-  const error = await collect(child).errored;
+  const error = await deadline(collect(child).errored, 'the host to refuse the out-of-root cwd');
   assert.match(error.message, /outside the agent sessions root|refused/i);
 });
 
@@ -191,7 +211,7 @@ test('isolated spawn: a host that never reports ready fails closed with an error
   });
   t.after(() => spawnAs.shutdown());
   const child = spawnAs(process.execPath, ['-e', 'console.log("never")'], OPTS(sessionDir));
-  const error = await collect(child).errored;
+  const error = await deadline(collect(child).errored, 'the host start failure to surface');
   assert.match(error.message, /isolation/i);
 });
 
