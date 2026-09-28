@@ -73,6 +73,11 @@ function appendLog(name, text) {
   }
 }
 
+/** Stage markers in host-trace.log — a native abort leaves its last position behind on disk. */
+function trace(text) {
+  appendLog('host-trace.log', `${new Date().toISOString()} ${text}\n`);
+}
+
 /** The packet-folder boundary: refuse anything whose cwd is not strictly inside agentsRoot. */
 function insideAgentsRoot(candidate) {
   if (typeof candidate !== 'string' || !candidate) return false;
@@ -272,6 +277,7 @@ function scan() {
       continue;
     }
     try {
+      trace(`req ${name} op=${req && req.op}`);
       if (req && req.op === 'spawn') onSpawn(req);
       else if (req && req.op === 'cancel') onCancel(req);
       else if (req && req.op === 'shutdown') onShutdown();
@@ -288,11 +294,10 @@ try {
   process.stderr.write(`agent-host: cannot create channel dir: ${error.message}\n`);
   process.exit(2);
 }
-try {
-  fs.watch(sessionDir, () => scan());
-} catch {
-  /* the poll fallback below still delivers requests */
-}
+// No fs.watch: libuv's fs-event delivery (ReadDirectoryChangesW) natively aborts the host
+// (0xC0000409) on Windows Server 2025-class builds — CI evidence — and a native abort cannot be
+// caught. The 100 ms poll alone is the whole scan path; dispatch latency is irrelevant next to
+// an agent run.
 setInterval(scan, 100);
 // The office owns the host's lifetime: when the office process is gone the host exits. EPERM means
 // the pid exists but belongs to another account — alive, keep serving.
@@ -304,5 +309,6 @@ setInterval(() => {
     onShutdown();
   }
 }, 5000);
+trace(`host up pid=${process.pid} user=${(process.env.USERNAME || process.env.USER || 'unknown')}`);
 writeJson(`ready-${sessionId}.json`, { pid: process.pid, user: os.userInfo().username });
 scan();

@@ -141,8 +141,9 @@ async function deadline<T>(promise: Promise<T>, what: string): Promise<T> {
 }
 
 /**
- * Reads the channel's own evidence — host-errors.log plus every err-*.log under .host/run-*.
- * On CI these files are the only window into a host that dies natively with no JS stack.
+ * Reads the channel's own evidence — host-trace.log and host-errors.log plus every err-*.log
+ * under .host/run-*. On CI these files are the only window into a host that dies natively with
+ * no JS stack.
  */
 function channelEvidence(agentsRoot: string): string {
   try {
@@ -150,7 +151,7 @@ function channelEvidence(agentsRoot: string): string {
     const chunks: string[] = [];
     for (const run of readdirSync(hostDir).filter(name => name.startsWith('run-'))) {
       const dir = path.join(hostDir, run);
-      for (const name of readdirSync(dir).filter(name => name === 'host-errors.log' || /^err-.+\.log$/.test(name))) {
+      for (const name of readdirSync(dir).filter(name => name === 'host-errors.log' || name === 'host-trace.log' || /^err-.+\.log$/.test(name))) {
         try {
           chunks.push(`${run}/${name}: ${readFileSync(path.join(dir, name), 'utf8').slice(0, 400)}`);
         } catch {
