@@ -1,6 +1,6 @@
 # Quant Research Office — single implementation roadmap
 
-Current review, 2026-09-28: C11 development exit criteria are met through LR-17; L2 is closed at 132 ms. LR-16 implementation and launcher follow-ups are merged (#37–#40), but real elevated QRO-Agent acceptance remains unverified: the scratch probes could not start in the Codex-managed Windows process environment. Fail-closed evidence evaluation now has regression coverage. A safe standalone runner is not checked in because account setup outside the app would rotate the Windows account password without updating the app's DPAPI-protected secret. Acceptance must run from a normal desktop app-backed process, then record scratch evidence. A current official-source terms scan is recorded in records/reviews/provider-terms-review-prep-2026-09-28.md; it flags unresolved consumer automation and securities-research questions for counsel. Provider-terms legal approval remains user-owned and pending. Signing, installer, updates, fuses and clean-machine release validation remain deferred under D-3. The installed App copy mirrors merge commit e11e22246e42999f1572707136b15a71d8a7b3f2 and app.asar SHA-256 is 25922E5A701BD1768B4F72792BEBD84BEF079D7CEC1EAEA668F458EAC6F5C5BC. See section 11 and section 17 for evidence and remaining gates. Older opening updates below are historical.
+Current review, 2026-09-28 (organizer verification of `54aa5f7`, see the last section 17 entry): C11 development is complete and independently re-verified — 949 tests, 948 pass, 0 fail, 1 skip; typecheck, Prettier and build clean; CI green; `bench-store.ts 1000` openMs 92 ms. C11 development exit criteria are met through LR-17; L2 is closed at 132 ms. LR-16 implementation and launcher follow-ups are merged (#37–#40), but real elevated QRO-Agent acceptance remains unverified: the scratch probes could not start in the Codex-managed Windows process environment. Fail-closed evidence evaluation now has regression coverage. A safe standalone runner is not checked in because account setup outside the app would rotate the Windows account password without updating the app's DPAPI-protected secret. Acceptance must run from a normal desktop app-backed process, then record scratch evidence. A current official-source terms scan is recorded in records/reviews/provider-terms-review-prep-2026-09-28.md; it flags unresolved consumer automation and securities-research questions for counsel. Provider-terms legal approval remains user-owned and pending. Signing, installer, updates, fuses and clean-machine release validation remain deferred under D-3. The installed App copy mirrors merge commit e11e22246e42999f1572707136b15a71d8a7b3f2 and app.asar SHA-256 is 25922E5A701BD1768B4F72792BEBD84BEF079D7CEC1EAEA668F458EAC6F5C5BC. See section 11 and section 17 for evidence and remaining gates. Older opening updates below are historical.
 
 Current status update, 2026-09-24: `origin/main` carries the communication pipeline (comm-pipe-1..3, sealed round plus user decision) and the complete M-memory workstream (office-mem-1/2). A packaged-app audit found and fixed four user-visible defects on branch `fix/memory-page-bugs-20260924` (see the dated entry of that name at the end of this file). **Where status lives:** the section 11 tables, plus the dated progress log in section 17 at the end of this file. The newest entry is last. Open items: the C8 user-run Colab pilot, P3 live acceptance of a real user decision, REVISE re-mint, external memory-engine evaluation, C10 comparisons and every hosted gate.
 
@@ -1114,7 +1114,7 @@ Ordered implementation packets (organizer owns shared contracts, IPC, dependenci
 
 Exact next local work: implement C10-A attempt preparation/ledger and C10-B contracts on organizer-published packets; retain C9's separate local-session probe and pilot as outstanding. Local fixture work can proceed without changing R5 or waiting for real data. Do not start paid/live provider runs merely because a packet is written.
 
-### C11 — Launch-readiness revision (LR packets) — IN_PROGRESS; LR-0…LR-11, LR-14 merged (`abbe9a1`), re-anchored on `e0ce5d9`; LR-8 measured — openMs 4,999 ≥ 3,000 → checkpoint design packet needed
+### C11 — Launch-readiness revision (LR packets) — DEVELOPMENT COMPLETE 2026-09-28; LR-0…LR-11, LR-14, LR-15, LR-17 merged and LR-16 code merged (`54aa5f7`); launch gates open: LR-16 real acceptance, legal review; D-3 deferred
 
 Source: the 2026-09-25 commercial launch-readiness review in section 17 (findings L1–L15).
 Base: `origin/main` at or after `e0ce5d9` (rev-3/rev-4 merged; LR-0 merged as PR #18; re-anchored — see C11.0 rule 0). LR-1 is the next packet. New desktop-batch code rounds must branch from this formatted `main`. This slice is written so that a coding model
@@ -1220,12 +1220,12 @@ stop and report the conflict instead of choosing yourself.
 | 7 | LR-4 Local-first Add agent defaults with risk consent | L5, L9, L1 | Coding model | LR-1 |
 | 8 | LR-6 One model catalog per account in the quick-access copy | L2 | Coding model | RA |
 | 9 | LR-7 Show the window before the workspace opens | L2 | Coding model | LR-6 |
-| 10 | LR-8 Measure startup and decide on an integrity checkpoint | L2 | Coding model (measure only) | LR-6, LR-7 |
+| 10 | LR-8 Measure startup and decide on an integrity checkpoint (measured 4,999 ms → LR-17 added; LR-17 merged, 92–132 ms) | L2 | Coding model (measure only) | LR-6, LR-7 |
 | 11 | LR-9 Plain provider status in Settings | L5, L10 | Coding model | LR-1 |
 | 12 | LR-10 One date and number formatter | L11 | Coding model | LR-1 |
 | 13 | LR-11 Accessible names for icon buttons | L13 | Coding model | LR-1 |
 | 14 | LR-14 Unified look with light as the default theme | L14 | Coding model | LR-6, LR-1 |
-| Launch gate | LR-15 API-key mode (design first) | L4 | Organizer designs, coding model builds | all above |
+| Launch gate | LR-15 API-key mode (merged PR #34, `b4c71ec`) | L4 | Organizer designs, coding model builds | all above |
 | Launch gate | LR-16 Separate Windows user for agent sessions (implementation merged; real acceptance open) | L1 | Organizer acceptance | all above |
 | Launch gate | Legal review of provider terms | L4 | User (lawyer) | — |
 | Very last | Deferred — signing, installer, updates, fuses (former LR-12) | L3 | User reopens D-3 first | everything |
@@ -2158,14 +2158,14 @@ Steps:
 
 #### Launch gate — do not start during development
 
-- **LR-15 API-key mode (D-4).** The organizer writes the design first; the coding model builds it.
+- **LR-15 API-key mode (D-4). DONE — merged PR #34 (`b4c71ec`) 2026-09-27.** The organizer writes the design first; the coding model builds it.
   Requirements already fixed by the user: every user signs in with their **own** provider account
   or enters their **own** API key; the developer's accounts are never used, embedded or
   referenced; keys are stored with Electron `safeStorage` (Windows DPAPI), never in the workspace,
   logs, Git or prompts; subscription mode stays available for users' own subscriptions.
 - **Legal review (D-4).** The user has each provider's terms reviewed for commercial automated
   use before any sale. Record the outcome in section 17.
-- **LR-16 Separate Windows user for agent sessions (D-1 option A).** The organizer writes the
+- **LR-16 Separate Windows user for agent sessions (D-1 option A). CODE MERGED (PRs #37–#40, #42); real elevated acceptance NOT RUN — gate open.** The organizer writes the
   design first. Direction: a dedicated low-privilege local account created once with the user's
   consent, agent CLIs started as that account, and file access limited to the packet folders.
 
@@ -6207,3 +6207,14 @@ user-owned. `App\` currently mirrors `abbe9a1` (asar `A498E677…`).
 - **Changed files:** `app/src/main/agent-isolation-acceptance.ts`,
   `app/tests/agent-isolation.test.ts`, this roadmap, and the counsel prep record. C11 development
   exit criteria remain met; D-3 remains deferred.
+
+### 2026-09-28 — Organizer verification of C11 on `54aa5f7`; development complete, two launch gates open
+
+- **Scope checked:** `origin/main` at `54aa5f7` (PR #43), which contains every C11 code packet: LR-0 (#18), LR-1 (#21), LR-2…LR-14 (#23–#32), LR-15 (#34), LR-17 (#35) and LR-16 with its follow-ups (#37–#40, #42). LR-8 was a measurement packet with no branch; its result produced LR-17. LR-12 stays parked under D-3.
+- **Independent re-run in a clean worktree on `54aa5f7`:** `pnpm install --frozen-lockfile` clean; `pnpm typecheck` 0 `error TS`; `pnpm format:check` "All matched files use Prettier code style!"; `node scripts/build.mjs` "Built Quant Research Office 0.5.0"; full unit suite 949 tests, 948 pass, 0 fail, 1 skipped (matches PR #42's report). `bench-store.ts 1000`: openMs **92 ms**, tailEvents 0 — under the 3 s exit criterion, so L2 stays closed.
+- **CI:** `verify` on main head `54aa5f7` succeeded (run 36485341602), including the packaged desktop e2e. One earlier main run failed: PR #41 (`70a5dd9`, docs-only) failed `archive.test.ts` "a large workspace streams past the in-memory format limits" with `unexpected EOF` in the inflate worker. The next two main runs passed without code changes to the archive path, so this is recorded as an **intermittent CI failure, not yet reproduced**. Watch it; if it recurs, open a finding against the archive streaming reader.
+- **C11 development exit criteria:** met — LR-0…LR-11 and LR-14 merged, desktop e2e and format check green in CI, open time under 3 s.
+- **Launch gates still open (not closed by this entry):**
+  1. **LR-16 real elevated acceptance — NOT RUN.** The `QRO-Agent` local account exists, is active and belongs only to `Users`, but no passing probe evidence exists anywhere in the repo, the worktrees or the temp folder; the only attempt failed at host startup in the Codex-managed process environment. The user must run it from a normal desktop session through the app, with scratch probe data, and the fail-closed evaluator must pass every check.
+  2. **Provider-terms legal review — handled outside this project by a separate reviewer (user decision 2026-09-28).** It is off the development track and no packet waits on it; it still gates any sale. Counsel prep is in `records/reviews/provider-terms-review-prep-2026-09-28.md`.
+- **Still deferred (D-3):** signing, installer, updates, fuses (former LR-12) and clean-machine release validation. The section 11 commercial-launch row therefore stays IN_PROGRESS and the product stays private/internal beta.
