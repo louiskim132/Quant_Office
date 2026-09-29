@@ -6216,5 +6216,5 @@ user-owned. `App\` currently mirrors `abbe9a1` (asar `A498E677…`).
 - **C11 development exit criteria:** met — LR-0…LR-11 and LR-14 merged, desktop e2e and format check green in CI, open time under 3 s.
 - **Launch gates still open (not closed by this entry):**
   1. **LR-16 real elevated acceptance — NOT RUN.** The `QRO-Agent` local account exists, is active and belongs only to `Users`, but no passing probe evidence exists anywhere in the repo, the worktrees or the temp folder; the only attempt failed at host startup in the Codex-managed process environment. The user must run it from a normal desktop session through the app, with scratch probe data, and the fail-closed evaluator must pass every check.
-  2. **Provider-terms legal review — user-owned, pending.** Counsel prep is in `records/reviews/provider-terms-review-prep-2026-09-28.md`.
+  2. **Provider-terms legal review — handled outside this project by a separate reviewer (user decision 2026-09-28).** It is off the development track and no packet waits on it; it still gates any sale. Counsel prep is in `records/reviews/provider-terms-review-prep-2026-09-28.md`.
 - **Still deferred (D-3):** signing, installer, updates, fuses (former LR-12) and clean-machine release validation. The section 11 commercial-launch row therefore stays IN_PROGRESS and the product stays private/internal beta.
