@@ -40,6 +40,8 @@ jobs:
         run: pnpm build
       - name: Package
         working-directory: app
+        env:
+          QRO_TEST_BUILD: '1'
         run: node scripts/package.mjs
       - name: Desktop end-to-end
         working-directory: app
