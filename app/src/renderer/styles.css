@@ -551,6 +551,13 @@ h1 {
 .empty-state p:last-child {
   margin-bottom: 0;
 }
+.project-choices {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  max-width: 520px;
+}
 .project-card {
   border: 1px solid var(--border);
   border-radius: 9px;
