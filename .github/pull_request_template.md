@@ -1,16 +1,17 @@
 ## Task and result
 
-Task/worker ID, objective, frozen base commit, and resulting behavior:
+Packet or worker ID, objective, base commit, and the resulting behavior:
 
 ## Scope
 
-Owned paths and any dependencies on other PRs:
+Changed paths, and any dependency on another PR:
 
 ## Verification
 
-Exact commands and actual results; include screenshots for UI changes. List checks not run.
+Exact commands and their actual results; screenshots or a packaged-app check for UI changes. List every check that did not run.
 
 ## Organizer handoff
 
-Head commit SHA, unresolved defects, migration/interface impact, and proposed roadmap update.
-Worker PRs target the batch organizer branch. The organizer reviews the final combined result and opens the integration PR to main.
+Head commit SHA, unresolved defects, migration or interface impact, and the proposed roadmap entry (workers do not edit `docs/ROADMAP.md`).
+
+In a desktop batch, worker PRs target the batch organizer branch and the organizer opens the integration PR to `main`. A packet-wave PR targets `main` directly. Either way, only the organizer merges, through this PR, after `verify` passes on its exact head.

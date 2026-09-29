@@ -1,4 +1,4 @@
-> Historical architecture specification. Current runtime status and superseding constraints: [readiness matrix](../app/docs/readiness.md). Fixed-team and API-budget provisions below are not active product defaults.
+> Workflow reference, maintained with the code. Current status is in [roadmap section 11](ROADMAP.md#11-execution-checklist-and-progress-record); where this page and the roadmap disagree, the roadmap wins. Fixed-team and API-budget provisions below are historical, not active product defaults.
 
 # Research workflow and external handoff — architecture 0.3
 
