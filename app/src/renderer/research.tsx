@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ArrowLeft,
   BookOpen,
@@ -156,7 +156,13 @@ export function ResearchView({
             <FolderOpen size={14} />
             Location &amp; inputs
           </summary>
-          <ProjectLocationPanel project={project} saved={savedLocation} location={location} onState={onState} />
+          <ProjectLocationPanel
+            project={project}
+            saved={savedLocation}
+            location={location}
+            requests={state.requests}
+            onState={onState}
+          />
         </details>
       </div>
       <ProjectRequests state={state} projectId={projectId} onOpenQueue={onOpenQueue} />

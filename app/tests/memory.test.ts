@@ -126,7 +126,7 @@ class FakeSerenaChild {
   kill() {
     return true;
   }
-  on(event: string, listener: (...args: never[]) => void) {
+  on(_event: string, _listener: (...args: never[]) => void) {
     return this;
   }
 }
@@ -214,20 +214,17 @@ async function heavy(t: any): Promise<Heavy> {
     agents[role] = agent;
   }
   const spawn: CliSpawn = () => new FakeChild() as never;
-  const exec = new LocalCliExecAdapter(
-    () => sessionsRoot,
-    provider => `${provider}.exe`,
-    clock,
-    undefined,
-    spawn,
-    () => ({ TEST_ENV: 'scrubbed' }),
-    undefined,
-    undefined,
-    agentId => store.snapshot().agents.find(a => a.id === agentId)?.provider,
-    undefined,
-    () => new FakeSerenaChild() as never,
-    60,
-  );
+  const exec = new LocalCliExecAdapter({
+    sessionsRoot: () => sessionsRoot,
+    executable: provider => `${provider}.exe`,
+    now: clock,
+    spawnChild: spawn,
+    environment: () => ({ TEST_ENV: 'scrubbed' }),
+    providerFor: agentId => store.snapshot().agents.find(a => a.id === agentId)?.provider,
+    serenaSpawn: () => new FakeSerenaChild() as never,
+    serenaReadyTimeoutMs: 60,
+    claudeSpawnGapMs: 0,
+  });
   execAdapter.current = exec;
   const local = new LocalSessionRouter(
     id => store.localSessionForJob(id),
@@ -499,7 +496,7 @@ test('search is bounded, project-scoped, and ranks live findings above supersede
 
 test('a COMPLETED receipt’s findings/links ingest into the ledger through the observe path', async t => {
   const f = await heavy(t);
-  const { request, hops } = await mintedRound(f);
+  const { hops } = await mintedRound(f);
   // The brief hop already ran inside mintedRound — pick the first minted hop whose
   // declared predecessors are all COMPLETED (the same Kahn rule completeRound uses).
   const done = new Set(hops.filter(item => jobFor(f, item.id).state === 'COMPLETED').map(item => item.id));

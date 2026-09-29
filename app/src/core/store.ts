@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, realpathSync, statSync } from 'node:fs';
 
 /** stat that returns undefined for missing/unreadable paths instead of throwing raw ENOENT. */
 function safeStat(p: string) {
@@ -92,7 +92,6 @@ import type {
   ResearchContract,
   ResearchTask,
   Request,
-  Settings,
   MemoryFinding,
   MemoryRelationship,
   MemoryGraph,
@@ -1069,7 +1068,6 @@ const jobEventSchema = z
     applied: appliedReportPayloadSchema.optional(),
   })
   .strict();
-const roleSlotSchema = z.object({ role, count: z.number().int().min(1).max(64) }).strict();
 const teamSchema = z
   .object({
     id,
@@ -1672,6 +1670,14 @@ export function downgradeWorkspaceToV3(file: string): string {
 
 export class OfficeStore {
   private readonly db: DatabaseSync;
+  /**
+   * The canonical projection text this connection last verified or wrote. Ordinary reads parse it
+   * instead of re-reading the row and re-canonicalizing it (tens of milliseconds per read on a
+   * real workspace). Every write refreshes it, every ROLLBACK clears it, and integrity
+   * verification always reads the stored row, so a tampered row is still detected. One
+   * connection is the only writer of a workspace file, so the text cannot go stale underneath.
+   */
+  private projectionText: string | null = null;
   private closed = false;
   private needsBackgroundVerify = false;
   private researchIndexReady = false;
@@ -1746,7 +1752,7 @@ export class OfficeStore {
             this.verifyIntegrity();
             this.db.exec('COMMIT');
           } catch (error) {
-            this.db.exec('ROLLBACK');
+            this.rollback();
             throw error;
           }
         }
@@ -1783,7 +1789,7 @@ export class OfficeStore {
           this.db.exec(`PRAGMA user_version=${SCHEMA_VERSION}`);
           this.db.exec('COMMIT');
         } catch (error) {
-          this.db.exec('ROLLBACK');
+          this.rollback();
           throw error;
         }
       }
@@ -1863,13 +1869,30 @@ export class OfficeStore {
       }
     }
   }
+  /** A fresh, caller-owned copy of the projection (see `projectionText`). */
   private readProjection(): Projection {
+    return JSON.parse(this.projectionText ?? this.storedProjectionText()) as Projection;
+  }
+  /**
+   * The stored projection row, verified canonical, read from the database rather than the cache.
+   * Integrity checks use this directly; it also refreshes the cache.
+   */
+  private storedProjectionText(): string {
     const row = this.db.prepare('SELECT state FROM projection WHERE singleton=1').get() as
       { state: string } | undefined;
     if (!row) throw new Error('Missing workspace projection');
-    const parsed = JSON.parse(row.state) as Projection;
-    if (canonical(parsed) !== row.state) throw new Error('Workspace projection is not canonical JSON');
-    return parsed;
+    if (canonical(JSON.parse(row.state)) !== row.state) throw new Error('Workspace projection is not canonical JSON');
+    this.projectionText = row.state;
+    return row.state;
+  }
+  private writeProjection(text: string): void {
+    this.db.prepare('UPDATE projection SET state=? WHERE singleton=1').run(text);
+    this.projectionText = text;
+  }
+  /** Rolls back the open transaction; a projection written inside it must not survive in the cache. */
+  private rollback(): void {
+    this.projectionText = null;
+    this.db.exec('ROLLBACK');
   }
   private allEvents(): StoredEvent[] {
     return this.db
@@ -1992,8 +2015,7 @@ export class OfficeStore {
       previous = event.hash;
       expectedSequence = event.sequence + 1;
     }
-    if (canonical(rebuilt) !== canonical(this.readProjection()))
-      throw new Error('Workspace projection integrity failure');
+    if (canonical(rebuilt) !== this.storedProjectionText()) throw new Error('Workspace projection integrity failure');
   }
   private verifyIntegrity(rewriteProjection = false): void {
     this.checkStorageIntegrity();
@@ -2008,16 +2030,17 @@ export class OfficeStore {
     }
     if (Number(this.db.prepare('SELECT COUNT(*) AS count FROM commands').get()!.count) !== receiptIds.size)
       throw new Error('Unexpected command receipts');
-    if (canonical(rebuilt) !== canonical(this.readProjection())) {
+    const rebuiltText = canonical(rebuilt);
+    if (rebuiltText !== this.storedProjectionText()) {
       // Only the one-time migration may replace the stored projection, and only after the hash
       // chain above was verified; the projection is derived data.
       if (!rewriteProjection) throw new Error('Workspace projection integrity failure');
-      this.db.prepare('UPDATE projection SET state=? WHERE singleton=1').run(canonical(rebuilt));
+      this.writeProjection(rebuiltText);
     }
     // A completed full verification certifies the history through the tip; the next open replays
     // only what lands after this checkpoint.
     const tip = this.tipEvent();
-    this.writeCheckpoint(tip?.sequence ?? 0, tip?.hash ?? ZERO_HASH, canonical(rebuilt));
+    this.writeCheckpoint(tip?.sequence ?? 0, tip?.hash ?? ZERO_HASH, rebuiltText);
   }
   /**
    * The same full verification as verifyIntegrity, chunked so the event loop stays responsive. It
@@ -2067,16 +2090,16 @@ export class OfficeStore {
     if (currentTip !== tip) return;
     if (Number(this.db.prepare('SELECT COUNT(*) AS count FROM commands').get()!.count) !== receiptIds.size)
       throw new Error('Unexpected command receipts');
-    if (canonical(rebuilt) !== canonical(this.readProjection()))
-      throw new Error('Workspace projection integrity failure');
+    const rebuiltText = canonical(rebuilt);
+    if (rebuiltText !== this.storedProjectionText()) throw new Error('Workspace projection integrity failure');
     // The checkpoint advance is its own tiny transaction — synchronous on this connection, never
     // held open across an await and never nested inside another transaction.
     this.db.exec('BEGIN IMMEDIATE');
     try {
-      this.writeCheckpoint(tip, previous, canonical(rebuilt));
+      this.writeCheckpoint(tip, previous, rebuiltText);
       this.db.exec('COMMIT');
     } catch (error) {
-      this.db.exec('ROLLBACK');
+      this.rollback();
       throw error;
     }
   }
@@ -3772,7 +3795,7 @@ export class OfficeStore {
     this.db
       .prepare('INSERT INTO events(sequence,id,record) VALUES(?,?,?)')
       .run(event.sequence, event.id, canonical(event));
-    this.db.prepare('UPDATE projection SET state=? WHERE singleton=1').run(canonical(next));
+    this.writeProjection(canonical(next));
     this.db.prepare("INSERT INTO outbox(event_sequence,state) VALUES(?,'PENDING')").run(event.sequence);
     this.indexEvent(event);
     if (command)
@@ -4856,7 +4879,7 @@ export class OfficeStore {
       operation();
       this.db.exec('COMMIT');
     } catch (error) {
-      this.db.exec('ROLLBACK');
+      this.rollback();
       throw error;
     }
     return this.snapshot({ history: this.includeHistoryInResults });

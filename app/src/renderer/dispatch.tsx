@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { Agent, AppState, InputSnapshot, ProviderJob, Request, JobEvent } from '../shared/types';
 import type { LocalSessionSummary, LocalLaunchPlan } from '../shared/local-session';
 import { agentDispatchReadiness } from '../shared/readiness';

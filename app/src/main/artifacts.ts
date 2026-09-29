@@ -10,7 +10,7 @@ import { OfficeStore } from '../core/store.js';
 import { canonicalHash } from '../core/canonical.js';
 import { parseStrictJson } from '../core/strict-json.js';
 import { objectInventory } from '../core/object-inventory.js';
-import type { Artifact, AppState } from '../shared/types.js';
+import type { Artifact } from '../shared/types.js';
 import { catBoostPackageSchema, type CatBoostPackage, type GateEvaluation } from '../shared/research-contracts.js';
 import { advanceable, evaluatePackage } from '../core/research-gates.js';
 import { assertHonestApproval, releaseManifestSchema } from '../shared/shadow.js';
@@ -609,7 +609,6 @@ export class ArtifactService {
    * destination is announced, so a backup is never reported without having been read back.
    */
   private async backupStreamed(destination: string, tempDir: string, db: string): Promise<void> {
-    const snapshot = this.store.snapshot({ history: false });
     const seen = new Set<string>();
     const sources = [
       { path: 'workspace.sqlite', file: db },
@@ -775,8 +774,6 @@ export class ArtifactService {
         databaseBytes > this.format.maxFileBytes
       )
         return await this.backupStreamed(destination, tempDir, db);
-      const snapshot = this.store.snapshot({ history: false });
-
       const files: Record<string, Uint8Array> = { 'workspace.sqlite': await readFile(db) };
       for (const hash of objects) {
         const bytes = await readFile(this.objectPath(hash));

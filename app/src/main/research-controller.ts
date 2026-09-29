@@ -1,12 +1,6 @@
 import {
-  MANDATORY_GATES,
-  STAGE_GATES,
   nextActions,
   pipelineStageBlocker,
-  stageCompletionBlocker,
-  lineageCounters,
-  FOLLOW_UP_ALLOWANCE,
-  type GateId,
   type ResearchBranch,
   type ResearchRecords,
   type Stage,

@@ -120,18 +120,18 @@ function fixture(
   };
   const environment = () => ({ TEST_ENV: 'scrubbed-subscription-env' });
   const executables: Record<Provider, string> = { devin: 'devin.exe', claude: 'claude.exe', openai: 'codex.exe' };
-  const adapter = new LocalCliExecAdapter(
-    () => sessions,
-    provider => {
+  const adapter = new LocalCliExecAdapter({
+    sessionsRoot: () => sessions,
+    executable: provider => {
       if (options.executableError) throw new Error(`no ${provider} executable on PATH`);
       return executables[provider];
     },
-    () => at(1),
-    undefined,
-    spawn,
+    now: () => at(1),
+    spawnChild: spawn,
     environment,
-    options.timeoutMs,
-  );
+    timeoutMs: options.timeoutMs,
+    claudeSpawnGapMs: 0,
+  });
   const assignment: Assignment = {
     id: randomUUID(),
     projectId: snapshot.projectId,
@@ -675,11 +675,11 @@ test('cancel with no office-owned process writes the advisory sentinel only', as
   const restarted = fixture(t, { provider: 'claude' });
   const restartResult = await restarted.adapter.submit(restarted.context);
   const restartBound = { ...restarted.binding, packetHash: restartResult.localPacket!.packetHash };
-  const fresh = new LocalCliExecAdapter(
-    () => restarted.sessions,
-    p => restarted.executables[p],
-    () => at(2),
-  );
+  const fresh = new LocalCliExecAdapter({
+    sessionsRoot: () => restarted.sessions,
+    executable: p => restarted.executables[p],
+    now: () => at(2),
+  });
   const orphan = await fresh.cancel(restarted.job(), restartBound);
   assert.equal(orphan.acknowledged, true, 'the sentinel is still delivered');
   assert.ok(existsSync(path.join(restarted.dir, 'cancel.requested')));
@@ -691,11 +691,11 @@ test('a restarted office reports the recorded pid as informational, never owners
   // The fixture's recorded pid is this very test process — alive, but not spawned by the office.
   const f = fixture(t, { provider: 'claude', pid: process.pid });
   const { result, bound } = await submitted(f);
-  const fresh = new LocalCliExecAdapter(
-    () => f.sessions,
-    p => f.executables[p],
-    () => at(2),
-  );
+  const fresh = new LocalCliExecAdapter({
+    sessionsRoot: () => f.sessions,
+    executable: p => f.executables[p],
+    now: () => at(2),
+  });
   const observed = await fresh.observe(f.job(result.detail), bound);
   assert.equal(observed.state, 'UNKNOWN');
   assert.match(
@@ -709,11 +709,11 @@ test('a restarted office reports the recorded pid as informational, never owners
 test('a dead recorded pid reports as not running after a restart', async t => {
   const f = fixture(t, { provider: 'claude' });
   const { bound } = await submitted(f);
-  const fresh = new LocalCliExecAdapter(
-    () => f.sessions,
-    p => f.executables[p],
-    () => at(2),
-  );
+  const fresh = new LocalCliExecAdapter({
+    sessionsRoot: () => f.sessions,
+    executable: p => f.executables[p],
+    now: () => at(2),
+  });
   // A pid the test fabricates is overwhelmingly unlikely to name a live process; either honest
   // wording is accepted — the requirement is that no ownership is claimed.
   const observed = await fresh.observe(
@@ -765,22 +765,14 @@ test('consecutive claude launches are spaced so concurrent sessions do not race 
     return f.spawn(executable, args, options);
   };
   const gap = 150;
-  const adapter = new LocalCliExecAdapter(
-    () => f.sessions,
-    provider => f.executables[provider],
-    () => at(1),
-    undefined,
-    spawn,
-    f.environment,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    gap,
-  );
+  const adapter = new LocalCliExecAdapter({
+    sessionsRoot: () => f.sessions,
+    executable: provider => f.executables[provider],
+    now: () => at(1),
+    spawnChild: spawn,
+    environment: f.environment,
+    claudeSpawnGapMs: gap,
+  });
   t.after(() => adapter.disposeAll());
   const second = {
     ...f.binding,

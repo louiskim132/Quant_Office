@@ -1,25 +1,14 @@
 import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { removeTreeSync } from '../src/main/fsx';
-import { tmpdir } from 'node:os';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { OfficeStore } from '../src/core/store';
-import {
-  AssignmentController,
-  type ObserveResult,
-  type ProviderAdapter,
-  type SubmitContext,
-  type SubmitResult,
-} from '../src/main/controller';
+import { AssignmentController } from '../src/main/controller';
 import { PipelineService } from '../src/main/pipeline';
-import { OutputService } from '../src/main/outputs';
-import { prepareInputSnapshot, snapshotObjectPath } from '../src/main/locations';
+import { prepareInputSnapshot } from '../src/main/locations';
 import { HoldoutCustody } from '../src/main/holdout';
 import { TerminalHandoffAdapter } from '../src/main/handoff';
 import { stageContextHash, stageReportSchema, type StageContext } from '../src/shared/pipeline';
-import type { Agent, CapabilityEvidence, CapabilityOperation, InputSnapshot, ProviderJob } from '../src/shared/types';
 
 import { fixture, completeS1, key, at, sha256, declared, SECTIONS } from './fixtures/pipeline';
 import { promotable } from '../src/main/research-controller';
