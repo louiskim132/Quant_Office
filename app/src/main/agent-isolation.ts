@@ -27,7 +27,7 @@ import type { Provider } from '../shared/types.js';
  *
  * There is no Node API to spawn-as-another-user on Windows, so the boundary is built from files
  * and one credential hop: the office launches a long-lived host (`agent-host.cjs`, written fresh
- * into the ACL'd sessions root) via `powershell → Start-Process -Credential` — the password rides
+ * into the ACL'd sessions root) via `powershell → ProcessStartInfo` with the account credential — the password rides
  * the bootstrap's stdin, never argv — and the host then spawns each agent CLI itself, stdio
  * redirected to log files inside the same ACL'd channel. The office tails those files; every
  * request is a req-<id>.json the host polices (cwd must stay inside the sessions root).
@@ -304,6 +304,34 @@ export interface QroAgentSpawn {
  */
 const ALLOWED_ENV = /^(ANTHROPIC_API_KEY|OPENAI_API_KEY|CODEX_API_KEY|DEVIN_API_KEY|QRO_|NO_COLOR$|CI$)/;
 
+/**
+ * The only variables the credential bootstrap copies into the host's environment: system-wide
+ * values that are the same for every account. The bootstrap adds the machine Path and a TEMP
+ * inside the host tree; nothing user-specific from the office profile crosses.
+ */
+export const HOST_ENV_KEEP = [
+  'SystemRoot',
+  'windir',
+  'SystemDrive',
+  'ComSpec',
+  'PATHEXT',
+  'OS',
+  'NUMBER_OF_PROCESSORS',
+  'PROCESSOR_ARCHITECTURE',
+  'PROCESSOR_IDENTIFIER',
+  'PROCESSOR_LEVEL',
+  'PROCESSOR_REVISION',
+  'ProgramData',
+  'ProgramFiles',
+  'ProgramFiles(x86)',
+  'ProgramW6432',
+  'CommonProgramFiles',
+  'CommonProgramFiles(x86)',
+  'CommonProgramW6432',
+  'ALLUSERSPROFILE',
+  'PUBLIC',
+];
+
 function sanitizedEnv(env: NodeJS.ProcessEnv): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(env))
@@ -340,10 +368,17 @@ export function qroAgentSpawn(deps: QroAgentSpawnDeps): QroAgentSpawn {
   }
 
   /**
-   * The credential hop: a powershell that reads the password from its own stdin, builds the
-   * PSCredential, and Start-Process -Wait's the agent host as QRO-Agent. -UseNewEnvironment +
-   * -LoadUserProfile give the host the agent account's own environment and profile hive — that
-   * is what spawned children inherit outside the whitelisted office keys, never the office env.
+   * The credential hop: a powershell that reads the password from its own stdin and starts the
+   * agent host as QRO-Agent through ProcessStartInfo (CreateProcessWithLogonW, profile loaded),
+   * waiting on it. The host's environment is built explicitly from HOST_ENV_KEEP — that is what
+   * spawned children inherit outside the whitelisted office keys, never the office env.
+   * Found in the real-account acceptance on 2026-09-29, and why this is not Start-Process:
+   * - `-UseNewEnvironment` rebuilds the block from the registry only, which drops SystemRoot
+   *   (node.exe then aborts at startup on `ncrypto::CSPRNG`) and pulls in the office user's HKCU
+   *   variables; without it, the Start-Process credential logon failed with "Access is denied".
+   * - node realpaths its main script by lstat-ing every parent folder, and QRO-Agent may not
+   *   look inside the office profile that holds userData. `--preserve-symlinks(-main)` skip that
+   *   walk; the script itself is readable through the sessions-root grant.
    */
   function defaultLauncher(channelDir: string): HostProcess {
     const credential = deps.secrets.agentCredential();
@@ -356,12 +391,23 @@ export function qroAgentSpawn(deps: QroAgentSpawnDeps): QroAgentSpawn {
       // Build the SecureString with .NET directly. Some managed Windows PowerShell environments
       // can discover Microsoft.PowerShell.Security but fail to import it in this bootstrap.
       '$sec = New-Object System.Security.SecureString; foreach ($ch in $pw.ToCharArray()) { $sec.AppendChar($ch) }; $sec.MakeReadOnly()',
-      '$cred = New-Object System.Management.Automation.PSCredential($env:QRO_ISO_USER, $sec)',
       // '--no-maglev' must precede the script: V8 Maglev JIT __fastfail's (0xC0000409) on
       // CFG/CET-enforcing Windows builds (nodejs/node#62260, e.g. Server 2025 CI). The host is
       // the only long-lived process in the chain — the sole candidate to tier up to Maglev; the
       // provider grandchildren are short-lived and can't be flagged anyway.
-      `Start-Process -Credential $cred -FilePath ${quote(nodeExe)} -ArgumentList '--no-maglev',${quote(script)},${quote(channelDir)},'${process.pid}' -WindowStyle Hidden -LoadUserProfile -UseNewEnvironment -Wait`,
+      `$si = New-Object System.Diagnostics.ProcessStartInfo(${quote(nodeExe)}, ${quote(`--no-maglev --preserve-symlinks --preserve-symlinks-main "${script}" "${channelDir}" ${process.pid}`)})`,
+      "$si.UserName = $env:QRO_ISO_USER; $si.Domain = '.'; $si.Password = $sec; $si.LoadUserProfile = $true",
+      `$si.UseShellExecute = $false; $si.CreateNoWindow = $true; $si.WorkingDirectory = ${quote(hostDir)}`,
+      // The host's whole environment is built here: system-wide keys only, the machine Path, and
+      // a temp folder inside the ACL'd host tree. Nothing from the office profile crosses.
+      `$tmp = ${quote(path.join(hostDir, 'tmp'))}; [void][IO.Directory]::CreateDirectory($tmp)`,
+      '$si.EnvironmentVariables.Clear()',
+      `foreach ($k in @(${HOST_ENV_KEEP.map(quote).join(',')})) { $v = [Environment]::GetEnvironmentVariable($k); if ($v) { $si.EnvironmentVariables[$k] = $v } }`,
+      "$si.EnvironmentVariables['Path'] = [Environment]::GetEnvironmentVariable('Path', 'Machine')",
+      "$si.EnvironmentVariables['TEMP'] = $tmp; $si.EnvironmentVariables['TMP'] = $tmp",
+      // The host's stderr comes back through this bootstrap, so a start failure is reported.
+      '$si.RedirectStandardError = $true',
+      '$p = [System.Diagnostics.Process]::Start($si); $err = $p.StandardError.ReadToEnd(); $p.WaitForExit(); [Console]::Error.Write($err); exit $p.ExitCode',
     ].join('; ');
     const proc = spawn('powershell.exe', ['-NoProfile', '-Command', bootstrap], {
       // Start-Process inherits its caller's working directory. Keep that directory inside the
