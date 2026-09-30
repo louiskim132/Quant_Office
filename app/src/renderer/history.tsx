@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { History } from 'lucide-react';
 import type { AgentLog, AppState, LineageEvent } from '../shared/types';
 import { Empty } from './components';
+import { formatDateTime } from './format';
 import './history.css';
 
 type RecordView = 'all' | 'yours' | 'messages' | 'work' | 'between';
@@ -23,6 +24,7 @@ export function HistoryView({
   label: (value: string) => string;
   date: (value: string) => string;
 }) {
+  const [technical, setTechnical] = useState(false);
   const [subject, setSubject] = useState('');
   const [peer, setPeer] = useState('');
   const [view, setView] = useState<RecordView>('all');
@@ -112,6 +114,23 @@ export function HistoryView({
         Date.parse(b.time) - Date.parse(a.time) || b.sequence - a.sequence || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
     );
   const recorded = total + logs.length;
+  const groups = new Map<string, Row[]>();
+  for (const row of visible) {
+    const day = formatDateTime(row.time).split(',').slice(0, 2).join(',');
+    const scope = row.event?.experimentId ?? row.event?.projectId ?? row.log?.conversationId ?? 'office';
+    const key = `${day}|${scope}`;
+    groups.set(key, [...(groups.get(key) ?? []), row]);
+  }
+  const title = (row: Row) => row.log?.text ?? row.event?.reason ?? '';
+  const subjectTitle = (row: Row) => {
+    const event = row.event;
+    if (!event) return `${name(row.log!.from)} → ${name(row.log!.to)}`;
+    return (
+      state.experiments.find(e => e.id === event.experimentId)?.name ??
+      state.projects.find(p => p.id === event.projectId)?.name ??
+      'Office activity'
+    );
+  };
   return (
     <>
       <div className="section-toolbar">
@@ -119,6 +138,18 @@ export function HistoryView({
           {recorded} recorded record{recorded === 1 ? '' : 's'} · showing {visible.length}
         </span>
       </div>
+      <div className="button-row history-mode" role="group" aria-label="History display">
+        <button className="secondary" aria-pressed={!technical} onClick={() => setTechnical(false)}>
+          Activity
+        </button>
+        <button className="secondary" aria-pressed={technical} onClick={() => setTechnical(true)}>
+          Technical events
+        </button>
+      </div>
+      <p className="muted">
+        {entries.length} loaded events of {total}. Integrity hashes are available in Technical events; this view does
+        not perform a new chain verification.
+      </p>
       <div className="history-filters">
         <label className="field">
           Subject
@@ -184,6 +215,32 @@ export function HistoryView({
               : 'No loaded records match the current filters. Load older events or widen the filters.'
           }
         />
+      ) : !technical ? (
+        <div className="timeline history-activity">
+          {[...groups.entries()].map(([key, rows]) => (
+            <article key={key}>
+              <div className="card-heading">
+                <h3>{subjectTitle(rows[0])}</h3>
+                <time>{date(rows[0].time)}</time>
+              </div>
+              <p>{title(rows[0]).split('\n')[0]}</p>
+              <details>
+                <summary>
+                  {rows.length} loaded update{rows.length === 1 ? '' : 's'} · {key.split('|')[0]}
+                </summary>
+                {rows.map(row => (
+                  <div className="activity-record" key={row.id}>
+                    <time>{date(row.time)}</time>
+                    <p>{title(row)}</p>
+                    <small className="muted">
+                      {row.event ? name(row.event.actor) : `${name(row.log!.from)} → ${name(row.log!.to)}`}
+                    </small>
+                  </div>
+                ))}
+              </details>
+            </article>
+          ))}
+        </div>
       ) : (
         <div className="timeline">
           {visible.map(row =>

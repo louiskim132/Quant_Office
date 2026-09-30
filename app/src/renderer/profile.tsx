@@ -1,5 +1,6 @@
+import { OfficeChat } from './office-chat';
 import React, { useEffect, useState } from 'react';
-import type { Agent, AppState, Assignment, JobEvent, Message, ProviderJob, Request, WorkLog } from '../shared/types';
+import type { Agent, AppState, Assignment, JobEvent, ProviderJob, Request, WorkLog } from '../shared/types';
 import { agentDispatchReadiness } from '../shared/readiness';
 import { formatDateTime } from './format';
 
@@ -90,28 +91,8 @@ export function ProfileTabs({
   const [error, setError] = useState('');
   const assignments = (state.assignments ?? []).filter(item => item.agentId === agent.id);
   const jobs = (state.jobs ?? []).filter(job => assignments.some(item => item.id === job.assignmentId));
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [messageCursor, setMessageCursor] = useState<string | null>(null);
   const [selectedJobId, setSelectedJobId] = useState('');
   const selectedJob = jobs.find(j => j.id === selectedJobId) ?? jobs.at(-1);
-  useEffect(() => {
-    if (tab !== 'Conversation') return;
-    let canceled = false;
-    void window.office
-      .messagePage({ agentId: agent.id, limit: 50 })
-      .then(page => {
-        if (!canceled) {
-          setMessages(page.entries);
-          setMessageCursor(page.nextCursor);
-        }
-      })
-      .catch(e => {
-        if (!canceled) setError((e as Error).message);
-      });
-    return () => {
-      canceled = true;
-    };
-  }, [tab, agent.id, state]);
   const gate = agentDispatchReadiness(
     state,
     agent,
@@ -217,33 +198,8 @@ export function ProfileTabs({
         </div>
       )}
       {tab === 'Conversation' && (
-        <div className="tab-panel">
-          {!messages.length && <p>No scoped messages involve this profile.</p>}
-          {messages.map(message => (
-            <article className="assignment-row" key={message.id}>
-              <strong>{message.kind.replaceAll('_', ' ').toLowerCase()}</strong>
-              <p>{message.body}</p>
-              <p className="muted">
-                {message.fromAgentId === agent.id ? 'sent' : 'received'} ·{' '}
-                {message.deliveredAt ? `delivered ${formatDateTime(message.deliveredAt)}` : 'no delivery receipt yet'}
-              </p>
-            </article>
-          ))}
-          {messageCursor && (
-            <button
-              onClick={() =>
-                void window.office
-                  .messagePage({ agentId: agent.id, limit: 50, cursor: messageCursor })
-                  .then(page => {
-                    setMessages(current => [...current, ...page.entries]);
-                    setMessageCursor(page.nextCursor);
-                  })
-                  .catch(e => setError((e as Error).message))
-              }
-            >
-              More scoped messages
-            </button>
-          )}
+        <div className="tab-panel profile-conversation">
+          <OfficeChat key={agent.id} state={state} initialAgentId={agent.id} />
         </div>
       )}
       {tab === 'Logs' && (

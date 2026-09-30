@@ -4,6 +4,7 @@ import { latestJobFor } from '../core/jobs';
 import './pipeline.css';
 import './office.css';
 import { firstSentence, formatDateTime, shortenPaths } from './format';
+import { PipelineMap } from './pipeline-map';
 
 const TERMINAL = ['COMPLETED', 'FAILED', 'CANCEL_ACKNOWLEDGED'];
 const RUNNING = ['SUBMITTING', 'ACCEPTED', 'RUNNING', 'UNKNOWN', 'CANCEL_REQUESTED'];
@@ -342,93 +343,97 @@ export function PipelineCard({
       {(pipeline.phase === 'LAUNCHED' || pipeline.phase === 'AWAITING_DECISION') && (
         <p className="muted">{`Launched${pipeline.shape === 'QUICK' ? ' as a quick round' : ''}${hops.length ? ` — ${hops.length} minted hop${hops.length === 1 ? '' : 's'}` : ' — no minted hops on record yet'}`}</p>
       )}
+      {!!hops.length && <PipelineMap hops={hops} state={state} />}
       {!!hops.length && (
-        <table className="pipeline-hops">
-          <thead>
-            <tr>
-              <th>Hop</th>
-              <th>Agent</th>
-              <th>Latest job</th>
-              <th>Elapsed</th>
-              <th>Last reason</th>
-              <th aria-label="Actions" />
-            </tr>
-          </thead>
-          <tbody>
-            {hops.map(hop => {
-              const job = latestJobFor(state.jobs, hop.id);
-              const agent = state.agents.find(item => item.id === hop.agentId);
-              return (
-                <tr key={hop.id}>
-                  <td>{hop.pipelineKey}</td>
-                  <td>
-                    {agent?.name ?? 'Unassigned'} · {hop.requestedModel} ·{' '}
-                    {hop.appliedEffort === 'UNVERIFIED'
-                      ? 'effort unverified'
-                      : (hop.appliedEffort ?? hop.requestedEffort).toLowerCase()}
-                  </td>
-                  <td>
-                    {job
-                      ? `${job.state.toLowerCase().replaceAll('_', ' ')} · attempt ${job.attempt ?? 1}`
-                      : 'no job on record'}
-                  </td>
-                  <td>{elapsed(job)}</td>
-                  <td className="pipeline-reason">
-                    <Reason text={job ? (job.lastObservation ?? (job.detail || '—')) : '—'} />
-                  </td>
-                  <td className="pipeline-hop-actions">
-                    {job?.state !== 'COMPLETED' && (
-                      <button
-                        type="button"
-                        className="secondary"
-                        disabled={busy || !!hopBusy || !!observeDisabledReason(job)}
-                        title={observeDisabledReason(job)}
-                        onClick={() =>
-                          void hopAction('observe', () => window.office.observeJob({ assignmentId: hop.id }))
-                        }
-                      >
-                        Observe
-                      </button>
-                    )}
-                    {job?.state !== 'COMPLETED' && observeDisabledReason(job) && (
-                      <div className="muted pipeline-hop-note">{observeDisabledReason(job)}</div>
-                    )}
-                    {retryable(job) && (
-                      <button
-                        type="button"
-                        className="secondary"
-                        disabled={busy || !!hopBusy}
-                        onClick={() =>
-                          void hopAction('retry', () =>
-                            window.office.retryPipelineHop({
-                              requestId: request.id,
-                              pipelineKey: hop.pipelineKey!,
-                              expectedRevision: request.revision,
-                            }),
-                          )
-                        }
-                      >
-                        {hopBusy === 'retry' ? 'Retrying…' : 'Retry'}
-                      </button>
-                    )}
-                    {job && !TERMINAL.includes(job.state) && (
-                      <button
-                        type="button"
-                        className="cancel-request"
-                        disabled={busy || !!hopBusy}
-                        onClick={() =>
-                          void hopAction('cancel', () => window.office.cancelJob({ assignmentId: hop.id }))
-                        }
-                      >
-                        {job.state === 'CANCEL_REQUESTED' ? 'Re-check cancellation' : 'Cancel hop'}
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        <details className="pipeline-table">
+          <summary>Step actions & recorded details</summary>
+          <table className="pipeline-hops">
+            <thead>
+              <tr>
+                <th>Hop</th>
+                <th>Agent</th>
+                <th>Latest job</th>
+                <th>Elapsed</th>
+                <th>Last reason</th>
+                <th aria-label="Actions" />
+              </tr>
+            </thead>
+            <tbody>
+              {hops.map(hop => {
+                const job = latestJobFor(state.jobs, hop.id);
+                const agent = state.agents.find(item => item.id === hop.agentId);
+                return (
+                  <tr key={hop.id}>
+                    <td>{hop.pipelineKey}</td>
+                    <td>
+                      {agent?.name ?? 'Unassigned'} · {hop.requestedModel} ·{' '}
+                      {hop.appliedEffort === 'UNVERIFIED'
+                        ? 'effort unverified'
+                        : (hop.appliedEffort ?? hop.requestedEffort).toLowerCase()}
+                    </td>
+                    <td>
+                      {job
+                        ? `${job.state.toLowerCase().replaceAll('_', ' ')} · attempt ${job.attempt ?? 1}`
+                        : 'no job on record'}
+                    </td>
+                    <td>{elapsed(job)}</td>
+                    <td className="pipeline-reason">
+                      <Reason text={job ? (job.lastObservation ?? (job.detail || '—')) : '—'} />
+                    </td>
+                    <td className="pipeline-hop-actions">
+                      {job?.state !== 'COMPLETED' && (
+                        <button
+                          type="button"
+                          className="secondary"
+                          disabled={busy || !!hopBusy || !!observeDisabledReason(job)}
+                          title={observeDisabledReason(job)}
+                          onClick={() =>
+                            void hopAction('observe', () => window.office.observeJob({ assignmentId: hop.id }))
+                          }
+                        >
+                          Observe
+                        </button>
+                      )}
+                      {job?.state !== 'COMPLETED' && observeDisabledReason(job) && (
+                        <div className="muted pipeline-hop-note">{observeDisabledReason(job)}</div>
+                      )}
+                      {retryable(job) && (
+                        <button
+                          type="button"
+                          className="secondary"
+                          disabled={busy || !!hopBusy}
+                          onClick={() =>
+                            void hopAction('retry', () =>
+                              window.office.retryPipelineHop({
+                                requestId: request.id,
+                                pipelineKey: hop.pipelineKey!,
+                                expectedRevision: request.revision,
+                              }),
+                            )
+                          }
+                        >
+                          {hopBusy === 'retry' ? 'Retrying…' : 'Retry'}
+                        </button>
+                      )}
+                      {job && !TERMINAL.includes(job.state) && (
+                        <button
+                          type="button"
+                          className="cancel-request"
+                          disabled={busy || !!hopBusy}
+                          onClick={() =>
+                            void hopAction('cancel', () => window.office.cancelJob({ assignmentId: hop.id }))
+                          }
+                        >
+                          {job.state === 'CANCEL_REQUESTED' ? 'Re-check cancellation' : 'Cancel hop'}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </details>
       )}
       {pipeline.phase === 'AWAITING_DECISION' && (
         <>

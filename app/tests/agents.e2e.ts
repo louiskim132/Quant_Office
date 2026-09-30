@@ -17,7 +17,9 @@ try {
   const page = await app.firstWindow();
   await page.getByRole('heading', { name: 'The office', exact: true }).waitFor();
   for (let i = 0; i < 2; i++) {
-    await page.getByRole('button', { name: 'Add Agent', exact: true }).click();
+    await page.getByRole('button', { name: 'Add agent', exact: true }).click();
+    await page.getByLabel('Provider', { exact: true }).selectOption('openai');
+    await page.getByLabel('Execution environment', { exact: true }).selectOption('HOSTED_SETUP_REQUIRED');
     await page.getByLabel('Agent name', { exact: true }).fill('Test Director ' + (i + 1));
     await page.getByLabel('Section / team', { exact: true }).fill(i === 0 ? 'Signals' : 'Risk');
     await page.getByLabel('Role', { exact: true }).selectOption('DIRECTOR');
@@ -37,6 +39,7 @@ try {
   assert.equal(await page.locator('.office-person').count(), 2);
   await page.screenshot({ path: path.join(root, 'test-output', 'agents-office.png') });
   await page.locator('.office-person').first().click();
+  await page.getByRole('button', { name: 'Full profile & logs', exact: true }).click();
   const detail = page.getByRole('dialog', { name: 'Test Director 1', exact: true });
   await detail.waitFor();
   await detail.getByRole('button', { name: 'Refresh effort options', exact: true }).click();
@@ -76,7 +79,10 @@ try {
   await page.getByLabel('Subject', { exact: true }).selectOption(state.agents[1].id);
   await page.getByLabel('Other participant', { exact: true }).selectOption(state.agents[0].id);
   await page.getByLabel('Record view', { exact: true }).selectOption('between');
-  await page.getByText('Fixture review request <script>window.injected=true</script>', { exact: true }).waitFor();
+  await page
+    .getByText('Fixture review request <script>window.injected=true</script>', { exact: true })
+    .first()
+    .waitFor();
   await page.getByRole('button', { name: 'Usage', exact: true }).click();
   const transcripts = path.join(data, 'transcripts');
   await mkdir(transcripts);

@@ -127,7 +127,7 @@ try {
   await page.getByText(/Project planning archive exported/).waitFor();
   assert.ok((await stat(destination)).size > 100);
   await page.getByRole('button', { name: 'Usage', exact: true }).click();
-  await page.getByText('5 hour: Unavailable', { exact: true }).first().waitFor();
+  await page.getByText('Not checked yet', { exact: true }).first().waitFor();
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByLabel('Theme', { exact: true }).selectOption('light');
   await page.waitForFunction(() => document.documentElement.dataset.theme === 'light');
@@ -272,6 +272,9 @@ try {
       'agentIsolationRemove',
       'importFiles',
       'onChanged',
+      'livePresence',
+      'onPresence',
+      'setAttentionCount',
       'previewArtifact',
       'describeObject',
       'readObject',
@@ -332,8 +335,8 @@ try {
   await requestDialog.getByRole('button', { name: 'Close dialog' }).click();
   await page.getByRole('button', { name: 'Office', exact: true }).click();
   // The queue lives on Office after relaunch; the canceled request still opens its research details.
+  await page.locator('.queue-row').first().click();
   await page.getByRole('button', { name: 'Cancel request', exact: true }).click();
-  await page.getByLabel('Show requests').selectOption('canceled');
   await page.getByRole('button', { name: 'View research details', exact: true }).click();
   await page.locator('.contract-field textarea').first().waitFor();
   assert.equal(await page.locator('.contract-field textarea:disabled').count(), 8);
@@ -390,9 +393,10 @@ try {
     fixtureStore.close();
   }
   page = await launch();
-  await page.getByText('Idle · no open provider work', { exact: true }).waitFor();
+  await page.getByText('Idle · no open provider work', { exact: true }).first().waitFor();
   // Profile dialog: the model/effort editor sits under the profile fields and above the connection section.
-  await page.getByRole('button', { name: 'Edit Idle fixture profile' }).click();
+  await page.locator('.office-person').first().click();
+  await page.getByRole('button', { name: 'Full profile & logs', exact: true }).click();
   const agentDialog = page.getByRole('dialog', { name: 'Idle fixture' });
   await agentDialog.locator('.effort-control').waitFor();
   const ordered = await agentDialog.evaluate(el => {

@@ -147,7 +147,12 @@ export function Drawer({
     const previous = document.activeElement as HTMLElement | null;
     ref.current?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !document.querySelector('dialog[open]')) onClose();
+      if (
+        e.key === 'Escape' &&
+        !document.querySelector('dialog[open]') &&
+        [...document.querySelectorAll('.drawer')].at(-1) === ref.current
+      )
+        onClose();
     };
     window.addEventListener('keydown', onKey);
     return () => {

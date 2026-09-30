@@ -1375,7 +1375,8 @@ function register() {
         `${count} need${count === 1 ? 's' : ''} you`,
       );
     else win.setOverlayIcon(null, '');
-    if (count > lastAttention && !win.isFocused()) win.flashFrame(true);
+    if (count === 0) win.flashFrame(false);
+    else if (count > lastAttention && !win.isFocused()) win.flashFrame(true);
     lastAttention = count;
   });
   // Live presence of the children this office spawned: in memory, read-only, never an event-chain record.

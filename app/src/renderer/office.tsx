@@ -3,7 +3,9 @@ import type { Agent, AppState, Role } from '../shared/types';
 import { agentBinding, providerReadiness } from '../shared/readiness';
 import './office.css';
 import { Users } from 'lucide-react';
-import { Empty } from './components';
+import { Empty, Avatar, StatusPill } from './components';
+import { useOfficeActivity } from './use-activity';
+import { seatView } from './seat-view';
 import { formatDateTime } from './format';
 
 export function AgentRoster({
@@ -21,6 +23,7 @@ export function AgentRoster({
   onRemove: (id: string, removed: boolean) => void;
   onDelete: (id: string) => void;
 }) {
+  const { activity, now } = useOfficeActivity(state);
   const [lifecycle, setLifecycle] = useState('active'),
     [search, setSearch] = useState(''),
     [team, setTeam] = useState(''),
@@ -113,22 +116,55 @@ export function AgentRoster({
           </div>
           {agents.slice(currentPage * 24, (currentPage + 1) * 24).map(a => (
             <article className="project-card agent-row" key={a.id}>
-              <span className="agent-cell agent-name">{a.name}</span>
+              <span className="agent-cell agent-name">
+                <Avatar
+                  id={a.id}
+                  name={a.name}
+                  status={
+                    seatView(
+                      a,
+                      activity.find(x => x.agentId === a.id),
+                      state.requests,
+                      now,
+                    ).status
+                  }
+                />
+                <strong>{a.name}</strong>
+              </span>
               <span className="agent-cell">
                 {a.team} · {a.role.replaceAll('_', ' ')}
               </span>
               <span className="agent-cell">
                 {a.provider} · {a.model} · {a.effort ?? 'default'} effort
               </span>
-              <span className="agent-cell">{a.account}</span>
               <span className="agent-cell">
-                {a.deletedAt
-                  ? 'Removed · history retained'
-                  : a.removedAt
-                    ? 'Archived · history retained'
-                    : a.execution === 'LOCAL'
-                      ? 'Local (this machine)'
-                      : 'Hosted setup required'}
+                <details>
+                  <summary>{a.execution === 'LOCAL' ? 'Local CLI' : 'Hosted setup'}</summary>
+                  <small>{a.account}</small>
+                </details>
+              </span>
+              <span className="agent-cell">
+                <StatusPill
+                  status={
+                    seatView(
+                      a,
+                      activity.find(x => x.agentId === a.id),
+                      state.requests,
+                      now,
+                    ).status
+                  }
+                  label={a.deletedAt ? 'Removed' : a.removedAt ? 'Archived' : undefined}
+                />
+                <small>
+                  {
+                    seatView(
+                      a,
+                      activity.find(x => x.agentId === a.id),
+                      state.requests,
+                      now,
+                    ).requestName
+                  }
+                </small>
               </span>
               <div className="button-row agent-actions">
                 <button className="secondary" onClick={() => onAgent(a.id)}>
@@ -158,7 +194,7 @@ export function AgentRoster({
                     </button>
                   </>
                 ) : (
-                  <button className="cancel-request" disabled={busy} onClick={() => onRemove(a.id, true)}>
+                  <button className="text-button" disabled={busy} onClick={() => onRemove(a.id, true)}>
                     Archive agent
                   </button>
                 )}

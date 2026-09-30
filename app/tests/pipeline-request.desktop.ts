@@ -117,8 +117,12 @@ try {
   assert.equal(request.pipeline?.phase, 'BRIEFING');
   assert.equal(request.pipeline?.briefAssignmentId, null);
   assert.equal(request.leadAgentId, state.agents.find(agent => agent.name === 'Director Ada')!.id);
-  const card = page.locator('.task-card').first();
-  await card.getByText(/planning pipeline/).waitFor();
+  await page.locator('.queue-row').first().click();
+  const card = page
+    .getByRole('complementary', { name: `Request: ${request.name}` })
+    .locator('.task-card')
+    .first();
+  await card.getByText(/Director brief/).waitFor();
   assert.match(await card.innerText(), /Director brief/, 'the briefing surface shows while the request is briefing');
   const launch = card.getByRole('button', { name: 'Launch pipeline', exact: true });
   assert.equal(await launch.isDisabled(), true, 'launch stays gated until the director brief completes');

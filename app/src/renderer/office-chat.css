@@ -412,3 +412,23 @@
     grid-template-columns: 1fr;
   }
 }
+
+.office-chat-system {
+  text-align: left;
+  margin: 8px 12px;
+  max-width: none;
+  padding: 8px 12px;
+  box-shadow: none;
+  border-left: 2px solid var(--border);
+  background: transparent;
+}
+.office-chat-working {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 12px;
+  color: var(--muted);
+}
+.office-chat-filters {
+  flex-wrap: wrap;
+}

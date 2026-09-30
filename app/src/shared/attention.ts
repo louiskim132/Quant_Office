@@ -48,7 +48,8 @@ export function attentionItems(
       kind: 'agent',
       status: 'stalled',
       title: `${agent.name} has gone quiet`,
-      detail: 'Its process is still running but has written nothing for 10 minutes. Some CLIs stay silent until they finish.',
+      detail:
+        'Its process is still running but has written nothing for 10 minutes. Some CLIs stay silent until they finish.',
       targetId: agent.id,
     });
   }

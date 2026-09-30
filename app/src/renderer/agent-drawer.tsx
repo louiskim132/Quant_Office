@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X } from 'lucide-react';
 import type { OfficeActivity } from '../shared/activity';
 import type { Agent, AppState } from '../shared/types';
@@ -31,6 +31,26 @@ export function AgentDrawer({
   onProfile: (id: string) => void;
   onOpenRequest: (requestId: string) => void;
 }) {
+  const ref = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const previous = document.activeElement as HTMLElement | null;
+    ref.current?.focus();
+    const key = (e: KeyboardEvent) => {
+      if (
+        e.key === 'Escape' &&
+        !document.querySelector('dialog[open]') &&
+        [...document.querySelectorAll('.drawer')].at(-1) === ref.current
+      ) {
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', key);
+    return () => {
+      window.removeEventListener('keydown', key);
+      previous?.focus();
+    };
+  }, []);
   const view = seatView(agent, activity, state.requests, now);
   const [busy, setBusy] = useState(''),
     [error, setError] = useState(''),
@@ -55,7 +75,7 @@ export function AgentDrawer({
   }
   const requestName = (id: string) => (state.requests ?? []).find(r => r.id === id)?.name ?? 'Request';
   return (
-    <aside className="drawer" role="complementary" aria-label={`${agent.name} details`}>
+    <aside ref={ref} tabIndex={-1} className="drawer" role="complementary" aria-label={`${agent.name} details`}>
       <div className="drawer-head">
         <Avatar id={agent.id} name={agent.name} size={36} status={view.status} />
         <div style={{ minWidth: 0, flex: 1 }}>
