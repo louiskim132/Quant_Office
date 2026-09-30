@@ -50,7 +50,7 @@ function upsertLocationScope(
   return true;
 }
 import { resolve, isAbsolute } from 'node:path';
-import { DatabaseSync, backup as sqliteBackup, type SQLOutputValue } from 'node:sqlite';
+import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { z } from 'zod';
 import { independenceClaimBlocker } from '../shared/cooperation.js';
 import { MEMORY_SEATS } from '../shared/local-session.js';
@@ -142,6 +142,8 @@ import {
 
 export { canonical, canonicalHash, sha256 } from './canonical.js';
 const ZERO_HASH = '0'.repeat(64);
+/** Events the background verification reads before it yields to the event loop. */
+const BACKGROUND_VERIFY_PAGE = 25;
 const cents = z.number().int().min(0).max(MAX_BUDGET_CENTS);
 const id = z.string().uuid();
 const timestamp = z.string().datetime();
@@ -2052,32 +2054,29 @@ export class OfficeStore {
     if (this.closed) return;
     this.checkStorageIntegrity();
     const tip = Number((this.db.prepare('SELECT MAX(sequence) AS s FROM events').get() as { s: number | null }).s ?? 0);
-    const cursor = this.db
-      .prepare('SELECT sequence,id,record FROM events WHERE sequence <= ? ORDER BY sequence')
-      .iterate(tip);
+    // One short statement per page, never a cursor held across the yields: SQLite refuses VACUUM
+    // (backup) while any statement is mid-step on the connection. Events are append-only, so paging
+    // by sequence up to the captured tip reads exactly what a cursor would have.
+    const page = this.db.prepare(
+      'SELECT sequence,id,record FROM events WHERE sequence > ? AND sequence <= ? ORDER BY sequence LIMIT ?',
+    );
     let previous = ZERO_HASH;
     let expectedSequence = 1;
     let rebuilt = blank();
     const receiptIds = new Set<string>();
-    let scanned = 0;
-    try {
-      // Manual iteration: the loop must never call next() on a statement that close() finalized.
-      while (!this.closed) {
-        const next = cursor.next();
-        if (next.done) break;
-        const event = this.parseEventRow(next.value);
+    // The loop never reads through a statement that close() finalized: close() can only run during the
+    // yield, and the loop condition re-checks `closed` right after it.
+    while (!this.closed) {
+      const rows = page.all(expectedSequence - 1, tip, BACKGROUND_VERIFY_PAGE);
+      for (const row of rows) {
+        const event = this.parseEventRow(row);
         this.checkEventChain(event, expectedSequence, previous, receiptIds);
         rebuilt = applyChanges(rebuilt, event.payload.changes);
         previous = event.hash;
         expectedSequence = event.sequence + 1;
-        if (++scanned % 25 === 0) await new Promise(resolve => setImmediate(resolve));
       }
-    } finally {
-      try {
-        cursor.return?.();
-      } catch {
-        /* the statement is already finalized once the store is closed */
-      }
+      if (rows.length < BACKGROUND_VERIFY_PAGE) break;
+      await new Promise(resolve => setImmediate(resolve));
     }
     if (this.closed) return;
     // The scan verified events through `tip`, but the aggregate reads below see live tables. If a
@@ -8502,8 +8501,13 @@ export class OfficeStore {
       target = normalizedPath(destination);
     if ([source, `${source}-wal`, `${source}-shm`].includes(target))
       throw new Error('Backup destination cannot overwrite the active workspace');
+    if (existsSync(destination)) throw new Error('Backup destination already exists');
     this.verifyIntegrity();
-    await sqliteBackup(this.db, destination);
+    // VACUUM INTO copies on this thread, so no write can interleave with the copy. node:sqlite's
+    // async backup() copied on a worker thread while this connection kept writing. SQLite refuses
+    // VACUUM while a statement is mid-step, so nothing may hold a cursor across an await (see
+    // verifyInBackground).
+    this.db.prepare('VACUUM INTO ?').run(destination);
   }
   close(): void {
     if (!this.closed) {
