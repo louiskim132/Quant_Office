@@ -1327,6 +1327,9 @@ export interface OfficeAPI {
   retryPipelineHop(input: { requestId: string; pipelineKey: string; expectedRevision: number }): Promise<AppState>;
   searchMemory(input: { projectId: string; text: string; limit?: number }): Promise<{ findings: MemoryFinding[] }>;
   memoryGraph(projectId: string): Promise<MemoryGraph>;
+  /** The office's own view of the agent processes it spawned; in memory only, empty when none run. */
+  livePresence(): Promise<import('./activity').LivePresence[]>;
+  onPresence(callback: (presence: import('./activity').LivePresence[]) => void): () => void;
   onChanged(callback: () => void): () => void;
 }
 /** Reported, never acted on by the renderer: promotion is decided in main, from gate receipts. */

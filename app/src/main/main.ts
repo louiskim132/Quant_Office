@@ -1363,6 +1363,11 @@ function register() {
     return { findings: store.searchMemoryFindings(input.projectId, input.text, input.limit) };
   });
   handle('office:memory-graph', value => store.memoryGraph(id.parse(value)));
+  // Live presence of the children this office spawned: in memory, read-only, never an event-chain record.
+  handle('office:presence', value => {
+    noInput(value);
+    return exec?.presence() ?? [];
+  });
   handle('office:preview', value => artifacts.preview(id.parse(value)));
   handle('office:import', async value => {
     const input = importSchema.parse(value);
@@ -1614,6 +1619,16 @@ function buildController(): AssignmentController {
     // office profile's subscription sign-ins do not exist in the agent account's profile.
     agentHost,
   );
+  // Children start, speak and end far faster than the window needs to hear about it: one push per second.
+  let presenceTimer: ReturnType<typeof setTimeout> | undefined;
+  exec.onPresence = () => {
+    if (presenceTimer) return;
+    presenceTimer = setTimeout(() => {
+      presenceTimer = undefined;
+      win?.webContents.send('office:presence', exec?.presence() ?? []);
+    }, 1000);
+    presenceTimer.unref?.();
+  };
   const execRoute = new LocalSessionRouter(
     jobId => store.localSessionForJob(jobId),
     { FLAT_PACKET: exec, PROJECT_WORKTREE: exec },
