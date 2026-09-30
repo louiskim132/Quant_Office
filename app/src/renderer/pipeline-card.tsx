@@ -3,7 +3,7 @@ import type { AppState, Command, PipelineShape, ProviderJob, Request } from '../
 import { latestJobFor } from '../core/jobs';
 import './pipeline.css';
 import './office.css';
-import { formatDateTime } from './format';
+import { firstSentence, formatDateTime, shortenPaths } from './format';
 
 const TERMINAL = ['COMPLETED', 'FAILED', 'CANCEL_ACKNOWLEDGED'];
 const RUNNING = ['SUBMITTING', 'ACCEPTED', 'RUNNING', 'UNKNOWN', 'CANCEL_REQUESTED'];
@@ -67,6 +67,19 @@ function pickPreview(job: ProviderJob | undefined, preferred: string[]) {
     stored.find(output => /\.(txt|json|log|csv|tsv|tex)$/i.test(output.path)) ??
     stored[0];
   return output && { jobId: job.id, path: output.path, sha256: output.sha256, bytes: output.bytes };
+}
+
+/** A hop's last reason: the first sentence, with the rest one click away and file paths shortened. */
+function Reason({ text }: { text: string }) {
+  const clean = shortenPaths(text);
+  const { head, cut } = firstSentence(clean, 160);
+  if (!cut) return <>{clean}</>;
+  return (
+    <details className="reason-more">
+      <summary>{head}</summary>
+      <p>{clean}</p>
+    </details>
+  );
 }
 
 export function PipelineCard({
@@ -229,7 +242,12 @@ export function PipelineCard({
             </p>
           );
         })()}
-      {pipeline.phase === 'BRIEFING' && (
+      {pipeline.phase === 'BRIEFING' && request.status === 'CANCELED' && (
+        <p className="muted">
+          This request was canceled before its round launched. The brief and notes are kept for the record.
+        </p>
+      )}
+      {pipeline.phase === 'BRIEFING' && request.status !== 'CANCELED' && (
         <>
           <p className="muted">
             Director brief
@@ -355,20 +373,24 @@ export function PipelineCard({
                       : 'no job on record'}
                   </td>
                   <td>{elapsed(job)}</td>
-                  <td className="pipeline-reason">{job ? (job.lastObservation ?? (job.detail || '—')) : '—'}</td>
+                  <td className="pipeline-reason">
+                    <Reason text={job ? (job.lastObservation ?? (job.detail || '—')) : '—'} />
+                  </td>
                   <td className="pipeline-hop-actions">
-                    <button
-                      type="button"
-                      className="secondary"
-                      disabled={busy || !!hopBusy || !!observeDisabledReason(job)}
-                      title={observeDisabledReason(job)}
-                      onClick={() =>
-                        void hopAction('observe', () => window.office.observeJob({ assignmentId: hop.id }))
-                      }
-                    >
-                      Observe
-                    </button>
-                    {observeDisabledReason(job) && (
+                    {job?.state !== 'COMPLETED' && (
+                      <button
+                        type="button"
+                        className="secondary"
+                        disabled={busy || !!hopBusy || !!observeDisabledReason(job)}
+                        title={observeDisabledReason(job)}
+                        onClick={() =>
+                          void hopAction('observe', () => window.office.observeJob({ assignmentId: hop.id }))
+                        }
+                      >
+                        Observe
+                      </button>
+                    )}
+                    {job?.state !== 'COMPLETED' && observeDisabledReason(job) && (
                       <div className="muted pipeline-hop-note">{observeDisabledReason(job)}</div>
                     )}
                     {retryable(job) && (
@@ -512,7 +534,7 @@ export function PipelineCard({
           {hopError}
         </p>
       )}
-      {request.status !== 'CANCELED' && !archived && (
+      {request.status !== 'CANCELED' && !archived && pipeline.phase !== 'DECIDED' && (
         <div className="pipeline-card-actions">
           <button
             type="button"

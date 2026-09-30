@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import type { AppState, Command, Experiment, Project, Request, ResearchContract } from '../shared/types';
 import { requestQueue } from '../shared/queue';
+import { summarizeRequest } from '../shared/request-summary';
 import { ResearchPipeline } from './pipeline';
 import { ProjectLocationPanel } from './projects';
 import { Empty, label } from './components';
@@ -111,7 +112,7 @@ export function ResearchView({
   onBack: () => void;
   onEditProject: () => void;
   onNewRequest: () => void;
-  onOpenQueue: () => void;
+  onOpenQueue: (requestId?: string) => void;
 }) {
   const savedLocation = state.locations?.find(l => l.projectId === projectId);
   const location = savedLocation?.localFolder ?? project.localFolder ?? '';
@@ -185,17 +186,12 @@ export function ResearchView({
           command={command}
         />
       ) : (
-        <Empty
-          icon={BookOpen}
-          title={experiments.length ? 'Choose an experiment' : 'Define your first experiment'}
-          description="Open research details from the work queue, or create a new request."
-          action={
-            <button className="primary" disabled={project?.archived} onClick={onNewRequest}>
-              <Plus size={15} />
-              New request
-            </button>
-          }
-        />
+        <p className="research-hint muted">
+          <BookOpen size={14} />
+          {experiments.length
+            ? 'Choose an experiment above to see its research contract.'
+            : 'Research details appear here once a request creates an experiment.'}
+        </p>
       )}
       <ResearchPipeline key={projectId} state={state} projectId={projectId} />
     </>
@@ -210,7 +206,7 @@ function ProjectRequests({
 }: {
   state: AppState;
   projectId: string;
-  onOpenQueue: () => void;
+  onOpenQueue: (requestId?: string) => void;
 }) {
   const rows = requestQueue(state)
     .filter(entry => entry.root.projectId === projectId)
@@ -253,7 +249,7 @@ function ProjectRequests({
                 <span className="request-row-left">
                   <span className="request-row-name">{name}</span>
                   <span className={`status-badge${canceled ? ' canceled' : ''}`}>
-                    {canceled ? 'Canceled' : row.status === 'ACCEPTED' ? 'Completed' : row.status.toLowerCase()}
+                    {summarizeRequest(state, row).label}
                   </span>
                   <span className="request-row-time muted">{date(row.root.createdAt)}</span>
                 </span>
@@ -276,8 +272,8 @@ function ProjectRequests({
                     : 'No provider job submitted'}
                 </p>
                 <div className="button-row">
-                  <button className="secondary" onClick={onOpenQueue}>
-                    Open in work queue
+                  <button className="secondary" onClick={() => onOpenQueue(row.id)}>
+                    Open request
                   </button>
                 </div>
               </div>

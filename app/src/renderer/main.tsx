@@ -32,9 +32,13 @@ import type {
   WorkType,
   WorkMode,
 } from '../shared/types';
+import './tokens.css';
 import './styles.css';
 import { requestQueue } from '../shared/queue';
-import { OfficeScene, AgentRoster, ProfileEditor, ConnectionBinding } from './office';
+import { AgentRoster, ProfileEditor, ConnectionBinding } from './office';
+import { OfficeScene } from './office-scene';
+import { useOfficeActivity } from './use-activity';
+import { AgentDrawer } from './agent-drawer';
 import { WorkQueue } from './queue';
 import { AgentSetup, AgentIsolation, ProviderConnections, SubscriptionUsage } from './agents';
 import { ProjectsView } from './projects';
@@ -182,6 +186,10 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState<'project' | 'edit-project' | 'experiment' | null>(null);
   const [agentDetailId, setAgentDetailId] = useState<string | null>(null);
+  /** The agent whose side drawer is open — a quick look, distinct from the full profile dialog. */
+  const [drawerAgentId, setDrawerAgentId] = useState<string | null>(null);
+  /** The request whose detail panel is open on the Office page. */
+  const [openRequestId, setOpenRequestId] = useState<string | null>(null);
   const [localFolder, setLocalFolder] = useState<string | null>(null);
   const [requestMode, setRequestMode] = useState<WorkMode>('SINGLE');
   const [requestWorkType, setRequestWorkType] = useState<WorkType>('PLANNING');
@@ -190,6 +198,7 @@ function App() {
   const [preview, setPreview] = useState<{ name: string; text: string; truncated: boolean; binary: boolean } | null>(
     null,
   );
+  const { activity, now } = useOfficeActivity(state);
   const project = state?.projects.find(p => p.id === projectId);
   const experiments = state?.experiments.filter(e => e.projectId === projectId) || [];
   const experiment = experiments.find(e => e.id === experimentId);
@@ -507,8 +516,8 @@ function App() {
               <div className="heading-actions">
                 {page === 'Projects' ? (
                   <>
-                    {state.projects.some(p => !p.archived && !p.removedAt) && (
-                      <button className="primary" disabled={project?.archived} onClick={() => setModal('experiment')}>
+                    {!project && state.projects.some(p => !p.archived && !p.removedAt) && (
+                      <button className="primary" onClick={() => setModal('experiment')}>
                         <Plus size={16} />
                         New request
                       </button>
@@ -550,7 +559,13 @@ function App() {
           {page === 'Office' && (
             <>
               <div className="office-live-layout">
-                <OfficeScene agents={state.agents} state={state} onAgent={setAgentDetailId} />
+                <OfficeScene
+                  agents={state.agents}
+                  activity={activity}
+                  now={now}
+                  requests={state.requests}
+                  onAgent={setDrawerAgentId}
+                />
                 <OfficeChat state={state} />
               </div>
               <WorkQueue
@@ -569,6 +584,8 @@ function App() {
                 onCancel={id =>
                   void command({ type: 'task.cancel', taskId: id }, 'Request and linked research canceled.')
                 }
+                openRequestId={openRequestId}
+                onOpenRequest={setOpenRequestId}
               />
             </>
           )}
@@ -598,7 +615,10 @@ function App() {
                 onEditProject={() => setModal('edit-project')}
                 onNewRequest={() => setModal('experiment')}
                 onState={acceptState}
-                onOpenQueue={() => setPage('Office')}
+                onOpenQueue={requestId => {
+                  setPage('Office');
+                  if (requestId) setOpenRequestId(requestId);
+                }}
               />
             ) : (
               <ProjectsView
@@ -801,6 +821,24 @@ function App() {
           </span>
         </footer>
       </div>
+      {drawerAgentId && state.agents.find(a => a.id === drawerAgentId) && (
+        <AgentDrawer
+          key={drawerAgentId}
+          agent={state.agents.find(a => a.id === drawerAgentId)!}
+          activity={activity.find(a => a.agentId === drawerAgentId)}
+          state={state}
+          now={now}
+          onClose={() => setDrawerAgentId(null)}
+          onState={acceptState}
+          onProfile={id => setAgentDetailId(id)}
+          onOpenRequest={requestId => {
+            if (!state.requests?.some(item => item.id === requestId)) return;
+            setPage('Office');
+            setOpenRequestId(requestId);
+            setDrawerAgentId(null);
+          }}
+        />
+      )}
       {agentDetailId && state.agents.find(a => a.id === agentDetailId) && (
         <Dialog
           wide

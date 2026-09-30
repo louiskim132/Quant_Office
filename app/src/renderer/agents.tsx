@@ -17,6 +17,7 @@ import { LocalConsumption } from './activity';
 import { TRANSPORT_PROBE_CONTAINMENT } from '../shared/transport';
 import './agents.css';
 import { formatDateTime } from './format';
+import { Checkbox } from './components';
 const roleNames: Record<Role, string> = {
   DIRECTOR: 'Director',
   PM_A: 'PM · Implementation',
@@ -251,14 +252,13 @@ export function AgentSetup({ onAdded }: { onAdded: (state: AppState, execution?:
             </label>
           )}
           {spawnsLocally && (
-            <label className="field consent">
-              <span>
-                <input type="checkbox" checked={riskAccepted} onChange={e => setRiskAccepted(e.target.checked)} /> I
-                understand that this agent runs unattended on this computer with my Windows account's permissions. It
+            <div className="field consent">
+              <Checkbox checked={riskAccepted} onChange={setRiskAccepted}>
+                I understand that this agent runs unattended on this computer with my Windows account's permissions. It
                 can read, change and delete files my account can reach, and run programs. Files it reads are not a
                 security boundary.
-              </span>
-            </label>
+              </Checkbox>
+            </div>
           )}
           <label className="field">
             Model
