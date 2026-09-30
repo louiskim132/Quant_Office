@@ -82,3 +82,39 @@ test('canceled and not-yet-started requests are their own buckets', () => {
   assert.equal(draft.bucket, 'queued');
   assert.equal(draft.label, 'Draft');
 });
+
+test('a local hop stays UNKNOWN while it runs: in progress while watched, needs the user only when nothing is', () => {
+  const state = {
+    assignments: [hop('h1', 'plan-brief'), hop('h2', 'draft-a')],
+    jobs: [job('h1', 'COMPLETED'), job('h2', 'UNKNOWN')],
+    localSessions: [],
+  };
+  const launched = entry(request({ pipeline: pipeline('LAUNCHED') }));
+  // Before presence is known, and while the office watches the process, the hop is running — never failed.
+  for (const watched of [undefined, new Set(['j-h2'])]) {
+    const summary = summarizeRequest(state, launched, watched);
+    assert.equal(summary.bucket, 'running');
+    assert.deepEqual(summary.runningAgentIds, ['a-h2']);
+    assert.equal(summary.failedHops, 0);
+  }
+  // A receipt on the binding means the result is being read: still in progress.
+  const receipted = summarizeRequest(
+    { ...state, localSessions: [{ jobId: 'j-h2', lastReceipt: { sequence: 1 } }] as never },
+    launched,
+    new Set(),
+  );
+  assert.equal(receipted.bucket, 'running');
+  // No receipt and no watched process (for example after a restart): the user must look.
+  const orphan = summarizeRequest(state, launched, new Set());
+  assert.equal(orphan.bucket, 'needs');
+  assert.equal(orphan.label, 'Step status unknown');
+  assert.equal(orphan.unknownHops, 1);
+  assert.equal(orphan.failedHops, 0);
+  // A running director brief is local too.
+  const briefing = summarizeRequest(
+    { assignments: [hop('h1', 'plan-brief')], jobs: [job('h1', 'UNKNOWN')], localSessions: [] },
+    entry(request({ pipeline: pipeline('BRIEFING') })),
+    new Set(['j-h1']),
+  );
+  assert.equal(briefing.label, 'Director briefing');
+});

@@ -24,11 +24,13 @@ export function attentionItems(
     'tasks' | 'experiments' | 'projects' | 'requests' | 'assignments' | 'jobs' | 'localSessions' | 'agents'
   >,
   activity: OfficeActivity[],
+  /** Jobs the office watches a process for; see summarizeRequest. Undefined until presence is known. */
+  watchedJobIds?: ReadonlySet<string>,
 ): AttentionItem[] {
   const items: AttentionItem[] = [];
   for (const entry of requestQueue(state)) {
     if (!entry.request || entry.request.removedAt) continue;
-    const summary = summarizeRequest(state, entry);
+    const summary = summarizeRequest(state, entry, watchedJobIds);
     if (summary.bucket !== 'needs') continue;
     items.push({
       id: `request:${entry.id}`,

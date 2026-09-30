@@ -223,11 +223,11 @@ function App() {
   const [preview, setPreview] = useState<{ name: string; text: string; truncated: boolean; binary: boolean } | null>(
     null,
   );
-  const { activity, now } = useOfficeActivity(state);
+  const { activity, now, watchedJobIds } = useOfficeActivity(state);
   const project = state?.projects.find(p => p.id === projectId);
   const experiments = state?.experiments.filter(e => e.projectId === projectId) || [];
   const experiment = experiments.find(e => e.id === experimentId);
-  const attention = state ? attentionItems(state, activity) : [];
+  const attention = state ? attentionItems(state, activity, watchedJobIds) : [];
   const needsYou = attention.length;
   const working = activity.filter(a => ['working', 'stalled'].includes(activityStatus(a))).length;
   const failedSeats = activity.filter(a => activityStatus(a) === 'failed').length;
@@ -612,6 +612,7 @@ function App() {
                 <OfficeChat state={state} />
               </div>
               <WorkQueue
+                watchedJobIds={watchedJobIds}
                 onState={acceptState}
                 onAction={c => void command(c)}
                 state={state}

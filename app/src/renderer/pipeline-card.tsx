@@ -5,6 +5,7 @@ import './pipeline.css';
 import './office.css';
 import { firstSentence, formatDateTime, shortenPaths } from './format';
 import { PipelineMap } from './pipeline-map';
+import { useLivePresence } from './use-activity';
 
 const TERMINAL = ['COMPLETED', 'FAILED', 'CANCEL_ACKNOWLEDGED'];
 const RUNNING = ['SUBMITTING', 'ACCEPTED', 'RUNNING', 'UNKNOWN', 'CANCEL_REQUESTED'];
@@ -150,12 +151,15 @@ export function PipelineCard({
       setHopBusy('');
     }
   };
+  // A local hop is UNKNOWN for its whole run, so the store's retry gate also admits a hop whose process
+  // is still alive. Offering Retry then would start a second agent on the same step; cancel it first.
+  const { presence } = useLivePresence();
   const retryable = (job: ProviderJob | undefined) =>
     pipelineHopRetryable(
       pipeline.phase,
       job,
       (state.localSessions ?? []).find(item => item.jobId === job?.id),
-    );
+    ) && !presence?.some(item => item.jobId === job?.id && item.alive);
   const previewTarget =
     pipeline.phase === 'BRIEFING' && briefJob?.state === 'COMPLETED'
       ? pickPreview(briefJob, ['brief.md', 'report.md'])

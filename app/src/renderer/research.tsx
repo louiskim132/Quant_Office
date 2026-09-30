@@ -16,6 +16,7 @@ import { ResearchPipeline } from './pipeline';
 import { ProjectLocationPanel } from './projects';
 import { Empty, label, Avatar } from './components';
 import { timeAgo } from './status';
+import { useLivePresence, watchedJobs } from './use-activity';
 import './research.css';
 
 type CommandInput = Command extends infer C ? (C extends Command ? Omit<C, 'idempotencyKey'> : never) : never;
@@ -264,6 +265,7 @@ function ProjectRequests({
   projectId: string;
   onOpenQueue: (requestId?: string) => void;
 }) {
+  const watchedJobIds = watchedJobs(useLivePresence().presence);
   const rows = requestQueue(state)
     .filter(entry => entry.root.projectId === projectId)
     .slice()
@@ -305,7 +307,7 @@ function ProjectRequests({
                 <span className="request-row-left">
                   <span className="request-row-name">{name}</span>
                   <span className={`status-badge${canceled ? ' canceled' : ''}`}>
-                    {summarizeRequest(state, row).label}
+                    {summarizeRequest(state, row, watchedJobIds).label}
                   </span>
                   <span className="request-row-time muted">{date(row.root.createdAt)}</span>
                 </span>

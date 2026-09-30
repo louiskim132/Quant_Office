@@ -36,6 +36,7 @@ export function WorkQueue({
   onState,
   openRequestId,
   onOpenRequest,
+  watchedJobIds,
 }: {
   state: AppState;
   onAction: (command: Command) => void;
@@ -47,6 +48,8 @@ export function WorkQueue({
   /** The request whose detail panel is open — owned by the app so other surfaces can open it too. */
   openRequestId: string | null;
   onOpenRequest: (id: string | null) => void;
+  /** Jobs the office watches a process for (presence); see summarizeRequest. */
+  watchedJobIds?: ReadonlySet<string>;
 }) {
   const [scopeProject, setScopeProject] = useState('');
   const [scopeAgent, setScopeAgent] = useState('');
@@ -62,7 +65,7 @@ export function WorkQueue({
     ...(search ? { search } : {}),
   };
   const scope = queueScope(state, queueFilter);
-  const rows = scope.entries.map(entry => ({ entry, summary: summarizeRequest(state, entry) }));
+  const rows = scope.entries.map(entry => ({ entry, summary: summarizeRequest(state, entry, watchedJobIds) }));
   const byBucket = (key: RequestBucket) =>
     rows.filter(r => r.summary.bucket === key).sort((a, b) => b.summary.lastAt.localeCompare(a.summary.lastAt));
   const counts = Object.fromEntries(GROUPS.map(g => [g.key, byBucket(g.key).length])) as Record<RequestBucket, number>;

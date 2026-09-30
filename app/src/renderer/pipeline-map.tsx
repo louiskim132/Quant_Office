@@ -4,6 +4,7 @@ import { latestJobFor } from '../core/jobs';
 import { Avatar, StatusPill, Drawer, Disclosure } from './components';
 import { formatElapsed } from './status';
 import { FilePreviewPane, type FilePreview } from './file-preview';
+import { useLivePresence } from './use-activity';
 import './explorer.css';
 
 export function PipelineMap({ hops, state }: { hops: Assignment[]; state: AppState }) {
@@ -13,6 +14,9 @@ export function PipelineMap({ hops, state }: { hops: Assignment[]; state: AppSta
     [busy, setBusy] = useState(false),
     [error, setError] = useState('');
   const ticket = React.useRef(0);
+  // A local hop is recorded UNKNOWN for its whole run; the office's own process record says it is running.
+  const { presence } = useLivePresence();
+  const alive = new Set((presence ?? []).filter(p => p.alive).map(p => p.jobId));
   React.useEffect(() => {
     ticket.current++;
     setPreview(null);
@@ -55,13 +59,17 @@ export function PipelineMap({ hops, state }: { hops: Assignment[]; state: AppSta
             : 'idle';
   const card = (hop: Assignment) => {
     const j = latestJobFor(state.jobs, hop.id),
-      a = state.agents.find(a => a.id === hop.agentId);
+      a = state.agents.find(a => a.id === hop.agentId),
+      observed = j?.state === 'UNKNOWN' && alive.has(j.id);
     return (
       <button className="pipeline-node" key={hop.id} onClick={() => setSelected(hop.id)}>
         <Avatar id={hop.agentId} name={a?.name ?? 'Unassigned'} />
         <strong>{hop.pipelineKey ?? 'Direct dispatch'}</strong>
         <span>{a?.name ?? 'Unassigned'}</span>
-        <StatusPill status={status(j?.state)} label={j?.state.toLowerCase().replaceAll('_', ' ') ?? 'Not started'} />
+        <StatusPill
+          status={observed ? 'working' : status(j?.state)}
+          label={observed ? 'running' : (j?.state.toLowerCase().replaceAll('_', ' ') ?? 'Not started')}
+        />
         <small>
           {(hop.dependsOn ?? []).length
             ? `After ${(hop.dependsOn ?? []).map(id => hops.find(h => h.id === id)?.pipelineKey ?? 'prior step').join(', ')}`
