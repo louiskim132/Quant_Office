@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ShieldCheck } from 'lucide-react';
 import type { Agent, AppState, Experiment, ResearchStatus, WorkMode } from '../shared/types';
 import type { BranchLink, PipelineRecord } from '../shared/pipeline';
@@ -35,7 +35,7 @@ export function PipelineReviews({
 }) {
   const [selectedPreview, setSelectedPreview] = useState<FilePreview | null>(null);
   const [previewBusy, setPreviewBusy] = useState(false);
-  const previewTicket = React.useRef(0);
+  const previewTicket = useRef(0);
   useEffect(() => {
     previewTicket.current++;
     setSelectedPreview(null);

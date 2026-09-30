@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { removeTreeSync } from '../src/main/fsx';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -135,7 +135,7 @@ test('a repeated query is reused, and the reuse is recorded rather than disguise
 
 test('a changed dependency invalidates the answer instead of reusing an interpretation of bytes that are gone', async t => {
   const f = fixture(t);
-  const object = f.artifact('run.log', 'row 0 clean\n');
+  f.artifact('run.log', 'row 0 clean\n');
   const evidence = new EvidenceService(f.store, f.workspace);
   const before = await evidence.query({ agentId: f.author.id, projectId: f.project.id, pattern: 'LOOK_AHEAD' });
   assert.equal(before.matches.length, 0);

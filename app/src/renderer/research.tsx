@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ArrowLeft,
   BookOpen,
@@ -14,7 +14,7 @@ import { requestQueue } from '../shared/queue';
 import { summarizeRequest } from '../shared/request-summary';
 import { ResearchPipeline } from './pipeline';
 import { ProjectLocationPanel } from './projects';
-import { Empty, label, Avatar } from './components';
+import { label, Avatar } from './components';
 import { timeAgo } from './status';
 import { useLivePresence, watchedJobs } from './use-activity';
 import './research.css';
@@ -165,7 +165,13 @@ export function ResearchView({
             <FolderOpen size={14} />
             Location &amp; inputs
           </summary>
-          <ProjectLocationPanel project={project} saved={savedLocation} location={location} onState={onState} />
+          <ProjectLocationPanel
+            project={project}
+            saved={savedLocation}
+            location={location}
+            requests={state.requests}
+            onState={onState}
+          />
         </details>
       </div>
       <div className="project-summary-grid">

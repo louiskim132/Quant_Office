@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { GATES, type ResearchBranch, type FrozenResearchSpec, type Stage, type GateId } from './research.js';
+import { GATES, type ResearchBranch, type FrozenResearchSpec, type Stage } from './research.js';
 import type { AppState, InputSnapshot } from './types.js';
 import type { BranchLink } from './pipeline.js';
 

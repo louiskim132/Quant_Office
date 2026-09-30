@@ -1,4 +1,3 @@
-import React from 'react';
 import { previewCsv } from './preview-data';
 export type FilePreview = { name: string; text: string; truncated: boolean; binary: boolean };
 /** Text is rendered as React text, never HTML from an agent or imported file. */

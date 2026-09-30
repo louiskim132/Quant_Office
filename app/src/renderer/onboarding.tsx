@@ -1,4 +1,3 @@
-import React from 'react';
 import type { AppState } from '../shared/types';
 export function Onboarding({
   state,

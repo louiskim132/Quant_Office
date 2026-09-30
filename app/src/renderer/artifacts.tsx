@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ArrowDownToLine, ArrowUpFromLine, Box, FileText, FileCode, Table } from 'lucide-react';
 import type { AppState, Experiment, FileActionResult, Project } from '../shared/types';
 import { Empty, SearchField, Checkbox } from './components';
@@ -19,7 +19,6 @@ export function ArtifactsPage({
   experiment,
   busy,
   files,
-  setBusy,
   setPreview,
   onError,
 }: {
@@ -29,7 +28,6 @@ export function ArtifactsPage({
   experiment: Experiment | undefined;
   busy: boolean;
   files: (action: () => Promise<FileActionResult>) => void;
-  setBusy: (busy: boolean) => void;
   setPreview: (preview: FilePreview) => void;
   onError: (e: unknown) => void;
 }) {

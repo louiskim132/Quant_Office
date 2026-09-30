@@ -182,14 +182,13 @@ test('the exec adapter reports presence for children it owns, and only those', a
     children.push(child);
     return child as never;
   };
-  const adapter = new LocalCliExecAdapter(
-    () => sessions,
-    () => 'claude.exe',
-    () => new Date(clock).toISOString(),
-    undefined,
-    spawn,
-    () => ({}),
-  );
+  const adapter = new LocalCliExecAdapter({
+    sessionsRoot: () => sessions,
+    executable: () => 'claude.exe',
+    now: () => new Date(clock).toISOString(),
+    spawnChild: spawn,
+    environment: () => ({}),
+  });
   t.after(() => {
     adapter.disposeAll();
     removeTreeSync(root);

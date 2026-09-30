@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { Agent, AgentLog, AppState, Connection, Effort, LocalUsage, TokenTotals } from '../shared/types';
 import { suggestedEfforts, PROVIDER_MODEL_SUGGESTIONS, effortIsIndependentAxis } from '../shared/effort';
 import { formatDateTime, formatNumber } from './format';

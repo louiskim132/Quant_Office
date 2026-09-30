@@ -1,6 +1,6 @@
 # Evidence labels
 
-How the office labels what it has and has not verified. A label describes the strength and source of one record; it is never upgraded by repetition, and no label claims more than the operation that produced it. Current runtime status for each scope lives in the [readiness matrix](../app/docs/readiness.md).
+How the office labels what it has and has not verified. A label describes the strength and source of one record; it is never upgraded by repetition, and no label claims more than the operation that produced it. Current runtime status for each scope lives in the [roadmap section 11](ROADMAP.md#11-execution-checklist-and-progress-record).
 
 ## Levels and kinds
 

@@ -7,7 +7,6 @@ import { DatabaseSync } from 'node:sqlite';
 import { Secrets, agentEnvironment, type SecretBox } from '../src/main/secrets.js';
 import { Subscriptions } from '../src/main/subscriptions.js';
 import { OfficeStore } from '../src/core/store.js';
-import type { Provider } from '../src/shared/types.js';
 
 const KEY = 'sk-test-DEADBEEF-0123456789-abcdef';
 

@@ -412,7 +412,7 @@ test('the runtime-free separated path drives S2 and S7 through SEPARATED_REVIEW 
   const again = await service().run({ type: 'rebuttal', assignmentId: advocate.id, artifactId: rebuttal.id });
   assert.match(again.detail, /already recorded/);
 
-  const decided = await service().run({
+  await service().run({
     type: 'adjudicate',
     branchId: f.branch().id,
     expectedRevision: f.branch().revision,

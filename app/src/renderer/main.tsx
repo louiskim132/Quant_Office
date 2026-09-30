@@ -6,14 +6,12 @@ import {
   ArrowDownToLine,
   ArrowUpFromLine,
   Box,
-  Check,
   ChevronRight,
   Circle,
   Folder,
   FolderPlus,
   History,
   LayoutDashboard,
-  LockKeyhole,
   Network,
   Plus,
   RefreshCw,
@@ -23,19 +21,9 @@ import {
   Wallet,
   X,
 } from 'lucide-react';
-import type {
-  AppInfo,
-  AppState,
-  Command,
-  Experiment,
-  ResearchContract,
-  Role,
-  WorkType,
-  WorkMode,
-} from '../shared/types';
+import type { AppInfo, AppState, Command, WorkType, WorkMode } from '../shared/types';
 import './tokens.css';
 import './styles.css';
-import { requestQueue } from '../shared/queue';
 import { AgentRoster, ProfileEditor, ConnectionBinding } from './office';
 import { OfficeScene } from './office-scene';
 import { useOfficeActivity } from './use-activity';
@@ -93,57 +81,6 @@ const navSections = [
     ],
   ],
 ] as const;
-const roles: { role: Role; label: string; title: string; scope: string; color: string }[] = [
-  {
-    role: 'DIRECTOR',
-    label: 'Director',
-    title: 'Research direction',
-    scope: 'Defines research contracts, priorities, and final decisions.',
-    color: 'amber',
-  },
-  {
-    role: 'PM_A',
-    label: 'PM · A',
-    title: 'Implementation',
-    scope: 'Owns implementation and integration of research work.',
-    color: 'teal',
-  },
-  {
-    role: 'PM_B',
-    label: 'PM · B',
-    title: 'Verification',
-    scope: 'Independently verifies code, evidence, and reproducibility.',
-    color: 'blue',
-  },
-  {
-    role: 'PM_C',
-    label: 'PM · C',
-    title: 'Findings',
-    scope: 'Interprets statistical evidence and research findings.',
-    color: 'purple',
-  },
-  {
-    role: 'PM_D',
-    label: 'PM · D',
-    title: 'Falsification',
-    scope: 'Challenges assumptions, robustness, and economic value.',
-    color: 'rose',
-  },
-  {
-    role: 'WORKER',
-    label: 'Worker · 01',
-    title: 'Research execution',
-    scope: 'Completes bounded tasks under a project manager.',
-    color: 'neutral',
-  },
-  {
-    role: 'WORKER',
-    label: 'Worker · 02',
-    title: 'Research execution',
-    scope: 'Completes bounded tasks under a project manager.',
-    color: 'neutral',
-  },
-];
 const date = (d: string) =>
   new Date(d).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 const savedId = (key: string) => {
@@ -231,12 +168,9 @@ function App() {
   const needsYou = attention.length;
   const working = activity.filter(a => ['working', 'stalled'].includes(activityStatus(a))).length;
   const failedSeats = activity.filter(a => activityStatus(a) === 'failed').length;
-  const scopedArtifacts =
-    state?.artifacts.filter(a => a.projectId === projectId && (!experiment || a.experimentId === experiment.id)) || [];
-  const scopedEvents = state?.events.filter(e => !project || e.projectId === projectId || e.projectId === null) || [];
   const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
-  const acceptState = (next: AppState) =>
-    setState(previous => (previous && previous.events.length > next.events.length ? previous : next));
+  // Every state the main process sends omits the event history, so the newest state always wins.
+  const acceptState = (next: AppState) => setState(next);
   async function refresh() {
     try {
       if (!window.office)
@@ -696,7 +630,6 @@ function App() {
                 experiment={experiment}
                 busy={busy}
                 files={files}
-                setBusy={setBusy}
                 setPreview={setPreview}
                 onError={fail}
               />,
@@ -1337,15 +1270,6 @@ function App() {
   );
 }
 
-function Metric({ label: metricLabel, value, detail }: { label: string; value: string; detail: string }) {
-  return (
-    <div className="metric-card">
-      <span className="mini-label">{metricLabel}</span>
-      <strong>{value}</strong>
-      <p>{detail}</p>
-    </div>
-  );
-}
 function Dialog({
   title,
   onClose,

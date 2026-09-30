@@ -14,13 +14,6 @@ const day = (value: string) => {
     ? 'Today'
     : date.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
 };
-const initials = (name: string) =>
-  name
-    .split(/\s+/)
-    .slice(0, 2)
-    .map(s => s[0])
-    .join('')
-    .toUpperCase();
 const compare = (a: OfficeChatEntry, b: OfficeChatEntry) =>
   a.timestamp.localeCompare(b.timestamp) || a.id.localeCompare(b.id);
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { ArrowUpRight, Folder, FolderOpen, FolderPlus, Plus } from 'lucide-react';
 import type { AppState, Command, Project, ProjectLocation } from '../shared/types';
 import { Empty, SearchField } from './components';
@@ -39,11 +39,14 @@ export function ProjectLocationPanel({
   project,
   saved,
   location,
+  requests,
   onState,
 }: {
   project: Project;
   saved: ProjectLocation | undefined;
   location: string;
+  /** The office's current requests — the panel derives this project's planning notices from them. */
+  requests: AppState['requests'];
   onState: (s: AppState) => void;
 }) {
   const [folder, setFolder] = useState(location);
@@ -56,38 +59,21 @@ export function ProjectLocationPanel({
   }));
   const [withheld, setWithheld] = useState<string[]>(saved?.withheldPaths ?? []);
   const [withheldDraft, setWithheldDraft] = useState('');
-  const [notices, setNotices] = useState<string[]>([]);
+  // The planning-visibility notices come from the state the office already pushed — no extra read.
+  const notices = useMemo(
+    () => [
+      ...new Set(
+        (requests ?? [])
+          .filter(r => r.projectId === project.id && !r.removedAt && r.status !== 'CANCELED')
+          .map(r => r.pipeline?.notice)
+          .filter((n): n is string => !!n),
+      ),
+    ],
+    [requests, project.id],
+  );
   const [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
     [notice, setNotice] = useState('');
-  useEffect(() => {
-    if (!window.office) return;
-    let live = true;
-    const read = async () => {
-      try {
-        const s = await window.office.getState();
-        if (live)
-          setNotices([
-            ...new Set(
-              (s.requests ?? [])
-                .filter(r => r.projectId === project.id && !r.removedAt && r.status !== 'CANCELED')
-                .map(r => r.pipeline?.notice)
-                .filter((n): n is string => !!n),
-            ),
-          ]);
-      } catch {
-        /* The planning-visibility notice is advisory; a failed read leaves the panel usable. */
-      }
-    };
-    void read();
-    const off = window.office.onChanged(() => {
-      void read();
-    });
-    return () => {
-      live = false;
-      off();
-    };
-  }, [project.id]);
   const withheldDirty = [...withheld].sort().join('\n') !== [...baseline.withheld].sort().join('\n');
   const dirty = folder !== baseline.folder || withheldDirty;
   async function pickFolder() {

@@ -338,6 +338,14 @@ Reject a submitted or blocked packet with a specific reason:
 node tools/desktop.mjs reject worker-3 "The submission changes an unassigned contract and lacks old-record compatibility coverage."
 ```
 
+When a rejected worker can fix the problem within the same round and scope, Session 8 may reopen the slot instead of planning a new round:
+
+```powershell
+node tools/desktop.mjs reopen worker-3 "Add the missing old-record compatibility test; the scope is unchanged."
+```
+
+`reopen` works only on a `CODE` worker whose decision is `REJECTED`. It keeps the rejection and the superseded result as archived records, and returns the slot to `RUNNING`. The same worker session then fixes, commits and runs `finish` again with a fresh report; the packet, base and allowed paths do not change.
+
 Do not repair a worker by editing its checkout or copying its entire folder. A small integration-only correction may be made and committed in Session 8. A material redesign becomes a new round after the current round is resolved and closed.
 
 ### 5.1 Merge conflicts
@@ -439,6 +447,7 @@ The next user request may reuse the same eight desktop sessions. Session 8 publi
 | Stale round/report/review/head | Regenerate the report or assessment from current `status`/`review`. Never edit published state to make stale evidence fit. |
 | `MERGE_CONFLICT` | Resolve only in Session 8 using section 5.1. Worker remains untouched. |
 | `BLOCKED` | Session 8 reads the blocker and rejects or plans a later round. Worker makes no further edits. |
+| `REJECTED`, fixable in this round | Session 8 may `reopen` the slot with a reason (section 5). The worker then continues in the same session and submits a fresh report. |
 | `CLOSED` | No further work belongs to that round. Wait for a newly published round. |
 | Published packet hash changed | Stop all sessions. The immutable task record was modified; recover from Git/filesystem evidence instead of trusting it. |
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Bell, Check, X } from 'lucide-react';
 import type { Agent } from '../shared/types';
 import type { OfficeActivity } from '../shared/activity';

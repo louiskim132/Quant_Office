@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { Agent, AppState, Role } from '../shared/types';
 import { agentBinding, providerReadiness } from '../shared/readiness';
 import './office.css';

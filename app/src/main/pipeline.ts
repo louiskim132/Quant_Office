@@ -3,9 +3,8 @@ import { canonicalHash } from '../core/canonical.js';
 import { parseStrictJson } from '../core/strict-json.js';
 import type { OfficeStore } from '../core/store.js';
 import type { AssignmentController } from './controller.js';
-import { adjudicate as adjudicateStage, scheduleStage } from './research-controller.js';
+import { scheduleStage } from './research-controller.js';
 import type { HoldoutCustody } from './holdout.js';
-import { pipelineStageBlocker } from '../shared/research.js';
 import {
   pipelineActionSchema,
   stageContextHash,
@@ -19,7 +18,6 @@ import type { SignedResearchClaim } from '../shared/research-admission';
 import type { RunPackageBuilder, RunReturnInspector } from '../shared/run-package';
 import { buildBlindedPacket, buildAdversarialPackets } from './context-policy';
 import { z } from 'zod';
-import type { Holdout } from '../shared/holdout';
 export interface ResearchRuntime {
   prepareReview(input: {
     operationId: string;

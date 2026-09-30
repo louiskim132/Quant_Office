@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, stat } from 'node:fs/promises';
 import { removeTree } from './fsx.js';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -14,7 +14,6 @@ import {
   describeRequestSchema,
   evidenceBriefSchema,
   evidenceRecordSchema,
-  rawEvidenceOutputSchema,
   packetRequestSchema,
   readRequestSchema,
   searchRequestSchema,

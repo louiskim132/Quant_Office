@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { crc32 } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
