@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import { useCallback, useState } from 'react';
 import type { ObjectDescription, ReadResult, SearchMatch, SearchResult } from '../shared/evidence';
 
 /**

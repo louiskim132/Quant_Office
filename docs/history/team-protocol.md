@@ -1,4 +1,4 @@
-> Historical architecture specification. Current runtime status and superseding constraints: [readiness matrix](../app/docs/readiness.md). Fixed-team and API-budget provisions below are not active product defaults.
+> Historical architecture specification. Current runtime status and superseding constraints: [roadmap status, section 11](../ROADMAP.md#11-execution-checklist-and-progress-record). Fixed-team and API-budget provisions below are not active product defaults.
 
 # Team, authority and independent review — architecture 0.3
 

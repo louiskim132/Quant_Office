@@ -19,8 +19,6 @@ export const JOB_TRANSITIONS: Record<JobState, JobState[]> = {
 };
 export const TERMINAL_JOB_STATES: JobState[] = ['COMPLETED', 'FAILED', 'CANCEL_ACKNOWLEDGED'];
 export const isTerminalJob = (state: JobState): boolean => TERMINAL_JOB_STATES.includes(state);
-/** States where the office believes provider-side work may still exist and must be reconciled. */
-export const isOpenJob = (state: JobState): boolean => !isTerminalJob(state);
 
 /**
  * One assignment may carry several job records — every retry mints the next attempt rather than

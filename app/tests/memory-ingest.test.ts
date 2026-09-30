@@ -8,7 +8,6 @@ import { OfficeStore } from '../src/core/store';
 import { ingestReceiptMemory } from '../src/main/memory-ingest';
 import { removeTreeSync } from '../src/main/fsx';
 import type { LocalResultV2 } from '../src/shared/local-session';
-import type { MemoryFinding } from '../src/shared/types';
 
 const key = () => randomUUID();
 const sha = (text: string) => createHash('sha256').update(text, 'utf8').digest('hex');

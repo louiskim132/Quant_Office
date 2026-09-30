@@ -430,7 +430,7 @@ test('a signed-in but unidentified session is one stable context, never a fake a
   f.store.confirmAgentBinding({ observation: observation(0), agent });
   // The tool reports sign-in but cannot name the account: repeated checks update one ''-identity
   // record instead of minting a new "account" each time the output format shifts.
-  const first = f.store.recordAccountObservation(observation(1, ''));
+  f.store.recordAccountObservation(observation(1, ''));
   const second = f.store.recordAccountObservation(observation(2, ''));
   assert.equal(
     second.connections!.filter(c => c.provider === 'claude' && c.identity === '').length,
