@@ -193,7 +193,7 @@ export function ArtifactsPage({
                 )
               }
             >
-              Import references
+              Import your first references
             </button>
           }
         />
@@ -205,7 +205,7 @@ export function ArtifactsPage({
                 ? plural(rows.length, 'file')
                 : `${visible.length} of ${rows.length} files shown`}
             </p>
-            {!visible.length && <p>No files match these filters — widen the search or clear the filters.</p>}
+            {!visible.length && <p>No files match these filters. Widen the search or clear the filters.</p>}
             {visible.map(row => {
               const ext = extension(row.name),
                 Icon = ext === 'csv' ? Table : ['ts', 'js', 'py', 'json'].includes(ext) ? FileCode : FileText;
