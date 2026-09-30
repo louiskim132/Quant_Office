@@ -1,4 +1,5 @@
 import { previewCsv } from './preview-data';
+import { plural } from './format';
 export type FilePreview = { name: string; text: string; truncated: boolean; binary: boolean };
 /** Text is rendered as React text, never HTML from an agent or imported file. */
 export function FilePreviewPane({
@@ -30,8 +31,8 @@ export function FilePreviewPane({
       ) : csv ? (
         <div className="table-wrap">
           <p className="muted">
-            {Math.max(0, csv.rows.length - 1)} preview rows{csv.truncated ? ' · limited to 200 lines' : ''} · first 20
-            columns
+            {plural(Math.max(0, csv.rows.length - 1), 'preview row')}
+            {csv.truncated ? ' · limited to 200 lines' : ''} · first 20 columns
           </p>
           <table>
             <thead>

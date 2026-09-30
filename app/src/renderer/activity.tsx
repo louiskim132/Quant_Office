@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Agent, AgentLog, AppState, Connection, Effort, LocalUsage, TokenTotals } from '../shared/types';
 import { suggestedEfforts, PROVIDER_MODEL_SUGGESTIONS, effortIsIndependentAxis } from '../shared/effort';
-import { formatDateTime, formatNumber } from './format';
+import { formatDateTime, formatNumber, plural } from './format';
 const number = (n: number) => formatNumber(n);
 function TokenTable({ items }: { items: { label: string; totals: TokenTotals }[] }) {
   return (
@@ -260,7 +260,7 @@ export function ActivityView({ state, fixedAgent }: { state: AppState; fixedAgen
         </p>
       )}
       {notice && <p role="status">{notice}</p>}
-      <p className="muted">{filtered.length} recorded entries</p>
+      <p className="muted">{plural(filtered.length, 'recorded entry', 'recorded entries')}</p>
       {filtered.length === 0 ? (
         <div className="inline-note">
           No entries match this view. Agent conversations and tool activity appear only when recorded or explicitly

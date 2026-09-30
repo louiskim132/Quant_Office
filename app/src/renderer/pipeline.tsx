@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { GitBranch } from 'lucide-react';
 import type { AppState, ResearchStatus, TrialLedgerEntry, WorkMode, Command } from '../shared/types';
 import type { PipelineAction, PipelineRecord } from '../shared/pipeline';
 import type { Stage, StageFunction } from '../shared/research';
@@ -6,6 +7,7 @@ import { SPEC_SECTIONS, STAGE_FUNCTIONS, STAGE_GATES, STAGES } from '../shared/r
 import type { ManualRunReadiness } from '../shared/run-package';
 import { BranchStanding } from './review';
 import { EvidencePanel } from './evidence';
+import { Empty } from './components';
 import './pipeline.css';
 
 const STAGE_TITLES: Record<Stage, string> = {
@@ -166,7 +168,16 @@ export function ResearchPipeline({ state, projectId }: { state: AppState; projec
       {message && <p role="status">{message}</p>}
       {archived && <p>Archived project · research is read-only.</p>}
       {!branches.length ? (
-        <p>No research branches are recorded for this project.</p>
+        <Empty
+          icon={GitBranch}
+          title="No research branches recorded"
+          description="A research branch keeps a separated review sequence and its bound evidence for this project."
+          hint={
+            archived
+              ? 'This project is archived — its research record stays readable, nothing new registers.'
+              : 'Register a research branch below to start the separated review sequence.'
+          }
+        />
       ) : (
         <label>
           Research branch
@@ -347,7 +358,7 @@ export function ResearchPipeline({ state, projectId }: { state: AppState; projec
               </select>
             </label>
           ) : (
-            <p>No gate receipts identify a subject yet. Advancement remains blocked.</p>
+            <p className="muted">No gate receipts identify a subject yet. Advancement remains blocked.</p>
           )}
           <label>
             Planning mode

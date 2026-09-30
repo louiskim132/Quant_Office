@@ -4,7 +4,7 @@ import type { LocalSessionSummary, LocalLaunchPlan } from '../shared/local-sessi
 import { agentDispatchReadiness } from '../shared/readiness';
 import { requestJobs } from '../shared/queue';
 import { dependencyStatus } from '../shared/cooperation';
-import { formatDateTime } from './format';
+import { formatDateTime, plural } from './format';
 
 const jobLabels: Record<ProviderJob['state'], string> = {
   INTENT: 'Prepared · nothing submitted',
@@ -205,7 +205,7 @@ export function RequestDispatch({
         <p className="muted">
           {request.pipeline.kind === 'PLANNING' ? 'Planning' : 'Result analysis'} pipeline —{' '}
           {request.pipeline.phase === 'BRIEFING'
-            ? `the director brief hop is briefing${briefJob ? ` (${briefJob.state.toLowerCase().replaceAll('_', ' ')})` : ''}; confirm the shaped brief on the request card to launch the remaining arms.`
+            ? `the director brief hop is briefing${briefJob ? ` (${briefJob.state.toLowerCase().replaceAll('_', ' ')})` : ''}; confirm the shaped brief on the request card to launch the remaining steps.`
             : request.pipeline.phase === 'LAUNCHED'
               ? 'launched.'
               : request.pipeline.phase === 'AWAITING_DECISION'
@@ -243,8 +243,9 @@ export function RequestDispatch({
       )}
       {summaries.some(item => item.unresolved) && (
         <p className="notice">
-          {summaries.filter(item => item.unresolved).length} job(s) still require observation or reconciliation,
-          regardless of other completed jobs.
+          {plural(summaries.filter(item => item.unresolved).length, 'job')} still require
+          {summaries.filter(item => item.unresolved).length === 1 ? 's' : ''} observation or reconciliation, regardless
+          of other completed jobs.
         </p>
       )}
       {closed && (
