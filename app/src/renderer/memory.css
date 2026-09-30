@@ -136,7 +136,7 @@
 .mem-legend {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 14px;
   font-size: 10px;
   color: var(--subtle);
   text-transform: lowercase;
@@ -144,10 +144,17 @@
 .mem-legend-item {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
 }
 .mem-legend-item svg {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 10px;
   overflow: visible;
+}
+.mem-legend-item svg.legend-mark {
+  width: 12px;
+  height: 12px;
 }
 .mem-legend .legend-line {
   stroke: var(--subtle);

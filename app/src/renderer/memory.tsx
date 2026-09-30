@@ -490,7 +490,7 @@ export function MemoryView({ state, projectId }: { state: AppState; projectId: s
                   refuted
                 </span>
                 <span className="mem-legend-item">
-                  <svg viewBox="0 0 12 12" width="12" height="12">
+                  <svg className="legend-mark" viewBox="0 0 12 12" width="12" height="12">
                     <circle className="legend-dot superseded" cx="6" cy="6" r="4" />
                     <line className="legend-strike" x1="2.5" y1="9.5" x2="9.5" y2="2.5" />
                   </svg>
