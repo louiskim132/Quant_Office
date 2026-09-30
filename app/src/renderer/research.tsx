@@ -21,6 +21,7 @@ import type {
   ResearchContract,
 } from '../shared/types';
 import { requestQueue } from '../shared/queue';
+import type { QueueEntry, RequestJobSummary } from '../shared/queue';
 import { summarizeRequest, type RequestBucket } from '../shared/request-summary';
 import { ResearchPipeline } from './pipeline';
 import { ProjectLocationPanel } from './projects';
@@ -118,6 +119,111 @@ export function requestLifecycle(
       pending: job ? 'No settled outcome on record' : 'No provider job on record',
     },
   ];
+}
+
+/**
+ * One cell of the request grid. `text` is a recorded word — '—' when the stage has no record;
+ * `status` renders the cell as a mini pill when a status-vocabulary key applies; `provenance`
+ * keeps a settled state tagged with who reported it; `title` carries the underlying record.
+ */
+export interface RequestGridCell {
+  text: string;
+  status?: StatusKey;
+  provenance?: StepSource;
+  title: string;
+}
+export interface RequestGridRow {
+  minted: RequestGridCell;
+  dispatched: RequestGridCell;
+  terminal: RequestGridCell;
+  reviewed: RequestGridCell;
+}
+
+const DASH = '—';
+
+/**
+ * The per-stage cells for one request row, derived only from records the state holds: the request
+ * record itself, the focus provider job (unresolved attempt else latest), review decisions bound to
+ * the request's current revision, and the pipeline's recorded gate. Nothing is projected forward —
+ * a job that was never dispatched reads '—', and a settled state is labeled with its evidence so an
+ * office-observed or user-reported terminal is never presented as a provider claim.
+ */
+export function requestGridCells(
+  entry: QueueEntry,
+  state: Pick<AppState, 'decisions' | 'jobs' | 'reviews'>,
+): RequestGridRow {
+  const request = entry.request;
+  const jobs = entry.jobs ?? [];
+  const focus = jobs.find(j => j.unresolved) ?? jobs[jobs.length - 1];
+  const job = focus ? (state.jobs ?? []).find(j => j.id === focus.jobId) : undefined;
+  const minted: RequestGridCell = {
+    text: label(entry.status),
+    title: `Request recorded ${date(entry.root.createdAt)}`,
+  };
+  const dispatched: RequestGridCell = job?.dispatchedAt
+    ? {
+        text: `dispatched${(focus?.attempt ?? 1) > 1 ? ` · attempt ${focus?.attempt}` : ''}`,
+        title: `Office-recorded dispatch ${date(job.dispatchedAt)}`,
+      }
+    : {
+        text: DASH,
+        title: job ? 'A job is on record but no dispatch time is recorded' : 'No provider job on record',
+      };
+  const terminal: RequestGridCell =
+    focus && SETTLED_JOB.has(focus.state)
+      ? {
+          text: label(focus.state),
+          status: focus.state === 'FAILED' ? 'failed' : focus.state === 'COMPLETED' ? 'done' : 'idle',
+          provenance: provenanceTag(focus.evidence),
+          title: `${label(focus.state)} — ${provenanceTag(focus.evidence)}${job ? `, recorded ${date(job.settledAt || job.updatedAt)}` : ''}`,
+        }
+      : {
+          text: DASH,
+          title: job || focus ? 'No settled outcome on record' : 'No provider job on record',
+        };
+  let reviewed: RequestGridCell;
+  const decision = request?.pipeline?.phase === 'DECIDED' ? request.pipeline.decision : undefined;
+  const verdict = request
+    ? (state.decisions ?? [])
+        .filter(d => d.requestId === request.id && d.requestRevision === request.revision)
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
+    : undefined;
+  const report = request?.experimentId && (state.reviews ?? []).some(r => r.experimentId === request.experimentId);
+  if (request?.pipeline?.phase === 'AWAITING_DECISION') {
+    reviewed = {
+      text: 'Decision needed',
+      status: 'needs',
+      title: 'The recorded report waits on your decision — approve, request a revision or reject',
+    };
+  } else if (decision) {
+    reviewed = {
+      text:
+        decision.decision === 'APPROVE'
+          ? 'approved'
+          : decision.decision === 'REVISE'
+            ? 'revision requested'
+            : decision.decision === 'REJECT'
+              ? 'rejected'
+              : 'decided',
+      title: `Decision recorded ${date(decision.decidedAt)}`,
+    };
+  } else if (verdict) {
+    reviewed = {
+      text: label(verdict.verdict),
+      title: `Review decision recorded ${date(verdict.createdAt)}${verdict.phase === 'REBUTTAL' ? ' · rebuttal' : ''}${verdict.independence === 'SEPARATE_SESSION_UNVERIFIED' ? ' · independence unverified' : ''}`,
+    };
+  } else if (report) {
+    reviewed = {
+      text: 'report recorded',
+      title: 'A review report exists on record; no decision recorded',
+    };
+  } else {
+    reviewed = {
+      text: DASH,
+      title: request ? 'No review on record' : 'No request record',
+    };
+  }
+  return { minted, dispatched, terminal, reviewed };
 }
 
 const contractFields: [keyof ResearchContract, string, string][] = [
@@ -358,6 +464,83 @@ export function ResearchView({
   );
 }
 
+/** One grid cell: a mini pill when a status-vocabulary key applies, else the recorded word. */
+function GridCell({ cell }: { cell: RequestGridCell }) {
+  return (
+    <span className={`request-grid-cell${cell.text === '—' ? ' muted' : ''}`} title={cell.title}>
+      {cell.status ? <StatusPill status={cell.status} label={cell.text} /> : cell.text}
+      {cell.provenance && <em className="request-grid-prov">{cell.provenance}</em>}
+    </span>
+  );
+}
+
+/**
+ * The expanded body under a request row — identical in the List and Grid views, so a row click
+ * always opens the same recorded detail either mode.
+ */
+function RequestRowDetail({
+  row,
+  summary,
+  focus,
+  jobs,
+  steps,
+  blockers,
+  onOpenQueue,
+}: {
+  row: QueueEntry;
+  summary: ReturnType<typeof summarizeRequest>;
+  focus: RequestJobSummary | undefined;
+  jobs: RequestJobSummary[];
+  steps: LifecycleStep[];
+  blockers: string[];
+  onOpenQueue: (requestId?: string) => void;
+}) {
+  return (
+    <div className="request-row-detail">
+      <p>{row.root.prompt}</p>
+      {blockers.map(b => (
+        <p className="blocker" key={b}>
+          {b}
+        </p>
+      ))}
+      <dl className="request-tracks">
+        <div>
+          <dt>Request status</dt>
+          <dd>
+            {label(row.status)}
+            {row.request?.pipeline?.phase === 'DECIDED' && summary.outcome
+              ? ` — decision ${label(summary.outcome)}`
+              : ''}
+          </dd>
+        </div>
+        <div>
+          <dt>Provider job</dt>
+          <dd>
+            {focus
+              ? `${label(focus.state)} — ${provenanceTag(focus.evidence)}${focus.unresolved ? ' · needs reconciliation' : ''}${jobs.length > 1 ? ` · ${jobs.length} on record` : ''}`
+              : 'No provider job on record'}
+          </dd>
+        </div>
+      </dl>
+      <ol className="request-timeline" aria-label="Recorded lifecycle">
+        {steps.map(step => (
+          <li className={step.at ? '' : 'pending'} key={step.key}>
+            <span className="request-step-name">{step.label}</span>
+            <span className="request-step-tag">{step.source}</span>
+            <span className="request-step-at muted">{step.at ? date(step.at) : step.pending}</span>
+            {step.detail && <span className="request-step-detail muted">{step.detail}</span>}
+          </li>
+        ))}
+      </ol>
+      <div className="button-row">
+        <button className="secondary" onClick={() => onOpenQueue(row.id)}>
+          Open request
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /** This project's work-queue rows, including requests that never produced an experiment. */
 function ProjectRequests({
   state,
@@ -369,19 +552,97 @@ function ProjectRequests({
   onOpenQueue: (requestId?: string) => void;
 }) {
   const watchedJobIds = watchedJobs(useLivePresence().presence);
+  const [view, setView] = useState<'list' | 'grid'>(() => {
+    try {
+      return localStorage.getItem('qro.request-view') === 'grid' ? 'grid' : 'list';
+    } catch {
+      return 'list';
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem('qro.request-view', view);
+    } catch {}
+  }, [view]);
   const rows = requestQueue(state)
     .filter(entry => entry.root.projectId === projectId)
     .slice()
     .reverse();
+  const prepare = (row: QueueEntry) => {
+    const summary = summarizeRequest(state, row, watchedJobIds);
+    const name =
+      row.request?.name ?? state.experiments.find(e => e.id === row.root.experimentId)?.name ?? 'Research request';
+    const leadAgent = row.request?.leadAgentId ? state.agents.find(a => a.id === row.request?.leadAgentId) : undefined;
+    const lead = row.request
+      ? row.request.leadAgentId
+        ? (leadAgent?.name ?? 'Lead agent removed')
+        : 'No lead'
+      : `${label(row.root.recipient)} role`;
+    const jobs = row.jobs ?? [],
+      focus = jobs.find(j => j.unresolved) ?? jobs[jobs.length - 1];
+    const focusJob = focus ? (state.jobs ?? []).find(j => j.id === focus.jobId) : undefined;
+    const steps = requestLifecycle(row.request, row.root.createdAt, focusJob);
+    const blockers = [
+      ...(row.request?.blockers ?? []).map(b => `${b.code}: ${b.message}`),
+      ...(row.root.blocker ? [row.root.blocker] : []),
+    ];
+    return { summary, name, lead, jobs, focus, steps, blockers };
+  };
   return (
     <section className="project-requests" aria-label="Project requests">
-      <h2>Requests</h2>
+      <div className="request-view-head">
+        <h2>Requests</h2>
+        {!!rows.length && (
+          <div className="request-view" role="group" aria-label="Request view">
+            <button aria-pressed={view === 'list'} onClick={() => setView('list')}>
+              List
+            </button>
+            <button aria-pressed={view === 'grid'} onClick={() => setView('grid')}>
+              Grid
+            </button>
+          </div>
+        )}
+      </div>
       <p className="muted">
         Every request on this project, including ones without an experiment. Expand a row for its objective and
         provider-job record, or manage it from the Office work queue.
       </p>
       {!rows.length ? (
         <p className="muted">No requests on this project yet.</p>
+      ) : view === 'grid' ? (
+        <>
+          <div className="request-grid-head" aria-hidden="true">
+            <span>Request</span>
+            <span title="The request record's standing">Minted</span>
+            <span title="The office's own dispatch record">Dispatched</span>
+            <span title="The recorded terminal job state — the tag says who reported it">Terminal</span>
+            <span title="The recorded review gate or decision for this revision">Reviewed</span>
+          </div>
+          {rows.map(row => {
+            const { summary, name, jobs, focus, steps, blockers } = prepare(row);
+            const cells = requestGridCells(row, state);
+            return (
+              <details className="request-row-item request-grid-item" key={row.id}>
+                <summary className="request-grid-row">
+                  <span className="request-row-name">{name}</span>
+                  <GridCell cell={cells.minted} />
+                  <GridCell cell={cells.dispatched} />
+                  <GridCell cell={cells.terminal} />
+                  <GridCell cell={cells.reviewed} />
+                </summary>
+                <RequestRowDetail
+                  row={row}
+                  summary={summary}
+                  focus={focus}
+                  jobs={jobs}
+                  steps={steps}
+                  blockers={blockers}
+                  onOpenQueue={onOpenQueue}
+                />
+              </details>
+            );
+          })}
+        </>
       ) : (
         <>
           <div className="request-head" aria-hidden="true">
@@ -393,27 +654,7 @@ function ProjectRequests({
             <span>Last activity</span>
           </div>
           {rows.map(row => {
-            const summary = summarizeRequest(state, row, watchedJobIds);
-            const name =
-              row.request?.name ??
-              state.experiments.find(e => e.id === row.root.experimentId)?.name ??
-              'Research request';
-            const leadAgent = row.request?.leadAgentId
-              ? state.agents.find(a => a.id === row.request?.leadAgentId)
-              : undefined;
-            const lead = row.request
-              ? row.request.leadAgentId
-                ? (leadAgent?.name ?? 'Lead agent removed')
-                : 'No lead'
-              : `${label(row.root.recipient)} role`;
-            const jobs = row.jobs ?? [],
-              focus = jobs.find(j => j.unresolved) ?? jobs[jobs.length - 1];
-            const focusJob = focus ? (state.jobs ?? []).find(j => j.id === focus.jobId) : undefined;
-            const steps = requestLifecycle(row.request, row.root.createdAt, focusJob);
-            const blockers = [
-              ...(row.request?.blockers ?? []).map(b => `${b.code}: ${b.message}`),
-              ...(row.root.blocker ? [row.root.blocker] : []),
-            ];
+            const { summary, name, lead, jobs, focus, steps, blockers } = prepare(row);
             return (
               <details className="request-row-item" key={row.id}>
                 <summary>
@@ -430,48 +671,15 @@ function ProjectRequests({
                   <span className="request-row-job muted">{focus ? label(focus.state) : 'none'}</span>
                   <span className="request-row-activity muted">{timeAgo(summary.lastAt)}</span>
                 </summary>
-                <div className="request-row-detail">
-                  <p>{row.root.prompt}</p>
-                  {blockers.map(b => (
-                    <p className="blocker" key={b}>
-                      {b}
-                    </p>
-                  ))}
-                  <dl className="request-tracks">
-                    <div>
-                      <dt>Request status</dt>
-                      <dd>
-                        {label(row.status)}
-                        {row.request?.pipeline?.phase === 'DECIDED' && summary.outcome
-                          ? ` — decision ${label(summary.outcome)}`
-                          : ''}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>Provider job</dt>
-                      <dd>
-                        {focus
-                          ? `${label(focus.state)} — ${provenanceTag(focus.evidence)}${focus.unresolved ? ' · needs reconciliation' : ''}${jobs.length > 1 ? ` · ${jobs.length} on record` : ''}`
-                          : 'No provider job on record'}
-                      </dd>
-                    </div>
-                  </dl>
-                  <ol className="request-timeline" aria-label="Recorded lifecycle">
-                    {steps.map(step => (
-                      <li className={step.at ? '' : 'pending'} key={step.key}>
-                        <span className="request-step-name">{step.label}</span>
-                        <span className="request-step-tag">{step.source}</span>
-                        <span className="request-step-at muted">{step.at ? date(step.at) : step.pending}</span>
-                        {step.detail && <span className="request-step-detail muted">{step.detail}</span>}
-                      </li>
-                    ))}
-                  </ol>
-                  <div className="button-row">
-                    <button className="secondary" onClick={() => onOpenQueue(row.id)}>
-                      Open request
-                    </button>
-                  </div>
-                </div>
+                <RequestRowDetail
+                  row={row}
+                  summary={summary}
+                  focus={focus}
+                  jobs={jobs}
+                  steps={steps}
+                  blockers={blockers}
+                  onOpenQueue={onOpenQueue}
+                />
               </details>
             );
           })}
