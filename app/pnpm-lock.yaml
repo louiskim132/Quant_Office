@@ -27,18 +27,15 @@ importers:
         specifier: 4.5.4
         version: 4.5.4
     devDependencies:
+      '@electron/fuses':
+        specifier: 2.1.3
+        version: 2.1.3
       '@electron/packager':
         specifier: 20.3.0
         version: 20.3.0
-      '@electron/windows-sign':
-        specifier: 2.0.6
-        version: 2.0.6
       '@types/node':
-        specifier: ^24.13.3
+        specifier: 24.13.3
         version: 24.13.3
-      '@types/pngjs':
-        specifier: 6.0.5
-        version: 6.0.5
       '@types/react':
         specifier: 19.2.18
         version: 19.2.18
@@ -75,6 +72,11 @@ packages:
 
   '@electron/asar@4.3.0':
     resolution: {integrity: sha512-k/FFC/NQoTykGBi/Ga4L4KorsAKDdkK0LfNVG90eUG6vPVpJaL3iR9V1ZLbzBAF3QpojK5DcaGOdQOheKZv4JQ==}
+    engines: {node: '>=22.12.0'}
+    hasBin: true
+
+  '@electron/fuses@2.1.3':
+    resolution: {integrity: sha512-LoKJUXNiJ4JM8IIrUltSHI+8pkogaGj5wmJx81jE/Wk3g2w1/kfMbTEKNoY5kitGE8hiC12h32R/1SlywFtxXg==}
     engines: {node: '>=22.12.0'}
     hasBin: true
 
@@ -267,9 +269,6 @@ packages:
 
   '@types/node@24.13.3':
     resolution: {integrity: sha512-Dh8vAsV36ig5wa9OX4pXvMc9D3Veibfw2wix0CUwYODLD8nkj9UsLjASr49nPg+2eKzxhBV+v7L8pXvT4e639Q==}
-
-  '@types/pngjs@6.0.5':
-    resolution: {integrity: sha512-0k5eKfrA83JOZPppLtS2C7OUtyNAl2wKNxfyYl9Q5g9lPkgBl/9hNyAu6HuEH2J4XmIv2znEpkDd0SaZVxW6iQ==}
 
   '@types/react-dom@19.2.7':
     resolution: {integrity: sha512-I8bPpDLcHBv1qiIiXDCy71Rt8eQDKJP0sMSWJphDdAcdqiJ1sGpZamavoEIRZmYzjia9LuEb2HlYdDpmoENpvQ==}
@@ -646,6 +645,8 @@ snapshots:
       glob: 13.0.6
       minimatch: 10.2.6
 
+  '@electron/fuses@2.1.3': {}
+
   '@electron/get@5.1.0':
     dependencies:
       debug: 4.4.3
@@ -798,10 +799,6 @@ snapshots:
   '@types/node@24.13.3':
     dependencies:
       undici-types: 7.18.2
-
-  '@types/pngjs@6.0.5':
-    dependencies:
-      '@types/node': 24.13.3
 
   '@types/react-dom@19.2.7(@types/react@19.2.18)':
     dependencies:

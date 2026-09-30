@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ShieldCheck } from 'lucide-react';
 import type { Agent, AppState, Experiment, ResearchStatus, WorkMode } from '../shared/types';
 import type { BranchLink, PipelineRecord } from '../shared/pipeline';

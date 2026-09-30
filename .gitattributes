@@ -1,7 +1,4 @@
-# Keep the LR-0 formatter's LF output stable on Windows checkouts.
-app/src/**/*.ts text eol=lf
-app/src/**/*.tsx text eol=lf
-app/src/**/*.css text eol=lf
-app/tests/**/*.ts text eol=lf
-app/scripts/**/*.mjs text eol=lf
-app/scripts/**/*.ts text eol=lf
+# Every tracked text file is stored and checked out with LF, including on Windows checkouts that
+# set core.autocrlf. This keeps the Prettier check (LR-0) stable and ends LF/CRLF churn in docs,
+# manifests and workflows. Binary files are detected automatically.
+* text=auto eol=lf

@@ -34,22 +34,19 @@ const callbacks: Promise<void>[] = [];
 const launches: { executable: string; cwd: string; pid: number | undefined }[] = [];
 const exited = new Map<string, number>();
 let controller: AssignmentController;
-const exec = new LocalCliExecAdapter(
-  () => sessionsRoot,
-  p => subscriptions.toolPath(p),
+const exec = new LocalCliExecAdapter({
+  sessionsRoot: () => sessionsRoot,
+  executable: p => subscriptions.toolPath(p),
   now,
-  undefined,
-  (executable, args, options) => {
+  spawnChild: (executable, args, options) => {
     const child = spawn(executable, args, options);
     launches.push({ executable, cwd: options.cwd, pid: child.pid });
     child.on('exit', () => exited.set(options.cwd, Date.now()));
     return child;
   },
-  undefined,
-  8 * 60_000,
-  undefined,
-  id => store.snapshot().agents.find(a => a.id === id)?.provider,
-  jobId => {
+  timeoutMs: 8 * 60_000,
+  providerFor: id => store.snapshot({ history: false }).agents.find(a => a.id === id)?.provider,
+  onLocalEvent: jobId => {
     const task = (async () => {
       const job = store.snapshot({ history: false }).jobs?.find(j => j.id === jobId);
       if (!job) return;
@@ -61,7 +58,7 @@ const exec = new LocalCliExecAdapter(
     });
     callbacks.push(task);
   },
-);
+});
 const route = new LocalSessionRouter(
   id => store.localSessionForJob(id),
   { FLAT_PACKET: exec, PROJECT_WORKTREE: exec },

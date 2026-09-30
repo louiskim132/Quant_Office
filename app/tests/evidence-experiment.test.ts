@@ -168,7 +168,7 @@ test('section 8.4 measured retrieval experiment preserves all planted findings a
   assert.deepEqual(baseline.findings, defects.slice().sort());
   assert.deepEqual(onDemand.findings, baseline.findings);
   await assert.rejects(evidence.read({ agentId: agent.id, objectHash: privateHash }));
-  const changed = put(project.id, 'new-source.txt', 'AUDIT_DEFECT NEW_SOURCE');
+  put(project.id, 'new-source.txt', 'AUDIT_DEFECT NEW_SOURCE');
   const refreshed = await evidence.query({
     agentId: agent.id,
     projectId: project.id,

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { History } from 'lucide-react';
 import type { AgentLog, AppState, LineageEvent } from '../shared/types';
 import { Empty } from './components';

@@ -3,8 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, copyFile, cp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { createHash, randomUUID } from 'node:crypto';
-import { OfficeStore } from '../src/core/store';
+import { randomUUID } from 'node:crypto';
 import { fixture, completeS1 } from './fixtures/pipeline';
 import { SPEC_SECTIONS } from '../src/shared/research';
 

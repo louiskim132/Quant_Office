@@ -1,5 +1,4 @@
-import test, { type TestContext } from 'node:test';
-import assert from 'node:assert/strict';
+import { type TestContext } from 'node:test';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { removeTreeSync } from '../../src/main/fsx';
@@ -17,8 +16,6 @@ import { PipelineService } from '../../src/main/pipeline';
 import { OutputService } from '../../src/main/outputs';
 import { prepareInputSnapshot, snapshotObjectPath } from '../../src/main/locations';
 import { HoldoutCustody } from '../../src/main/holdout';
-import { TerminalHandoffAdapter } from '../../src/main/handoff';
-import { stageContextHash, stageReportSchema, type StageContext } from '../../src/shared/pipeline';
 import type {
   Agent,
   CapabilityEvidence,

@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, realpathSync, watch, type FSWatcher } from 'node:fs';
 import path from 'node:path';
@@ -160,6 +160,90 @@ interface SpawnRecord {
 
 const sha256Text = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex');
 
+const TASKKILL = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'taskkill.exe');
+
+/**
+ * The default child spawn. On Windows, kill() ends the whole process tree (taskkill /T /F): a
+ * provider CLI's own tool processes — shells, python, node — would otherwise outlive a cancel or
+ * the run limit, because TerminateProcess stops only the direct child. The isolated host
+ * (agent-host.cjs) kills trees the same way. Elsewhere kill() is the plain signal.
+ */
+export function spawnTreeKillable(command: string, args: string[], options: CliSpawnOptions): CliChild {
+  const child = spawn(command, args, {
+    cwd: options.cwd,
+    env: options.env,
+    windowsHide: options.windowsHide,
+    stdio: options.stdio,
+  });
+  if (process.platform === 'win32') {
+    const plainKill = child.kill.bind(child);
+    child.kill = (signal?: NodeJS.Signals | number) => {
+      if (!child.pid || child.exitCode !== null || child.signalCode !== null) return plainKill(signal);
+      execFile(TASKKILL, ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true }, error => {
+        // taskkill could not run or found nothing — fall back to stopping the direct child.
+        if (error) plainKill(signal);
+      });
+      return true;
+    };
+  }
+  return child;
+}
+
+/** Construction options for LocalCliExecAdapter. Only `sessionsRoot` is required. */
+export interface LocalCliExecOptions {
+  sessionsRoot: () => string;
+  /**
+   * Resolves the installed CLI path for a provider. The production wiring passes the
+   * subscriptions toolPath resolver; the bare-name default lets spawn resolve it on PATH.
+   */
+  executable?: (provider: Provider) => string;
+  now?: () => string;
+  io?: LocalFileIO;
+  /** The direct spawn; the default kills the whole process tree on Windows (spawnTreeKillable). */
+  spawnChild?: CliSpawn;
+  /**
+   * The child's environment, built per provider at spawn: the scrubbed subscription environment,
+   * plus the provider's own API-key variable when the user saved one locally (LR-15).
+   */
+  environment?: (provider: Provider) => NodeJS.ProcessEnv;
+  timeoutMs?: number;
+  discoverRecords?: (dir: string, provider: Provider) => Discovery;
+  /** Resolves an agent record's provider for plan previews, which run before a binding exists. */
+  providerFor?: (agentId: string) => Provider | undefined;
+  /**
+   * Fired after a child exit or a receipt/ack write settles — the office observes the job and
+   * advances the chain. In-memory only: a run from a previous office process is covered by
+   * startup reconciliation, never by a listener on a process this office did not spawn.
+   */
+  onLocalEvent?: (jobId: string) => void;
+  /**
+   * Spawns the office-side serena readiness probe — stdin must be a pipe so the initialize
+   * handshake can be written; the exec spawn's pinned 'ignore' stdin cannot serve.
+   */
+  serenaSpawn?: SerenaSpawn;
+  /** Probe deadline override for tests; serena-session supplies the 30s default. */
+  serenaReadyTimeoutMs?: number;
+  /**
+   * The office-bound edge of the evidence drop-box, bound to EvidenceService at construction.
+   * The caller identity comes from the assignment record at submit — never from file bytes.
+   */
+  evidenceFrames?: EvidenceFrameHandler;
+  /** Minimum spacing between claude launches (CLAUDE_SPAWN_GAP_MS). Tests with fake children pass 0. */
+  claudeSpawnGapMs?: number;
+  /**
+   * Which credential context a spawn's environment carries — recorded on the launch record so the
+   * evidence states which mode dispatched the run. Metadata only; the key itself never enters the
+   * record.
+   */
+  authMode?: (provider: Provider) => 'subscription' | 'api-key';
+  /**
+   * The isolated spawn surface (LR-16). When present, the agent CLI is dispatched through the
+   * QRO-Agent host instead of a direct spawn — and the run must authenticate with a saved API
+   * key, because the office user's subscription sign-ins do not exist in the agent's profile.
+   */
+  spawnAs?: CliSpawn;
+}
+
 /**
  * The office-spawned local route (QO-LOCAL-REV §6): instead of writing a packet the user launches,
  * the office writes the same office-local-session@2 packet and then spawns the provider's installed
@@ -192,70 +276,49 @@ export class LocalCliExecAdapter implements ProviderAdapter {
   private claudeLaunches: Promise<void> = Promise.resolve();
   private lastClaudeLaunchAt = 0;
 
-  constructor(
-    private readonly sessionsRoot: () => string,
-    /**
-     * Resolves the installed CLI path for a provider. The production wiring passes the
-     * subscriptions toolPath resolver; the bare-name default lets spawn resolve it on PATH.
-     */
-    private readonly executable: (provider: Provider) => string = provider => provider,
-    private readonly now: () => string = () => new Date().toISOString(),
-    private readonly io: LocalFileIO = new GuardedLocalFileIO(),
-    private readonly spawnChild: CliSpawn = (command, args, options) =>
-      spawn(command, args, {
-        cwd: options.cwd,
-        env: options.env,
-        windowsHide: options.windowsHide,
-        stdio: options.stdio,
-      }),
-    /**
-     * The child's environment, built per provider at spawn: the scrubbed subscription environment,
-     * plus the provider's own API-key variable when the user saved one locally (LR-15).
-     */
-    private readonly environment: (provider: Provider) => NodeJS.ProcessEnv = () => subscriptionEnvironment(),
-    private readonly timeoutMs: number = DEFAULT_TIMEOUT_MS,
-    private readonly discoverRecords: (dir: string, provider: Provider) => Discovery = discover,
-    /** Resolves an agent record's provider for plan previews, which run before a binding exists. */
-    private readonly providerFor?: (agentId: string) => Provider | undefined,
-    /**
-     * Fired after a child exit or a receipt/ack write settles — the office observes the job and
-     * advances the chain. In-memory only: a run from a previous office process is covered by
-     * startup reconciliation, never by a listener on a process this office did not spawn.
-     */
-    private readonly onLocalEvent?: (jobId: string) => void,
-    /**
-     * Spawns the office-side serena readiness probe — stdin must be a pipe so the initialize
-     * handshake can be written; the exec spawn's pinned 'ignore' stdin cannot serve.
-     */
-    private readonly serenaSpawn: SerenaSpawn = (command, args, options) =>
-      spawn(command, args, {
-        cwd: options.cwd,
-        env: options.env,
-        windowsHide: options.windowsHide,
-        stdio: options.stdio,
-      }),
-    /** Probe deadline override for tests; serena-session supplies the 30s default. */
-    private readonly serenaReadyTimeoutMs?: number,
-    /**
-     * The office-bound edge of the evidence drop-box, bound to EvidenceService at construction.
-     * The caller identity comes from the assignment record at submit — never from file bytes.
-     */
-    private readonly evidenceFrames?: EvidenceFrameHandler,
-    /** The claude launch spacing; tests pass 0. */
-    private readonly claudeSpawnGapMs: number = CLAUDE_SPAWN_GAP_MS,
-    /**
-     * Which credential context a spawn's environment carries — recorded on the launch record so the
-     * evidence states which mode dispatched the run. Metadata only; the key itself never enters the
-     * record.
-     */
-    private readonly authMode: (provider: Provider) => 'subscription' | 'api-key' = () => 'subscription',
-    /**
-     * The isolated spawn surface (LR-16). When present, the agent CLI is dispatched through the
-     * QRO-Agent host instead of a direct spawn — and the run must authenticate with a saved API
-     * key, because the office user's subscription sign-ins do not exist in the agent's profile.
-     */
-    private readonly spawnAs?: CliSpawn,
-  ) {}
+  private readonly sessionsRoot: () => string;
+  private readonly executable: (provider: Provider) => string;
+  private readonly now: () => string;
+  private readonly io: LocalFileIO;
+  private readonly spawnChild: CliSpawn;
+  private readonly environment: (provider: Provider) => NodeJS.ProcessEnv;
+  private readonly timeoutMs: number;
+  private readonly discoverRecords: (dir: string, provider: Provider) => Discovery;
+  private readonly providerFor?: (agentId: string) => Provider | undefined;
+  private readonly onLocalEvent?: (jobId: string) => void;
+  private readonly serenaSpawn: SerenaSpawn;
+  private readonly serenaReadyTimeoutMs?: number;
+  private readonly evidenceFrames?: EvidenceFrameHandler;
+  private readonly claudeSpawnGapMs: number;
+  private readonly authMode: (provider: Provider) => 'subscription' | 'api-key';
+  private readonly spawnAs?: CliSpawn;
+
+  constructor(options: LocalCliExecOptions) {
+    this.sessionsRoot = options.sessionsRoot;
+    this.executable = options.executable ?? (provider => provider);
+    this.now = options.now ?? (() => new Date().toISOString());
+    this.io = options.io ?? new GuardedLocalFileIO();
+    this.spawnChild = options.spawnChild ?? spawnTreeKillable;
+    this.environment = options.environment ?? (() => subscriptionEnvironment());
+    this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.discoverRecords = options.discoverRecords ?? discover;
+    this.providerFor = options.providerFor;
+    this.onLocalEvent = options.onLocalEvent;
+    this.serenaSpawn =
+      options.serenaSpawn ??
+      ((command, args, spawnOptions) =>
+        spawn(command, args, {
+          cwd: spawnOptions.cwd,
+          env: spawnOptions.env,
+          windowsHide: spawnOptions.windowsHide,
+          stdio: spawnOptions.stdio,
+        }));
+    this.serenaReadyTimeoutMs = options.serenaReadyTimeoutMs;
+    this.evidenceFrames = options.evidenceFrames;
+    this.claudeSpawnGapMs = options.claudeSpawnGapMs ?? CLAUDE_SPAWN_GAP_MS;
+    this.authMode = options.authMode ?? (() => 'subscription');
+    this.spawnAs = options.spawnAs;
+  }
 
   /** Waits until a claude launch would be at least claudeSpawnGapMs after the previous one. */
   private claudeLaunchSlot(): Promise<void> {
@@ -899,7 +962,7 @@ export class LocalCliExecAdapter implements ProviderAdapter {
   }
 
   async fetch(
-    job: ProviderJob,
+    _job: ProviderJob,
     output: { path: string; sha256: string; bytes: number },
     local?: LocalSessionRecord | null,
   ): Promise<Uint8Array> {

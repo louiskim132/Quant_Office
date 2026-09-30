@@ -697,7 +697,7 @@ test('a late completion after a cancellation request stays with the old job', as
 test('a restart during dispatch reconciles to Unknown and never resubmits or invents an outcome', async t => {
   const adapter = new FakeAdapter();
   const f = await fixture(t, adapter);
-  const { assignment } = f.controller.prepare({
+  f.controller.prepare({
     requestId: f.request.id,
     agentId: f.agent.id,
     snapshotId: f.snapshot.id,

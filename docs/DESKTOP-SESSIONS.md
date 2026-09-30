@@ -338,6 +338,14 @@ Reject a submitted or blocked packet with a specific reason:
 node tools/desktop.mjs reject worker-3 "The submission changes an unassigned contract and lacks old-record compatibility coverage."
 ```
 
+When a rejected worker can fix the problem within the same round and scope, Session 8 may reopen the slot instead of planning a new round:
+
+```powershell
+node tools/desktop.mjs reopen worker-3 "Add the missing old-record compatibility test; the scope is unchanged."
+```
+
+`reopen` works only on a `CODE` worker whose decision is `REJECTED`. It keeps the rejection and the superseded result as archived records, and returns the slot to `RUNNING`. The same worker session then fixes, commits and runs `finish` again with a fresh report; the packet, base and allowed paths do not change.
+
 Do not repair a worker by editing its checkout or copying its entire folder. A small integration-only correction may be made and committed in Session 8. A material redesign becomes a new round after the current round is resolved and closed.
 
 ### 5.1 Merge conflicts
@@ -439,6 +447,7 @@ The next user request may reuse the same eight desktop sessions. Session 8 publi
 | Stale round/report/review/head | Regenerate the report or assessment from current `status`/`review`. Never edit published state to make stale evidence fit. |
 | `MERGE_CONFLICT` | Resolve only in Session 8 using section 5.1. Worker remains untouched. |
 | `BLOCKED` | Session 8 reads the blocker and rejects or plans a later round. Worker makes no further edits. |
+| `REJECTED`, fixable in this round | Session 8 may `reopen` the slot with a reason (section 5). The worker then continues in the same session and submits a fresh report. |
 | `CLOSED` | No further work belongs to that round. Wait for a newly published round. |
 | Published packet hash changed | Stop all sessions. The immutable task record was modified; recover from Git/filesystem evidence instead of trusting it. |
 
@@ -446,4 +455,4 @@ The next user request may reuse the same eight desktop sessions. Session 8 publi
 
 The helper enforces role/folder binding, one immutable current packet, seven complete slots, disjoint declared write scope, protected integration files, frozen base commits, clean preconditions, exact submitted SHAs, stale-review refusal, atomic result records and organizer-only merging. Its regression suite launches seven simultaneous `start` commands.
 
-It cannot prove that a human did not open the same folder in two applications, authenticate a model/provider, independently verify the truth of a reported test, make a hosted clone see local files, or guarantee semantic compatibility. GitHub protection remains a separate control. Session 8 must independently review and test and may merge only through the protected exact-head PR gate above.
+It cannot prove that a human did not open the same folder in two applications, authenticate a model/provider, independently verify the truth of a reported test, make a hosted clone see local files, or guarantee semantic compatibility. GitHub protection remains a separate control, and it is currently unavailable on this repository's plan (branch protection and rulesets answer "Upgrade to GitHub Pro or make this repository public"), so the exact-head PR gate above is procedural: nothing on GitHub stops a direct push to `main`. Session 8 must independently review and test and may merge only through the exact-head PR gate above.

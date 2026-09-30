@@ -198,3 +198,31 @@ test('downgrade accepts a v6 workspace', async t => {
     db.close();
   }
 });
+
+test('the background verification pages through the history and advances the checkpoint at every page boundary', async t => {
+  // A page is 25 events, so check the lengths on both sides of each boundary.
+  for (const events of [1, 24, 25, 26, 50, 51]) {
+    const { file, holder } = fixture(t);
+    holder.store = new OfficeStore(file);
+    for (let i = 0; i < events; i++) holder.store.recordAccountObservation(observation(i));
+    holder.store.close();
+    assert.equal(tip(file)!.sequence, events, `${events} events were recorded`);
+    holder.store = new OfficeStore(file);
+    await holder.store.verifyInBackground();
+    assert.equal(checkpoint(file)!.sequence, events, `checkpoint after ${events} events`);
+  }
+});
+
+test('a tampered event on a later page is reported at its own sequence', async t => {
+  const { file, holder } = fixture(t);
+  holder.store = new OfficeStore(file);
+  for (let i = 0; i < 60; i++) holder.store.recordAccountObservation(observation(i));
+  await holder.store.verifyInBackground();
+  holder.store.close();
+  mutateEvent(file, 40, record => {
+    record.hash = sha256('tampered record bytes');
+  });
+  // The checkpoint already covers sequence 40, so the tail replay opens cleanly; only the full scan finds it.
+  holder.store = new OfficeStore(file);
+  await assert.rejects(holder.store.verifyInBackground(), /hash chain integrity failure at sequence 40/);
+});

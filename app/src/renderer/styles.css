@@ -231,13 +231,6 @@ pre {
   background: var(--border);
   margin: 18px 12px;
 }
-.later-dot {
-  height: 5px;
-  width: 5px;
-  border-radius: 50%;
-  background: var(--subtle);
-  margin-left: auto;
-}
 .sidebar-footer {
   margin-top: auto;
   padding: 27px 12px 0;
@@ -989,12 +982,6 @@ td .secondary {
   .artifact-toolbar .primary {
     font-size: 9px;
     padding: 9px;
-  }
-  .composer-header .muted {
-    max-width: 160px;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-    overflow: hidden;
   }
 }
 @media (max-width: 1040px) {

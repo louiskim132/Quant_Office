@@ -1,8 +1,9 @@
 name: Verify
 on:
   pull_request:
-  push:
-    branches: [main, 'codex/**', 'parallel/**']
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * 1' # weekly safety run on main, Mondays 06:00 UTC
 permissions:
   contents: read
 concurrency:
@@ -14,13 +15,13 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: '24.19.0'
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
-          version: '11.19.0'
+          version: '12.3.4'
       - name: Coordination regression tests
         run: node --test tools/parallel.test.mjs tools/desktop.test.mjs
       - name: Install locked dependencies
@@ -40,6 +41,8 @@ jobs:
         run: pnpm build
       - name: Package
         working-directory: app
+        env:
+          QRO_TEST_BUILD: '1'
         run: node scripts/package.mjs
       - name: Desktop end-to-end
         working-directory: app
