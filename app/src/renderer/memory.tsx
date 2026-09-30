@@ -12,7 +12,16 @@ import type {
 import { Empty, SearchField, label } from './components';
 import './memory.css';
 import { formatDateTime } from './format';
-import { layoutMemory, fitMemory, memoryLabels, memoryDegrees, memoryRadius, memoryEdgeTrim } from './memory-layout';
+import {
+  layoutMemory,
+  fitMemory,
+  memoryLabels,
+  memoryDegrees,
+  memoryRadius,
+  memoryEdgeTrim,
+  memoryInWindow,
+  MEMORY_WINDOWS,
+} from './memory-layout';
 
 const KINDS: FindingKind[] = ['OBSERVATION', 'HYPOTHESIS', 'RESULT', 'DEFECT', 'DECISION', 'NOTE'];
 const REL_KINDS: RelationshipKind[] = ['SUPPORTS', 'CONTRADICTS', 'RELATES', 'DUPLICATES', 'REFINES'];
@@ -45,6 +54,8 @@ export function MemoryView({ state, projectId }: { state: AppState; projectId: s
   const [view, setView] = useState({ x: 0, y: 0, k: 1 });
   const [hiddenKinds, setHiddenKinds] = useState<Set<FindingKind>>(new Set());
   const [showRefuted, setShowRefuted] = useState(false);
+  const [windowSel, setWindowSel] = useState('all');
+  const [compareIds, setCompareIds] = useState<Set<string>>(new Set());
   const [linkTarget, setLinkTarget] = useState('');
   const [linkKind, setLinkKind] = useState<RelationshipKind>('RELATES');
   const [linkNote, setLinkNote] = useState('');
@@ -163,7 +174,7 @@ export function MemoryView({ state, projectId }: { state: AppState; projectId: s
     drag.x = e.clientX;
     drag.y = e.clientY;
   };
-  const onPointerUp = () => {
+  const onPointerUp = (e: React.PointerEvent) => {
     const drag = dragRef.current;
     dragRef.current = null;
     if (!drag) return;
@@ -172,8 +183,18 @@ export function MemoryView({ state, projectId }: { state: AppState; projectId: s
       return;
     }
     if (drag.kind === 'node' && drag.id) {
-      setSelectedNode(drag.id);
-      setSelectedEdge('');
+      if (e.ctrlKey || e.metaKey) {
+        const id = drag.id;
+        setCompareIds(current => {
+          const next = new Set(current);
+          if (next.has(id)) next.delete(id);
+          else next.add(id);
+          return next;
+        });
+      } else {
+        setSelectedNode(drag.id);
+        setSelectedEdge('');
+      }
     } else if (drag.kind === 'edge' && drag.id) {
       setSelectedEdge(drag.id);
       setSelectedNode('');
@@ -256,6 +277,7 @@ export function MemoryView({ state, projectId }: { state: AppState; projectId: s
       setLinkTarget('');
       setLinkNote('');
     }, 'Link proposed — it renders dashed until confirmed or refuted.');
+  const findingCreated = new Map(projectFindings.map(f => [f.id, f.createdAt]));
   const focusNode = (id: string) => {
     setSelectedNode(id);
     setSelectedEdge('');
@@ -268,6 +290,8 @@ export function MemoryView({ state, projectId }: { state: AppState; projectId: s
         next.delete(kind);
         return next;
       });
+    // Same for the window: focusing a finding outside it widens the display filter.
+    if (!memoryInWindow([{ findingId: id }], i => findingCreated.get(i), windowSel).has(id)) setWindowSel('all');
     const p = posRef.current[id];
     if (p) setView(v => ({ k: v.k, x: W / 2 - p.x * v.k, y: H / 2 - p.y * v.k }));
   };
@@ -325,9 +349,17 @@ export function MemoryView({ state, projectId }: { state: AppState; projectId: s
       .filter(e => e.status !== 'REFUTED' && (e.from === selectedNode || e.to === selectedNode))
       .flatMap(e => [e.from, e.to]),
   ]);
+  // Window + kind chips are display filters over loaded graph data — records never change.
+  const inWindow = memoryInWindow(graph?.nodes ?? [], id => findingCreated.get(id), windowSel);
+  const presentKinds = KINDS.filter(kind => (graph?.nodes ?? []).some(node => node.kind === kind));
   const visibleNodes = (graph?.nodes ?? [])
     .slice(0, 100)
-    .filter(node => !hiddenKinds.has(node.kind) && (!localOnly || !selectedNode || neighbors.has(node.findingId)));
+    .filter(
+      node =>
+        inWindow.has(node.findingId) &&
+        !hiddenKinds.has(node.kind) &&
+        (!localOnly || !selectedNode || neighbors.has(node.findingId)),
+    );
   const visibleIds = new Set(visibleNodes.map(n => n.findingId));
   const labelIds = memoryLabels(visibleNodes, pos, view.k * graphScale, hovered || selectedNode);
   const focusedIds = new Set([
@@ -449,7 +481,7 @@ export function MemoryView({ state, projectId }: { state: AppState; projectId: s
           </aside>
           <div className="memory-graph">
             <div className="memory-kindrow">
-              {KINDS.map(kind => (
+              {presentKinds.map(kind => (
                 <button
                   key={kind}
                   type="button"
@@ -503,6 +535,20 @@ export function MemoryView({ state, projectId }: { state: AppState; projectId: s
               </label>
             </div>
             <div className="memory-tools button-row">
+              <span className="memory-window" role="group" aria-label="Graph window — display filter only">
+                <span className="memory-window-label muted">Window · display only</span>
+                {MEMORY_WINDOWS.map(w => (
+                  <button
+                    key={w.id}
+                    type="button"
+                    aria-pressed={windowSel === w.id}
+                    className={`memory-window-chip${windowSel === w.id ? ' on' : ''}`}
+                    onClick={() => setWindowSel(w.id)}
+                  >
+                    {w.label}
+                  </button>
+                ))}
+              </span>
               <button className="secondary" onClick={() => setView(fitMemory(pos))}>
                 Fit graph
               </button>
@@ -530,101 +576,135 @@ export function MemoryView({ state, projectId }: { state: AppState; projectId: s
                 Local graph
               </button>
             </div>
-            <svg
-              ref={svgRef}
-              viewBox={`0 0 ${W} ${H}`}
-              role="img"
-              aria-label="Memory graph"
-              onPointerDown={onPointerDown}
-              onPointerMove={onPointerMove}
-              onPointerUp={onPointerUp}
-              onPointerLeave={onPointerUp}
-            >
-              <g ref={gRef} transform={`translate(${view.x} ${view.y}) scale(${view.k})`}>
-                {boundedEdges.map(edge => {
-                  const a = pos[edge.from],
-                    b = pos[edge.to],
-                    mx = (a.x + b.x) / 2,
-                    my = (a.y + b.y) / 2;
-                  const trim = memoryEdgeTrim(
-                    a,
-                    b,
-                    memoryRadius(degrees[edge.from] ?? 0),
-                    memoryRadius(degrees[edge.to] ?? 0),
-                  );
-                  const near = edge.from === hovered || edge.to === hovered;
-                  return (
-                    <g
-                      key={edge.relationshipId}
-                      data-rel={edge.relationshipId}
-                      className={`mem-edge status-${edge.status.toLowerCase()}${selectedEdge === edge.relationshipId ? ' selected' : ''}${
-                        hovered && selectedEdge !== edge.relationshipId ? (near ? ' near' : ' dim') : ''
-                      }`}
-                    >
-                      <line className="mem-edge-hit" x1={a.x} y1={a.y} x2={b.x} y2={b.y} />
-                      <line
-                        className="mem-edge-line"
-                        x1={trim.short ? a.x : trim.x1}
-                        y1={trim.short ? a.y : trim.y1}
-                        x2={trim.short ? b.x : trim.x2}
-                        y2={trim.short ? b.y : trim.y2}
-                      />
-                      {!trim.short && <path className="mem-edge-arrow" d={trim.arrow} />}
-                      {(selectedEdge === edge.relationshipId || hovered === edge.from || hovered === edge.to) && (
-                        <text className="mem-edge-label" x={mx} y={my - 4} textAnchor="middle">
-                          {label(edge.kind)}
-                        </text>
-                      )}
-                    </g>
-                  );
-                })}
-                {visibleNodes.map(node => {
-                  const p = pos[node.findingId];
-                  if (!p) return null;
-                  const r = memoryRadius(degrees[node.findingId] ?? 0);
-                  return (
-                    <g
-                      key={node.findingId}
-                      data-finding={node.findingId}
-                      role="button"
-                      tabIndex={0}
-                      aria-label={`${node.title} — ${label(node.kind)}`}
-                      aria-pressed={selectedNode === node.findingId}
-                      onKeyDown={e => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault();
-                          setSelectedNode(node.findingId);
-                          setSelectedEdge('');
-                        }
-                      }}
-                      onMouseEnter={() => setHovered(node.findingId)}
-                      onMouseLeave={() => setHovered('')}
-                      opacity={hovered && !focusedIds.has(node.findingId) ? 0.25 : 1}
-                      className={`mem-node kind-${node.kind.toLowerCase()}${node.superseded ? ' superseded' : ''}${selectedNode === node.findingId ? ' selected' : ''}`}
-                      transform={`translate(${p.x} ${p.y})`}
-                    >
-                      <title>{node.title}</title>
-                      <circle className="mem-node-hit" r={Math.max(r, 13)} />
-                      <circle className="mem-node-dot" r={r} />
-                      {node.superseded && (
-                        <line className="mem-supersede" x1={-r * 0.72} y1={r * 0.72} x2={r * 0.72} y2={-r * 0.72} />
-                      )}
-                      <text
-                        className="mem-node-title"
-                        y={r + 15 / (view.k * graphScale)}
-                        textAnchor="middle"
-                        style={{
-                          visibility: labelIds.has(node.findingId) ? 'visible' : 'hidden',
-                          fontSize: 12 / (view.k * graphScale),
-                        }}
+            <div className="memory-canvas">
+              <svg
+                ref={svgRef}
+                viewBox={`0 0 ${W} ${H}`}
+                role="img"
+                aria-label="Memory graph"
+                onPointerDown={onPointerDown}
+                onPointerMove={onPointerMove}
+                onPointerUp={onPointerUp}
+                onPointerLeave={onPointerUp}
+              >
+                <g ref={gRef} transform={`translate(${view.x} ${view.y}) scale(${view.k})`}>
+                  {boundedEdges.map(edge => {
+                    const a = pos[edge.from],
+                      b = pos[edge.to],
+                      mx = (a.x + b.x) / 2,
+                      my = (a.y + b.y) / 2;
+                    const trim = memoryEdgeTrim(
+                      a,
+                      b,
+                      memoryRadius(degrees[edge.from] ?? 0),
+                      memoryRadius(degrees[edge.to] ?? 0),
+                    );
+                    const near = edge.from === hovered || edge.to === hovered;
+                    return (
+                      <g
+                        key={edge.relationshipId}
+                        data-rel={edge.relationshipId}
+                        className={`mem-edge status-${edge.status.toLowerCase()}${selectedEdge === edge.relationshipId ? ' selected' : ''}${
+                          hovered && selectedEdge !== edge.relationshipId ? (near ? ' near' : ' dim') : ''
+                        }`}
                       >
-                        {node.title.length > 24 ? `${node.title.slice(0, 22)}…` : node.title}
-                      </text>
-                    </g>
+                        <line className="mem-edge-hit" x1={a.x} y1={a.y} x2={b.x} y2={b.y} />
+                        <line
+                          className="mem-edge-line"
+                          x1={trim.short ? a.x : trim.x1}
+                          y1={trim.short ? a.y : trim.y1}
+                          x2={trim.short ? b.x : trim.x2}
+                          y2={trim.short ? b.y : trim.y2}
+                        />
+                        {!trim.short && <path className="mem-edge-arrow" d={trim.arrow} />}
+                        {(selectedEdge === edge.relationshipId || hovered === edge.from || hovered === edge.to) && (
+                          <text className="mem-edge-label" x={mx} y={my - 4} textAnchor="middle">
+                            {label(edge.kind)}
+                          </text>
+                        )}
+                      </g>
+                    );
+                  })}
+                  {visibleNodes.map(node => {
+                    const p = pos[node.findingId];
+                    if (!p) return null;
+                    const r = memoryRadius(degrees[node.findingId] ?? 0);
+                    return (
+                      <g
+                        key={node.findingId}
+                        data-finding={node.findingId}
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`${node.title} — ${label(node.kind)}`}
+                        aria-pressed={selectedNode === node.findingId}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            setSelectedNode(node.findingId);
+                            setSelectedEdge('');
+                          }
+                        }}
+                        onMouseEnter={() => setHovered(node.findingId)}
+                        onMouseLeave={() => setHovered('')}
+                        opacity={hovered && !focusedIds.has(node.findingId) ? 0.25 : 1}
+                        className={`mem-node kind-${node.kind.toLowerCase()}${node.superseded ? ' superseded' : ''}${selectedNode === node.findingId ? ' selected' : ''}`}
+                        transform={`translate(${p.x} ${p.y})`}
+                      >
+                        <title>{node.title}</title>
+                        <circle className="mem-node-hit" r={Math.max(r, 13)} />
+                        <circle className="mem-node-dot" r={r} />
+                        {node.superseded && (
+                          <line className="mem-supersede" x1={-r * 0.72} y1={r * 0.72} x2={r * 0.72} y2={-r * 0.72} />
+                        )}
+                        <text
+                          className="mem-node-title"
+                          y={r + 15 / (view.k * graphScale)}
+                          textAnchor="middle"
+                          style={{
+                            visibility: labelIds.has(node.findingId) ? 'visible' : 'hidden',
+                            fontSize: 12 / (view.k * graphScale),
+                          }}
+                        >
+                          {node.title.length > 24 ? `${node.title.slice(0, 22)}…` : node.title}
+                        </text>
+                      </g>
+                    );
+                  })}
+                </g>
+              </svg>
+              {!visibleNodes.length && (
+                <p className="mem-empty" role="status">
+                  {windowSel !== 'all'
+                    ? 'No findings in this window — display filter only; records are unchanged.'
+                    : 'All finding kinds are filtered out.'}
+                </p>
+              )}
+            </div>
+            {!!compareIds.size && (
+              <div className="memory-tray" role="group" aria-label="Compare tray">
+                <span className="muted">Comparing {compareIds.size}</span>
+                {[...compareIds].map(id => {
+                  const node = graph?.nodes.find(n => n.findingId === id);
+                  if (!node) return null;
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      className="memory-tray-item"
+                      onClick={() => focusNode(id)}
+                      title={node.title}
+                    >
+                      <span className={`mem-legend-dot kind-${node.kind.toLowerCase()}`} aria-hidden="true" />
+                      <span className="memory-tray-title">{node.title}</span>
+                      <small className="muted">{node.superseded ? 'Superseded' : 'Recorded'}</small>
+                    </button>
                   );
                 })}
-              </g>
-            </svg>
+                <button type="button" className="text-button" onClick={() => setCompareIds(new Set())}>
+                  Clear
+                </button>
+              </div>
+            )}
             <p className="muted memory-hint">
               Drag to pan · scroll to zoom · drag a node to pin it · dot size = link count, color = finding kind ·
               arrows follow the recorded link direction
