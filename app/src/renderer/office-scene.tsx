@@ -13,6 +13,20 @@ interface ScenePos {
   y: number;
   loc: string;
 }
+
+/** Loose floor zones by role. Order inside each zone follows join order; empty seats stay put. */
+export interface SeatZones {
+  directors: Agent[];
+  pms: Agent[];
+  workers: Agent[];
+}
+export function seatZones(seats: (Agent | null)[]): SeatZones {
+  return {
+    directors: seats.filter((a): a is Agent => a?.role === 'DIRECTOR'),
+    pms: seats.filter((a): a is Agent => !!a && a.role.startsWith('PM')),
+    workers: seats.filter((a): a is Agent => a?.role === 'WORKER'),
+  };
+}
 const reducedMotion = () =>
   window.matchMedia('(prefers-reduced-motion: reduce)').matches ||
   document.documentElement.dataset.motion === 'reduced';
@@ -189,11 +203,9 @@ export function OfficeScene({
     );
   };
 
-  // Seating mirrors the org: the director gets a separate room; project managers sit above workers.
-  // Groups keep the join-ordered seat list so people don't shuffle.
-  const directors = seats.filter((a): a is Agent => a?.role === 'DIRECTOR'),
-    pms = seats.filter((a): a is Agent => !!a && a.role.startsWith('PM')),
-    workers = seats.filter((a): a is Agent => a?.role === 'WORKER');
+  // Seating mirrors the org on one open floor: loose role zones marked on the floor, never
+  // walled in. Groups keep the join-ordered seat list so people don't shuffle.
+  const zones = seatZones(seats);
   const roomName = (id: string | null) =>
     id ? ((requests ?? []).find(r => r.id === id)?.name ?? 'Conversation in progress') : 'No active meeting';
   const busyRooms = meetings.map((id, i) => ({ id, i })).filter(r => r.id);
@@ -215,40 +227,38 @@ export function OfficeScene({
       </div>
       <div className="sky-floor">
         <div className="office-main">
-          <section className="director-suite">
-            <h3>DIRECTOR'S OFFICE</h3>
+          <section className="floor-zone" data-zone="director">
+            <h3 className="zone-tag">DIRECTOR</h3>
             <div className="workstations">
-              {directors.length ? (
-                directors.map(a => station(a, seats.indexOf(a)))
+              {zones.directors.length ? (
+                zones.directors.map(a => station(a, seats.indexOf(a)))
               ) : (
                 <span className="vacant-seat">No director seated</span>
               )}
             </div>
           </section>
-          <div className="staff-rows">
-            <section className="staff-row">
-              <h3>PROJECT MANAGERS</h3>
-              <div className="workstations">
-                {pms.length ? (
-                  pms.map(a => station(a, seats.indexOf(a)))
-                ) : (
-                  <span className="vacant-seat">No project managers seated</span>
-                )}
-              </div>
-            </section>
-            <section className="staff-row">
-              <h3>WORKERS</h3>
-              <div className="workstations">
-                {workers.length ? (
-                  workers.map(a => station(a, seats.indexOf(a)))
-                ) : team.length ? (
-                  <span className="vacant-seat">No workers seated</span>
-                ) : (
-                  ([null, null, null, null] as (Agent | null)[]).map((a, i) => station(a, i))
-                )}
-              </div>
-            </section>
-          </div>
+          <section className="floor-zone" data-zone="pm">
+            <h3 className="zone-tag">PROJECT MANAGERS</h3>
+            <div className="workstations">
+              {zones.pms.length ? (
+                zones.pms.map(a => station(a, seats.indexOf(a)))
+              ) : (
+                <span className="vacant-seat">No project managers seated</span>
+              )}
+            </div>
+          </section>
+          <section className="floor-zone" data-zone="workers">
+            <h3 className="zone-tag">WORKERS</h3>
+            <div className="workstations">
+              {zones.workers.length ? (
+                zones.workers.map(a => station(a, seats.indexOf(a)))
+              ) : team.length ? (
+                <span className="vacant-seat">No workers seated</span>
+              ) : (
+                ([null, null, null, null] as (Agent | null)[]).map((a, i) => station(a, i))
+              )}
+            </div>
+          </section>
         </div>
         <aside className={`meeting-wing${busyRooms.length ? '' : ' quiet'}`}>
           {busyRooms.map(({ id, i }) => (
