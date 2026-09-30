@@ -1,4 +1,3 @@
-import React from 'react';
 import { ArrowDownToLine, ArrowUpFromLine, Box, LockKeyhole } from 'lucide-react';
 import type { AppState, Experiment, FileActionResult, Project } from '../shared/types';
 import { Empty, label } from './components';

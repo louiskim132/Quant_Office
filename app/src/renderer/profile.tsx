@@ -86,7 +86,6 @@ export function ProfileTabs({
   const [logs, setLogs] = useState<WorkLog[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [events, setEvents] = useState<JobEvent[]>([]);
-  const [eventCursor, setEventCursor] = useState<string | null>(null);
   const [error, setError] = useState('');
   const assignments = (state.assignments ?? []).filter(item => item.agentId === agent.id);
   const jobs = (state.jobs ?? []).filter(job => assignments.some(item => item.id === job.assignmentId));
@@ -139,10 +138,7 @@ export function ProfileTabs({
     void window.office
       .jobEventPage({ jobId: selectedJob!.id, limit: 50 })
       .then(page => {
-        if (!cancelled) {
-          setEvents(page.entries);
-          setEventCursor(page.nextCursor);
-        }
+        if (!cancelled) setEvents(page.entries);
       })
       .catch(e => setError((e as Error).message));
     return () => {

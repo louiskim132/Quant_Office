@@ -32,7 +32,7 @@ import { recordChainHandoff } from './chain-messages.js';
 import { verifySnapshotForTransfer, type OutputDestination } from './locations.js';
 import { localRequirementFor } from './local-lane.js';
 import { safeEntry, MAX_FILE } from './artifacts.js';
-import { pipelineStageBlocker, type FrozenResearchSpec } from '../shared/research.js';
+import { type FrozenResearchSpec } from '../shared/research.js';
 import { stageContextHash } from '../shared/pipeline.js';
 import { settlePipelineDecision } from './pipeline-runner.js';
 import { ingestReceiptMemory } from './memory-ingest.js';

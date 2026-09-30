@@ -233,17 +233,15 @@ async function fixture(t: any) {
     calls.push({ executable, args, options: spawnOptions, child });
     return child;
   };
-  const exec = new LocalCliExecAdapter(
-    () => sessionsRoot,
-    provider => `${provider}.exe`,
-    clock,
-    undefined,
-    spawn,
-    () => ({ TEST_ENV: 'scrubbed' }),
-    undefined,
-    undefined,
-    agentId => store.snapshot().agents.find(a => a.id === agentId)?.provider,
-  );
+  const exec = new LocalCliExecAdapter({
+    sessionsRoot: () => sessionsRoot,
+    executable: provider => `${provider}.exe`,
+    now: clock,
+    spawnChild: spawn,
+    environment: () => ({ TEST_ENV: 'scrubbed' }),
+    providerFor: agentId => store.snapshot().agents.find(a => a.id === agentId)?.provider,
+    claudeSpawnGapMs: 0,
+  });
   const local = new LocalSessionRouter(
     id => store.localSessionForJob(id),
     { FLAT_PACKET: exec, PROJECT_WORKTREE: exec },

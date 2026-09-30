@@ -21,7 +21,7 @@ import { EVIDENCE_SURFACE_ID, mountsEvidenceSurface, type ToolProfile } from '..
 import type { SerenaSpawn } from '../src/main/serena-session';
 import type { EvidenceCaller } from '../src/main/evidence-tool';
 import type { LocalSessionRecord } from '../src/shared/local-session';
-import type { Assignment, Effort, InputSnapshot, Provider } from '../src/shared/types';
+import type { Assignment, InputSnapshot } from '../src/shared/types';
 
 const at = (minutes: number) => new Date(Date.UTC(2026, 8, 8, 10, 0, 0) + minutes * 60000).toISOString();
 const sha = (text: string) => createHash('sha256').update(text).digest('hex');
@@ -140,7 +140,7 @@ class FakeSerenaChild {
   readonly kills: unknown[] = [];
   constructor(
     readonly pid = 7777,
-    private readonly handshake = true,
+    handshake = true,
   ) {
     if (handshake)
       this.stdin.on('data', () => {
@@ -153,7 +153,7 @@ class FakeSerenaChild {
     this.kills.push(signal);
     return true;
   }
-  on(event: string, listener: (...args: never[]) => void) {
+  on(_event: string, _listener: (...args: never[]) => void) {
     return this;
   }
 }
@@ -229,21 +229,17 @@ function fixture(
     if (options.serenaMissing) throw Object.assign(new Error(`spawn ${executable} ENOENT`), { code: 'ENOENT' });
     return new FakeSerenaChild(7777, options.serenaAnswers ?? true) as never;
   };
-  const adapter = new LocalCliExecAdapter(
-    () => sessions,
-    provider => `${provider}.exe`,
-    () => at(1),
-    undefined,
-    spawn,
-    () => ({ TEST_ENV: 'scrubbed' }),
-    undefined,
-    undefined,
-    undefined,
-    undefined,
+  const adapter = new LocalCliExecAdapter({
+    sessionsRoot: () => sessions,
+    executable: provider => `${provider}.exe`,
+    now: () => at(1),
+    spawnChild: spawn,
+    environment: () => ({ TEST_ENV: 'scrubbed' }),
     serenaSpawn,
-    60,
-    options.frames,
-  );
+    serenaReadyTimeoutMs: 60,
+    evidenceFrames: options.frames,
+    claudeSpawnGapMs: 0,
+  });
   t.after(() => {
     adapter.disposeAll();
     removeTreeSync(root);

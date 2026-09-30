@@ -110,7 +110,7 @@ class Adapter implements ProviderAdapter {
   }
 }
 
-test('only an existing archived project can be removed', t => {
+test('only an existing archived project can be removed', () => {
   const store = new OfficeStore(':memory:');
   try {
     const project = store.execute({
@@ -133,7 +133,7 @@ test('only an existing archived project can be removed', t => {
   }
 });
 
-test('removal retains the project row, its requests and experiments, and the recorded history', t => {
+test('removal retains the project row, its requests and experiments, and the recorded history', () => {
   const store = new OfficeStore(':memory:');
   try {
     const project = store.execute({
@@ -210,7 +210,7 @@ test('removal retains the project row, its requests and experiments, and the rec
   }
 });
 
-test('restoring a removed project clears the removal and lands it in the archived list', t => {
+test('restoring a removed project clears the removal and lands it in the archived list', () => {
   const store = new OfficeStore(':memory:');
   try {
     const project = store.execute({

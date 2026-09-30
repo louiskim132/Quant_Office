@@ -401,7 +401,7 @@ test('draft export isolates project data and carries independently checkable byt
 });
 
 test('a draft export of a project with no memory records stays well-formed', async t => {
-  const { directory, store, service, project } = fixture(t);
+  const { directory, service, project } = fixture(t);
   const destination = path.join(directory, 'export-empty.qro.zip');
   await service.exportProject(project.id, destination);
   const exported = JSON.parse(strFromU8(unzipSync(await readFile(destination))['project.json']));

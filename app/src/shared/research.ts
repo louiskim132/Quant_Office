@@ -1,5 +1,3 @@
-import type { Effort } from './types.js';
-
 /**
  * The staged research workflow, S0 to S10.
  *

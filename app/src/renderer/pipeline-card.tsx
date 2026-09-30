@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { AppState, Command, PipelineShape, ProviderJob, Request } from '../shared/types';
 import { latestJobFor } from '../core/jobs';
 import './pipeline.css';

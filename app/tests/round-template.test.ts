@@ -204,7 +204,6 @@ test('per-arm tool profiles match the plugin table', () => {
 
 test('every entry carries the armRole its roster position fills', () => {
   const entries = buildCommRound(declaration({ analysts: ['pm-c', 'pm-d'] })).entries;
-  const map = byKey(entries);
   const expected: Record<string, CommRoundEntry['armRole']> = {
     'plan-brief': 'DIRECTOR',
     'plan-draft-a': 'PM_A',

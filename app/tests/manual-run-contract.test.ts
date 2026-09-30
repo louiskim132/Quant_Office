@@ -15,7 +15,7 @@ import {
   type RunReturnManifest,
 } from '../src/shared/run-package';
 import type { BranchLink } from '../src/shared/pipeline';
-import type { AppState, InputSnapshot } from '../src/shared/types';
+import type { AppState } from '../src/shared/types';
 import type { FrozenResearchSpec, ResearchBranch } from '../src/shared/research';
 
 /**
