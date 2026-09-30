@@ -501,8 +501,12 @@ test('a completed browser login is detected from the auth file write, verified o
   const codexHome = mkdtempSync(path.join(tmpdir(), 'qro-codex-home-'));
   const previous = process.env.CODEX_HOME;
   process.env.CODEX_HOME = codexHome;
+  // The OAuth callback writes auth.json after the browser has opened, never before sign-in started, so
+  // the fake browser writes it a moment later. Written inside openBrowser itself, the file's mtime can
+  // fall a clock tick before the login's start time about a quarter of the time, and detection then
+  // waits out its 5-minute deadline before passing.
   const service = new Subscriptions(root, async () => {
-    writeFileSync(path.join(codexHome, 'auth.json'), '{"tokens":{}}');
+    setTimeout(() => writeFileSync(path.join(codexHome, 'auth.json'), '{"tokens":{}}'), 100);
   });
   let stopped = 0,
     probed = 0,
