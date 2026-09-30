@@ -1,4 +1,31 @@
 /* History page: merged event/work-log stream filter bar and timeline. */
+/* Saved filter views row — shared by history.tsx and activity.tsx. */
+.saved-views {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0 0 14px;
+}
+.saved-views .field {
+  margin: 0;
+  font-size: 11px;
+  gap: 6px;
+  color: var(--muted);
+  flex: 0 1 220px;
+  min-width: 140px;
+}
+.saved-views select,
+.saved-views input {
+  width: 100%;
+  min-width: 0;
+  min-height: 34px;
+  box-sizing: border-box;
+}
+.saved-views .secondary {
+  flex-shrink: 0;
+}
+
 .history-filters {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
