@@ -114,7 +114,7 @@ export function summarizeRequest(
       return {
         ...common,
         bucket: 'needs',
-        label: failed.length === 1 ? 'A step failed' : `${failed.length} steps failed`,
+        label: failed.length === 1 ? 'Step failed' : `${failed.length} steps failed`,
         reason: 'Open the request to retry or cancel the failed step.',
       };
     if (unknown.length)

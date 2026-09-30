@@ -5,16 +5,25 @@ import { STATUS, type StatusKey } from './status';
 import { avatarLook } from './avatar';
 
 export const label = (s: string) => s.replaceAll('_', ' ').toLowerCase();
+/**
+ * The single empty-state contract: icon + page-specific title + one-line value statement +
+ * a primary CTA. `secondary` adds a lower-emphasis affordance beside it, `hint` one muted
+ * line of scope (e.g. what filters exclude) — both optional and purely additive.
+ */
 export function Empty({
   icon: Icon,
   title,
   description,
   action,
+  secondary,
+  hint,
 }: {
   icon: React.ComponentType<{ size?: number; strokeWidth?: number }>;
   title: string;
   description: string;
   action?: React.ReactNode;
+  secondary?: React.ReactNode;
+  hint?: string;
 }) {
   return (
     <div className="empty-state">
@@ -23,7 +32,15 @@ export function Empty({
       </div>
       <h2>{title}</h2>
       <p>{description}</p>
-      {action}
+      {hint && <p className="empty-hint">{hint}</p>}
+      {secondary !== undefined ? (
+        <div className="empty-actions">
+          {action}
+          {secondary}
+        </div>
+      ) : (
+        action
+      )}
     </div>
   );
 }

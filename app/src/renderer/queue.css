@@ -279,6 +279,9 @@ div.command-preview {
 .queue-group[data-bucket='needs'] > summary h3 {
   color: var(--st-needs);
 }
+.queue-group[data-bucket='awaiting'] > summary h3 {
+  color: var(--st-meeting);
+}
 .queue-list {
   list-style: none;
   margin: 4px 0 0;
@@ -294,9 +297,10 @@ div.command-preview {
 .queue-row {
   width: 100%;
   display: grid;
-  grid-template-columns: minmax(180px, 2fr) minmax(150px, 1.6fr) 128px 72px 84px 16px;
+  grid-template-columns: minmax(180px, 2fr) minmax(150px, 1.6fr) 128px 72px 16px;
   align-items: center;
-  gap: 14px;
+  column-gap: 14px;
+  row-gap: 2px;
   padding: 11px 14px;
   text-align: left;
   color: var(--text);
@@ -307,6 +311,66 @@ div.command-preview {
 }
 .queue-row[data-bucket='needs'] {
   box-shadow: inset 3px 0 var(--st-needs);
+}
+.queue-row[data-bucket='awaiting'] {
+  box-shadow: inset 3px 0 var(--st-meeting);
+}
+/* Second line per row: status reason, provider-job state and last activity age. */
+.queue-sub {
+  grid-column: 1 / -1;
+  font-size: var(--fs-1);
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.queue-new {
+  display: inline-block;
+  margin-left: 7px;
+  padding: 0 7px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.6;
+  vertical-align: 1px;
+}
+/* Job timeline inside the request drawer. */
+.job-timeline summary {
+  cursor: pointer;
+}
+.job-timeline .timeline {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.job-timeline .timeline li {
+  display: grid;
+  grid-template-columns: 142px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: baseline;
+  font-size: var(--fs-2);
+}
+.job-timeline .timeline time {
+  font-size: var(--fs-1);
+  white-space: nowrap;
+}
+.tl-prov {
+  font-size: 10px;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 7px;
+  white-space: nowrap;
+}
+.tl-prov[data-prov='provider-reported'] {
+  color: var(--st-meeting);
+}
+.tl-prov[data-prov='user-reported'] {
+  color: var(--st-stalled);
 }
 .queue-main {
   display: flex;
@@ -394,8 +458,7 @@ div.command-preview {
   .queue-row {
     grid-template-columns: minmax(150px, 2fr) minmax(130px, 1.4fr) 112px 16px;
   }
-  .queue-agents,
-  .queue-time {
+  .queue-agents {
     display: none;
   }
 }

@@ -147,7 +147,7 @@ export function ProjectLocationPanel({
     <div className="project-row-panel">
       <div>
         <strong>Project folder on this device</strong>
-        <p className="path-text">{folder || 'Not selected'}</p>
+        <p className="path-text">{folder || 'No folder linked'}</p>
         {folder && (
           <p className="muted">
             Everything in this folder is shared, except withheld paths, which planning hops never see.
@@ -264,6 +264,8 @@ export function ProjectsView({
   const [search, setSearch] = useState('');
   const removed = state.projects.filter(p => p.removedAt);
   const visible = state.projects.filter(p => !p.removedAt);
+  const activeCount = visible.filter(p => !p.archived).length;
+  const archivedCount = visible.length - activeCount;
   const listed =
     projectLifecycle === 'removed'
       ? removed
@@ -302,7 +304,7 @@ export function ProjectsView({
     <>
       <div className="section-toolbar">
         <span>
-          {visible.filter(p => !p.archived).length} active projects · {visible.filter(p => p.archived).length} archived
+          {activeCount} active {activeCount === 1 ? 'project' : 'projects'} · {archivedCount} archived
           {removed.length > 0 && ` · ${removed.length} removed`}
         </span>
         <label className="field">
@@ -370,13 +372,27 @@ export function ProjectsView({
                         </span>
                       </button>
                     )}
-                    <span className="path-text project-row-location">{location || 'Not selected'}</span>
+                    <span className="path-text project-row-location">{location || 'No folder linked'}</span>
                     <span className="project-row-count">
-                      <strong>{(state.requests ?? []).filter(r => r.projectId === p.id && !r.removedAt).length}</strong>{' '}
-                      requests
+                      {(() => {
+                        const requestCount = (state.requests ?? []).filter(
+                          r => r.projectId === p.id && !r.removedAt,
+                        ).length;
+                        return (
+                          <>
+                            <strong>{requestCount}</strong> {requestCount === 1 ? 'request' : 'requests'}
+                          </>
+                        );
+                      })()}
                       <small>
-                        {(state.findings ?? []).filter(f => f.projectId === p.id && !f.supersededById).length} findings
-                        · {timeAgo(state.events.filter(e => e.projectId === p.id).at(-1)?.createdAt ?? p.createdAt)}
+                        {(() => {
+                          const findingCount = (state.findings ?? []).filter(
+                            f => f.projectId === p.id && !f.supersededById,
+                          ).length;
+                          return `${findingCount} ${findingCount === 1 ? 'finding' : 'findings'}`;
+                        })()}
+                        {' · active '}
+                        {timeAgo(state.events.filter(e => e.projectId === p.id).at(-1)?.createdAt ?? p.createdAt)}
                       </small>
                     </span>
                     <span className="quiet-badge small">

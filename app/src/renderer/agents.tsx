@@ -463,6 +463,7 @@ export function AgentSetup({ onAdded }: { onAdded: (state: AppState, execution?:
   );
 }
 export function SubscriptionUsage({ state }: { state: AppState }) {
+  const providers: Provider[] = ['openai', 'claude', 'devin'];
   const [connections, setConnections] = useState<Partial<Record<Provider, Connection>>>({}),
     [errors, setErrors] = useState<Partial<Record<Provider, string>>>({}),
     [busy, setBusy] = useState<Partial<Record<Provider, boolean>>>({});
@@ -479,14 +480,24 @@ export function SubscriptionUsage({ state }: { state: AppState }) {
       setBusy(b => ({ ...b, [provider]: false }));
     }
   }
+  const anyChecking = providers.some(provider => busy[provider]);
   return (
     <>
       <div className="inline-note">
         Subscription allowances belong to accounts, not individual agents. No API billing or automatic paid fallback.
         Usage is refreshed only when requested.
       </div>
-      {(['openai', 'claude', 'devin'] as Provider[]).map(provider => {
+      <div className="section-toolbar">
+        <span className="muted">Run the same per-card check for every provider.</span>
+        <button className="secondary" disabled={anyChecking} onClick={() => void Promise.all(providers.map(refresh))}>
+          {anyChecking ? 'Checking…' : 'Refresh all'}
+        </button>
+      </div>
+      {providers.map(provider => {
         const c = connections[provider];
+        const matching = state.agents.filter(
+          a => !a.removedAt && a.provider === provider && (!c?.connected || a.account === c.account),
+        ).length;
         return (
           <section className="settings-card usage-card" key={provider}>
             <div className="section-toolbar">
@@ -496,13 +507,9 @@ export function SubscriptionUsage({ state }: { state: AppState }) {
               </button>
             </div>
             <p>
-              {c?.connected ? c.account || 'Signed in — account unidentified' : 'Account not checked'} ·{' '}
-              {
-                state.agents.filter(
-                  a => !a.removedAt && a.provider === provider && (!c?.connected || a.account === c.account),
-                ).length
-              }{' '}
-              active profiles{c?.connected ? ' with matching setup account' : ' (account not checked)'}
+              {c?.connected ? c.account || 'Signed in — account unidentified' : 'Account not checked'} · {matching}{' '}
+              active profile{matching === 1 ? '' : 's'}
+              {c?.connected ? ' with matching setup account' : ''}
             </p>
             {c?.connected &&
               c.account &&
@@ -820,7 +827,12 @@ export function ProviderConnections({ state }: { state: AppState }) {
                   </button>
                 )}
                 {provider === 'claude' && (
-                  <button className="text-button" disabled title={TRANSPORT_PROBE_CONTAINMENT.status}>
+                  <button
+                    className="text-button"
+                    disabled
+                    title={TRANSPORT_PROBE_CONTAINMENT.status}
+                    aria-label={`Verify cloud transport — unavailable. ${TRANSPORT_PROBE_CONTAINMENT.status}`}
+                  >
                     Verify cloud transport…
                   </button>
                 )}

@@ -12,7 +12,7 @@ import type {
 import { Empty, SearchField, label } from './components';
 import './memory.css';
 import { formatDateTime } from './format';
-import { layoutMemory, fitMemory, memoryLabels } from './memory-layout';
+import { layoutMemory, fitMemory, memoryLabels, memoryDegrees, memoryRadius, memoryEdgeTrim } from './memory-layout';
 
 const KINDS: FindingKind[] = ['OBSERVATION', 'HYPOTHESIS', 'RESULT', 'DEFECT', 'DECISION', 'NOTE'];
 const REL_KINDS: RelationshipKind[] = ['SUPPORTS', 'CONTRADICTS', 'RELATES', 'DUPLICATES', 'REFINES'];
@@ -21,8 +21,7 @@ const REL_KINDS: RelationshipKind[] = ['SUPPORTS', 'CONTRADICTS', 'RELATES', 'DU
 const posKey = (projectId: string) => `qro.memory.seats.v2.${projectId}`;
 const legacyPosKey = (projectId: string) => `qro.memory.pos.${projectId}`;
 const W = 820,
-  H = 540,
-  R = 18;
+  H = 540;
 
 const shortHash = (s: string) => `${s.slice(0, 12)}…`;
 const stamp = (iso: string) => formatDateTime(iso);
@@ -318,6 +317,8 @@ export function MemoryView({ state, projectId }: { state: AppState; projectId: s
     return `Artifact · ${art ? `${art.name} · ` : ''}${shortHash(ref.id)}`;
   };
   const nodeKind = new Map((graph?.nodes ?? []).map(node => [node.findingId, node.kind]));
+  // Dot size reflects every recorded non-refuted link, even ones a filter currently hides.
+  const degrees = memoryDegrees(graph?.edges ?? []);
   const neighbors = new Set([
     selectedNode,
     ...(graph?.edges ?? [])
@@ -463,9 +464,39 @@ export function MemoryView({ state, projectId }: { state: AppState; projectId: s
                     })
                   }
                 >
+                  <span className="mem-legend-dot" aria-hidden="true" />
                   {label(kind)}
                 </button>
               ))}
+              <span className="mem-legend" aria-hidden="true">
+                <span className="mem-legend-item">
+                  <svg viewBox="0 0 26 10" width="26" height="10">
+                    <line className="legend-line confirmed" x1="1" y1="5" x2="19" y2="5" />
+                    <path className="legend-arrow confirmed" d="M 25 5 L 18.5 2 L 18.5 8 Z" />
+                  </svg>
+                  confirmed
+                </span>
+                <span className="mem-legend-item">
+                  <svg viewBox="0 0 26 10" width="26" height="10">
+                    <line className="legend-line proposed" x1="1" y1="5" x2="19" y2="5" />
+                    <path className="legend-arrow proposed" d="M 25 5 L 18.5 2 L 18.5 8 Z" />
+                  </svg>
+                  proposed
+                </span>
+                <span className="mem-legend-item">
+                  <svg viewBox="0 0 26 10" width="26" height="10">
+                    <line className="legend-line refuted" x1="1" y1="5" x2="25" y2="5" />
+                  </svg>
+                  refuted
+                </span>
+                <span className="mem-legend-item">
+                  <svg className="legend-mark" viewBox="0 0 12 12" width="12" height="12">
+                    <circle className="legend-dot superseded" cx="6" cy="6" r="4" />
+                    <line className="legend-strike" x1="2.5" y1="9.5" x2="9.5" y2="2.5" />
+                  </svg>
+                  superseded
+                </span>
+              </span>
               <label className="memory-refuted">
                 <input type="checkbox" checked={showRefuted} onChange={e => setShowRefuted(e.target.checked)} />
                 Show refuted
@@ -515,14 +546,30 @@ export function MemoryView({ state, projectId }: { state: AppState; projectId: s
                     b = pos[edge.to],
                     mx = (a.x + b.x) / 2,
                     my = (a.y + b.y) / 2;
+                  const trim = memoryEdgeTrim(
+                    a,
+                    b,
+                    memoryRadius(degrees[edge.from] ?? 0),
+                    memoryRadius(degrees[edge.to] ?? 0),
+                  );
+                  const near = edge.from === hovered || edge.to === hovered;
                   return (
                     <g
                       key={edge.relationshipId}
                       data-rel={edge.relationshipId}
-                      className={`mem-edge status-${edge.status.toLowerCase()}${selectedEdge === edge.relationshipId ? ' selected' : ''}`}
+                      className={`mem-edge status-${edge.status.toLowerCase()}${selectedEdge === edge.relationshipId ? ' selected' : ''}${
+                        hovered && selectedEdge !== edge.relationshipId ? (near ? ' near' : ' dim') : ''
+                      }`}
                     >
                       <line className="mem-edge-hit" x1={a.x} y1={a.y} x2={b.x} y2={b.y} />
-                      <line className="mem-edge-line" x1={a.x} y1={a.y} x2={b.x} y2={b.y} />
+                      <line
+                        className="mem-edge-line"
+                        x1={trim.short ? a.x : trim.x1}
+                        y1={trim.short ? a.y : trim.y1}
+                        x2={trim.short ? b.x : trim.x2}
+                        y2={trim.short ? b.y : trim.y2}
+                      />
+                      {!trim.short && <path className="mem-edge-arrow" d={trim.arrow} />}
                       {(selectedEdge === edge.relationshipId || hovered === edge.from || hovered === edge.to) && (
                         <text className="mem-edge-label" x={mx} y={my - 4} textAnchor="middle">
                           {label(edge.kind)}
@@ -534,6 +581,7 @@ export function MemoryView({ state, projectId }: { state: AppState; projectId: s
                 {visibleNodes.map(node => {
                   const p = pos[node.findingId];
                   if (!p) return null;
+                  const r = memoryRadius(degrees[node.findingId] ?? 0);
                   return (
                     <g
                       key={node.findingId}
@@ -556,13 +604,14 @@ export function MemoryView({ state, projectId }: { state: AppState; projectId: s
                       transform={`translate(${p.x} ${p.y})`}
                     >
                       <title>{node.title}</title>
-                      <circle r={R} />
+                      <circle className="mem-node-hit" r={Math.max(r, 13)} />
+                      <circle className="mem-node-dot" r={r} />
                       {node.superseded && (
-                        <line className="mem-supersede" x1={-R + 9} y1={R - 9} x2={R - 9} y2={-R + 9} />
+                        <line className="mem-supersede" x1={-r * 0.72} y1={r * 0.72} x2={r * 0.72} y2={-r * 0.72} />
                       )}
                       <text
                         className="mem-node-title"
-                        y={R + 15 / (view.k * graphScale)}
+                        y={r + 15 / (view.k * graphScale)}
                         textAnchor="middle"
                         style={{
                           visibility: labelIds.has(node.findingId) ? 'visible' : 'hidden',
@@ -577,7 +626,8 @@ export function MemoryView({ state, projectId }: { state: AppState; projectId: s
               </g>
             </svg>
             <p className="muted memory-hint">
-              Drag to pan · scroll to zoom · drag a node to pin it · uniform sizes, color = finding kind
+              Drag to pan · scroll to zoom · drag a node to pin it · dot size = link count, color = finding kind ·
+              arrows follow the recorded link direction
               {(graph?.nodes.length ?? 0) > 100 || visibleEdges.length > 200
                 ? ' · Bounded view: at most 100 nodes / 200 links'
                 : ''}

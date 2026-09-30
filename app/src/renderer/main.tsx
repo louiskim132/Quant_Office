@@ -31,6 +31,8 @@ import { useOfficeActivity } from './use-activity';
 import { AgentDrawer } from './agent-drawer';
 import { AgentStrip, AttentionBell, ToastStack } from './shell-widgets';
 import { attentionItems } from '../shared/attention';
+import type { AttentionItem } from '../shared/attention';
+import type { OfficeActivity } from '../shared/activity';
 import { activityStatus } from './status';
 import { WorkQueue } from './queue';
 import { AgentSetup, AgentIsolation, ProviderConnections, SubscriptionUsage } from './agents';
@@ -116,6 +118,101 @@ export function requestCreatePayload(form: Pick<FormData, 'get' | 'getAll'>, mod
   };
 }
 
+/** One actionable row in the Go to… palette. */
+export interface PaletteItem {
+  id: string;
+  /** The text matched against the query and shown as the button's name. */
+  label: string;
+  kind: 'page' | 'command' | 'project' | 'request';
+  page?: Page;
+  command?: 'new-request' | 'add-agent' | 'needs-you';
+  projectId?: string;
+  requestId?: string;
+  /** Set when the command cannot run now — the row stays visible but inert, with the reason as its title. */
+  disabledReason?: string;
+}
+export interface PaletteSection {
+  label: string;
+  items: PaletteItem[];
+}
+
+/**
+ * The palette's sections, kept pure for tests. Pages follow the sidebar's own grouping so the
+ * palette teaches the same model; projects and requests are recency-ordered (updatedAt) and capped
+ * when unfiltered, matching how recents read in every launcher UI.
+ */
+export function paletteSections(state: Pick<AppState, 'projects' | 'requests'>, query: string): PaletteSection[] {
+  const q = query.trim().toLowerCase();
+  const match = (text: string) => !q || text.toLowerCase().includes(q);
+  const open = (state.projects ?? []).filter(p => !p.archived && !p.removedAt);
+  const sections: PaletteSection[] = [];
+  for (const [section, items] of navSections) {
+    const pages = items
+      .filter(([name]) => match(name))
+      .map(([name]): PaletteItem => ({ id: `page:${name}`, label: name, kind: 'page', page: name }));
+    if (pages.length) sections.push({ label: section, items: pages });
+  }
+  const commandItems: PaletteItem[] = [
+    {
+      id: 'command:new-request',
+      label: 'New request',
+      kind: 'command',
+      command: 'new-request',
+      disabledReason: open.length ? undefined : 'Create a project first',
+    },
+    { id: 'command:add-agent', label: 'Add agent', kind: 'command', command: 'add-agent' },
+    { id: 'command:needs-you', label: 'Open Needs you', kind: 'command', command: 'needs-you' },
+  ];
+  const commands = commandItems.filter(item => match(item.label));
+  if (commands.length) sections.push({ label: 'Commands', items: commands });
+  const projects = open
+    .filter(p => match(p.name))
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    .slice(0, q ? 10 : 5)
+    .map((p): PaletteItem => ({ id: `project:${p.id}`, label: p.name, kind: 'project', projectId: p.id }));
+  // Unfiltered the cap shows only the five most recently touched — the "Recent" prefix says so.
+  if (projects.length) sections.push({ label: q ? 'Projects' : 'Recent projects', items: projects });
+  const requests = (state.requests ?? [])
+    .filter(r => !r.removedAt && match(r.name))
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    .slice(0, q ? 10 : 5)
+    .map((r): PaletteItem => ({ id: `request:${r.id}`, label: r.name, kind: 'request', requestId: r.id }));
+  if (requests.length) sections.push({ label: q ? 'Requests' : 'Recent requests', items: requests });
+  return sections;
+}
+
+/**
+ * Per-project live state for the picker: seats the office currently watches working on that
+ * project's requests, and request-kind attention items pointing at it. Derived only from recorded
+ * state — never a guess.
+ */
+export function projectLiveCounts(
+  requests: { id: string; projectId: string }[],
+  activity: OfficeActivity[],
+  attention: AttentionItem[],
+): Map<string, { working: number; needsYou: number }> {
+  const requestProject = new Map(requests.map(r => [r.id, r.projectId]));
+  const counts = new Map<string, { working: number; needsYou: number }>();
+  const bump = (projectId: string, key: 'working' | 'needsYou') => {
+    const entry = counts.get(projectId) ?? { working: 0, needsYou: 0 };
+    entry[key] += 1;
+    counts.set(projectId, entry);
+  };
+  for (const seat of activity) {
+    const status = activityStatus(seat);
+    if ((status === 'working' || status === 'stalled') && seat.requestId) {
+      const projectId = requestProject.get(seat.requestId);
+      if (projectId) bump(projectId, 'working');
+    }
+  }
+  for (const item of attention) {
+    if (item.kind !== 'request') continue;
+    const projectId = requestProject.get(item.targetId);
+    if (projectId) bump(projectId, 'needsYou');
+  }
+  return counts;
+}
+
 function App() {
   const [state, setState] = useState<AppState | null>(null);
   const [info, setInfo] = useState<AppInfo | null>(null);
@@ -129,13 +226,16 @@ function App() {
     }
   });
   const [palette, setPalette] = useState(false),
-    [paletteQuery, setPaletteQuery] = useState('');
+    [paletteQuery, setPaletteQuery] = useState(''),
+    [paletteIndex, setPaletteIndex] = useState(0),
+    [needsYouOpen, setNeedsYouOpen] = useState(false);
   useEffect(() => {
     const handle = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         setPalette(p => !p);
         setPaletteQuery('');
+        setPaletteIndex(0);
       }
     };
     window.addEventListener('keydown', handle);
@@ -143,6 +243,10 @@ function App() {
   }, []);
   const [projectId, setProjectId] = useState(() => savedId('quant-project'));
   const [experimentId, setExperimentId] = useState(() => savedId('quant-experiment'));
+  /** The last project the user actually opened — leads the picker as "Last opened". */
+  const [lastProjectId, setLastProjectId] = useState(() => savedId('quant-project-last'));
+  /** True once the user clears the project pick on purpose; stops sole-project auto-select undoing it. */
+  const clearedProject = useRef(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
@@ -163,6 +267,7 @@ function App() {
   );
   const { activity, now, watchedJobIds } = useOfficeActivity(state);
   const project = state?.projects.find(p => p.id === projectId);
+  const openProjects = state?.projects.filter(p => !p.archived && !p.removedAt) ?? [];
   const experiments = state?.experiments.filter(e => e.projectId === projectId) || [];
   const experiment = experiments.find(e => e.id === experimentId);
   const attention = state ? attentionItems(state, activity, watchedJobIds) : [];
@@ -195,12 +300,22 @@ function App() {
     try {
       localStorage.setItem('quant-project', projectId);
       localStorage.setItem('quant-experiment', experimentId);
+      localStorage.setItem('quant-project-last', lastProjectId);
     } catch {}
-  }, [projectId, experimentId]);
-  // A removed project stays in the record but leaves every picker, including the selected-project state.
+  }, [projectId, experimentId, lastProjectId]);
+  // A removed or archived project stays in the record but leaves every picker, including the selection.
+  // This clear is not the user's pick, so it does not mark the selection deliberately cleared.
   useEffect(() => {
-    if (project?.removedAt) chooseProject('');
-  }, [project?.removedAt]);
+    if (project?.removedAt || project?.archived) chooseProject('', false);
+  }, [project?.removedAt, project?.archived]);
+  // Any selection — restored, auto, or manual — ends the cleared flag; only an explicit '' sets it.
+  useEffect(() => {
+    if (projectId) clearedProject.current = false;
+  }, [projectId]);
+  // A single open project selects itself unless the user deliberately cleared the pick this session.
+  useEffect(() => {
+    if (!project && !clearedProject.current && openProjects.length === 1) setProjectId(openProjects[0].id);
+  }, [project, openProjects]);
   useEffect(() => {
     if (modal === 'experiment') setRequestProject('');
   }, [modal]);
@@ -247,9 +362,11 @@ function App() {
       setBusy(false);
     }
   }
-  function chooseProject(id: string) {
+  function chooseProject(id: string, userAction = true) {
+    if (!id && userAction) clearedProject.current = true;
     setProjectId(id);
     setExperimentId('');
+    if (id) setLastProjectId(id);
   }
   useEffect(() => {
     setLocalFolder(null);
@@ -307,9 +424,10 @@ function App() {
       setModal(null);
     }
   }
-  const openProjects = state?.projects.filter(p => !p.archived && !p.removedAt) ?? [];
   // Nothing is selected on a fresh start or after the Projects page. When projects exist, offer them
-  // here instead of sending the user to create another one.
+  // here instead of sending the user to create another one. Each pick carries the live state the
+  // office already recorded — requests, seats working on them, and items that need the user.
+  const liveByProject = projectLiveCounts(state?.requests ?? [], activity, attention);
   const needProject = (content: React.ReactNode) =>
     project ? (
       content
@@ -319,12 +437,29 @@ function App() {
         title="Choose a project"
         description="This page shows one project at a time."
         action={
-          <div className="project-choices">
-            {openProjects.map(p => (
-              <button key={p.id} className="secondary" onClick={() => chooseProject(p.id)}>
-                {p.name}
-              </button>
-            ))}
+          <div className="project-picks">
+            {[...openProjects]
+              .sort(
+                (a, b) =>
+                  Number(b.id === lastProjectId) - Number(a.id === lastProjectId) ||
+                  b.updatedAt.localeCompare(a.updatedAt),
+              )
+              .map(p => {
+                const live = liveByProject.get(p.id);
+                const requests = (state?.requests ?? []).filter(r => r.projectId === p.id && !r.removedAt).length;
+                const bits = [
+                  requests ? `${requests} request${requests === 1 ? '' : 's'}` : '',
+                  live?.working ? `${live.working} working` : '',
+                  live?.needsYou ? `${live.needsYou} ${live.needsYou === 1 ? 'needs' : 'need'} you` : '',
+                ].filter(Boolean);
+                return (
+                  <button key={p.id} className="project-pick" onClick={() => chooseProject(p.id)}>
+                    <strong>{p.name}</strong>
+                    <span className="project-pick-state">{bits.length ? bits.join(' · ') : 'No requests yet'}</span>
+                    {p.id === lastProjectId && <span className="project-pick-tag">Last opened</span>}
+                  </button>
+                );
+              })}
           </div>
         }
       />
@@ -373,6 +508,32 @@ function App() {
         </button>
       </div>
     );
+  const closePalette = () => {
+    setPalette(false);
+    setPaletteQuery('');
+    setPaletteIndex(0);
+  };
+  const paletteSectionList = palette ? paletteSections(state, paletteQuery) : [];
+  // Disabled rows render but can never be activated — arrows and Enter skip them.
+  const paletteFlat = paletteSectionList.flatMap(section => section.items).filter(item => !item.disabledReason);
+  const paletteActive = Math.min(paletteIndex, Math.max(paletteFlat.length - 1, 0));
+  function runPaletteItem(item: PaletteItem) {
+    closePalette();
+    if (item.page) setPage(item.page);
+    else if (item.command === 'new-request') setModal('experiment');
+    else if (item.command === 'add-agent') setPage('Add Agent');
+    else if (item.command === 'needs-you') setNeedsYouOpen(true);
+    else if (item.projectId) {
+      chooseProject(item.projectId);
+      setPage('Projects');
+    } else if (item.requestId) {
+      setPage('Office');
+      setOpenRequestId(item.requestId);
+    }
+  }
+  // The eyebrow echoes the page's sidebar section so the heading block follows one rule.
+  const pageSection = navSections.find(([, items]) => items.some(([name]) => name === page))?.[0] ?? 'WORKSPACE';
+  const agentCount = state.agents.filter(a => !a.removedAt).length;
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -401,7 +562,9 @@ function App() {
                 >
                   <Icon size={18} />
                   <span>{name}</span>
-                  {name === 'Office' && needsYou > 0 && <b aria-label={`${needsYou} need you`}>{needsYou}</b>}
+                  {name === 'Office' && needsYou > 0 && (
+                    <b aria-label={`${needsYou} ${needsYou === 1 ? 'needs' : 'need'} you`}>{needsYou}</b>
+                  )}
                 </button>
               ))}
             </React.Fragment>
@@ -448,20 +611,23 @@ function App() {
                   </option>
                 ))}
             </select>
-            <ChevronRight size={14} />
-            <select
-              aria-label="Current experiment"
-              disabled={!project}
-              value={experiment?.id || ''}
-              onChange={e => setExperimentId(e.target.value)}
-            >
-              <option value="">All experiments</option>
-              {experiments.map(e => (
-                <option key={e.id} value={e.id}>
-                  {e.name}
-                </option>
-              ))}
-            </select>
+            {project && (
+              <>
+                <ChevronRight size={14} />
+                <select
+                  aria-label="Current experiment"
+                  value={experiment?.id || ''}
+                  onChange={e => setExperimentId(e.target.value)}
+                >
+                  <option value="">All experiments</option>
+                  {experiments.map(e => (
+                    <option key={e.id} value={e.id}>
+                      {e.name}
+                    </option>
+                  ))}
+                </select>
+              </>
+            )}
           </div>
           <div className="topbar-right">
             <button
@@ -471,6 +637,7 @@ function App() {
               onClick={() => {
                 setPalette(true);
                 setPaletteQuery('');
+                setPaletteIndex(0);
               }}
             >
               Go to…
@@ -478,6 +645,8 @@ function App() {
             <AgentStrip agents={state.agents} activity={activity} onPick={setDrawerAgentId} />
             <AttentionBell
               items={attention}
+              open={needsYouOpen}
+              onOpenChange={setNeedsYouOpen}
               onPick={item => {
                 if (item.kind === 'agent') setDrawerAgentId(item.targetId);
                 else {
@@ -488,7 +657,7 @@ function App() {
             />
             <span className="provider-status">
               <span className="status-dot off" />
-              {state.agents.filter(a => !a.removedAt).length} agents registered
+              {agentCount} {agentCount === 1 ? 'agent' : 'agents'} registered
             </span>
             <button className="spend-pill" onClick={() => setPage('Usage')}>
               <Wallet size={14} />
@@ -499,7 +668,7 @@ function App() {
         <main>
           <div className="page-heading">
             <div>
-              <div className="eyebrow">{page === 'Office' ? 'YOUR RESEARCH WORKSPACE' : 'QUANT RESEARCH OFFICE'}</div>
+              <div className="eyebrow">{pageSection}</div>
               <h1>{page === 'Office' ? 'The office' : page}</h1>
               <p>
                 {
@@ -859,17 +1028,25 @@ function App() {
           </span>
           <span>
             <span className="statusbar-counts">
-              <b>{working}</b> working
+              <button className="statusbar-seg" onClick={() => setPage('Office')} title="Open the Office work queue">
+                <b>{working}</b> working
+              </button>
               <span className="statusbar-divider">|</span>
-              <b>{needsYou}</b> need you
+              <button className="statusbar-seg" onClick={() => setNeedsYouOpen(true)} title="Open the Needs you list">
+                <b>{needsYou}</b> {needsYou === 1 ? 'needs' : 'need'} you
+              </button>
               {failedSeats > 0 && (
                 <>
                   <span className="statusbar-divider">|</span>
-                  <b>{failedSeats}</b> failed lately
+                  <button className="statusbar-seg failed" onClick={() => setPage('History')} title="Open History">
+                    <b>{failedSeats}</b> failed lately
+                  </button>
                 </>
               )}
               <span className="statusbar-divider">|</span>
-              {state.agents.filter(a => !a.removedAt).length} agents
+              <button className="statusbar-seg" onClick={() => setPage('Agents')} title="Open the Agents roster">
+                <b>{agentCount}</b> registered {agentCount === 1 ? 'agent' : 'agents'}
+              </button>
             </span>
           </span>
         </footer>
@@ -896,74 +1073,73 @@ function App() {
         />
       )}
       {palette && (
-        <Dialog title="Go to…" onClose={() => setPalette(false)}>
+        <Dialog title="Go to…" onClose={closePalette}>
           <input
             autoFocus
+            className="palette-input"
             aria-label="Find a page, project, or request"
             placeholder="Search pages, projects, requests…"
             value={paletteQuery}
-            onChange={e => setPaletteQuery(e.target.value)}
+            onChange={e => {
+              setPaletteQuery(e.target.value);
+              setPaletteIndex(0);
+            }}
+            onKeyDown={e => {
+              if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                e.preventDefault();
+                if (paletteFlat.length)
+                  setPaletteIndex(
+                    (paletteActive + (e.key === 'ArrowDown' ? 1 : paletteFlat.length - 1)) % paletteFlat.length,
+                  );
+              } else if (e.key === 'Enter') {
+                e.preventDefault();
+                const item = paletteFlat[paletteActive];
+                if (item) runPaletteItem(item);
+              }
+            }}
           />
           <div className="palette-results">
-            {(
-              [
-                'Office',
-                'Agents',
-                'Projects',
-                'Memory',
-                'Artifacts',
-                'Reviews',
-                'History',
-                'Usage',
-                'Settings',
-                'Add Agent',
-              ] as Page[]
-            )
-              .filter(p => p.toLowerCase().includes(paletteQuery.toLowerCase()))
-              .map(p => (
-                <button
-                  key={p}
-                  className="secondary"
-                  onClick={() => {
-                    setPage(p);
-                    setPalette(false);
-                  }}
-                >
-                  {p}
-                </button>
-              ))}
-            {state.projects
-              .filter(p => !p.removedAt && p.name.toLowerCase().includes(paletteQuery.toLowerCase()))
-              .slice(0, 10)
-              .map(p => (
-                <button
-                  key={p.id}
-                  className="secondary"
-                  onClick={() => {
-                    chooseProject(p.id);
-                    setPage('Projects');
-                    setPalette(false);
-                  }}
-                >
-                  Project · {p.name}
-                </button>
-              ))}
-            {(state.requests ?? [])
-              .filter(r => !r.removedAt && r.name.toLowerCase().includes(paletteQuery.toLowerCase()))
-              .slice(0, 10)
-              .map(r => (
-                <button
-                  key={r.id}
-                  className="secondary"
-                  onClick={() => {
-                    setPage('Office');
-                    setOpenRequestId(r.id);
-                    setPalette(false);
-                  }}
-                >
-                  Request · {r.name}
-                </button>
-              ))}
+            {paletteSectionList.map(section => (
+              <div key={section.label} className="palette-group">
+                <div className="palette-group-label">{section.label}</div>
+                {section.items.map(item => {
+                  const flatIndex = paletteFlat.indexOf(item);
+                  return (
+                    <button
+                      key={item.id}
+                      className={`secondary palette-item${flatIndex === paletteActive ? ' active' : ''}`}
+                      disabled={Boolean(item.disabledReason)}
+                      title={item.disabledReason}
+                      onMouseEnter={() => {
+                        if (flatIndex >= 0) setPaletteIndex(flatIndex);
+                      }}
+                      onClick={() => runPaletteItem(item)}
+                      ref={el => {
+                        if (flatIndex === paletteActive) el?.scrollIntoView({ block: 'nearest' });
+                      }}
+                    >
+                      {(item.kind === 'project' || item.kind === 'request') && (
+                        <span className="palette-kind">{item.kind === 'project' ? 'Project' : 'Request'}</span>
+                      )}
+                      {item.label}
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
+            {!paletteSectionList.length && <p className="muted">Nothing matches.</p>}
+          </div>
+          <div className="palette-hints">
+            <span>
+              <kbd>↑</kbd>
+              <kbd>↓</kbd> move
+            </span>
+            <span>
+              <kbd>Enter</kbd> open
+            </span>
+            <span>
+              <kbd>Esc</kbd> close
+            </span>
           </div>
         </Dialog>
       )}

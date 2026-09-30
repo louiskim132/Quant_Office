@@ -1,12 +1,64 @@
 import { useEffect, useState } from 'react';
 import type { Agent, AppState, Role } from '../shared/types';
-import { agentBinding, providerReadiness } from '../shared/readiness';
+import type { OfficeActivity } from '../shared/activity';
+import { agentBinding, currentConnection, providerReadiness } from '../shared/readiness';
 import './office.css';
 import { Users } from 'lucide-react';
 import { Empty, Avatar, StatusPill } from './components';
 import { useOfficeActivity } from './use-activity';
 import { seatView } from './seat-view';
 import { formatDateTime } from './format';
+import { timeAgo } from './status';
+
+const parseTime = (value: string | undefined): number => {
+  const t = value ? Date.parse(value) : Number.NaN;
+  return Number.isFinite(t) ? t : Number.NaN;
+};
+
+/**
+ * One freshness claim per roster row, from recorded timestamps alone: the newest verification
+ * reads 'Last verified …', otherwise the newest recorded account observation reads 'Checked …',
+ * and a row with neither admits 'Never checked'. A missing or unparsable timestamp is skipped,
+ * never invented.
+ */
+export function rosterFreshness(
+  agent: { connectionVerifiedAt?: string; bindingVerifiedAt?: string },
+  lastObservedAt: string | undefined,
+  now: number,
+): string {
+  const stamps = (...values: Array<string | undefined>) => values.map(parseTime).filter(Number.isFinite);
+  const verifiedAt = Math.max(-Infinity, ...stamps(agent.bindingVerifiedAt, agent.connectionVerifiedAt));
+  const checkedAt = Math.max(-Infinity, ...stamps(lastObservedAt));
+  const latest = Math.max(verifiedAt, checkedAt);
+  if (!Number.isFinite(latest)) return 'Never checked';
+  return `${latest === verifiedAt ? 'Last verified' : 'Checked'} ${timeAgo(latest, now)}`;
+}
+
+export type RosterProvenance = 'office-observed' | 'provider-reported' | 'unverified';
+
+/**
+ * Who backs the status a roster row shows. 'provider-reported' and 'office-observed' come straight
+ * from the recorded evidence field; a live claim with no evidence is 'unverified'; a row whose
+ * status is only the office's own ledger (idle, a recorded recent outcome, archived) is backed by
+ * office records, so it is office-observed.
+ */
+export function rosterProvenance(activity: Pick<OfficeActivity, 'kind' | 'evidence'> | undefined): RosterProvenance {
+  if (activity?.evidence === 'PROVIDER_REPORTED') return 'provider-reported';
+  if (activity?.kind === 'UNKNOWN' || activity?.evidence === 'NONE') return 'unverified';
+  return 'office-observed';
+}
+
+export const rosterProvenanceTitle: Record<RosterProvenance, string> = {
+  'office-observed': "Backed by the office's own records or a process it watches.",
+  'provider-reported': 'Reported by the provider — the office records it but does not attest it.',
+  unverified: 'No provider report or office record backs the current state.',
+};
+
+/** Header count copy: 'N agents' unfiltered, 'N matching agents' only while a filter is active. */
+export function agentCountLabel(count: number, filtered: boolean): string {
+  const word = count === 1 ? 'agent' : 'agents';
+  return `${count} ${filtered ? 'matching ' : ''}${word} · no seat limit`;
+}
 
 export function AgentRoster({
   state,
@@ -47,10 +99,11 @@ export function AgentRoster({
   );
   const lastPage = Math.max(0, Math.ceil(agents.length / 24) - 1),
     currentPage = Math.min(page, lastPage);
+  const filtered = lifecycle !== 'active' || search.trim() !== '' || team !== '' || role !== '' || provider !== '';
   return (
     <>
       <div className="section-toolbar">
-        <span>{agents.length} matching agents · no seat limit</span>
+        <span>{agentCountLabel(agents.length, filtered)}</span>
         <button className="primary" onClick={onAdd}>
           Add agent
         </button>
@@ -97,13 +150,25 @@ export function AgentRoster({
           </select>
         </label>
       </div>
-      {!agents.length && (
-        <Empty
-          icon={Users}
-          title="No agents match these filters"
-          description="Adjust the membership, search, team, role or provider filters to widen the list."
-        />
-      )}
+      {!agents.length &&
+        (filtered || state.agents.some(a => !a.removedAt) ? (
+          <Empty
+            icon={Users}
+            title="No agents match these filters"
+            description="Adjust the membership, search, team, role or provider filters to widen the list."
+          />
+        ) : (
+          <Empty
+            icon={Users}
+            title="No agents yet"
+            description="Seat the first member of the team — add verifies the account with the provider's own sign-in first."
+            action={
+              <button className="primary" onClick={onAdd}>
+                Add agent
+              </button>
+            }
+          />
+        ))}
       {!!agents.length && (
         <div className="agent-rows">
           <div className="agent-row agent-head">
@@ -114,93 +179,78 @@ export function AgentRoster({
             <span>Status</span>
             <span />
           </div>
-          {agents.slice(currentPage * 24, (currentPage + 1) * 24).map(a => (
-            <article className="project-card agent-row" key={a.id}>
-              <span className="agent-cell agent-name">
-                <Avatar
-                  id={a.id}
-                  name={a.name}
-                  status={
-                    seatView(
-                      a,
-                      activity.find(x => x.agentId === a.id),
-                      state.requests,
-                      now,
-                    ).status
-                  }
-                />
-                <strong>{a.name}</strong>
-              </span>
-              <span className="agent-cell">
-                {a.team} · {a.role.replaceAll('_', ' ')}
-              </span>
-              <span className="agent-cell">
-                {a.provider} · {a.model} · {a.effort ?? 'default'} effort
-              </span>
-              <span className="agent-cell">
-                <details>
-                  <summary>{a.execution === 'LOCAL' ? 'Local CLI' : 'Hosted setup'}</summary>
-                  <small>{a.account}</small>
-                </details>
-              </span>
-              <span className="agent-cell">
-                <StatusPill
-                  status={
-                    seatView(
-                      a,
-                      activity.find(x => x.agentId === a.id),
-                      state.requests,
-                      now,
-                    ).status
-                  }
-                  label={a.deletedAt ? 'Removed' : a.removedAt ? 'Archived' : undefined}
-                />
-                <small>
-                  {
-                    seatView(
-                      a,
-                      activity.find(x => x.agentId === a.id),
-                      state.requests,
-                      now,
-                    ).requestName
-                  }
-                </small>
-              </span>
-              <div className="button-row agent-actions">
-                <button className="secondary" onClick={() => onAgent(a.id)}>
-                  Profile &amp; logs
-                </button>
-                {a.deletedAt ? (
-                  <button
-                    className="cancel-request"
-                    disabled={busy}
-                    title="Brings this agent back into the archived list; restore again there to make it active."
-                    onClick={() => onRemove(a.id, false)}
-                  >
-                    Restore
+          {agents.slice(currentPage * 24, (currentPage + 1) * 24).map(a => {
+            const agentActivity = activity.find(x => x.agentId === a.id),
+              view = seatView(a, agentActivity, state.requests, now),
+              provenance = rosterProvenance(agentActivity),
+              freshness = rosterFreshness(a, currentConnection(state, a.provider)?.lastCheckedAt, now);
+            return (
+              <article className="project-card agent-row" key={a.id}>
+                <span className="agent-cell agent-name">
+                  <Avatar id={a.id} name={a.name} status={view.status} />
+                  <strong>{a.name}</strong>
+                </span>
+                <span className="agent-cell">
+                  {a.team} · {a.role.replaceAll('_', ' ')}
+                </span>
+                <span className="agent-cell">
+                  {a.provider} · {a.model} · {a.effort ?? 'default'} effort
+                </span>
+                <span className="agent-cell">
+                  <details>
+                    <summary>{a.execution === 'LOCAL' ? 'Local CLI' : 'Hosted setup'}</summary>
+                    <small>{a.account}</small>
+                  </details>
+                  <small className="roster-stamp">{freshness}</small>
+                </span>
+                <span className="agent-cell">
+                  <StatusPill
+                    status={view.status}
+                    label={a.deletedAt ? 'Removed' : a.removedAt ? 'Archived' : undefined}
+                  />
+                  <small className="prov-chip" data-evidence={provenance} title={rosterProvenanceTitle[provenance]}>
+                    {provenance}
+                  </small>
+                  <small title={view.requestName || undefined} aria-label={view.requestName || undefined}>
+                    {view.requestName}
+                  </small>
+                </span>
+                <div className="button-row agent-actions">
+                  <button className="secondary" onClick={() => onAgent(a.id)}>
+                    Profile &amp; logs
                   </button>
-                ) : a.removedAt ? (
-                  <>
+                  {a.deletedAt ? (
                     <button
                       className="cancel-request"
                       disabled={busy}
-                      title="Hides this archived agent from pickers and lists. Its profile, assignments and history are retained."
-                      onClick={() => onDelete(a.id)}
+                      title="Brings this agent back into the archived list; restore again there to make it active."
+                      onClick={() => onRemove(a.id, false)}
                     >
-                      Remove from list
+                      Restore
                     </button>
-                    <button className="cancel-request" disabled={busy} onClick={() => onRemove(a.id, false)}>
-                      Restore agent
+                  ) : a.removedAt ? (
+                    <>
+                      <button
+                        className="cancel-request"
+                        disabled={busy}
+                        title="Hides this archived agent from pickers and lists. Its profile, assignments and history are retained."
+                        onClick={() => onDelete(a.id)}
+                      >
+                        Remove from list
+                      </button>
+                      <button className="cancel-request" disabled={busy} onClick={() => onRemove(a.id, false)}>
+                        Restore agent
+                      </button>
+                    </>
+                  ) : (
+                    <button className="text-button" disabled={busy} onClick={() => onRemove(a.id, true)}>
+                      Archive agent
                     </button>
-                  </>
-                ) : (
-                  <button className="text-button" disabled={busy} onClick={() => onRemove(a.id, true)}>
-                    Archive agent
-                  </button>
-                )}
-              </div>
-            </article>
-          ))}
+                  )}
+                </div>
+              </article>
+            );
+          })}
         </div>
       )}
       {lastPage > 0 && (

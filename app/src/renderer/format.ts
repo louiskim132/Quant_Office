@@ -8,6 +8,10 @@ export const formatDateTime = (value: string | number | Date): string => {
 };
 export const formatNumber = (value: number): string => numberFormat.format(value);
 
+/** Counted nouns pluralize once: `1 event`, `0 events`, `3 entries` via the optional plural form. */
+export const plural = (count: number, singular: string, pluralForm?: string): string =>
+  `${count} ${count === 1 ? singular : (pluralForm ?? `${singular}s`)}`;
+
 /**
  * Absolute Windows/POSIX paths in prose become their last two segments: "…\outputs\ema200.py".
  * The full path stays available in the underlying record; running text does not need it.

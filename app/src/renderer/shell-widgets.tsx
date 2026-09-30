@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { Bell, Check, X } from 'lucide-react';
 import type { Agent } from '../shared/types';
 import type { OfficeActivity } from '../shared/activity';
@@ -7,23 +7,46 @@ import { Avatar, StatusPill } from './components';
 import { activityStatus, STATUS } from './status';
 import './shell.css';
 
-/** The bell: one place that lists everything waiting on the user, each item a deep link. */
-export function AttentionBell({ items, onPick }: { items: AttentionItem[]; onPick: (item: AttentionItem) => void }) {
-  const [open, setOpen] = useState(false);
+/**
+ * Needs-you items split by kind: requests that need an action first, then agents gone quiet.
+ * Exported pure so the grouping stays testable.
+ */
+export function attentionGroups(items: AttentionItem[]): { label: string; items: AttentionItem[] }[] {
+  return [
+    { label: 'Requests needing action', items: items.filter(i => i.kind === 'request') },
+    { label: 'Agents gone quiet', items: items.filter(i => i.kind !== 'request') },
+  ].filter(group => group.items.length > 0);
+}
+
+/**
+ * The bell: one place that lists everything waiting on the user, each item a deep link. Open state
+ * is owned by the caller so the status bar and the palette can summon the same panel.
+ */
+export function AttentionBell({
+  items,
+  onPick,
+  open,
+  onOpenChange,
+}: {
+  items: AttentionItem[];
+  onPick: (item: AttentionItem) => void;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
     const away = (e: MouseEvent) => {
-      if (!box.current?.contains(e.target as Node)) setOpen(false);
+      if (!box.current?.contains(e.target as Node)) onOpenChange(false);
     };
-    const key = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    const key = (e: KeyboardEvent) => e.key === 'Escape' && onOpenChange(false);
     window.addEventListener('mousedown', away);
     window.addEventListener('keydown', key);
     return () => {
       window.removeEventListener('mousedown', away);
       window.removeEventListener('keydown', key);
     };
-  }, [open]);
+  }, [open, onOpenChange]);
   return (
     <div className="bell" ref={box}>
       <button
@@ -31,7 +54,7 @@ export function AttentionBell({ items, onPick }: { items: AttentionItem[]; onPic
         aria-haspopup="true"
         aria-expanded={open}
         aria-label={items.length ? `${items.length} items need you` : 'Nothing needs you'}
-        onClick={() => setOpen(v => !v)}
+        onClick={() => onOpenChange(!open)}
       >
         <Bell size={16} />
         {items.length > 0 && <b>{items.length}</b>}
@@ -40,22 +63,30 @@ export function AttentionBell({ items, onPick }: { items: AttentionItem[]; onPic
         <div className="bell-pop" role="region" aria-label="Needs you">
           <h3>Needs you</h3>
           {items.length ? (
-            <ul>
-              {items.map(item => (
-                <li key={item.id}>
-                  <button
-                    onClick={() => {
-                      setOpen(false);
-                      onPick(item);
-                    }}
-                  >
-                    <StatusPill status={item.status} label={item.kind === 'request' ? 'Request' : 'Agent'} />
-                    <strong>{item.title}</strong>
-                    <span>{item.detail}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
+            attentionGroups(items).map(group => (
+              <div className="bell-group" key={group.label}>
+                <div className="bell-group-label">{group.label}</div>
+                <ul>
+                  {group.items.map(item => (
+                    <li key={item.id}>
+                      <button
+                        onClick={() => {
+                          onOpenChange(false);
+                          onPick(item);
+                        }}
+                      >
+                        <span className="bell-item-head">
+                          <StatusPill status={item.status} label={item.kind === 'request' ? 'Request' : 'Agent'} />
+                          <strong>{item.title}</strong>
+                          <em className="bell-open">Open</em>
+                        </span>
+                        <span>{item.detail}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))
           ) : (
             <p className="muted">Nothing is waiting on you.</p>
           )}
