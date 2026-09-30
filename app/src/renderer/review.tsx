@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ShieldCheck } from 'lucide-react';
 import type { Agent, AppState, Experiment, ResearchStatus, WorkMode } from '../shared/types';
 import type { BranchLink, PipelineRecord } from '../shared/pipeline';
-import { Empty, label } from './components';
+import { Empty, label, Avatar, StatusPill } from './components';
+import { FilePreviewPane, type FilePreview } from './file-preview';
+import './explorer.css';
 import { pipelineReviewHops } from './job-outputs';
 
 /** Stage functions whose work is an independent review rather than production. */
@@ -31,15 +33,34 @@ export function PipelineReviews({
   setPreview: (preview: PreviewResult) => void;
   onError: (e: unknown) => void;
 }) {
+  const [selectedPreview, setSelectedPreview] = useState<FilePreview | null>(null);
+  const [previewBusy, setPreviewBusy] = useState(false);
+  const previewTicket = useRef(0);
+  useEffect(() => {
+    previewTicket.current++;
+    setSelectedPreview(null);
+    setPreviewBusy(false);
+    return () => {
+      previewTicket.current++;
+    };
+  }, [projectId, experiment?.id]);
   const experimentOf = (requestId: string) => state.requests?.find(r => r.id === requestId)?.experimentId;
   const groups = pipelineReviewHops(state, projectId).filter(
     g => !experiment || experimentOf(g.requestId) === experiment.id,
   );
-  const preview = (jobId: string, path: string) => {
-    window.office
-      .jobOutputPreview({ jobId, path })
-      .then(r => setPreview({ name: path, text: r.text, truncated: r.truncated, binary: false }))
-      .catch(onError);
+  const preview = async (jobId: string, path: string) => {
+    const ticket = ++previewTicket.current;
+    setPreviewBusy(true);
+    setSelectedPreview(null);
+    try {
+      const r = await window.office.jobOutputPreview({ jobId, path });
+      if (ticket === previewTicket.current)
+        setSelectedPreview({ name: path, text: r.text, truncated: r.truncated, binary: false });
+    } catch (e) {
+      if (ticket === previewTicket.current) onError(e);
+    } finally {
+      if (ticket === previewTicket.current) setPreviewBusy(false);
+    }
   };
   return (
     <section>
@@ -59,37 +80,61 @@ export function PipelineReviews({
             <div className="card-heading">
               <h3>{group.requestName}</h3>
             </div>
-            <ul className="functions">
+            <div className="review-columns">
               {group.hops.map(hop => (
-                <li key={hop.assignmentId}>
-                  <b>{label(hop.pipelineKey.replaceAll('-', ' '))}</b>
-                  <span>
-                    {hop.agentName}
-                    {hop.state
-                      ? ` · attempt ${hop.attempt} · ${label(hop.state)}`
-                      : ' · recorded — no job dispatched yet'}
-                  </span>
-                  {!!hop.outputs.length && (
-                    <span className="button-row">
-                      {hop.outputs.map(output => (
-                        <button
-                          key={output.path + output.sha256}
-                          className="secondary"
-                          disabled={busy}
-                          onClick={() => preview(output.jobId, output.path)}
-                          title={`${output.path} · ${output.bytes} bytes · sha256 ${output.sha256.slice(0, 12)}…`}
-                        >
-                          Preview {output.path}
-                        </button>
-                      ))}
-                    </span>
-                  )}
-                </li>
+                <section className="review-hop" key={hop.assignmentId}>
+                  <div className="card-heading">
+                    <Avatar id={hop.agentId} name={hop.agentName} />
+                    <strong>{hop.agentName}</strong>
+                    <StatusPill
+                      status={
+                        hop.state === 'FAILED'
+                          ? 'failed'
+                          : hop.state === 'COMPLETED'
+                            ? 'done'
+                            : hop.state === 'RUNNING'
+                              ? 'working'
+                              : 'unknown'
+                      }
+                      label={hop.state ? label(hop.state) : 'Not dispatched'}
+                    />
+                  </div>
+                  <h3>{label(hop.pipelineKey.replaceAll('-', ' '))}</h3>
+                  <p className="muted">Verdict: unverified · attempt {hop.attempt ?? '—'}</p>
+                  <p>{hop.detail.split('\n')[0].slice(0, 220)}</p>
+                  <details>
+                    <summary>Recorded details</summary>
+                    <p>{hop.detail}</p>
+                    <p>
+                      Completion records execution state. Read the report for claims and concerns; no review verdict is
+                      inferred from completion.
+                    </p>
+                  </details>
+                  <div className="button-row">
+                    {hop.outputs.map(output => (
+                      <button
+                        key={output.path + output.sha256}
+                        className="secondary"
+                        disabled={busy}
+                        onClick={() => void preview(output.jobId, output.path)}
+                        title={output.path}
+                      >
+                        Preview {output.path.split('/').pop()}
+                      </button>
+                    ))}
+                  </div>
+                  {!hop.outputs.length && <p className="muted">No stored report yet.</p>}
+                </section>
               ))}
-            </ul>
+            </div>
           </article>
         ))
       )}
+      <FilePreviewPane
+        preview={selectedPreview}
+        loading={previewBusy}
+        onOpen={() => selectedPreview && setPreview(selectedPreview)}
+      />
     </section>
   );
 }
@@ -137,7 +182,7 @@ export function ResearchStageReviews({
       <h2>Research-stage reviews (S2/S7)</h2>
       <div className="review-gates">
         {STAGE_GATE.map((s, i) => (
-          <div key={s.label}>
+          <div key={s.label} data-recorded={s.done(records)}>
             <span className="gate-number">0{i + 1}</span>
             <strong>{s.label}</strong>
             <span className="quiet-badge small">{s.done(records) ? 'Recorded' : 'Pending'}</span>

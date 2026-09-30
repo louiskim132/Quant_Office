@@ -1,3 +1,4 @@
+import { Onboarding } from './onboarding';
 import { OfficeChat } from './office-chat';
 import React, { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -5,7 +6,6 @@ import {
   ArrowDownToLine,
   ArrowUpFromLine,
   Box,
-  Check,
   ChevronRight,
   Circle,
   Folder,
@@ -23,9 +23,15 @@ import {
   X,
 } from 'lucide-react';
 import type { AppInfo, AppState, Command, WorkType, WorkMode } from '../shared/types';
+import './tokens.css';
 import './styles.css';
-import { requestQueue } from '../shared/queue';
-import { OfficeScene, AgentRoster, ProfileEditor, ConnectionBinding } from './office';
+import { AgentRoster, ProfileEditor, ConnectionBinding } from './office';
+import { OfficeScene } from './office-scene';
+import { useOfficeActivity } from './use-activity';
+import { AgentDrawer } from './agent-drawer';
+import { AgentStrip, AttentionBell, ToastStack } from './shell-widgets';
+import { attentionItems } from '../shared/attention';
+import { activityStatus } from './status';
 import { WorkQueue } from './queue';
 import { AgentSetup, AgentIsolation, ProviderConnections, SubscriptionUsage } from './agents';
 import { ProjectsView } from './projects';
@@ -36,7 +42,7 @@ import { AgentDetails, ModelEffortEditor } from './activity';
 import { MemoryView } from './memory';
 import { ArtifactsPage } from './artifacts';
 import { ReviewsView } from './review';
-import { Empty, label } from './components';
+import { Empty, label, Checkbox } from './components';
 
 type Page =
   | 'Agents'
@@ -114,6 +120,27 @@ function App() {
   const [state, setState] = useState<AppState | null>(null);
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [page, setPage] = useState<Page>('Office');
+  const [settingsSection, setSettingsSection] = useState('all');
+  const [taskbarAttention, setTaskbarAttention] = useState(() => {
+    try {
+      return localStorage.getItem('qro.taskbar-attention') !== 'off';
+    } catch {
+      return true;
+    }
+  });
+  const [palette, setPalette] = useState(false),
+    [paletteQuery, setPaletteQuery] = useState('');
+  useEffect(() => {
+    const handle = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setPalette(p => !p);
+        setPaletteQuery('');
+      }
+    };
+    window.addEventListener('keydown', handle);
+    return () => window.removeEventListener('keydown', handle);
+  }, []);
   const [projectId, setProjectId] = useState(() => savedId('quant-project'));
   const [experimentId, setExperimentId] = useState(() => savedId('quant-experiment'));
   const [error, setError] = useState('');
@@ -122,6 +149,10 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState<'project' | 'edit-project' | 'experiment' | null>(null);
   const [agentDetailId, setAgentDetailId] = useState<string | null>(null);
+  /** The agent whose side drawer is open — a quick look, distinct from the full profile dialog. */
+  const [drawerAgentId, setDrawerAgentId] = useState<string | null>(null);
+  /** The request whose detail panel is open on the Office page. */
+  const [openRequestId, setOpenRequestId] = useState<string | null>(null);
   const [localFolder, setLocalFolder] = useState<string | null>(null);
   const [requestMode, setRequestMode] = useState<WorkMode>('SINGLE');
   const [requestWorkType, setRequestWorkType] = useState<WorkType>('PLANNING');
@@ -130,10 +161,14 @@ function App() {
   const [preview, setPreview] = useState<{ name: string; text: string; truncated: boolean; binary: boolean } | null>(
     null,
   );
+  const { activity, now, watchedJobIds } = useOfficeActivity(state);
   const project = state?.projects.find(p => p.id === projectId);
   const experiments = state?.experiments.filter(e => e.projectId === projectId) || [];
   const experiment = experiments.find(e => e.id === experimentId);
-  const blockedRequests = state ? requestQueue(state).filter(r => r.status === 'BLOCKED').length : 0;
+  const attention = state ? attentionItems(state, activity, watchedJobIds) : [];
+  const needsYou = attention.length;
+  const working = activity.filter(a => ['working', 'stalled'].includes(activityStatus(a))).length;
+  const failedSeats = activity.filter(a => activityStatus(a) === 'failed').length;
   const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
   // Every state the main process sends omits the event history, so the newest state always wins.
   const acceptState = (next: AppState) => setState(next);
@@ -176,6 +211,10 @@ function App() {
     }
   }, [state?.settings]);
   useEffect(() => {
+    void window.office?.setAttentionCount?.(taskbarAttention ? needsYou : 0).catch(() => {});
+  }, [needsYou, taskbarAttention]);
+  useEffect(() => {
+    setDrawerAgentId(null);
     document.querySelector('main')?.scrollTo(0, 0);
   }, [page]);
   async function command(input: CommandInput, success?: string) {
@@ -362,7 +401,7 @@ function App() {
                 >
                   <Icon size={18} />
                   <span>{name}</span>
-                  {name === 'Office' && blockedRequests > 0 && <b>{blockedRequests}</b>}
+                  {name === 'Office' && needsYou > 0 && <b aria-label={`${needsYou} need you`}>{needsYou}</b>}
                 </button>
               ))}
             </React.Fragment>
@@ -425,6 +464,28 @@ function App() {
             </select>
           </div>
           <div className="topbar-right">
+            <button
+              className="text-button"
+              aria-label="Go to a page, project, or request"
+              title="Ctrl+K"
+              onClick={() => {
+                setPalette(true);
+                setPaletteQuery('');
+              }}
+            >
+              Go to…
+            </button>
+            <AgentStrip agents={state.agents} activity={activity} onPick={setDrawerAgentId} />
+            <AttentionBell
+              items={attention}
+              onPick={item => {
+                if (item.kind === 'agent') setDrawerAgentId(item.targetId);
+                else {
+                  setPage('Office');
+                  setOpenRequestId(item.targetId);
+                }
+              }}
+            />
             <span className="provider-status">
               <span className="status-dot off" />
               {state.agents.filter(a => !a.removedAt).length} agents registered
@@ -462,8 +523,8 @@ function App() {
               <div className="heading-actions">
                 {page === 'Projects' ? (
                   <>
-                    {state.projects.some(p => !p.archived && !p.removedAt) && (
-                      <button className="primary" disabled={project?.archived} onClick={() => setModal('experiment')}>
+                    {!project && state.projects.some(p => !p.archived && !p.removedAt) && (
+                      <button className="primary" onClick={() => setModal('experiment')}>
                         <Plus size={16} />
                         New request
                       </button>
@@ -485,30 +546,26 @@ function App() {
               </div>
             )}
           </div>
-          {error && (
-            <div className="notice error" role="alert">
-              <span>{error}</span>
-              <button aria-label="Dismiss error" onClick={() => setError('')}>
-                <X size={16} />
-              </button>
-            </div>
-          )}
-          {notice && (
-            <div className="notice success" role="status">
-              <Check size={16} />
-              <span>{notice}</span>
-              <button aria-label="Dismiss notice" onClick={() => setNotice('')}>
-                <X size={16} />
-              </button>
-            </div>
-          )}
           {page === 'Office' && (
             <>
+              <Onboarding
+                state={state}
+                onAgents={() => setPage('Add Agent')}
+                onProjects={() => setModal('project')}
+                onRequest={() => setModal('experiment')}
+              />
               <div className="office-live-layout">
-                <OfficeScene agents={state.agents} state={state} onAgent={setAgentDetailId} />
+                <OfficeScene
+                  agents={state.agents}
+                  activity={activity}
+                  now={now}
+                  requests={state.requests}
+                  onAgent={setDrawerAgentId}
+                />
                 <OfficeChat state={state} />
               </div>
               <WorkQueue
+                watchedJobIds={watchedJobIds}
                 onState={acceptState}
                 onAction={c => void command(c)}
                 state={state}
@@ -524,6 +581,8 @@ function App() {
                 onCancel={id =>
                   void command({ type: 'task.cancel', taskId: id }, 'Request and linked research canceled.')
                 }
+                openRequestId={openRequestId}
+                onOpenRequest={setOpenRequestId}
               />
             </>
           )}
@@ -553,7 +612,11 @@ function App() {
                 onEditProject={() => setModal('edit-project')}
                 onNewRequest={() => setModal('experiment')}
                 onState={acceptState}
-                onOpenQueue={() => setPage('Office')}
+                onPage={setPage}
+                onOpenQueue={requestId => {
+                  setPage('Office');
+                  if (requestId) setOpenRequestId(requestId);
+                }}
               />
             ) : (
               <ProjectsView
@@ -586,7 +649,6 @@ function App() {
                 experiment={experiment}
                 busy={busy}
                 files={files}
-                setBusy={setBusy}
                 setPreview={setPreview}
                 onError={fail}
               />,
@@ -596,9 +658,47 @@ function App() {
           {page === 'Usage' && <SubscriptionUsage state={state} />}
           {page === 'Settings' && (
             <>
-              <ProviderConnections state={state} />
-              <AgentIsolation />
-              <div className="settings-card">
+              <nav className="settings-nav button-row" aria-label="Settings sections">
+                {[
+                  ['all', 'All settings'],
+                  ['connections', 'Connections'],
+                  ['isolation', 'Agents & isolation'],
+                  ['notifications', 'Notifications'],
+                  ['appearance', 'Appearance'],
+                  ['data', 'Data & recovery'],
+                  ['about', 'About'],
+                ].map(([id, title]) => (
+                  <button
+                    key={id}
+                    className="secondary"
+                    aria-pressed={settingsSection === id}
+                    onClick={() => setSettingsSection(id)}
+                  >
+                    {title}
+                  </button>
+                ))}
+              </nav>
+              {['all', 'connections'].includes(settingsSection) && <ProviderConnections state={state} />}
+              {['all', 'isolation'].includes(settingsSection) && <AgentIsolation />}
+
+              <div className="settings-card" hidden={!['all', 'notifications'].includes(settingsSection)}>
+                <h2>Notifications</h2>
+                <Checkbox
+                  checked={taskbarAttention}
+                  onChange={enabled => {
+                    setTaskbarAttention(enabled);
+                    try {
+                      localStorage.setItem('qro.taskbar-attention', enabled ? 'on' : 'off');
+                    } catch {}
+                  }}
+                >
+                  Taskbar badge and attention flash when the office needs you
+                </Checkbox>
+                <p className="muted">
+                  The in-app inbox stays available. Desktop popups and sounds are off in this revision.
+                </p>
+              </div>
+              <div className="settings-card" hidden={!['all', 'appearance'].includes(settingsSection)}>
                 <h2>Appearance</h2>
                 <div className="setting-row">
                   <div>
@@ -642,7 +742,7 @@ function App() {
                   </button>
                 </div>
               </div>
-              <div className="settings-card">
+              <div className="settings-card" hidden={!['all', 'data'].includes(settingsSection)}>
                 <h2>Data & recovery</h2>
                 <div className="setting-row">
                   <div>
@@ -707,7 +807,7 @@ function App() {
                   </div>
                 </div>
               </div>
-              <div className="settings-card">
+              <div className="settings-card" hidden={!['all', 'about'].includes(settingsSection)}>
                 <h2>Execution boundaries</h2>
                 <div className="boundary-grid">
                   <div>
@@ -718,7 +818,10 @@ function App() {
                   <div>
                     <span className="boundary-number">02</span>
                     <strong>Provider infrastructure</strong>
-                    <p>All agent reasoning, coding, verification, and research calculations.</p>
+                    <p>
+                      Agent sessions use the configured official client. Main experiments run manually in your Colab
+                      session.
+                    </p>
                   </div>
                   <div>
                     <span className="boundary-number">03</span>
@@ -736,26 +839,134 @@ function App() {
                 setPage('Office');
                 setNotice(
                   execution === 'LOCAL'
-                    ? 'Agent added. Sessions run on this machine through the official CLI; no local transport is configured in this build, so dispatch stays blocked.'
+                    ? 'Agent added. Sessions run on this machine through the signed-in official CLI, subject to the recorded launch checks.'
                     : 'Agent added. Hosted research execution remains blocked until configured.',
                 );
               }}
             />
           )}
         </main>
+        <ToastStack
+          error={error}
+          notice={notice}
+          onDismissError={() => setError('')}
+          onDismissNotice={() => setNotice('')}
+        />
         <footer className="statusbar">
           <span>
             <span className="status-dot" />
             Local record ready
           </span>
           <span>
-            {state.agents.filter(a => !a.removedAt).length} registered agents
-            <span className="statusbar-divider">|</span>
-            {blockedRequests} blocked requests · all projects<span className="statusbar-divider">|</span>No active
-            provider jobs
+            <span className="statusbar-counts">
+              <b>{working}</b> working
+              <span className="statusbar-divider">|</span>
+              <b>{needsYou}</b> need you
+              {failedSeats > 0 && (
+                <>
+                  <span className="statusbar-divider">|</span>
+                  <b>{failedSeats}</b> failed lately
+                </>
+              )}
+              <span className="statusbar-divider">|</span>
+              {state.agents.filter(a => !a.removedAt).length} agents
+            </span>
           </span>
         </footer>
       </div>
+      {drawerAgentId && state.agents.find(a => a.id === drawerAgentId) && (
+        <AgentDrawer
+          key={drawerAgentId}
+          agent={state.agents.find(a => a.id === drawerAgentId)!}
+          activity={activity.find(a => a.agentId === drawerAgentId)}
+          state={state}
+          now={now}
+          onClose={() => setDrawerAgentId(null)}
+          onState={acceptState}
+          onProfile={id => {
+            setDrawerAgentId(null);
+            setAgentDetailId(id);
+          }}
+          onOpenRequest={requestId => {
+            if (!state.requests?.some(item => item.id === requestId)) return;
+            setPage('Office');
+            setOpenRequestId(requestId);
+            setDrawerAgentId(null);
+          }}
+        />
+      )}
+      {palette && (
+        <Dialog title="Go to…" onClose={() => setPalette(false)}>
+          <input
+            autoFocus
+            aria-label="Find a page, project, or request"
+            placeholder="Search pages, projects, requests…"
+            value={paletteQuery}
+            onChange={e => setPaletteQuery(e.target.value)}
+          />
+          <div className="palette-results">
+            {(
+              [
+                'Office',
+                'Agents',
+                'Projects',
+                'Memory',
+                'Artifacts',
+                'Reviews',
+                'History',
+                'Usage',
+                'Settings',
+                'Add Agent',
+              ] as Page[]
+            )
+              .filter(p => p.toLowerCase().includes(paletteQuery.toLowerCase()))
+              .map(p => (
+                <button
+                  key={p}
+                  className="secondary"
+                  onClick={() => {
+                    setPage(p);
+                    setPalette(false);
+                  }}
+                >
+                  {p}
+                </button>
+              ))}
+            {state.projects
+              .filter(p => !p.removedAt && p.name.toLowerCase().includes(paletteQuery.toLowerCase()))
+              .slice(0, 10)
+              .map(p => (
+                <button
+                  key={p.id}
+                  className="secondary"
+                  onClick={() => {
+                    chooseProject(p.id);
+                    setPage('Projects');
+                    setPalette(false);
+                  }}
+                >
+                  Project · {p.name}
+                </button>
+              ))}
+            {(state.requests ?? [])
+              .filter(r => !r.removedAt && r.name.toLowerCase().includes(paletteQuery.toLowerCase()))
+              .slice(0, 10)
+              .map(r => (
+                <button
+                  key={r.id}
+                  className="secondary"
+                  onClick={() => {
+                    setPage('Office');
+                    setOpenRequestId(r.id);
+                    setPalette(false);
+                  }}
+                >
+                  Request · {r.name}
+                </button>
+              ))}
+          </div>
+        </Dialog>
+      )}
       {agentDetailId && state.agents.find(a => a.id === agentDetailId) && (
         <Dialog
           wide

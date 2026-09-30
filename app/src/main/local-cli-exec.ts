@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, realpathSync, watch, type FSWatcher } from 'node
 import path from 'node:path';
 import type { CapabilityEvidence, Effort, JobEvent, Provider, ProviderJob } from '../shared/types.js';
 import type { LocalSessionRecord } from '../shared/local-session.js';
+import type { LivePresence } from '../shared/activity.js';
 import { mountsEvidenceSurface, type ToolProfile } from '../shared/tool-profile.js';
 import type { EvidenceCaller } from './evidence-tool.js';
 import {
@@ -156,6 +157,8 @@ interface SpawnRecord {
   queryWatcher: FSWatcher | null;
   /** Trailing debounce so an exit plus a receipt write collapse into one observation. */
   notifyTimer: ReturnType<typeof setTimeout> | undefined;
+  /** When the child last wrote a chunk to stdout or stderr — presence evidence only, never a job event. */
+  lastOutputAt: string | null;
 }
 
 const sha256Text = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex');
@@ -275,6 +278,11 @@ export class LocalCliExecAdapter implements ProviderAdapter {
   /** Serializes claude launches so consecutive spawns are at least claudeSpawnGapMs apart. */
   private claudeLaunches: Promise<void> = Promise.resolve();
   private lastClaudeLaunchAt = 0;
+  /**
+   * Fired when a child starts, speaks or ends, so the window can refresh its live-presence view.
+   * Presence is the office watching a process it owns; it is never written to the event chain.
+   */
+  onPresence?: () => void;
 
   private readonly sessionsRoot: () => string;
   private readonly executable: (provider: Provider) => string;
@@ -579,8 +587,10 @@ export class LocalCliExecAdapter implements ProviderAdapter {
       watcher: null,
       queryWatcher,
       notifyTimer: undefined,
+      lastOutputAt: null,
     };
     this.registry.set(binding.jobId, record);
+    this.announcePresence();
     // A receipt or cancel ack landing in the packet directory is itself the observation trigger —
     // the office never polls. A failed watch degrades to the exit trigger and manual observe,
     // which read the same files.
@@ -605,10 +615,12 @@ export class LocalCliExecAdapter implements ProviderAdapter {
         record.pendingErr = '';
       }
       if (record.timer) clearTimeout(record.timer);
+      this.announcePresence();
       this.notify(record.jobId);
     });
     child.on('error', error => {
       record.spawnError = error.message;
+      this.announcePresence();
     });
     record.timer = setTimeout(() => {
       if (record.exit || record.officeKill) return;
@@ -675,6 +687,30 @@ export class LocalCliExecAdapter implements ProviderAdapter {
     if (record.notifyTimer) clearTimeout(record.notifyTimer);
     record.notifyTimer = undefined;
     this.registry.delete(jobId);
+    this.announcePresence();
+  }
+
+  /**
+   * What the office can see of the children it spawned right now: alive or not, when each started and
+   * when it last wrote. In-memory and read-only; a process this office did not spawn never appears.
+   */
+  presence(): LivePresence[] {
+    return [...this.registry.values()].map(record => ({
+      jobId: record.jobId,
+      provider: record.launch.provider,
+      pid: record.launch.pid ?? null,
+      startedAt: record.launch.spawnedAt,
+      lastOutputAt: record.lastOutputAt,
+      alive: !record.exit && !record.spawnError && !record.officeKill,
+    }));
+  }
+
+  private announcePresence(): void {
+    try {
+      this.onPresence?.();
+    } catch {
+      /* a listener failure never reaches process bookkeeping */
+    }
   }
 
   /** Releases all spawn bookkeeping — the office calls this when it goes away. */
@@ -685,6 +721,8 @@ export class LocalCliExecAdapter implements ProviderAdapter {
   /** Buffers one output chunk into lines; retained volume is capped, drops are counted honestly. */
   private pushChunk(record: SpawnRecord, stream: 'stdout' | 'stderr', chunk: string): void {
     const previousSequence = record.seq;
+    record.lastOutputAt = this.now();
+    this.announcePresence();
     const key = stream === 'stdout' ? 'pendingOut' : 'pendingErr';
     record[key] += chunk;
     let index;

@@ -11,9 +11,12 @@ import {
 } from 'lucide-react';
 import type { AppState, Command, Experiment, Project, Request, ResearchContract } from '../shared/types';
 import { requestQueue } from '../shared/queue';
+import { summarizeRequest } from '../shared/request-summary';
 import { ResearchPipeline } from './pipeline';
 import { ProjectLocationPanel } from './projects';
-import { Empty, label } from './components';
+import { label, Avatar } from './components';
+import { timeAgo } from './status';
+import { useLivePresence, watchedJobs } from './use-activity';
 import './research.css';
 
 type CommandInput = Command extends infer C ? (C extends Command ? Omit<C, 'idempotencyKey'> : never) : never;
@@ -97,6 +100,7 @@ export function ResearchView({
   onEditProject,
   onNewRequest,
   onOpenQueue,
+  onPage,
 }: {
   state: AppState;
   project: Project;
@@ -111,8 +115,13 @@ export function ResearchView({
   onBack: () => void;
   onEditProject: () => void;
   onNewRequest: () => void;
-  onOpenQueue: () => void;
+  onOpenQueue: (requestId?: string) => void;
+  onPage: (page: 'Memory' | 'Artifacts' | 'Reviews') => void;
 }) {
+  const requests = (state.requests ?? []).filter(r => r.projectId === projectId && !r.removedAt);
+  const findings = (state.findings ?? []).filter(f => f.projectId === projectId && !f.supersededById);
+  const involved = new Set((state.assignments ?? []).filter(a => a.projectId === projectId).map(a => a.agentId));
+  const latest = state.events.filter(e => e.projectId === projectId).at(-1);
   const savedLocation = state.locations?.find(l => l.projectId === projectId);
   const location = savedLocation?.localFolder ?? project.localFolder ?? '';
   return (
@@ -165,6 +174,55 @@ export function ResearchView({
           />
         </details>
       </div>
+      <div className="project-summary-grid">
+        <div>
+          <strong>{requests.length}</strong>
+          <span>Requests</span>
+        </div>
+        <div>
+          <strong>{requests.filter(r => r.pipeline?.phase === 'AWAITING_DECISION').length}</strong>
+          <span>Open decisions</span>
+        </div>
+        <div>
+          <strong>{findings.length}</strong>
+          <span>Findings</span>
+        </div>
+        <div>
+          <strong>{state.artifacts.filter(a => a.projectId === projectId).length}</strong>
+          <span>Imported files</span>
+        </div>
+      </div>
+      <div className="project-shortcuts button-row" aria-label="Project views">
+        <button className="secondary" onClick={() => onPage('Memory')}>
+          Memory
+        </button>
+        <button className="secondary" onClick={() => onPage('Artifacts')}>
+          Artifacts
+        </button>
+        <button className="secondary" onClick={() => onPage('Reviews')}>
+          Reviews
+        </button>
+        <span className="muted">{latest ? `Last activity ${timeAgo(latest.createdAt)}` : 'No activity recorded'}</span>
+        {state.agents
+          .filter(a => involved.has(a.id))
+          .map(a => (
+            <Avatar key={a.id} id={a.id} name={a.name} />
+          ))}
+      </div>
+      {!!findings.length && (
+        <details className="project-latest-findings">
+          <summary>Latest findings</summary>
+          {findings
+            .slice(-3)
+            .reverse()
+            .map(f => (
+              <article key={f.id}>
+                <strong>{f.title}</strong>
+                <p>{f.body.slice(0, 200)}</p>
+              </article>
+            ))}
+        </details>
+      )}
       <ProjectRequests state={state} projectId={projectId} onOpenQueue={onOpenQueue} />
       {experiments.length > 0 && (
         <div className="experiment-tabs" aria-label="Experiments">
@@ -191,17 +249,12 @@ export function ResearchView({
           command={command}
         />
       ) : (
-        <Empty
-          icon={BookOpen}
-          title={experiments.length ? 'Choose an experiment' : 'Define your first experiment'}
-          description="Open research details from the work queue, or create a new request."
-          action={
-            <button className="primary" disabled={project?.archived} onClick={onNewRequest}>
-              <Plus size={15} />
-              New request
-            </button>
-          }
-        />
+        <p className="research-hint muted">
+          <BookOpen size={14} />
+          {experiments.length
+            ? 'Choose an experiment above to see its research contract.'
+            : 'Research details appear here once a request creates an experiment.'}
+        </p>
       )}
       <ResearchPipeline key={projectId} state={state} projectId={projectId} />
     </>
@@ -216,8 +269,9 @@ function ProjectRequests({
 }: {
   state: AppState;
   projectId: string;
-  onOpenQueue: () => void;
+  onOpenQueue: (requestId?: string) => void;
 }) {
+  const watchedJobIds = watchedJobs(useLivePresence().presence);
   const rows = requestQueue(state)
     .filter(entry => entry.root.projectId === projectId)
     .slice()
@@ -259,7 +313,7 @@ function ProjectRequests({
                 <span className="request-row-left">
                   <span className="request-row-name">{name}</span>
                   <span className={`status-badge${canceled ? ' canceled' : ''}`}>
-                    {canceled ? 'Canceled' : row.status === 'ACCEPTED' ? 'Completed' : row.status.toLowerCase()}
+                    {summarizeRequest(state, row, watchedJobIds).label}
                   </span>
                   <span className="request-row-time muted">{date(row.root.createdAt)}</span>
                 </span>
@@ -282,8 +336,8 @@ function ProjectRequests({
                     : 'No provider job submitted'}
                 </p>
                 <div className="button-row">
-                  <button className="secondary" onClick={onOpenQueue}>
-                    Open in work queue
+                  <button className="secondary" onClick={() => onOpenQueue(row.id)}>
+                    Open request
                   </button>
                 </div>
               </div>

@@ -104,6 +104,7 @@ try {
   const dialog = page.getByRole('dialog', { name: 'New request' });
   await dialog.getByLabel('Request name').fill('Explain with Alice');
   await dialog.getByLabel('Objective', { exact: true }).fill('Explain a notebook');
+  await dialog.getByLabel('Work type').selectOption('OTHER');
   const agent = (await page.evaluate(() => window.office.getState())).agents[0];
   await dialog.getByLabel('Responsible agent').selectOption(agent.id);
   await dialog.getByRole('button', { name: 'Save draft' }).click();
@@ -111,11 +112,15 @@ try {
   let state = await page.evaluate(() => window.office.getState());
   assert.equal(state.experiments.length, 0);
   assert.equal(state.requests![0].leadAgentId, agent.id);
+  await page.locator('.queue-row').first().click();
   await page.getByRole('button', { name: 'Start request', exact: true }).click();
-  await page.getByText(/No subscription cloud transport/).waitFor();
-  assert.equal(await page.getByLabel('Show requests').locator('option:checked').innerText(), 'Active (1)');
+  await page
+    .getByText(/No subscription cloud transport/)
+    .first()
+    .waitFor();
+  assert.equal(await page.locator('.queue-row').count(), 1);
   await page.getByRole('button', { name: 'Cancel request', exact: true }).click();
-  await page.getByLabel('Show requests').selectOption('canceled');
+  assert.equal(await page.locator('.queue-row[data-bucket=canceled]').count(), 1);
   assert.equal(await page.locator('.task-card').count(), 1);
   state = await page.evaluate(() => window.office.getState());
   assert.equal(state.requests![0].status, 'CANCELED');

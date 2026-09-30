@@ -325,3 +325,74 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+.memory-layout {
+  grid-template-columns: 200px minmax(0, 1fr) 280px;
+}
+.memory-list {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  border-radius: 9px;
+  padding: 12px;
+  max-height: 660px;
+  overflow: auto;
+}
+.memory-list .search-field {
+  min-width: 0;
+  width: 100%;
+}
+.memory-list-row {
+  display: grid;
+  gap: 6px;
+  text-align: left;
+  width: 100%;
+  background: transparent;
+  color: var(--text);
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  padding: 12px 6px;
+  font: inherit;
+  cursor: pointer;
+}
+.memory-list-row.selected {
+  background: var(--accent-soft);
+}
+.memory-list-row strong {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.memory-list-row .memory-kind {
+  width: fit-content;
+}
+.memory-list-row small {
+  color: var(--muted);
+}
+.memory-tools {
+  padding: 10px;
+  flex-wrap: wrap;
+}
+.mem-node:focus-visible circle {
+  stroke: var(--accent);
+  stroke-width: 4px;
+}
+.memory-connections {
+  margin: 16px 0;
+}
+@media (max-width: 1200px) {
+  .memory-layout {
+    grid-template-columns: minmax(0, 1fr) 270px;
+  }
+  .memory-list {
+    grid-column: 1 / -1;
+    max-height: 190px;
+  }
+}
+@media (max-width: 800px) {
+  .memory-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+html[data-motion='reduced'] .mem-node.selected circle {
+  animation: none;
+}
