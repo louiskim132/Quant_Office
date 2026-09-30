@@ -6,7 +6,6 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import {
   advanceable,
-  assertNoLocalExecution,
   evaluatePackage,
   gateCost,
   gateFit,
@@ -400,14 +399,6 @@ test('a declared prediction file that was not delivered blocks the artifact gate
     deliveredFiles: new Map([['predictions/oof.jsonl', { sha256: sha256('something else'), rows: 2 }]]),
   });
   assert.equal(outcome(wrong, 'G-ARTIFACT').outcome, 'FAIL');
-});
-
-test('there is no local research fallback, by name', () => {
-  assert.throws(
-    () => assertNoLocalExecution({ templateId: 'diagnostics', route: 'LOCAL_FALLBACK' }),
-    /never runs research locally, and there is no local fallback/,
-  );
-  assert.doesNotThrow(() => assertNoLocalExecution({ templateId: 'diagnostics', route: 'HOSTED_TEMPLATE_RUN' }));
 });
 
 test('a diagnostic with too few rows or an undefined metric is inadequate, not a negative result', () => {

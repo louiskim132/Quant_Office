@@ -8,37 +8,14 @@ import test, { type TestContext } from 'node:test';
 import { strToU8 } from 'fflate';
 import { OfficeStore } from '../src/core/store.js';
 import { EvidenceService } from '../src/main/evidence.js';
-import {
-  buildAdversarialPackets,
-  buildBlindedPacket,
-  independenceLabel,
-  openSealedRound,
-  sealReport,
-} from '../src/main/context-policy.js';
+import { buildAdversarialPackets, buildBlindedPacket } from '../src/main/context-policy.js';
 import { independenceClaimBlocker } from '../src/shared/cooperation.js';
-import type { Agent, EffectiveEvidence, ProviderCapabilitySnapshot } from '../src/shared/types.js';
+import type { Agent, ProviderCapabilitySnapshot } from '../src/shared/types.js';
 
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
 const key = () => randomUUID();
 const at = (minutes: number) => new Date(Date.UTC(2024, 0, 1, 0, minutes)).toISOString();
 const SUBJECT = randomUUID();
-
-const confinement = (route: string, overrides: Partial<EffectiveEvidence> = {}): EffectiveEvidence => ({
-  operation: 'TOOL_CONFINEMENT',
-  level: 'ACCOUNT_VERIFIED',
-  evidence: 'OBSERVED',
-  verifiedAt: at(0),
-  model: 'opus',
-  environment: 'anthropic-managed',
-  route: route as EffectiveEvidence['route'],
-  transport: 'OFFICIAL_CLI_TERMINAL',
-  detail: 'Confined to the staged snapshot directory.',
-  source: 'fixture',
-  snapshotId: randomUUID(),
-  expired: false,
-  impossible: false,
-  ...overrides,
-});
 
 test('a correctness packet carrying performance is refused, not quietly redacted', () => {
   const clean = {
@@ -148,88 +125,6 @@ test('the advocate and the skeptic argue from byte-identical evidence', () => {
         body: {},
       }),
     /cannot be the same profile/,
-  );
-});
-
-test('a first report cannot be read until every first report in the round is filed', () => {
-  const one = randomUUID(),
-    two = randomUUID();
-  const first = sealReport({
-    reviewerAgentId: one,
-    subjectId: SUBJECT,
-    body: 'The split plan does not purge the label horizon.',
-    sealedAt: at(1),
-  });
-  assert.equal(first.contentHash, sha256('The split plan does not purge the label horizon.'));
-
-  assert.throws(
-    () => openSealedRound({ subjectId: SUBJECT, expectedReviewerIds: [one, two], reports: [first] }),
-    /1 of 2 first reports have not been filed/,
-  );
-
-  const second = sealReport({
-    reviewerAgentId: two,
-    subjectId: SUBJECT,
-    body: 'The fit scope overruns fold one.',
-    sealedAt: at(2),
-  });
-  const opened = openSealedRound({ subjectId: SUBJECT, expectedReviewerIds: [one, two], reports: [first, second] });
-  assert.deepEqual(opened.map(report => report.reviewerAgentId).sort(), [one, two].sort());
-  // Sealing recorded the identity before opening, so a report cannot be edited between the two.
-  assert.equal(
-    opened.find(report => report.reviewerAgentId === two)!.contentHash,
-    sha256('The fit scope overruns fold one.'),
-  );
-});
-
-test('independence is labelled from what was observed, never from a flag', () => {
-  const subjectAgentId = randomUUID(),
-    reviewerAgentId = randomUUID();
-  const base = {
-    subjectExternalId: 'session_subject',
-    reviewerExternalId: 'session_reviewer',
-    subjectAgentId,
-    reviewerAgentId,
-    route: 'CLI_PTY',
-  };
-
-  assert.equal(independenceLabel({ ...base, evidence: [confinement('CLI_PTY')] }).label, 'VERIFIED_INDEPENDENT');
-
-  // A separate session with no observed confinement for that route is honest but weaker.
-  const unverified = independenceLabel({ ...base, evidence: [] });
-  assert.equal(unverified.label, 'SEPARATE_SESSION_UNVERIFIED');
-  assert.match(unverified.detail, /cannot be labelled verified independent/);
-
-  // Evidence for a different route, expired evidence, and impossible evidence all fail to qualify.
-  assert.equal(
-    independenceLabel({ ...base, evidence: [confinement('TERMINAL_HANDOFF')] }).label,
-    'SEPARATE_SESSION_UNVERIFIED',
-  );
-  assert.equal(
-    independenceLabel({ ...base, evidence: [confinement('CLI_PTY', { expired: true })] }).label,
-    'SEPARATE_SESSION_UNVERIFIED',
-  );
-  assert.equal(
-    independenceLabel({ ...base, evidence: [confinement('CLI_PTY', { impossible: true })] }).label,
-    'SEPARATE_SESSION_UNVERIFIED',
-  );
-  assert.equal(
-    independenceLabel({ ...base, evidence: [confinement('CLI_PTY', { evidence: 'DOCUMENTED' })] }).label,
-    'SEPARATE_SESSION_UNVERIFIED',
-  );
-
-  // Same profile, or the same provider session, is not independent at all.
-  assert.equal(
-    independenceLabel({ ...base, reviewerAgentId: subjectAgentId, evidence: [confinement('CLI_PTY')] }).label,
-    'NOT_INDEPENDENT',
-  );
-  assert.equal(
-    independenceLabel({ ...base, reviewerExternalId: 'session_subject', evidence: [confinement('CLI_PTY')] }).label,
-    'NOT_INDEPENDENT',
-  );
-  assert.equal(
-    independenceLabel({ ...base, reviewerExternalId: '', evidence: [confinement('CLI_PTY')] }).label,
-    'NOT_INDEPENDENT',
   );
 });
 

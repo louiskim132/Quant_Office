@@ -54,16 +54,6 @@ const GIT_SAFETY = [
 /** The initial commit's identity is declared here, never borrowed from machine config. */
 const COMMIT_IDENTITY = ['-c', 'user.email=office@localhost', '-c', 'user.name=Quant Research Office'];
 
-/** One parsed row of `git worktree list --porcelain`. */
-export interface WorktreeEntry {
-  path: string;
-  head: string;
-  branch: string | null;
-  detached: boolean;
-  bare: boolean;
-  prunable: boolean;
-}
-
 /** A repo or worktree name is one safe directory name — never a path, never traversal. */
 function safeSegment(name: string): boolean {
   return safeEntry(name) && !name.includes('/');
@@ -177,55 +167,4 @@ export async function createWorktree(
   const worktree = path.join(dir, WORKTREES_DIR, name);
   await gitOrThrow(['worktree', 'add', '--detach', worktree, commit], dir);
   return worktree;
-}
-
-/**
- * Drops registrations whose directories moved or vanished, after the office or the user
- * relocated them. Only the registration is touched: this never deletes a directory's bytes.
- */
-export async function removeWorktreeRegistration(repoDir: string): Promise<void> {
-  // A directory that is not a repo has no registrations to drop; that is reported as done.
-  if (!existsSync(path.join(repoDir, '.git'))) return;
-  await gitOrThrow(['worktree', 'prune'], repoDir);
-}
-
-/**
- * Every worktree the repo currently registers, parsed from `git worktree list --porcelain`.
- * A missing repo is reported as an empty list: nothing is registered anywhere we can see.
- */
-export async function listWorktrees(repoDir: string): Promise<WorktreeEntry[]> {
-  if (!existsSync(path.join(repoDir, '.git'))) return [];
-  const out = await gitOrThrow(['worktree', 'list', '--porcelain'], repoDir);
-  const entries: WorktreeEntry[] = [];
-  let current: Partial<WorktreeEntry> | null = null;
-  const flush = () => {
-    if (current?.path)
-      entries.push({
-        path: current.path,
-        head: current.head ?? '',
-        branch: current.branch ?? null,
-        detached: !!current.detached,
-        bare: !!current.bare,
-        prunable: !!current.prunable,
-      });
-    current = null;
-  };
-  for (const line of out.split(/\r?\n/)) {
-    if (!line.trim()) {
-      flush();
-      continue;
-    }
-    if (line.startsWith('worktree ')) {
-      flush();
-      current = { path: path.resolve(line.slice('worktree '.length)) };
-    } else if (!current) {
-      continue;
-    } else if (line.startsWith('HEAD ')) current.head = line.slice('HEAD '.length);
-    else if (line.startsWith('branch ')) current.branch = line.slice('branch '.length);
-    else if (line === 'detached') current.detached = true;
-    else if (line === 'bare') current.bare = true;
-    else if (line.startsWith('prunable')) current.prunable = true;
-  }
-  flush();
-  return entries;
 }

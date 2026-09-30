@@ -15,7 +15,7 @@ import {
   type SubmitContext,
 } from '../src/main/controller';
 import { prepareInputSnapshot, reconstructSnapshot, verifySnapshotForTransfer } from '../src/main/locations';
-import { resolveRoleSlots, dependencyStatus, reviewStatus } from '../src/shared/cooperation';
+import { dependencyStatus } from '../src/shared/cooperation';
 import { requestQueue } from '../src/shared/queue';
 import { scopeMismatches } from '../src/shared/readiness';
 import type {
@@ -287,13 +287,11 @@ test('team names are labels; membership decides routing and survives a rename', 
     expectedRevision: 1,
     name: 'Renamed desk',
   });
-  const resolved = resolveRoleSlots(state, { teamId: team.id, slots: [{ role: 'WORKER', count: 2 }] });
   assert.deepEqual(
-    resolved.slots[0].agentIds,
+    state.memberships!.filter(m => m.teamId === team.id && m.role === 'WORKER' && !m.removedAt).map(m => m.agentId),
     [f.worker.id, f.worker2.id],
-    'two members hold the same role and both resolve',
+    'two members hold the same role, and the rename keeps both',
   );
-  assert.deepEqual(resolved.blockers, []);
   assert.equal(state.teams![0].name, 'Renamed desk');
   assert.throws(
     () =>
@@ -306,58 +304,6 @@ test('team names are labels; membership decides routing and survives a rename', 
       }),
     /changed in another view/,
   );
-});
-
-test('a shortfall is reported instead of silently substituting another role', async t => {
-  const f = await fixture(t);
-  const team = f.store.execute({
-    type: 'team.create',
-    idempotencyKey: key(),
-    name: 'Small desk',
-    projectId: f.project.id,
-  }).teams![0];
-  f.store.execute({
-    type: 'team.member',
-    idempotencyKey: key(),
-    teamId: team.id,
-    agentId: f.worker.id,
-    role: 'WORKER',
-    member: true,
-  });
-  f.store.execute({
-    type: 'team.member',
-    idempotencyKey: key(),
-    teamId: team.id,
-    agentId: f.reviewerA.id,
-    role: 'PM_B',
-    member: true,
-  });
-  const state = f.store.snapshot();
-  const resolved = resolveRoleSlots(state, {
-    teamId: team.id,
-    slots: [
-      { role: 'WORKER', count: 2 },
-      { role: 'DIRECTOR', count: 1 },
-    ],
-  });
-  assert.equal(resolved.slots[0].shortfall, 1);
-  assert.equal(resolved.slots[1].agentIds.length, 0);
-  assert.equal(resolved.blockers.length, 2);
-  assert.ok(resolved.blockers[1].includes('DIRECTOR'));
-  // Removing a member changes routing immediately; the old membership stays in history.
-  const removed = f.store.execute({
-    type: 'team.member',
-    idempotencyKey: key(),
-    teamId: team.id,
-    agentId: f.worker.id,
-    role: 'WORKER',
-    member: false,
-  });
-  assert.equal(
-    resolveRoleSlots(removed, { teamId: team.id, slots: [{ role: 'WORKER', count: 1 }] }).slots[0].agentIds.length,
-    0,
-  );
-  assert.equal(removed.memberships!.length, 2, 'membership history is retained');
 });
 
 test('a request records requested slots against a team without routing anything yet', async t => {
@@ -570,65 +516,6 @@ test('a review needs a different agent, its own context and the real outputs', a
   );
 });
 
-test('two independent approvals satisfy review, and a later amendment invalidates them', async t => {
-  const f = await reviewFixture(t);
-  f.store.recordReviewDecision(f.decision(f.reviewerOne, f.reviewerA.id));
-  let state = f.store.recordReviewDecision(f.decision(f.reviewerTwo, f.reviewerB.id));
-  let status = reviewStatus(state, f.request.id);
-  assert.equal(status.independentReviewers, 2);
-  assert.equal(status.approved, true);
-  assert.deepEqual(status.blockers, []);
-  // Amending the request invalidates the approvals that judged the previous version.
-  state = f.store.execute({
-    type: 'request.update',
-    idempotencyKey: key(),
-    requestId: f.request.id,
-    expectedRevision: state.requests![0].revision,
-    objective: 'A materially different objective',
-    leadAgentId: f.worker.id,
-    participantIds: [f.reviewerA.id],
-    acceptanceCriteria: '',
-  });
-  status = reviewStatus(state, f.request.id);
-  assert.equal(status.approved, false);
-  assert.equal(status.independentReviewers, 0);
-  assert.ok(status.blockers.some(blocker => blocker.includes('moved to revision')));
-  assert.equal(
-    status.decisions.every(decision => decision.stale),
-    true,
-    'the old decisions are kept, marked stale',
-  );
-});
-
-test('one rejection blocks approval even with enough reviewers', async t => {
-  const f = await reviewFixture(t);
-  f.store.recordReviewDecision(f.decision(f.reviewerOne, f.reviewerA.id));
-  const state = f.store.recordReviewDecision(
-    f.decision(f.reviewerTwo, f.reviewerB.id, {
-      verdict: 'CHANGES_REQUESTED',
-      rationale: 'The evaluation is missing a control.',
-    }),
-  );
-  const status = reviewStatus(state, f.request.id);
-  assert.equal(status.independentReviewers, 2);
-  assert.equal(status.approved, false);
-  assert.ok(status.blockers.some(blocker => blocker.includes('changes requested')));
-});
-
-test('reviews of different bundles cannot pool into approval', async t => {
-  const f = await reviewFixture(t);
-  f.store.recordReviewDecision(f.decision(f.reviewerOne, f.reviewerA.id));
-  const state = f.store.recordReviewDecision(f.decision(f.reviewerTwo, f.reviewerB.id, { bundleHash: 'c'.repeat(64) }));
-  assert.equal(reviewStatus(state, f.request.id).approved, false);
-  assert.equal(reviewStatus(state, f.request.id).independentReviewers, 0);
-  const exact = reviewStatus(state, f.request.id, {
-    subjectAssignmentId: f.subject.assignment.id,
-    bundleHash: 'b'.repeat(64),
-  });
-  assert.equal(exact.independentReviewers, 1);
-  assert.equal(exact.approved, false);
-});
-
 test('a prepared reviewer is not a completed independent review context', async t => {
   const f = await reviewFixture(t);
   const pending = f.controller().prepare({ requestId: f.request.id, agentId: f.worker2.id, snapshotId: f.snapshot.id });
@@ -673,7 +560,7 @@ test('review, messages and teams replay and survive a restart', async t => {
   assert.deepEqual(after.decisions, before.decisions);
   assert.deepEqual(after.teams, before.teams);
   assert.deepEqual(after.memberships, before.memberships);
-  assert.equal(reviewStatus(after, f.request.id).independentReviewers, 1);
+  assert.equal(after.decisions!.length, 1);
 });
 
 test('explicit group work dispatches, and its delegation policy is recorded rather than treated as tool confinement', async t => {

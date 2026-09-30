@@ -3,12 +3,23 @@
 // which would otherwise stop the test runner from exiting.
 const nodePty = require('node-pty');
 const terminal = nodePty.spawn(process.env.ComSpec || 'cmd.exe', ['/c', 'echo pty-smoke-ok'], {
-  name: 'xterm-color', cols: 80, rows: 24, cwd: process.cwd(), env: process.env,
+  name: 'xterm-color',
+  cols: 80,
+  rows: 24,
+  cwd: process.cwd(),
+  env: process.env,
 });
 let output = '';
-terminal.onData(chunk => { output += chunk; });
+terminal.onData(chunk => {
+  output += chunk;
+});
 terminal.onExit(({ exitCode }) => {
-  process.stdout.write(JSON.stringify({ exitCode, sawOutput: output.includes('pty-smoke-ok'), node: process.versions.node }) + '\n');
+  process.stdout.write(
+    JSON.stringify({ exitCode, sawOutput: output.includes('pty-smoke-ok'), node: process.versions.node }) + '\n',
+  );
   process.exit(0);
 });
-setTimeout(() => { process.stdout.write(JSON.stringify({ timedOut: true, output }) + '\n'); process.exit(2); }, 20000);
+setTimeout(() => {
+  process.stdout.write(JSON.stringify({ timedOut: true, output }) + '\n');
+  process.exit(2);
+}, 20000);

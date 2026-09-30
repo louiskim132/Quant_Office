@@ -37,8 +37,7 @@ if (!sessionDir || !Number.isInteger(officePid) || officePid <= 0) {
   process.exit(2);
 }
 const channelParent = path.dirname(sessionDir);
-const agentsRoot =
-  path.basename(channelParent) === '.host' ? path.dirname(channelParent) : channelParent;
+const agentsRoot = path.basename(channelParent) === '.host' ? path.dirname(channelParent) : channelParent;
 const sessionId = path.basename(sessionDir);
 
 /** The only env keys the office may push into an agent child — API keys and office flags. */
@@ -262,7 +261,10 @@ function onShutdown() {
 function scan() {
   let names;
   try {
-    names = fs.readdirSync(sessionDir).filter(name => REQ.test(name)).sort();
+    names = fs
+      .readdirSync(sessionDir)
+      .filter(name => REQ.test(name))
+      .sort();
   } catch {
     return; // channel dir gone — the office-pid watchdog still applies
   }
@@ -309,6 +311,6 @@ setInterval(() => {
     onShutdown();
   }
 }, 5000);
-trace(`host up pid=${process.pid} user=${(process.env.USERNAME || process.env.USER || 'unknown')}`);
+trace(`host up pid=${process.pid} user=${process.env.USERNAME || process.env.USER || 'unknown'}`);
 writeJson(`ready-${sessionId}.json`, { pid: process.pid, user: os.userInfo().username });
 scan();

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { AppState, EffectiveEvidence } from '../shared/types.js';
+import type { AppState } from '../shared/types.js';
 import { type FunctionAssignment, type Stage, type StageFunction } from '../shared/research.js';
 export { STAGE_FUNCTIONS } from '../shared/research.js';
 export type { FunctionAssignment, StageFunction };
@@ -238,98 +238,5 @@ export function buildAdversarialPackets(input: {
     advocate: { ...base, reviewerAgentId: input.advocateAgentId },
     skeptic: { ...base, reviewerAgentId: input.skepticAgentId },
     evidenceHash,
-  };
-}
-
-// ---- sealed reports -----------------------------------------------------------------------------
-
-export interface SealedReport {
-  reviewerAgentId: string;
-  subjectId: string;
-  phase: 'FIRST';
-  sealedAt: string;
-  /** The report's identity, recorded now. The text is not readable until every first report is in. */
-  contentHash: string;
-}
-export interface SealedRound {
-  subjectId: string;
-  expectedReviewerIds: string[];
-  reports: (SealedReport & { body: string })[];
-}
-
-export function sealReport(input: {
-  reviewerAgentId: string;
-  subjectId: string;
-  body: string;
-  sealedAt: string;
-}): SealedReport & { body: string } {
-  return {
-    reviewerAgentId: input.reviewerAgentId,
-    subjectId: input.subjectId,
-    phase: 'FIRST',
-    sealedAt: input.sealedAt,
-    contentHash: createHash('sha256').update(input.body).digest('hex'),
-    body: input.body,
-  };
-}
-
-/**
- * Opens a round of first reports only once every expected reviewer has filed one.
- *
- * A first report read early is not evidence of anything except what the first reviewer thought, and
- * the remaining reviewers will now agree with it more often than they otherwise would.
- */
-export function openSealedRound(round: SealedRound): (SealedReport & { body: string })[] {
-  const filed = new Set(round.reports.map(report => report.reviewerAgentId));
-  const outstanding = round.expectedReviewerIds.filter(id => !filed.has(id));
-  if (outstanding.length)
-    throw new Error(
-      `${outstanding.length} of ${round.expectedReviewerIds.length} first reports have not been filed. Sealed reports open only when the round is complete.`,
-    );
-  return round.reports;
-}
-
-// ---- isolation ----------------------------------------------------------------------------------
-
-export type IndependenceLabel = 'VERIFIED_INDEPENDENT' | 'SEPARATE_SESSION_UNVERIFIED' | 'NOT_INDEPENDENT';
-
-/**
- * How independent a review may honestly be called, given what was actually observed.
- *
- * The strong label requires observed confinement evidence for the route the review ran on. A flag in
- * a fixture, or a route the account has never been seen to isolate, buys the weaker label — which is
- * still useful, and is not the same claim.
- */
-export function independenceLabel(input: {
-  subjectExternalId: string;
-  reviewerExternalId: string;
-  subjectAgentId: string;
-  reviewerAgentId: string;
-  evidence: EffectiveEvidence[];
-  route: string;
-}): { label: IndependenceLabel; detail: string } {
-  if (input.reviewerAgentId === input.subjectAgentId)
-    return { label: 'NOT_INDEPENDENT', detail: 'The reviewer and the author are the same profile.' };
-  if (!input.reviewerExternalId || input.reviewerExternalId === input.subjectExternalId)
-    return {
-      label: 'NOT_INDEPENDENT',
-      detail: 'The review shares the subject’s provider session, so it shares its context.',
-    };
-  const confinement = input.evidence.find(
-    item =>
-      item.operation === 'TOOL_CONFINEMENT' &&
-      item.route === input.route &&
-      item.evidence === 'OBSERVED' &&
-      !item.expired &&
-      !item.impossible,
-  );
-  if (!confinement)
-    return {
-      label: 'SEPARATE_SESSION_UNVERIFIED',
-      detail: `The review ran in a separate session, but no observed context-isolation evidence exists for the ${input.route} route. It cannot be labelled verified independent.`,
-    };
-  return {
-    label: 'VERIFIED_INDEPENDENT',
-    detail: `Separate session with observed confinement on ${input.route}, verified ${confinement.verifiedAt}.`,
   };
 }

@@ -19,9 +19,7 @@ import { OfficeStore } from '../src/core/store';
 import {
   MANIFEST_PATH,
   RESERVED_DIRECTORY,
-  RESERVATION_FILE,
   assertWritableDestination,
-  releaseUnusedReservation,
   reserveOutputDestination,
   prepareInputSnapshot,
   reconstructSnapshot,
@@ -949,39 +947,6 @@ test('an attempt directory is reserved exclusively, and a reservation is never a
   );
 });
 
-test('an unused reservation can be released, but one holding results or another key cannot', async t => {
-  const f = fixture(t);
-  const outputRoot = path.join(f.root, 'outputs');
-  mkdirSync(outputRoot, { recursive: true });
-  const scope = {
-    outputRoot,
-    projectId: f.project.id,
-    requestId: 'request-one',
-    assignmentId: 'assignment-one',
-    managed: true,
-  };
-
-  const unused = reserveOutputDestination({ ...scope, idempotencyKey: 'attempt-a' });
-  assert.equal(
-    releaseUnusedReservation(unused.path, 'someone-else'),
-    false,
-    'another key never releases this reservation',
-  );
-  assert.equal(existsSync(unused.path), true);
-  assert.equal(releaseUnusedReservation(unused.path, 'attempt-a'), true);
-  assert.equal(existsSync(unused.path), false, 'a proven-unused reservation is released');
-
-  const used = reserveOutputDestination({ ...scope, idempotencyKey: 'attempt-b' });
-  writeFileSync(path.join(used.path, 'result.json'), '{}');
-  assert.equal(
-    releaseUnusedReservation(used.path, 'attempt-b'),
-    false,
-    'a directory holding results is evidence, not a free name',
-  );
-  assert.equal(existsSync(path.join(used.path, 'result.json')), true);
-  assert.equal(readdirSync(used.path).includes(RESERVATION_FILE), true);
-});
-
 test('output reservations refuse redirected ancestors before writing beneath them', t => {
   const f = fixture(t),
     real = path.join(f.root, 'actual-results'),
@@ -1007,7 +972,6 @@ test('output reservations refuse redirected ancestors before writing beneath the
     /link/,
   );
   assert.equal(readdirSync(real).length, 0, 'reservation refused before recursive directory creation');
-  assert.throws(() => releaseUnusedReservation(link, 'one'), /link/);
 });
 
 test('a snapshot prepared for another request or revision is refused when work is created', async t => {

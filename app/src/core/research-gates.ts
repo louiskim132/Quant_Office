@@ -511,20 +511,3 @@ export function advanceable(evaluations: GateEvaluation[]): {
   const stopped = evaluations.filter(item => item.outcome === 'BLOCKED').map(item => item.gate);
   return { canAdvance: !failed.length && !stopped.length, failed, blocked: stopped };
 }
-
-/**
- * The office does not run research. This is the sentence that keeps that true in code.
- *
- * A local fallback is the tempting fix the first time a hosted route is unavailable, and it would
- * silently change what every downstream receipt means, so the attempt fails here rather than being
- * quietly satisfied somewhere lower down.
- */
-export function assertNoLocalExecution(intent: {
-  templateId: string;
-  route: 'HOSTED_TEMPLATE_RUN' | 'LOCAL_FALLBACK';
-}): void {
-  if (intent.route === 'LOCAL_FALLBACK')
-    throw new Error(
-      `The ${intent.templateId} template is authored and exported for hosted execution. The office never runs research locally, and there is no local fallback.`,
-    );
-}

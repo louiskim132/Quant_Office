@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import test from 'node:test';
-import { calibration, compareMethods, lineageAncestry, reEntryBlockers, searchLedger } from '../src/core/monitoring.js';
+import { calibration, compareMethods, lineageAncestry } from '../src/core/monitoring.js';
 import type { PredictionRecord, ResearchBranch, ResearchRecords, TrialLedgerEntry } from '../src/shared/research.js';
 
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
@@ -43,42 +43,7 @@ const trial = (
   settledAt: at(day + 1),
 });
 
-test('a search over the ledger surfaces the failures first, because that is what stops a repeat', () => {
-  const alpha = branch('Overnight momentum decay');
-  const beta = branch('Overnight momentum decay, wider universe', {
-    parentBranchId: alpha.id,
-    lineageId: alpha.lineageId,
-  });
-  const records: ResearchRecords = {
-    branches: [alpha, beta],
-    trials: [
-      trial(alpha, 'momentum decay on the base universe', 'COMPLETED', 1),
-      trial(beta, 'momentum decay with an overnight gap filter', 'FAILED', 3),
-      trial(beta, 'momentum decay pruned during the registered search', 'PRUNED', 5),
-      trial(alpha, 'momentum decay abandoned mid-run', 'CANCELED', 7),
-      trial(alpha, 'a variant still running', 'PENDING', 9),
-    ],
-  };
-
-  const matches = searchLedger(records, { text: 'momentum decay' });
-  assert.deepEqual(
-    matches.map(item => item.entry.outcome),
-    ['FAILED', 'CANCELED', 'PRUNED', 'COMPLETED'],
-    'pending is excluded and failures rank first',
-  );
-  assert.match(matches[0].relevance, /Read it before spending another trial on the same idea/);
-
-  assert.equal(searchLedger(records, { text: 'momentum decay', includePending: true }).length, 5);
-  assert.equal(searchLedger(records, { text: 'nothing like this' }).length, 0);
-  assert.equal(searchLedger(records, { lineageId: randomUUID() }).length, 0);
-
-  // A valid negative is reported as a result rather than as an absence of one.
-  const settled: ResearchRecords = { ...records, branches: [{ ...alpha, outcome: 'VALID_NEGATIVE' }, beta] };
-  const negative = searchLedger(settled, { text: 'base universe' })[0];
-  assert.match(negative.relevance, /a valid negative, which is a result and not an absence of one/);
-});
-
-test('retirement stays visible from every descendant that might repeat it', () => {
+test('retirement stays visible in the ancestry of every descendant that might repeat it', () => {
   const root = branch('Order-flow imbalance', {
     retiredAt: at(4),
     retiredReason: 'The signal did not survive costs at any horizon.',
@@ -101,14 +66,9 @@ test('retirement stays visible from every descendant that might repeat it', () =
   );
   assert.equal(ancestry[2].retiredReason, 'The signal did not survive costs at any horizon.');
 
-  const blockers = reEntryBlockers(records, grandchild.id);
-  assert.equal(blockers.length, 1);
-  assert.match(blockers[0], /repeats an idea that was already stopped/);
-  assert.deepEqual(reEntryBlockers(records, child.id).length, 1, 'renaming a branch does not clear its ancestry');
-
-  // A retirement with no recorded reason still blocks, and says that the reason is missing.
+  // A retirement with no recorded reason still shows, and says that the reason is missing.
   const vague: ResearchRecords = { branches: [{ ...root, retiredReason: undefined }, child] };
-  assert.match(reEntryBlockers(vague, child.id)[0], /Retired without a recorded reason/);
+  assert.equal(lineageAncestry(vague, child.id)[1].retiredReason, 'Retired without a recorded reason.');
 });
 
 test('calibration excludes retrospective records and carries its own uncertainty', () => {

@@ -268,30 +268,6 @@ export function evaluateShadow(input: {
 }
 
 /**
- * What a simulated fill is allowed to be used for.
- *
- * Kept as an explicit refusal because "we backtested the execution" is a sentence that gets written
- * about simulated fills, and it is not true of them.
- */
-export function impactClaimBlocker(fills: Fill[]): string | null {
-  const simulated = fills.filter(fill => fill.kind === 'SIMULATED');
-  if (!simulated.length) return null;
-  return `${simulated.length} of ${fills.length} fills are simulated. A simulated fill was priced against a book that did not move in response to it, so it cannot establish market impact, queue position or partial-fill behaviour.`;
-}
-
-/**
- * Whether a frozen threshold set still matches the one a verdict was reached under.
- *
- * Changing a threshold after a shadow period does not update the verdict; it invalidates it. The
- * alternative — recomputing quietly against the new number — is how a retirement becomes a pass.
- */
-export function thresholdInvalidation(verdictThresholdHash: string, currentThresholdHash: string): string | null {
-  return verdictThresholdHash === currentThresholdHash
-    ? null
-    : 'The shadow thresholds have changed since this verdict was reached, so it no longer stands. Re-run the evaluation under the current frozen thresholds rather than reinterpreting the old result.';
-}
-
-/**
  * A reproducible research package: what was done, under what approval, and what it does not mean.
  *
  * `approvalMeaning` is mandatory and its content is checked, because the single most costly mistake
