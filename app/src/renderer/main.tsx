@@ -9,6 +9,7 @@ import {
   ChevronRight,
   Circle,
   Folder,
+  FolderOpen,
   FolderPlus,
   History,
   LayoutDashboard,
@@ -306,9 +307,27 @@ function App() {
       setModal(null);
     }
   }
+  const openProjects = state?.projects.filter(p => !p.archived && !p.removedAt) ?? [];
+  // Nothing is selected on a fresh start or after the Projects page. When projects exist, offer them
+  // here instead of sending the user to create another one.
   const needProject = (content: React.ReactNode) =>
     project ? (
       content
+    ) : openProjects.length ? (
+      <Empty
+        icon={FolderOpen}
+        title="Choose a project"
+        description="This page shows one project at a time."
+        action={
+          <div className="project-choices">
+            {openProjects.map(p => (
+              <button key={p.id} className="secondary" onClick={() => chooseProject(p.id)}>
+                {p.name}
+              </button>
+            ))}
+          </div>
+        }
+      />
     ) : (
       <Empty
         icon={FolderPlus}

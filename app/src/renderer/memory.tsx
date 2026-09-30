@@ -584,6 +584,9 @@ export function MemoryView({ state, projectId }: { state: AppState; projectId: s
               {refutedCount
                 ? ` · ${refutedCount} refuted link${refutedCount === 1 ? '' : 's'} ${showRefuted ? 'shown struck-through' : 'hidden'}`
                 : ''}
+              {graph && graph.nodes.length > 1 && !graph.edges.length
+                ? ' · No links yet: lines appear only for links agents report or you add (select a finding, then Link to…)'
+                : ''}
             </p>
           </div>
           <aside className="memory-detail">
