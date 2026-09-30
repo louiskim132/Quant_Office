@@ -142,8 +142,18 @@ import {
 
 export { canonical, canonicalHash, sha256 } from './canonical.js';
 const ZERO_HASH = '0'.repeat(64);
+/** Where a paged history scan stands: the chain so far, rebuilt projection and receipts seen. */
+interface HistoryScan {
+  tip: number;
+  previous: string;
+  expectedSequence: number;
+  rebuilt: Projection;
+  receiptIds: Set<string>;
+}
 /** Events the background verification reads before it yields to the event loop. */
 const BACKGROUND_VERIFY_PAGE = 25;
+/** Longest stretch, in ms, the paged verification replays events before it yields inside a page. */
+const BACKGROUND_VERIFY_SLICE_MS = 40;
 const cents = z.number().int().min(0).max(MAX_BUDGET_CENTS);
 const id = z.string().uuid();
 const timestamp = z.string().datetime();
@@ -2045,62 +2055,96 @@ export class OfficeStore {
     this.writeCheckpoint(tip?.sequence ?? 0, tip?.hash ?? ZERO_HASH, rebuiltText);
   }
   /**
+   * The hash-chain half of the full verification, read in pages of BACKGROUND_VERIFY_PAGE events with a
+   * yield to the event loop between pages, through the tip captured when it starts. Resolves null when
+   * the store is closed mid-run. It reads one short statement per page and never holds a cursor across
+   * a yield: SQLite refuses VACUUM (backup) while any statement is mid-step on the connection. Events
+   * are append-only, so paging by sequence reads exactly what a cursor would have.
+   */
+  private async scanHistoryInPages(): Promise<HistoryScan | null> {
+    if (this.closed) return null;
+    this.checkStorageIntegrity();
+    const tip = Number((this.db.prepare('SELECT MAX(sequence) AS s FROM events').get() as { s: number | null }).s ?? 0);
+    const page = this.db.prepare(
+      'SELECT sequence,id,record FROM events WHERE sequence > ? AND sequence <= ? ORDER BY sequence LIMIT ?',
+    );
+    const scan: HistoryScan = {
+      tip,
+      previous: ZERO_HASH,
+      expectedSequence: 1,
+      rebuilt: blank(),
+      receiptIds: new Set(),
+    };
+    // The loop never reads through a statement that close() finalized: close() can only run during a
+    // yield, and `closed` is re-checked right after each one. A page's rows are already read, so a
+    // page of heavy events may also yield between two of them (a real 25-event page took 0.8 s).
+    const pause = () => new Promise(resolve => setImmediate(resolve));
+    let slice = performance.now();
+    while (!this.closed) {
+      const rows = page.all(scan.expectedSequence - 1, tip, BACKGROUND_VERIFY_PAGE);
+      for (const row of rows) {
+        this.applyScannedEvent(scan, this.parseEventRow(row));
+        if (performance.now() - slice >= BACKGROUND_VERIFY_SLICE_MS) {
+          await pause();
+          if (this.closed) return null;
+          slice = performance.now();
+        }
+      }
+      if (rows.length < BACKGROUND_VERIFY_PAGE) break;
+      await pause();
+      slice = performance.now();
+    }
+    return this.closed ? null : scan;
+  }
+  private applyScannedEvent(scan: HistoryScan, event: StoredEvent): void {
+    this.checkEventChain(event, scan.expectedSequence, scan.previous, scan.receiptIds);
+    scan.rebuilt = applyChanges(scan.rebuilt, event.payload.changes);
+    scan.previous = event.hash;
+    scan.expectedSequence = event.sequence + 1;
+  }
+  /**
+   * Completes a paged scan synchronously: replays events appended while it yielded, then checks the
+   * receipts and the stored projection and advances the checkpoint to the tip, exactly as the full
+   * verification does. Nothing can interleave between this and the caller's next synchronous step.
+   */
+  private finishHistoryScan(scan: HistoryScan): void {
+    for (const row of this.db
+      .prepare('SELECT sequence,id,record FROM events WHERE sequence > ? ORDER BY sequence')
+      .all(scan.expectedSequence - 1))
+      this.applyScannedEvent(scan, this.parseEventRow(row));
+    if (Number(this.db.prepare('SELECT COUNT(*) AS count FROM commands').get()!.count) !== scan.receiptIds.size)
+      throw new Error('Unexpected command receipts');
+    const rebuiltText = canonical(scan.rebuilt);
+    if (rebuiltText !== this.storedProjectionText()) throw new Error('Workspace projection integrity failure');
+    // The checkpoint advance is its own tiny transaction — synchronous on this connection, never
+    // held open across an await and never nested inside another transaction.
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      this.writeCheckpoint(scan.expectedSequence - 1, scan.previous, rebuiltText);
+      this.db.exec('COMMIT');
+    } catch (error) {
+      this.rollback();
+      throw error;
+    }
+  }
+  /**
    * The same full verification as verifyIntegrity, chunked so the event loop stays responsive. It
    * runs after a checkpointed open (the tail-only fast path) or on demand, and on success advances
    * the checkpoint to the tip it captured before scanning. Resolves without verifying when the
    * store is closed mid-run — closing during a background pass is normal.
    */
   async verifyInBackground(): Promise<void> {
-    if (this.closed) return;
-    this.checkStorageIntegrity();
-    const tip = Number((this.db.prepare('SELECT MAX(sequence) AS s FROM events').get() as { s: number | null }).s ?? 0);
-    // One short statement per page, never a cursor held across the yields: SQLite refuses VACUUM
-    // (backup) while any statement is mid-step on the connection. Events are append-only, so paging
-    // by sequence up to the captured tip reads exactly what a cursor would have.
-    const page = this.db.prepare(
-      'SELECT sequence,id,record FROM events WHERE sequence > ? AND sequence <= ? ORDER BY sequence LIMIT ?',
-    );
-    let previous = ZERO_HASH;
-    let expectedSequence = 1;
-    let rebuilt = blank();
-    const receiptIds = new Set<string>();
-    // The loop never reads through a statement that close() finalized: close() can only run during the
-    // yield, and the loop condition re-checks `closed` right after it.
-    while (!this.closed) {
-      const rows = page.all(expectedSequence - 1, tip, BACKGROUND_VERIFY_PAGE);
-      for (const row of rows) {
-        const event = this.parseEventRow(row);
-        this.checkEventChain(event, expectedSequence, previous, receiptIds);
-        rebuilt = applyChanges(rebuilt, event.payload.changes);
-        previous = event.hash;
-        expectedSequence = event.sequence + 1;
-      }
-      if (rows.length < BACKGROUND_VERIFY_PAGE) break;
-      await new Promise(resolve => setImmediate(resolve));
-    }
-    if (this.closed) return;
-    // The scan verified events through `tip`, but the aggregate reads below see live tables. If a
+    const scan = await this.scanHistoryInPages();
+    if (!scan) return;
+    // The scan verified events through its tip, but the aggregate reads below see live tables. If a
     // commit appended an event mid-scan, this pass is inconclusive — resolve without advancing the
     // checkpoint and let the next open retry, rather than raise a false integrity failure on a
     // healthy workspace. Everything after this check is synchronous, so nothing can interleave.
     const currentTip = Number(
       (this.db.prepare('SELECT MAX(sequence) AS s FROM events').get() as { s: number | null }).s ?? 0,
     );
-    if (currentTip !== tip) return;
-    if (Number(this.db.prepare('SELECT COUNT(*) AS count FROM commands').get()!.count) !== receiptIds.size)
-      throw new Error('Unexpected command receipts');
-    const rebuiltText = canonical(rebuilt);
-    if (rebuiltText !== this.storedProjectionText()) throw new Error('Workspace projection integrity failure');
-    // The checkpoint advance is its own tiny transaction — synchronous on this connection, never
-    // held open across an await and never nested inside another transaction.
-    this.db.exec('BEGIN IMMEDIATE');
-    try {
-      this.writeCheckpoint(tip, previous, rebuiltText);
-      this.db.exec('COMMIT');
-    } catch (error) {
-      this.rollback();
-      throw error;
-    }
+    if (currentTip !== scan.tip) return;
+    this.finishHistoryScan(scan);
   }
 
   snapshot(options: { history?: boolean } = {}): AppState {
@@ -8502,11 +8546,15 @@ export class OfficeStore {
     if ([source, `${source}-wal`, `${source}-shm`].includes(target))
       throw new Error('Backup destination cannot overwrite the active workspace');
     if (existsSync(destination)) throw new Error('Backup destination already exists');
-    this.verifyIntegrity();
+    // The full verification, paged so the window keeps responding (a synchronous pass froze the app
+    // for about 11 s on a 30 MB workspace, roadmap C12 U11). Events appended while it yields are
+    // replayed in the synchronous finish, so the copy below is exactly the history just verified.
+    const scan = await this.scanHistoryInPages();
+    if (!scan) throw new Error('Workspace is closed');
+    this.finishHistoryScan(scan);
     // VACUUM INTO copies on this thread, so no write can interleave with the copy. node:sqlite's
     // async backup() copied on a worker thread while this connection kept writing. SQLite refuses
-    // VACUUM while a statement is mid-step, so nothing may hold a cursor across an await (see
-    // verifyInBackground).
+    // VACUUM while a statement is mid-step, so nothing may hold a cursor across an await.
     this.db.prepare('VACUUM INTO ?').run(destination);
   }
   close(): void {

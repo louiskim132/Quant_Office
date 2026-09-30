@@ -1,7 +1,7 @@
 import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -50,7 +50,7 @@ const projectCount = (file: string) => {
 const ROUNDS = Number(process.env.QRO_BACKUP_RACE_ROUNDS ?? 40);
 const SEED_PROJECTS = 30;
 
-test('a backup that overlaps a write and the background verification never fails and copies the state it started from', async t => {
+test('a backup that overlaps a write and the background verification never fails and copies exactly what it verified', async t => {
   const { directory, file, holder } = fixture(t);
   holder.store = new OfficeStore(file);
   for (let i = 0; i < SEED_PROJECTS; i++) createProject(holder.store, `Seed ${i}`);
@@ -73,13 +73,15 @@ test('a backup that overlaps a write and the background verification never fails
       failures.push(String(error));
       continue;
     }
-    // The copy is taken on the calling thread, so the write issued right after backup() is not in it.
+    // backup() verifies in pages before it copies (U11), so the write issued right after the call lands
+    // first; the synchronous finish verifies it and the copy then holds exactly that history. Opening
+    // the copy re-verifies it.
     const projects = projectCount(destination);
-    if (projects !== SEED_PROJECTS + round) wrongState.push(`round ${round}: ${projects} projects`);
+    if (projects !== SEED_PROJECTS + round + 1) wrongState.push(`round ${round}: ${projects} projects`);
     rmSync(destination);
   }
   assert.deepEqual(failures, [], `${failures.length} of ${ROUNDS} backups failed`);
-  assert.deepEqual(wrongState, [], 'a backup is not the state it started from');
+  assert.deepEqual(wrongState, [], 'a backup is not the state it verified');
   assert.deepEqual(
     (await Promise.allSettled(passes)).filter(result => result.status === 'rejected'),
     [],
@@ -110,4 +112,42 @@ test('a backup never overwrites an existing file', async t => {
   writeFileSync(destination, 'not a workspace');
   await assert.rejects(store.backup(destination), /already exists/);
   assert.equal(readFileSync(destination, 'utf8'), 'not a workspace');
+});
+
+test('a backup verifies the whole history without blocking the event loop (U11)', async t => {
+  const { directory, file, holder } = fixture(t);
+  const store = (holder.store = new OfficeStore(file));
+  for (let i = 0; i < 120; i++) createProject(store, `Paged ${i}`);
+  let turns = 0;
+  const tick = () => {
+    turns++;
+    if (!done) setImmediate(tick);
+  };
+  let done = false;
+  setImmediate(tick);
+  await store.backup(join(directory, 'paged.sqlite'));
+  done = true;
+  // 120 events are five pages, so the event loop ran between them.
+  assert.ok(turns >= 4, `the event loop turned ${turns} times during the backup`);
+  assert.equal(projectCount(join(directory, 'paged.sqlite')), 120);
+});
+
+test('a backup still runs the full verification: a tampered prefix is refused', async t => {
+  const { directory, file, holder } = fixture(t);
+  holder.store = new OfficeStore(file);
+  createProject(holder.store, 'First');
+  createProject(holder.store, 'Second');
+  await holder.store.verifyInBackground();
+  holder.store.close();
+  const db = new DatabaseSync(file);
+  try {
+    db.exec('DELETE FROM commands WHERE event_sequence=(SELECT MIN(event_sequence) FROM commands)');
+  } finally {
+    db.close();
+  }
+  // The checkpointed open replays only the tail, so it opens; the backup's full scan finds the gap.
+  const store = (holder.store = new OfficeStore(file));
+  const destination = join(directory, 'tampered.sqlite');
+  await assert.rejects(store.backup(destination), /receipt integrity/);
+  assert.equal(existsSync(destination), false);
 });
