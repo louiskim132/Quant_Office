@@ -135,6 +135,29 @@ fieldset {
 .agent-actions {
   justify-content: flex-end;
 }
+/* Roster evidence stamps: the recorded-check age under the account, and the provenance chip beside
+   the status pill. Neutral chrome — provenance is a fact label, not a severity signal. */
+.roster-stamp {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  color: var(--subtle);
+}
+.prov-chip {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--subtle);
+  vertical-align: 2px;
+}
+.prov-chip[data-evidence='unverified'] {
+  border-style: dashed;
+}
 
 @media (max-width: 900px) {
   .profile-fields {
