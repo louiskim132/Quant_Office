@@ -93,7 +93,10 @@ try {
   await page.getByRole('button', { name: 'Memory', exact: true }).click();
   await page.getByRole('heading', { name: 'Choose a project', exact: true }).waitFor();
   assert.equal(await page.getByRole('button', { name: 'Create project', exact: true }).count(), 0);
-  await page.locator('.project-picks').getByRole('button', { name: /Volatility research/ }).click();
+  await page
+    .locator('.project-picks')
+    .getByRole('button', { name: /Volatility research/ })
+    .click();
   await page.getByRole('heading', { name: 'Choose a project', exact: true }).waitFor({ state: 'hidden' });
   await page.getByRole('button', { name: 'Projects', exact: true }).click();
   await page.getByRole('button', { name: 'Open project', exact: true }).waitFor();
