@@ -1,4 +1,5 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, session, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, session, shell } from 'electron';
+import { attentionBadgePng } from './attention-badge.js';
 import path from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
 import { mkdir, writeFile, rename } from 'node:fs/promises';
@@ -1363,6 +1364,20 @@ function register() {
     return { findings: store.searchMemoryFindings(input.projectId, input.text, input.limit) };
   });
   handle('office:memory-graph', value => store.memoryGraph(id.parse(value)));
+  // The taskbar badge for items waiting on the user. A count only: no content leaves the window.
+  let lastAttention = 0;
+  handle('office:attention', value => {
+    const count = z.number().int().min(0).max(999).parse(value);
+    if (!win || win.isDestroyed()) return;
+    if (count > 0)
+      win.setOverlayIcon(
+        nativeImage.createFromBuffer(attentionBadgePng()),
+        `${count} need${count === 1 ? 's' : ''} you`,
+      );
+    else win.setOverlayIcon(null, '');
+    if (count > lastAttention && !win.isFocused()) win.flashFrame(true);
+    lastAttention = count;
+  });
   // Live presence of the children this office spawned: in memory, read-only, never an event-chain record.
   handle('office:presence', value => {
     noInput(value);

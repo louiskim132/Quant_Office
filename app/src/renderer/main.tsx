@@ -39,6 +39,9 @@ import { AgentRoster, ProfileEditor, ConnectionBinding } from './office';
 import { OfficeScene } from './office-scene';
 import { useOfficeActivity } from './use-activity';
 import { AgentDrawer } from './agent-drawer';
+import { AgentStrip, AttentionBell, ToastStack } from './shell-widgets';
+import { attentionItems } from '../shared/attention';
+import { activityStatus } from './status';
 import { WorkQueue } from './queue';
 import { AgentSetup, AgentIsolation, ProviderConnections, SubscriptionUsage } from './agents';
 import { ProjectsView } from './projects';
@@ -202,7 +205,10 @@ function App() {
   const project = state?.projects.find(p => p.id === projectId);
   const experiments = state?.experiments.filter(e => e.projectId === projectId) || [];
   const experiment = experiments.find(e => e.id === experimentId);
-  const blockedRequests = state ? requestQueue(state).filter(r => r.status === 'BLOCKED').length : 0;
+  const attention = state ? attentionItems(state, activity) : [];
+  const needsYou = attention.length;
+  const working = activity.filter(a => ['working', 'stalled'].includes(activityStatus(a))).length;
+  const failedSeats = activity.filter(a => activityStatus(a) === 'failed').length;
   const scopedArtifacts =
     state?.artifacts.filter(a => a.projectId === projectId && (!experiment || a.experimentId === experiment.id)) || [];
   const scopedEvents = state?.events.filter(e => !project || e.projectId === projectId || e.projectId === null) || [];
@@ -247,6 +253,9 @@ function App() {
       document.documentElement.dataset.motion = state.settings.reducedMotion ? 'reduced' : 'full';
     }
   }, [state?.settings]);
+  useEffect(() => {
+    void window.office?.setAttentionCount?.(needsYou).catch(() => {});
+  }, [needsYou]);
   useEffect(() => {
     document.querySelector('main')?.scrollTo(0, 0);
   }, [page]);
@@ -416,7 +425,7 @@ function App() {
                 >
                   <Icon size={18} />
                   <span>{name}</span>
-                  {name === 'Office' && blockedRequests > 0 && <b>{blockedRequests}</b>}
+                  {name === 'Office' && needsYou > 0 && <b aria-label={`${needsYou} need you`}>{needsYou}</b>}
                 </button>
               ))}
             </React.Fragment>
@@ -479,6 +488,17 @@ function App() {
             </select>
           </div>
           <div className="topbar-right">
+            <AgentStrip agents={state.agents} activity={activity} onPick={setDrawerAgentId} />
+            <AttentionBell
+              items={attention}
+              onPick={item => {
+                if (item.kind === 'agent') setDrawerAgentId(item.targetId);
+                else {
+                  setPage('Office');
+                  setOpenRequestId(item.targetId);
+                }
+              }}
+            />
             <span className="provider-status">
               <span className="status-dot off" />
               {state.agents.filter(a => !a.removedAt).length} agents registered
@@ -539,23 +559,6 @@ function App() {
               </div>
             )}
           </div>
-          {error && (
-            <div className="notice error" role="alert">
-              <span>{error}</span>
-              <button aria-label="Dismiss error" onClick={() => setError('')}>
-                <X size={16} />
-              </button>
-            </div>
-          )}
-          {notice && (
-            <div className="notice success" role="status">
-              <Check size={16} />
-              <span>{notice}</span>
-              <button aria-label="Dismiss notice" onClick={() => setNotice('')}>
-                <X size={16} />
-              </button>
-            </div>
-          )}
           {page === 'Office' && (
             <>
               <div className="office-live-layout">
@@ -808,16 +811,31 @@ function App() {
             />
           )}
         </main>
+        <ToastStack
+          error={error}
+          notice={notice}
+          onDismissError={() => setError('')}
+          onDismissNotice={() => setNotice('')}
+        />
         <footer className="statusbar">
           <span>
             <span className="status-dot" />
             Local record ready
           </span>
           <span>
-            {state.agents.filter(a => !a.removedAt).length} registered agents
-            <span className="statusbar-divider">|</span>
-            {blockedRequests} blocked requests · all projects<span className="statusbar-divider">|</span>No active
-            provider jobs
+            <span className="statusbar-counts">
+              <b>{working}</b> working
+              <span className="statusbar-divider">|</span>
+              <b>{needsYou}</b> need you
+              {failedSeats > 0 && (
+                <>
+                  <span className="statusbar-divider">|</span>
+                  <b>{failedSeats}</b> failed lately
+                </>
+              )}
+              <span className="statusbar-divider">|</span>
+              {state.agents.filter(a => !a.removedAt).length} agents
+            </span>
           </span>
         </footer>
       </div>

@@ -1327,6 +1327,8 @@ export interface OfficeAPI {
   retryPipelineHop(input: { requestId: string; pipelineKey: string; expectedRevision: number }): Promise<AppState>;
   searchMemory(input: { projectId: string; text: string; limit?: number }): Promise<{ findings: MemoryFinding[] }>;
   memoryGraph(projectId: string): Promise<MemoryGraph>;
+  /** Reports how many items wait on the user, for the taskbar badge. A count only. */
+  setAttentionCount(count: number): Promise<void>;
   /** The office's own view of the agent processes it spawned; in memory only, empty when none run. */
   livePresence(): Promise<import('./activity').LivePresence[]>;
   onPresence(callback: (presence: import('./activity').LivePresence[]) => void): () => void;
