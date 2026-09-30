@@ -5691,7 +5691,7 @@ export class OfficeStore {
             },
           });
           reason = command.teamId
-            ? `Requested ${command.slots.map(slot => `${slot.count} ${slot.role}`).join(', ') || 'no role slots'} from a team. Slots resolve to actual agents at dispatch.`
+            ? `Requested ${command.slots.map(slot => `${slot.count} ${slot.role}`).join(', ') || 'no role slots'} from a team. The slots are recorded on the request; the office does not assign agents from them automatically.`
             : 'Cleared the team request; this work is not routed to a team.';
           break;
         }

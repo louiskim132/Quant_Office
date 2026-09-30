@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
-import { templateReceiptSchema, type TemplateReceipt } from '../shared/research-contracts.js';
 
 /**
  * The authored template versions this build ships, and what a receipt claiming one must match.
@@ -46,43 +45,4 @@ export function authoredTemplates(directory: string): AuthoredTemplate[] {
     .filter((item): item is AuthoredTemplate => item !== null);
   if (!templates.length) throw new Error(`No authored research templates were found in ${directory}.`);
   return templates.sort((a, b) => a.file.localeCompare(b.file));
-}
-
-/**
- * Checks one receipt against the authored templates, and against the inputs it claims to have read.
- *
- * A receipt that names a template version this build does not ship is not a slightly stale receipt:
- * the semantics of every number in it are unknown, so it is refused rather than accepted with a note.
- * A USER_SUPPLIED receipt is accepted as a document and explicitly not as evidence of a hosted run.
- */
-export function parseReceipt(
-  candidate: unknown,
-  templates: AuthoredTemplate[],
-  expectedInputHashes?: string[],
-): { receipt: TemplateReceipt; hosted: boolean; note: string } {
-  const receipt = templateReceiptSchema.parse(candidate);
-  const authored = templates.find(item => item.id === receipt.templateId && item.version === receipt.templateVersion);
-  if (!authored)
-    throw new Error(
-      `This receipt claims ${receipt.templateId} v${receipt.templateVersion}, which this build does not author. Its results cannot be interpreted.`,
-    );
-  if (authored.sha256 !== receipt.templateHash)
-    throw new Error(
-      `This receipt claims ${receipt.templateId} v${receipt.templateVersion} but names different bytes than the authored template.`,
-    );
-  if (Date.parse(receipt.finishedAt) < Date.parse(receipt.startedAt))
-    throw new Error('This receipt finished before it started.');
-  if (expectedInputHashes) {
-    const missing = expectedInputHashes.filter(hash => !receipt.inputHashes.includes(hash));
-    if (missing.length)
-      throw new Error(`This receipt does not name ${missing.length} of the inputs it was supposed to read.`);
-  }
-  const hosted = receipt.provenance === 'HOSTED_TEMPLATE_RUN';
-  return {
-    receipt,
-    hosted,
-    note: hosted
-      ? `Receipt for ${receipt.templateId} v${receipt.templateVersion} (${receipt.kind}, seed ${receipt.seed}) on ${receipt.environment}.`
-      : `User-supplied receipt for ${receipt.templateId} v${receipt.templateVersion}. Recorded as an account of a run, not as evidence that the office arranged one.`,
-  };
 }

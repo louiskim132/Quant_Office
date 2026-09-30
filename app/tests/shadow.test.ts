@@ -1,15 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import test from 'node:test';
-import {
-  evaluateShadow,
-  impactClaimBlocker,
-  thresholdInvalidation,
-  type Fill,
-  type Quote,
-  type ShadowPolicy,
-  type ShadowPrediction,
-} from '../src/shared/shadow.js';
+import { evaluateShadow, type Quote, type ShadowPolicy, type ShadowPrediction } from '../src/shared/shadow.js';
 
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
 const at = (day: number, hour = 0) => new Date(Date.UTC(2024, 5, day, hour)).toISOString();
@@ -186,40 +178,6 @@ test('a drift alarm asks for attention; a kill threshold stops the shadow', () =
     now: at(3),
   });
   assert.equal(between.outcome, 'INCONCLUSIVE');
-});
-
-test('a simulated fill cannot establish market impact', () => {
-  const fills: Fill[] = [
-    {
-      predictionId: randomUUID(),
-      symbol: 'AAA',
-      at: at(2),
-      quantity: 100,
-      price: 100,
-      kind: 'SIMULATED',
-      provenance: 'mid-price model',
-    },
-    {
-      predictionId: randomUUID(),
-      symbol: 'AAA',
-      at: at(2),
-      quantity: 100,
-      price: 100.05,
-      kind: 'EXECUTED',
-      provenance: 'broker statement 2024-06-02',
-    },
-  ];
-  assert.match(impactClaimBlocker(fills) ?? '', /priced against a book that did not move in response to it/);
-  assert.equal(impactClaimBlocker(fills.filter(fill => fill.kind === 'EXECUTED')), null);
-  assert.equal(impactClaimBlocker([]), null);
-});
-
-test('changing a threshold invalidates a verdict rather than rescoring it', () => {
-  assert.equal(thresholdInvalidation(sha256('thresholds v1'), sha256('thresholds v1')), null);
-  assert.match(
-    thresholdInvalidation(sha256('thresholds v1'), sha256('thresholds v2')) ?? '',
-    /no longer stands. Re-run the evaluation under the current frozen thresholds/,
-  );
 });
 
 test('nothing here reaches a network or an order interface', async () => {
