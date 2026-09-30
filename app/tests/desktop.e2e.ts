@@ -279,6 +279,7 @@ try {
       'agentIsolationStatus',
       'agentIsolationSetup',
       'agentIsolationRemove',
+      'agentIsolationVerify',
       'importFiles',
       'onChanged',
       'previewArtifact',

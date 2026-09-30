@@ -7,6 +7,7 @@ import path from 'node:path';
 import { removeTreeSync } from '../src/main/fsx';
 import {
   AGENT_USERNAME,
+  HOST_ENV_KEEP,
   buildAclPlan,
   qroAgentSpawn,
   resolveNodeExe,
@@ -437,7 +438,25 @@ test('setup script adds the isolated account to the standard Users group', () =>
 test('credential bootstrap starts in the agent-accessible host directory', () => {
   const source = readFileSync(path.resolve(import.meta.dirname, '../src/main/agent-isolation.ts'), 'utf8');
   assert.match(source, /cwd: hostDir/);
-  assert.match(source, /-LoadUserProfile -UseNewEnvironment -Wait/);
+  assert.match(source, /\$si\.WorkingDirectory = \$\{quote\(hostDir\)\}/);
+  assert.match(source, /\$si\.LoadUserProfile = \$true/);
+});
+
+// Both regressions below were found by the real-account acceptance on 2026-09-29.
+test('credential bootstrap builds the host environment with SystemRoot and nothing from the office profile', () => {
+  const source = readFileSync(path.resolve(import.meta.dirname, '../src/main/agent-isolation.ts'), 'utf8');
+  // Start-Process -UseNewEnvironment dropped SystemRoot, and node.exe aborts without it.
+  assert.doesNotMatch(source, /Start-Process -Credential/);
+  assert.match(source, /\$si\.EnvironmentVariables\.Clear\(\)/);
+  assert.ok(HOST_ENV_KEEP.includes('SystemRoot'));
+  for (const key of ['USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'TEMP', 'TMP', 'HOMEPATH', 'PSModulePath'])
+    assert.ok(!HOST_ENV_KEEP.includes(key), `${key} must not cross into the host`);
+});
+
+test('the host starts without resolving its script path through the office profile', () => {
+  const source = readFileSync(path.resolve(import.meta.dirname, '../src/main/agent-isolation.ts'), 'utf8');
+  // Without these node lstat's every parent folder, and C:\Users\<office user> is denied.
+  assert.match(source, /--no-maglev --preserve-symlinks --preserve-symlinks-main "\$\{script\}"/);
 });
 
 test('LR-16 acceptance passes only on successful identity, group, path-denial, and boundary probes', () => {

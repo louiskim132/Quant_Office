@@ -1,6 +1,6 @@
 # Quant Research Office — single implementation roadmap
 
-Current status, 2026-09-28: private/internal beta. C11 development is complete (LR-0…LR-11, LR-14, LR-15 and LR-17 merged; L2 closed — `bench-store.ts 1000` opens in about 0.1 s). Open launch gates: LR-16 real isolated-user acceptance (code merged; the elevated setup needs the user's UAC consent) and the provider-terms legal review, which a separate reviewer handles outside this project. Deferred under D-3: signing, installer, updates and clean-machine release validation. **Where status lives:** the section 11 tables and the dated log in section 17 (newest last). On 2026-09-28 the superseded opening paragraphs, completed packet texts and log entries before 2026-09-27 moved verbatim to [history/roadmap-archive-2026-09.md](history/roadmap-archive-2026-09.md); section numbers are unchanged.
+Current status, 2026-09-29: private/internal beta. C11 development is complete (LR-0…LR-11, LR-14, LR-15 and LR-17 merged; L2 closed — `bench-store.ts 1000` opens in about 0.1 s). Open launch gates: LR-16b (isolated agents on the user's subscription, required by D-6; the v1 real acceptance passed on 2026-09-29) and the provider-terms legal review, which a separate reviewer handles outside this project. Deferred under D-3: signing, installer, updates and clean-machine release validation. **Where status lives:** the section 11 tables and the dated log in section 17 (newest last). On 2026-09-28 the superseded opening paragraphs, completed packet texts and log entries before 2026-09-27 moved verbatim to [history/roadmap-archive-2026-09.md](history/roadmap-archive-2026-09.md); section numbers are unchanged.
 
 ## 1. Start here: scope, priority and execution rules
 
@@ -624,7 +624,7 @@ Ordered implementation packets (organizer owns shared contracts, IPC, dependenci
 
 Exact next local work: implement C10-A attempt preparation/ledger and C10-B contracts on organizer-published packets; retain C9's separate local-session probe and pilot as outstanding. Local fixture work can proceed without changing R5 or waiting for real data. Do not start paid/live provider runs merely because a packet is written.
 
-### C11 — Launch-readiness revision (LR packets) — DEVELOPMENT COMPLETE 2026-09-28; LR-0…LR-11, LR-14, LR-15, LR-17 merged and LR-16 code merged (`54aa5f7`); launch gates open: LR-16 real acceptance, legal review; D-3 deferred
+### C11 — Launch-readiness revision (LR packets) — DEVELOPMENT COMPLETE 2026-09-28; LR-0…LR-11, LR-14, LR-15, LR-17 merged and LR-16 code merged (`54aa5f7`); launch gates open: LR-16b (D-6), legal review; D-3 deferred
 
 Source: the 2026-09-25 commercial launch-readiness review in section 17 (findings L1–L15).
 Base: `origin/main` at or after `e0ce5d9` (rev-3/rev-4 merged; LR-0 merged as PR #18; re-anchored — see C11.0 rule 0). LR-1 is the next packet. New desktop-batch code rounds must branch from this formatted `main`. This slice is written so that a coding model
@@ -660,6 +660,14 @@ stop and report the conflict instead of choosing yourself.
 - **D-5 Formatting and design.** Formatter = **Prettier, line width 120**, and it runs **first**
   (LR-0), before any other revision. Design = **unify the look, with light as the default
   theme** (LR-14). The dark theme stays available in Settings.
+- **D-6 Agents run on the user's subscriptions only (2026-09-29).** Office agents run as local CLIs
+  signed in with the user's own subscription, or as the provider's cloud sessions on that
+  subscription. Provider API usage is billed separately from subscriptions, so no agent path may
+  require, suggest or default to an API key. LR-15 API-key mode stays in the product as an opt-in
+  only, to be reviewed after the legal decision. LR-16 isolation v1 authenticates isolated
+  dispatches only with API keys, so isolation stays off in real workspaces until LR-16b adds
+  subscription sign-in under the agent account. A cloud route (R5) is eligible only when its usage
+  is billed inside the subscription.
 
 #### C11.0 Rules for every packet (read these first, every time)
 
@@ -736,7 +744,7 @@ stop and report the conflict instead of choosing yourself.
 | 13 | LR-11 Accessible names for icon buttons | L13 | Coding model | LR-1 |
 | 14 | LR-14 Unified look with light as the default theme | L14 | Coding model | LR-6, LR-1 |
 | Launch gate | LR-15 API-key mode (merged PR #34, `b4c71ec`) | L4 | Organizer designs, coding model builds | all above |
-| Launch gate | LR-16 Separate Windows user for agent sessions (implementation merged; real acceptance open) | L1 | Organizer acceptance | all above |
+| Launch gate | LR-16 Separate Windows user for agent sessions (v1 merged; real acceptance passed 2026-09-29, PR #46; needs LR-16b under D-6) | L1 | Organizer acceptance | all above |
 | Launch gate | Legal review of provider terms | L4 | User (lawyer) | — |
 | Very last | Deferred — signing, installer, updates, fuses (former LR-12) | L3 | User reopens D-3 first | everything |
 
@@ -780,9 +788,12 @@ After the coding model reports, the organizer (Claude Opus) reviews the PR again
   logs, Git or prompts; subscription mode stays available for users' own subscriptions.
 - **Legal review (D-4).** The user has each provider's terms reviewed for commercial automated
   use before any sale. Record the outcome in section 17.
-- **LR-16 Separate Windows user for agent sessions (D-1 option A). CODE MERGED (PRs #37–#40, #42); real elevated acceptance NOT RUN — gate open.** The organizer writes the
+- **LR-16 Separate Windows user for agent sessions (D-1 option A). CODE MERGED (PRs #37–#40, #42); v1 real acceptance passed 2026-09-29 (PR #46); LR-16b open under D-6.** The organizer writes the
   design first. Direction: a dedicated low-privilege local account created once with the user's
   consent, agent CLIs started as that account, and file access limited to the packet folders.
+  Real acceptance passed 5/5 on 2026-09-29 through the in-app Check isolation action (PR #46).
+  Isolation v1 authenticates isolated dispatches only with a saved provider API key, so under D-6
+  it stays off in real workspaces until LR-16b adds a subscription sign-in under the agent account.
 
 #### Deferred — final step (D-3, reopen only when the user says so)
 
@@ -852,7 +863,7 @@ Status vocabulary: NOT_STARTED, IMPLEMENTED_FOUNDATION, IN_PROGRESS, PARTIALLY_V
 | D1 optional Serena trial | PARTIALLY_IMPLEMENTED, nonblocking | Project-local AGENTS.md and CLAUDE.md pointers plus the Git/worktree policy were added during repository setup on 2026-09-12. The optional Serena comparison and client configuration remain NOT_STARTED; no navigation plugin was installed. |
 | C10 four-plugin office evaluation | MEASURED_LOCAL 2026-09-25 (CLI A/B, scratch installs); no plugin enabled by default | 2026-09-16: section 3.2 and C10 define the trials and `app/benchmarks/plugin-evaluation/`. 2026-09-25: Serena 1.7.0, Ponytail v4.10.0, Graphify 0.9.68 and LightRAG 1.5.7 (Ollama local) trialled alone and stacked on an office implement packet and a 7-item code-navigation task. No plugin or pair saved tokens beyond run-to-run noise; Serena adds ~8.7k tokens per call and is unused unless hinted; stacking adds context and lowered accuracy; LightRAG local indexing failed (5 of 11 files timed out in 2 h). Recommended set: office memory ledger only. See section 17 entry "plugin trials" of this date. |
 | Token diet (pipeline token consumption) | VERIFIED_LOCAL on dev + packaged build; merged via PR #13/#14 (2026-09-25 local) | Branch `fix/token-diet-20260925` (base organizer `9356c2e`). Lean Claude/Codex launches, per-hop deliverables, hop-keyed inherited inputs, worker slices, packet essentials + `finish.py`, split contract, pre-registered analysis plan (`analysisOf`), QUICK round shape, implementation-only REVISE, claude launch spacing. Live: quick ema5 round 574k input tokens (was 2.50M), implementation-only revision 345k (was 3.10M), Codex implement 147k (was 374k). App\ `app.asar` `642139F3…`. Plugin trials done (C10 row). Follow-ups done on `fix/evidence-and-memory-20260925` (PR #14): evidence-surface args documented; memory capture restored and digest mounted at `plan-brief`. App\ `app.asar` `0901A8DF…` — see section 17 entries of this date. |
-| Commercial launch readiness | IN_PROGRESS — coded series merged through LR-17 (`90c0e45`); L2 closed (openMs 92–132 ms); LR-16 implementation merged, real QRO-Agent acceptance not run (the elevated setup needs the user's UAC consent); provider-terms legal review handled by a separate reviewer outside this project | Private/internal beta only. Merged 2026-09-27 as SWE-2 Max packets on protected main: LR-0 `e0ce5d9` (PR #18), LR-1 `232f273` (#21, packaged e2e in CI), LR-3 `54fd5be` (#23, PROMPT.md long prompts), LR-4 `c3a8a2a` (#24, local-first defaults + risk consent), LR-5 `36ff06e` (#25, inputs-as-data prompt boundary), LR-6 `ef2779a` (#26, projection compaction + schema 4 + downgrade tool), LR-2 `608ea06` (#27, crash diagnostics + bounded local log), LR-11 `fe00e4a` (#29, accessible-name e2e guard), LR-9 `fa3ac70` (#28, plain provider status in Settings), LR-14 `a54f29d` (#30, light default theme via schema 5), LR-10 `7b928c5` (#31, unified format.ts), LR-7 `abbe9a1` (#32, loading window), LR-15 `b4c71ec` (#34, API-key mode, safeStorage/DPAPI, schema-free), LR-17 `90c0e45` (#35, integrity checkpoint via schema 6 — open replays only the post-checkpoint tail and a chunked background full verify advances it; `bench-store.ts 1000` openMs 132 ms closes L2). LR-16 launcher follow-up PR #40 merged 2026-09-28 as `ba9b72d`; exact-head verify passed. Launch gates: LR-16 real elevated acceptance remains unverified, and provider-terms legal review is user-owned. Signing/installer/updates/fuses and clean-machine release validation stay deferred under D-3. `App\` mirrors `ba9b72d` (asar `4CF93A09D322A6CF4EBE6171A5514E895C6B782E94CA540ECCDBF8C502CADB8D`). |
+| Commercial launch readiness | IN_PROGRESS — coded series merged through LR-17 (`90c0e45`); L2 closed (openMs 92–132 ms); LR-16 v1 real acceptance passed 5/5 on 2026-09-29 (PR #46); LR-16b (subscription sign-in under QRO-Agent) is required by D-6; provider-terms legal review handled by a separate reviewer outside this project | Private/internal beta only. Merged 2026-09-27 as SWE-2 Max packets on protected main: LR-0 `e0ce5d9` (PR #18), LR-1 `232f273` (#21, packaged e2e in CI), LR-3 `54fd5be` (#23, PROMPT.md long prompts), LR-4 `c3a8a2a` (#24, local-first defaults + risk consent), LR-5 `36ff06e` (#25, inputs-as-data prompt boundary), LR-6 `ef2779a` (#26, projection compaction + schema 4 + downgrade tool), LR-2 `608ea06` (#27, crash diagnostics + bounded local log), LR-11 `fe00e4a` (#29, accessible-name e2e guard), LR-9 `fa3ac70` (#28, plain provider status in Settings), LR-14 `a54f29d` (#30, light default theme via schema 5), LR-10 `7b928c5` (#31, unified format.ts), LR-7 `abbe9a1` (#32, loading window), LR-15 `b4c71ec` (#34, API-key mode, safeStorage/DPAPI, schema-free), LR-17 `90c0e45` (#35, integrity checkpoint via schema 6 — open replays only the post-checkpoint tail and a chunked background full verify advances it; `bench-store.ts 1000` openMs 132 ms closes L2). LR-16 launcher follow-up PR #40 merged 2026-09-28 as `ba9b72d`; exact-head verify passed. Launch gates: LR-16b is open, and provider-terms legal review is user-owned. Signing/installer/updates/fuses and clean-machine release validation stay deferred under D-3. `App\` mirrors `ba9b72d` (asar `4CF93A09D322A6CF4EBE6171A5514E895C6B782E94CA540ECCDBF8C502CADB8D`). |
 | OmniRoute routing extension | NOT_STARTED implementation; architecture reviewed 2026-09-11 | Section 3.1 proposes operation-specific model/session/research contracts and an optional bounded free-worker route. Current subscription-only runtime policy remains unchanged; no gateway installation, provider transfer or live compatibility test occurred. Integrate with C2/C4/C7 and retain R5/custody requirements. |
 | R2 | VERIFIED_LOCAL within documented limits | Snapshot/output inventory is shared by backup and restore; both formats restore actual bytes into a new root. OutputService reserves real destinations on prepare/launch and stores versioned verified bytes. Required missing objects refuse backup. Snapshot identity rejects null/wrong request revisions. Remaining constraints: source swap races, recorded-platform Git reconstruction and R5 transport limits. |
 | R3 | VERIFIED_LOCAL | Preserve exact per-operation scope, durable evidence order, independent confinement and frozen account context. No new live capability evidence in this pass. |
@@ -941,8 +952,8 @@ Scope: read-only inspection of Devin session `glowing-thunder` (title `Quant_Off
 | Startup — LR-6 → LR-7 → LR-8 | Compact the disposable catalog projection without altering history; show the loading window before store work; measure startup. Source still constructs OfficeStore before BrowserWindow. | Scratch-workspace round-trip/downgrade tests and repeated startup measurements. The reported 166-second launch may include host contention; it does not rule out the separately measured store/startup defect. Never reset live data to improve timing. |
 | Coverage — desktop organizer | Exercise typed withheld-path entry in the packaged UI against scratch data: save a directory prefix, reload, verify persistence, remove it, and confirm BLIND excludes / FULL includes the expected files. | Exact build hash, UI actions, saved state and packet-path evidence. Existing packet-blinding checks do not prove this new editor was exercised. |
 | Coverage — desktop organizer | When a live provider test is explicitly authorized, exercise two Claude test agents launching in one phase. | Record agent/model/effort, actual spawn timestamps, at least the configured four-second spacing and completion/recovery results. The one-Claude QUICK roster cannot close this gap. |
-| Remaining C11 packets | None; LR-0…LR-11 and LR-14…LR-17 are merged and development exit criteria are met. | Launch gates remain LR-16 real isolated-user acceptance and counsel's provider-terms decision. Fail-closed evidence evaluation is covered; D-3 stays deferred. |
-| External/user gates | Keep C8 manual Colab return, R5 hosted evidence, LR-16 real isolated-user acceptance and provider-terms legal review separately tracked. | LR-16 acceptance must run through a normal desktop app-backed process so its DPAPI credential stays synchronized; the legal source packet does not substitute for counsel approval. Their own evidence; none is closed by local tests. Signing/installer/updates/fuses remain deferred under D-3. |
+| Remaining C11 packets | None; LR-0…LR-11 and LR-14…LR-17 are merged and development exit criteria are met. | Launch gates remain LR-16b (D-6; the v1 real acceptance passed 2026-09-29, PR #46) and counsel's provider-terms decision. Fail-closed evidence evaluation is covered; D-3 stays deferred. |
+| External/user gates | Keep C8 manual Colab return, R5 hosted evidence, LR-16b (isolated agents on the user's subscription, D-6) and provider-terms legal review separately tracked. | LR-16 v1 acceptance passed 2026-09-29 through the in-app Check isolation action (the DPAPI credential stayed synchronized) and counts on `main` once PR #46 merges; the legal source packet does not substitute for counsel approval. Their own evidence; none is closed by local tests. Signing/installer/updates/fuses remain deferred under D-3. |
 
 Do not publish findings-rev-5 without a reproducible new defect. Scratch acceptance can proceed independently of formatting, but it writes scratch state and may launch agents: it is not literally read-only and does not authorize live-data mutation or paid/provider runs. Any resulting code packet should be based on the formatted main after RA.
 
@@ -1254,3 +1265,34 @@ user-owned. `App\` currently mirrors `abbe9a1` (asar `A498E677…`).
 - **Verification:** format check clean; typecheck 0 errors; 945 tests, 944 pass, 0 fail, 1 skipped; build and package clean; packaged desktop e2e passed; packaged UI check of the Location & inputs panel with a scratch data folder, no page errors.
 - **Not changed here:** PRs #45 (Electron fuses) and #46 (LR-16 in-app check) stay separate; PR #44's commits are included. The installed `App` copy is not re-mirrored until this change merges.
 - **Next:** decide whether to wire or delete the unwired research-policy helpers listed in the audit record; trim capability history from state pushes; LR-16 real acceptance and worktree cleanup are the user's.
+
+### 2026-09-29 — LR-16 real QRO-Agent acceptance passed; host launch fixed
+
+- **How it ran:** from a normal desktop session on branch `feat/lr16-verify-action` (PR #46), driving
+  the development app with a scratch `QRO_USER_DATA_DIR` (`%TEMP%\qro-lr16-accept-20260929`). The
+  user approved the UAC prompt for Settings → Set up agent isolation, then the app's own Check
+  isolation action ran the probes through the saved DPAPI credential. Live Office user data was not
+  touched and had no isolation configured, so the password rotation by setup broke nothing.
+- **First run failed closed (0/5):** the agent host never reported ready. Three causes were found and
+  fixed in the credential bootstrap in `app/src/main/agent-isolation.ts` (commit `49f1922`):
+  1. `Start-Process -UseNewEnvironment` builds the environment from the registry only. That drops
+     `SystemRoot`, so node.exe aborted on `ncrypto::CSPRNG`, and it copied the office user's HKCU
+     variables. Without the flag, the Start-Process credential logon was refused ("Access is
+     denied"). The host now starts through `ProcessStartInfo` with an explicit environment:
+     system-wide keys (`HOST_ENV_KEEP`), the machine Path and a TEMP inside the ACL'd host tree.
+  2. node realpaths its main script by lstat-ing every parent folder, and QRO-Agent is denied
+     `C:\Users\<office user>`. `--preserve-symlinks --preserve-symlinks-main` skip that walk.
+  3. The host's stderr was discarded; it is now passed back, so a start failure is reported.
+  These match the 2026-09-28 Codex failure (the same CSPRNG assertion and "Access is denied").
+- **Result after the fix: passed 5/5**, twice (after the fix and again on the final build). whoami
+  is `qro-agent`; its groups are standard (Users, no Administrators); `dir` of the office profile
+  returns "Access is denied."; a `C:\` working folder is refused by the host boundary. The evidence
+  JSON stays in the scratch folder's `acceptance\` directory (not committed; it contains the
+  machine name).
+- **Verification (local; GitHub Actions paused for quota):** isolation tests 24/24 (3 new
+  regression tests); full suite 953 passed, 0 failed, 1 skipped; desktop e2e passed; typecheck and
+  Prettier clean.
+- **Still open:** merge PR #46 once Actions is available and verify passes; then rebuild and mirror
+  `App\`. Do **not** set up isolation in the real app: v1 needs a provider API key for every
+  isolated dispatch, and D-6 (the user's rule of 2026-09-29) keeps agents on subscriptions. LR-16b
+  is the follow-up.

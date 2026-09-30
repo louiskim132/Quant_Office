@@ -3,7 +3,7 @@
  * QRO agent-isolation host (LR-16).
  *
  * Runs as the low-privilege QRO-Agent account, launched by the office through PowerShell
- * Start-Process -Credential. Self-contained on purpose: node stdlib only, zero imports outside
+ * and a credential logon (ProcessStartInfo). Self-contained on purpose: node stdlib only, zero imports outside
  * node:* — it executes outside the app's bundle.
  *
  *   argv[2] = sessionDir  — the per-office-run request channel directory
