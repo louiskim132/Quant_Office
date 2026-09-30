@@ -544,12 +544,45 @@ h1 {
 .empty-state p:last-child {
   margin-bottom: 0;
 }
-.project-choices {
+.project-picks {
   display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
+  flex-direction: column;
   gap: 8px;
-  max-width: 520px;
+  width: min(430px, 100%);
+  margin: 0 auto;
+}
+.project-pick {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  text-align: left;
+}
+.project-pick:hover {
+  border-color: var(--accent);
+}
+.project-pick strong {
+  font-size: var(--fs-3);
+  flex-shrink: 0;
+}
+.project-pick-state {
+  flex: 1;
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--fs-1);
+}
+.project-pick-tag {
+  flex-shrink: 0;
+  font-size: var(--fs-1);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 99px;
+  padding: 1px 8px;
 }
 .project-card {
   border: 1px solid var(--border);
@@ -1299,6 +1332,9 @@ body {
 .settings-nav [aria-pressed='true'] {
   box-shadow: inset 0 -2px var(--accent);
 }
+.palette-input {
+  width: 100%;
+}
 .palette-results {
   display: grid;
   gap: 8px;
@@ -1308,6 +1344,50 @@ body {
 }
 .palette-results button {
   justify-content: flex-start;
+}
+.palette-group {
+  display: grid;
+  gap: 4px;
+}
+.palette-group-label {
+  font-size: var(--fs-1);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--subtle);
+  padding: 2px 4px;
+}
+.palette-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+.palette-item.active {
+  border-color: var(--accent);
+  background: var(--panel-2);
+}
+.palette-kind {
+  flex-shrink: 0;
+  font-size: var(--fs-1);
+  color: var(--subtle);
+}
+.palette-hints {
+  display: flex;
+  gap: 14px;
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  color: var(--subtle);
+  font-size: var(--fs-1);
+}
+.palette-hints kbd {
+  font: inherit;
+  font-size: 9px;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 0 4px;
+  background: var(--panel-2);
 }
 .agent-name {
   display: flex;
