@@ -3,6 +3,7 @@ import { ArrowUpRight, Folder, FolderOpen, FolderPlus, Plus } from 'lucide-react
 import type { AppState, Command, Project, ProjectLocation } from '../shared/types';
 import { Empty, SearchField } from './components';
 import './projects.css';
+import { timeAgo } from './status';
 
 /**
  * Normalizes a typed withheld entry exactly as `location.save` will — trim, backslashes to
@@ -371,7 +372,12 @@ export function ProjectsView({
                     )}
                     <span className="path-text project-row-location">{location || 'Not selected'}</span>
                     <span className="project-row-count">
-                      <strong>{state.experiments.filter(e => e.projectId === p.id).length}</strong> experiments
+                      <strong>{(state.requests ?? []).filter(r => r.projectId === p.id && !r.removedAt).length}</strong>{' '}
+                      requests
+                      <small>
+                        {(state.findings ?? []).filter(f => f.projectId === p.id && !f.supersededById).length} findings
+                        · {timeAgo(state.events.filter(e => e.projectId === p.id).at(-1)?.createdAt ?? p.createdAt)}
+                      </small>
                     </span>
                     <span className="quiet-badge small">
                       {p.removedAt ? 'Removed' : p.archived ? 'Archived' : p.id === projectId ? 'Selected' : 'Active'}

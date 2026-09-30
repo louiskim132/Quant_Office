@@ -92,6 +92,15 @@ try {
   const chat = page.getByRole('region', { name: 'Office group chat' });
   await chat.getByText(/The handoff is ready/).waitFor();
   assert.equal(await chat.locator('.office-chat-message').count(), 50);
+  await chat.getByLabel('Chat update type').selectOption('HANDOFF');
+  assert.equal(
+    await chat.locator('.office-chat-message').count(),
+    50,
+    'handoffs are labeled messages, not a job event kind',
+  );
+  await chat.getByLabel('Chat update type').selectOption('TOOL');
+  assert.equal(await chat.locator('.office-chat-message').count(), 0);
+  await chat.getByLabel('Chat update type').selectOption('');
   assert.equal(await chat.locator('img').count(), 0, 'agent text is not rendered as HTML');
   assert.ok(await chat.getByText('view only', { exact: false }).isVisible());
   const bounds = await page.evaluate(() => ({

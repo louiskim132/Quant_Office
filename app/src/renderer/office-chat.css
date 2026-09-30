@@ -15,7 +15,7 @@
 }
 .office-live-layout .meeting-wing {
   border-left: 0;
-  border-top: 5px solid #a9c9dc;
+  border-top: 5px solid var(--of-wall-edge);
   display: grid;
   grid-template-columns: 1fr 1fr;
   padding: 12px;
@@ -79,8 +79,9 @@
   align-items: center;
   gap: 11px;
   padding: 19px 18px;
-  background: #075e54;
-  color: #fff;
+  background: var(--panel);
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
 .office-chat-heading > div {
@@ -97,14 +98,15 @@
   font-size: 10px;
   line-height: 1.5;
   margin: 0;
-  color: #d7eee8;
+  color: var(--muted);
   overflow-wrap: anywhere;
 }
 .office-chat-icon {
   display: grid;
   place-items: center;
-  background: #ffffff20;
-  border: 1px solid #ffffff20;
+  background: var(--accent-bg);
+  color: var(--accent);
+  border: 1px solid var(--border);
   border-radius: 50%;
   height: 39px;
   width: 39px;
@@ -113,14 +115,14 @@
 .office-chat-refresh {
   display: grid;
   place-items: center;
-  color: #e3f6ef !important;
+  color: var(--muted) !important;
   background: transparent !important;
   border: 0 !important;
   padding: 8px !important;
   border-radius: 8px;
 }
 .office-chat-refresh:hover {
-  background: #ffffff15 !important;
+  background: var(--panel-2) !important;
 }
 .office-chat-filters {
   display: grid;
@@ -409,4 +411,24 @@
   .office-live-layout .meeting-wing {
     grid-template-columns: 1fr;
   }
+}
+
+.office-chat-system {
+  text-align: left;
+  margin: 8px 12px;
+  max-width: none;
+  padding: 8px 12px;
+  box-shadow: none;
+  border-left: 2px solid var(--border);
+  background: transparent;
+}
+.office-chat-working {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 12px;
+  color: var(--muted);
+}
+.office-chat-filters {
+  flex-wrap: wrap;
 }

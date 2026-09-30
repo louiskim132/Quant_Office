@@ -26,6 +26,7 @@ const api: OfficeAPI = {
   agentIsolationStatus: () => request('office:agent-isolation-status'),
   agentIsolationSetup: () => request('office:agent-isolation-setup'),
   agentIsolationRemove: () => request('office:agent-isolation-remove'),
+  agentIsolationVerify: () => request('office:agent-isolation-verify'),
   selectProviderTool: provider => request('office:provider-tool', provider),
   openProviderUsage: provider => request('office:provider-usage', provider),
   prepareRequest: input => request('office:request-prepare', input),
@@ -69,6 +70,13 @@ const api: OfficeAPI = {
   memoryGraph: projectId => request('office:memory-graph', projectId),
   jobOutputPreview: input => request('office:job-output-preview', input),
   retryPipelineHop: input => request('office:pipeline-retry-hop', input),
+  setAttentionCount: count => request('office:attention', count),
+  livePresence: () => request('office:presence'),
+  onPresence(callback) {
+    const handler = (_event: unknown, presence: Parameters<typeof callback>[0]) => callback(presence);
+    ipcRenderer.on('office:presence', handler);
+    return () => ipcRenderer.removeListener('office:presence', handler);
+  },
   onChanged(callback) {
     const handler = () => callback();
     ipcRenderer.on('office:changed', handler);

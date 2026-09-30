@@ -1,4 +1,5 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, session, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, session, shell } from 'electron';
+import { attentionBadgePng } from './attention-badge.js';
 import path from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
 import { mkdir, writeFile, rename } from 'node:fs/promises';
@@ -47,7 +48,7 @@ import { localArchiveResultSchema, type LocalSessionRecord } from '../shared/loc
 import { PtyCloudAdapter, transportModuleStatus } from './pty.js';
 import { probeCloudTransport } from './probe.js';
 import { assertTransportProbeAllowed } from '../shared/transport.js';
-import { realpathSync, existsSync, statSync } from 'node:fs';
+import { realpathSync, existsSync, statSync, mkdirSync, writeFileSync } from 'node:fs';
 import { calibration, compareMethods, lineageAncestry } from '../core/monitoring';
 /** One place decides what a usable project root is, so dialogs and saved allowlists agree. */
 function resolveSelectionRoot(root: string): string {
@@ -58,7 +59,8 @@ function resolveSelectionRoot(root: string): string {
 
 import { Subscriptions, providerSchema, subscriptionEnvironment } from './subscriptions.js';
 import { Secrets, agentEnvironment } from './secrets.js';
-import { qroAgentSpawn, setupAgentIsolation, type QroAgentSpawn } from './agent-isolation.js';
+import { AGENT_USERNAME, qroAgentSpawn, setupAgentIsolation, type QroAgentSpawn } from './agent-isolation.js';
+import { runAgentIsolationAcceptance } from './agent-isolation-acceptance.js';
 import type { Connection, Provider } from '../shared/types.js';
 import { describeError, writeLog } from './diagnostics.js';
 let subscriptions: Subscriptions;
@@ -579,6 +581,31 @@ function register() {
     controller = buildController();
     changed();
     return { ok: true };
+  });
+  // LR-16 acceptance: probes run as QRO-Agent through the office's own host, so the saved
+  // credential is used unchanged. Evidence lands in <userData>cceptance; it never includes the
+  // password, only the probes' output and the fail-closed verdict.
+  handle('office:agent-isolation-verify', async value => {
+    noInput(value);
+    if (!agentHost) throw new Error('Agent isolation is not active. Set it up first.');
+    const workspaceDir = workspaceDirectory(app.getPath('userData'));
+    const sessionDir = path.join(workspaceDir, 'local-sessions', `acceptance-${Date.now()}`);
+    mkdirSync(sessionDir, { recursive: true });
+    const report = await runAgentIsolationAcceptance({
+      spawnAs: agentHost,
+      username: AGENT_USERNAME,
+      sessionDir,
+      protectedDir: app.getPath('userData'),
+    });
+    const evidenceDir = path.join(app.getPath('userData'), 'acceptance');
+    mkdirSync(evidenceDir, { recursive: true });
+    const evidencePath = path.join(evidenceDir, `lr16-${new Date().toISOString().replaceAll(':', '-')}.json`);
+    writeFileSync(
+      evidencePath,
+      JSON.stringify({ at: new Date().toISOString(), version: app.getVersion(), ...report }, null, 2),
+      'utf8',
+    );
+    return { passed: report.passed, checks: report.checks, evidencePath };
   });
   handle('office:connection-status', async value => {
     const provider = providerSchema.parse(value);
@@ -1310,6 +1337,26 @@ function register() {
     return { findings: store.searchMemoryFindings(input.projectId, input.text, input.limit) };
   });
   handle('office:memory-graph', value => store.memoryGraph(id.parse(value)));
+  // The taskbar badge for items waiting on the user. A count only: no content leaves the window.
+  let lastAttention = 0;
+  handle('office:attention', value => {
+    const count = z.number().int().min(0).max(999).parse(value);
+    if (!win || win.isDestroyed()) return;
+    if (count > 0)
+      win.setOverlayIcon(
+        nativeImage.createFromBuffer(attentionBadgePng()),
+        `${count} need${count === 1 ? 's' : ''} you`,
+      );
+    else win.setOverlayIcon(null, '');
+    if (count === 0) win.flashFrame(false);
+    else if (count > lastAttention && !win.isFocused()) win.flashFrame(true);
+    lastAttention = count;
+  });
+  // Live presence of the children this office spawned: in memory, read-only, never an event-chain record.
+  handle('office:presence', value => {
+    noInput(value);
+    return exec?.presence() ?? [];
+  });
   handle('office:preview', value => artifacts.preview(id.parse(value)));
   handle('office:import', async value => {
     const input = importSchema.parse(value);
@@ -1553,6 +1600,16 @@ function buildController(): AssignmentController {
     // office profile's subscription sign-ins do not exist in the agent account's profile.
     spawnAs: agentHost,
   });
+  // Children start, speak and end far faster than the window needs to hear about it: one push per second.
+  let presenceTimer: ReturnType<typeof setTimeout> | undefined;
+  exec.onPresence = () => {
+    if (presenceTimer) return;
+    presenceTimer = setTimeout(() => {
+      presenceTimer = undefined;
+      win?.webContents.send('office:presence', exec?.presence() ?? []);
+    }, 1000);
+    presenceTimer.unref?.();
+  };
   const execRoute = new LocalSessionRouter(
     jobId => store.localSessionForJob(jobId),
     { FLAT_PACKET: exec, PROJECT_WORKTREE: exec },
