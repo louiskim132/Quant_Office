@@ -49,9 +49,7 @@ const state = (projects: Project[], requests: Request[]): Pick<AppState, 'projec
 
 test('palette pages follow the sidebar grouping and order', () => {
   const sections = paletteSections(state([project('p1', '2026-01-02T00:00:00Z')], []), '');
-  const pageGroups = sections
-    .map(s => s.label)
-    .filter(l => ['WORKSPACE', 'RESEARCH', 'RECORDS', 'SYSTEM'].includes(l));
+  const pageGroups = sections.map(s => s.label).filter(l => ['WORKSPACE', 'RESEARCH', 'RECORDS', 'SYSTEM'].includes(l));
   assert.deepEqual(pageGroups, ['WORKSPACE', 'RESEARCH', 'RECORDS', 'SYSTEM']);
   assert.deepEqual(
     sections.find(s => s.label === 'WORKSPACE')?.items.map(i => i.label),
@@ -81,7 +79,8 @@ test('New request is listed but inert until a project exists, with the reason on
     ?.items.find(i => i.command === 'new-request');
   assert.equal(ready?.disabledReason, undefined);
   // The other two commands always work.
-  const commands = ready && paletteSections(state([project('p1', 'x')], []), '').find(s => s.label === 'Commands')?.items;
+  const commands =
+    ready && paletteSections(state([project('p1', 'x')], []), '').find(s => s.label === 'Commands')?.items;
   assert.ok(commands?.some(i => i.command === 'add-agent'));
   assert.ok(commands?.some(i => i.command === 'needs-you'));
 });

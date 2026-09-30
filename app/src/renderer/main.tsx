@@ -141,10 +141,7 @@ export interface PaletteSection {
  * palette teaches the same model; projects and requests are recency-ordered (updatedAt) and capped
  * when unfiltered, matching how recents read in every launcher UI.
  */
-export function paletteSections(
-  state: Pick<AppState, 'projects' | 'requests'>,
-  query: string,
-): PaletteSection[] {
+export function paletteSections(state: Pick<AppState, 'projects' | 'requests'>, query: string): PaletteSection[] {
   const q = query.trim().toLowerCase();
   const match = (text: string) => !q || text.toLowerCase().includes(q);
   const open = (state.projects ?? []).filter(p => !p.archived && !p.removedAt);
@@ -449,8 +446,7 @@ function App() {
               )
               .map(p => {
                 const live = liveByProject.get(p.id);
-                const requests = (state?.requests ?? []).filter(r => r.projectId === p.id && !r.removedAt)
-                  .length;
+                const requests = (state?.requests ?? []).filter(r => r.projectId === p.id && !r.removedAt).length;
                 const bits = [
                   requests ? `${requests} request${requests === 1 ? '' : 's'}` : '',
                   live?.working ? `${live.working} working` : '',

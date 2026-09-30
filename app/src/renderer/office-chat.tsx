@@ -165,8 +165,7 @@ export function OfficeChat({ state, initialAgentId = '' }: { state: AppState; in
       `${e.text} ${name(e.agentId)}`.toLowerCase().includes(search.toLowerCase()),
   );
   // An empty feed is either a truly silent scope or a filter/scope miss — never blur the two.
-  const filteredEmpty =
-    !shown.length && (!!entries.length || !!(agentId || projectId || requestId || kind || search));
+  const filteredEmpty = !shown.length && (!!entries.length || !!(agentId || projectId || requestId || kind || search));
   const plainText = (text: string) => text.replace(/\b[a-f0-9]{64}\b/gi, 'stored packet');
   return (
     <section className="office-chat" aria-label="Office group chat">

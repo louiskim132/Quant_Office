@@ -489,11 +489,7 @@ export function SubscriptionUsage({ state }: { state: AppState }) {
       </div>
       <div className="section-toolbar">
         <span className="muted">Run the same per-card check for every provider.</span>
-        <button
-          className="secondary"
-          disabled={anyChecking}
-          onClick={() => void Promise.all(providers.map(refresh))}
-        >
+        <button className="secondary" disabled={anyChecking} onClick={() => void Promise.all(providers.map(refresh))}>
           {anyChecking ? 'Checking…' : 'Refresh all'}
         </button>
       </div>

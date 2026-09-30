@@ -30,7 +30,13 @@ const req = (patch: Partial<Request> = {}): Request =>
     ...patch,
   }) as Request;
 const entryOf = (r: Request, id = r.id): QueueEntry =>
-  ({ id, request: r, status: r.status, settled: false, root: { createdAt: t0, updatedAt: t0 } }) as unknown as QueueEntry;
+  ({
+    id,
+    request: r,
+    status: r.status,
+    settled: false,
+    root: { createdAt: t0, updatedAt: t0 },
+  }) as unknown as QueueEntry;
 const summaryOf = (bucket: RequestBucket, label: string, lastAt = t0): RequestSummary =>
   ({
     bucket,

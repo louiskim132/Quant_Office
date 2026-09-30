@@ -99,8 +99,7 @@ export function AgentRoster({
   );
   const lastPage = Math.max(0, Math.ceil(agents.length / 24) - 1),
     currentPage = Math.min(page, lastPage);
-  const filtered =
-    lifecycle !== 'active' || search.trim() !== '' || team !== '' || role !== '' || provider !== '';
+  const filtered = lifecycle !== 'active' || search.trim() !== '' || team !== '' || role !== '' || provider !== '';
   return (
     <>
       <div className="section-toolbar">
@@ -186,74 +185,70 @@ export function AgentRoster({
               provenance = rosterProvenance(agentActivity),
               freshness = rosterFreshness(a, currentConnection(state, a.provider)?.lastCheckedAt, now);
             return (
-            <article className="project-card agent-row" key={a.id}>
-              <span className="agent-cell agent-name">
-                <Avatar
-                  id={a.id}
-                  name={a.name}
-                  status={view.status}
-                />
-                <strong>{a.name}</strong>
-              </span>
-              <span className="agent-cell">
-                {a.team} · {a.role.replaceAll('_', ' ')}
-              </span>
-              <span className="agent-cell">
-                {a.provider} · {a.model} · {a.effort ?? 'default'} effort
-              </span>
-              <span className="agent-cell">
-                <details>
-                  <summary>{a.execution === 'LOCAL' ? 'Local CLI' : 'Hosted setup'}</summary>
-                  <small>{a.account}</small>
-                </details>
-                <small className="roster-stamp">{freshness}</small>
-              </span>
-              <span className="agent-cell">
-                <StatusPill
-                  status={view.status}
-                  label={a.deletedAt ? 'Removed' : a.removedAt ? 'Archived' : undefined}
-                />
-                <small className="prov-chip" data-evidence={provenance} title={rosterProvenanceTitle[provenance]}>
-                  {provenance}
-                </small>
-                <small title={view.requestName || undefined} aria-label={view.requestName || undefined}>
-                  {view.requestName}
-                </small>
-              </span>
-              <div className="button-row agent-actions">
-                <button className="secondary" onClick={() => onAgent(a.id)}>
-                  Profile &amp; logs
-                </button>
-                {a.deletedAt ? (
-                  <button
-                    className="cancel-request"
-                    disabled={busy}
-                    title="Brings this agent back into the archived list; restore again there to make it active."
-                    onClick={() => onRemove(a.id, false)}
-                  >
-                    Restore
+              <article className="project-card agent-row" key={a.id}>
+                <span className="agent-cell agent-name">
+                  <Avatar id={a.id} name={a.name} status={view.status} />
+                  <strong>{a.name}</strong>
+                </span>
+                <span className="agent-cell">
+                  {a.team} · {a.role.replaceAll('_', ' ')}
+                </span>
+                <span className="agent-cell">
+                  {a.provider} · {a.model} · {a.effort ?? 'default'} effort
+                </span>
+                <span className="agent-cell">
+                  <details>
+                    <summary>{a.execution === 'LOCAL' ? 'Local CLI' : 'Hosted setup'}</summary>
+                    <small>{a.account}</small>
+                  </details>
+                  <small className="roster-stamp">{freshness}</small>
+                </span>
+                <span className="agent-cell">
+                  <StatusPill
+                    status={view.status}
+                    label={a.deletedAt ? 'Removed' : a.removedAt ? 'Archived' : undefined}
+                  />
+                  <small className="prov-chip" data-evidence={provenance} title={rosterProvenanceTitle[provenance]}>
+                    {provenance}
+                  </small>
+                  <small title={view.requestName || undefined} aria-label={view.requestName || undefined}>
+                    {view.requestName}
+                  </small>
+                </span>
+                <div className="button-row agent-actions">
+                  <button className="secondary" onClick={() => onAgent(a.id)}>
+                    Profile &amp; logs
                   </button>
-                ) : a.removedAt ? (
-                  <>
+                  {a.deletedAt ? (
                     <button
                       className="cancel-request"
                       disabled={busy}
-                      title="Hides this archived agent from pickers and lists. Its profile, assignments and history are retained."
-                      onClick={() => onDelete(a.id)}
+                      title="Brings this agent back into the archived list; restore again there to make it active."
+                      onClick={() => onRemove(a.id, false)}
                     >
-                      Remove from list
+                      Restore
                     </button>
-                    <button className="cancel-request" disabled={busy} onClick={() => onRemove(a.id, false)}>
-                      Restore agent
+                  ) : a.removedAt ? (
+                    <>
+                      <button
+                        className="cancel-request"
+                        disabled={busy}
+                        title="Hides this archived agent from pickers and lists. Its profile, assignments and history are retained."
+                        onClick={() => onDelete(a.id)}
+                      >
+                        Remove from list
+                      </button>
+                      <button className="cancel-request" disabled={busy} onClick={() => onRemove(a.id, false)}>
+                        Restore agent
+                      </button>
+                    </>
+                  ) : (
+                    <button className="text-button" disabled={busy} onClick={() => onRemove(a.id, true)}>
+                      Archive agent
                     </button>
-                  </>
-                ) : (
-                  <button className="text-button" disabled={busy} onClick={() => onRemove(a.id, true)}>
-                    Archive agent
-                  </button>
-                )}
-              </div>
-            </article>
+                  )}
+                </div>
+              </article>
             );
           })}
         </div>

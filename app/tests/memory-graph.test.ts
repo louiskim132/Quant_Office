@@ -1,11 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  layoutMemory,
-  memoryDegrees,
-  memoryRadius,
-  memoryEdgeTrim,
-} from '../src/renderer/memory-layout';
+import { layoutMemory, memoryDegrees, memoryRadius, memoryEdgeTrim } from '../src/renderer/memory-layout';
 
 test('memoryDegrees counts both endpoints of non-refuted links only', () => {
   const edges = [
@@ -47,13 +42,18 @@ test('layoutMemory stays deterministic and separated while degree-aware spread o
       assert.ok(Math.hypot(values[i].x - values[j].x, values[i].y - values[j].y) > 70);
   // Degree-aware repulsion gives the high-degree hub visibly more room than the 105 baseline.
   const hubDist = Math.min(
-    ...star.slice(1).map(leaf => Math.hypot(points[leaf.findingId].x - points.hub.x, points[leaf.findingId].y - points.hub.y)),
+    ...star
+      .slice(1)
+      .map(leaf => Math.hypot(points[leaf.findingId].x - points.hub.x, points[leaf.findingId].y - points.hub.y)),
   );
   assert.ok(hubDist > 120, `hub distance ${hubDist} should exceed the plain repulsion zone`);
   assert.deepEqual(layoutMemory([...star].reverse(), [...edges].reverse()), points);
   // Refuted links never feed the degree map or the spread.
   assert.deepEqual(
-    layoutMemory(star, edges.map(e => ({ ...e, status: 'REFUTED' }))),
+    layoutMemory(
+      star,
+      edges.map(e => ({ ...e, status: 'REFUTED' })),
+    ),
     layoutMemory(star, []),
   );
 });

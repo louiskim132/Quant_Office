@@ -73,7 +73,11 @@ export interface QueueTimelineEvent {
 }
 
 const provenanceOf = (evidence: JobEvidence | undefined): TimelineProvenance =>
-  evidence === 'PROVIDER_REPORTED' ? 'provider-reported' : evidence === 'USER_REPORTED' ? 'user-reported' : 'office-observed';
+  evidence === 'PROVIDER_REPORTED'
+    ? 'provider-reported'
+    : evidence === 'USER_REPORTED'
+      ? 'user-reported'
+      : 'office-observed';
 
 const jobStateText = (state: string) => state.toLowerCase().replaceAll('_', ' ');
 
@@ -99,7 +103,11 @@ export function requestTimeline(
     const name = `${agentName(a.agentId)}${a.pipelineKey ? ` · ${a.pipelineKey}` : ''}`;
     const job = latestJobFor(state.jobs, a.id);
     if (!job) {
-      events.push({ at: a.createdAt, label: `Hop minted for ${name} — no provider job on record`, provenance: 'office-observed' });
+      events.push({
+        at: a.createdAt,
+        label: `Hop minted for ${name} — no provider job on record`,
+        provenance: 'office-observed',
+      });
       continue;
     }
     const attempt = job.attempt ?? 1;
@@ -108,7 +116,11 @@ export function requestTimeline(
     if (job.dispatchedAt)
       events.push({ at: job.dispatchedAt, label: `Dispatched to ${name}${suffix}`, provenance: 'office-observed' });
     else if (job.createdAt)
-      events.push({ at: job.createdAt, label: `Job record opened for ${name}${suffix}`, provenance: 'office-observed' });
+      events.push({
+        at: job.createdAt,
+        label: `Job record opened for ${name}${suffix}`,
+        provenance: 'office-observed',
+      });
     const session = (state.localSessions ?? []).find(s => s.jobId === job.id);
     if (session?.lastReceipt)
       events.push({
@@ -117,9 +129,17 @@ export function requestTimeline(
         provenance: 'office-observed',
       });
     if (isTerminalJob(job.state) && job.settledAt)
-      events.push({ at: job.settledAt, label: `Settled — ${jobStateText(job.state)}`, provenance: provenanceOf(job.evidence) });
+      events.push({
+        at: job.settledAt,
+        label: `Settled — ${jobStateText(job.state)}`,
+        provenance: provenanceOf(job.evidence),
+      });
     else if (job.updatedAt)
-      events.push({ at: job.updatedAt, label: `Observed — ${jobStateText(job.state)}`, provenance: provenanceOf(job.evidence) });
+      events.push({
+        at: job.updatedAt,
+        label: `Observed — ${jobStateText(job.state)}`,
+        provenance: provenanceOf(job.evidence),
+      });
   }
   return events.sort((x, y) => x.at.localeCompare(y.at) || x.label.localeCompare(y.label));
 }
@@ -638,7 +658,9 @@ function JobTimeline({ state, entry }: { state: AppState; entry: QueueEntry }) {
   const events = requestTimeline(state, entry);
   return (
     <details className="job-timeline" open>
-      <summary>Job timeline — {events.length} recorded event{events.length === 1 ? '' : 's'}</summary>
+      <summary>
+        Job timeline — {events.length} recorded event{events.length === 1 ? '' : 's'}
+      </summary>
       <ol className="timeline">
         {events.map(ev => (
           <li key={`${ev.at}|${ev.label}`}>
