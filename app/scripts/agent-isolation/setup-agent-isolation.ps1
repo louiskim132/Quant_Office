@@ -58,7 +58,7 @@ if ($b) {
       }
     }
     # New-LocalUser does not guarantee membership in the standard Users group. Without that
-    # baseline group, Windows can refuse the credential logon used by Start-Process -Credential.
+    # baseline group, Windows can refuse the credential logon the office uses to start the agent host.
     $sid = (New-Object System.Security.Principal.NTAccount($user)).Translate(
       [System.Security.Principal.SecurityIdentifier]).Value
     if (Get-Command Get-LocalGroupMember -ErrorAction SilentlyContinue) {
