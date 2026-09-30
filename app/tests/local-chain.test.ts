@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -268,18 +268,16 @@ async function fixture(
     calls.push({ executable, args, options: spawnOptions, child });
     return child;
   };
-  const exec = new LocalCliExecAdapter(
-    () => sessionsRoot,
-    provider => `${provider}.exe`,
-    clock,
-    undefined,
-    spawn,
-    () => ({ TEST_ENV: 'scrubbed' }),
-    undefined,
-    undefined,
-    agentId => store.snapshot().agents.find(a => a.id === agentId)?.provider,
-    options.events ? jobId => options.events!.push(jobId) : undefined,
-  );
+  const exec = new LocalCliExecAdapter({
+    sessionsRoot: () => sessionsRoot,
+    executable: provider => `${provider}.exe`,
+    now: clock,
+    spawnChild: spawn,
+    environment: () => ({ TEST_ENV: 'scrubbed' }),
+    providerFor: agentId => store.snapshot().agents.find(a => a.id === agentId)?.provider,
+    onLocalEvent: options.events ? jobId => options.events!.push(jobId) : undefined,
+    claudeSpawnGapMs: 0,
+  });
   const flat = new LocalMailboxAdapter(() => sessionsRoot, clock);
   const local =
     route === 'LOCAL_CLI_EXEC'

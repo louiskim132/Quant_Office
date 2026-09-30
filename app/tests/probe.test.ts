@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readdirSync } from 'node:fs';
+import { existsSync, mkdtempSync } from 'node:fs';
 import { removeTreeSync } from '../src/main/fsx';
 import { tmpdir } from 'node:os';
 import path from 'node:path';

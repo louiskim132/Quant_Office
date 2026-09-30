@@ -43,10 +43,9 @@ import { LocalWorktreeMailboxAdapter } from './local-worktree-session.js';
 import { WORKTREES_DIR } from './local-worktree-repo.js';
 import { LocalSessionRouter } from './local-session-router.js';
 import { createLocalProviderLifecycle } from './local-provider-lifecycle.js';
-import { localArchiveResultSchema } from '../shared/local-session.js';
+import { localArchiveResultSchema, type LocalSessionRecord } from '../shared/local-session.js';
 import { PtyCloudAdapter, transportModuleStatus } from './pty.js';
 import { probeCloudTransport } from './probe.js';
-import { currentConnection } from '../shared/readiness.js';
 import { assertTransportProbeAllowed } from '../shared/transport.js';
 import { realpathSync, existsSync, statSync, mkdirSync, writeFileSync } from 'node:fs';
 import { calibration, compareMethods, lineageAncestry } from '../core/monitoring';
@@ -203,7 +202,7 @@ async function start() {
     // The most recent recorded observation that named an account for this provider — the
     // still-fresh fallback a connected-but-unidentified live check resolves through.
     provider =>
-      [...(store.snapshot().connections ?? [])]
+      [...(store.snapshot({ history: false }).connections ?? [])]
         .reverse()
         .find(c => c.provider === provider && c.state === 'SIGNED_IN' && c.identity),
     secrets,
@@ -290,14 +289,19 @@ async function start() {
   });
   // Interrupted work is reconciled while the window is already visible but before the renderer
   // loads; a crash never resubmits or invents an outcome, and no page exists to serve IPC yet.
+  // A failed pass never blocks the window; it is logged, and the next trigger retries.
   try {
     await controller.reconcile();
-  } catch {}
+  } catch (error) {
+    writeLog(logDir(), 'WARN', `startup reconcile failed ${describeError(error)}`);
+  }
   // Work that finished while the office was closed may now unlock dependents — the same guarded
   // chain-advance runs once here, so a completed predecessor never leaves its chain parked.
   try {
     await controller.reconcileLocalChain();
-  } catch {}
+  } catch (error) {
+    writeLog(logDir(), 'WARN', `startup chain reconcile failed ${describeError(error)}`);
+  }
   register();
   await loadWindowWithRetry(win, html);
   // The office opens on re-observed accounts, not on however stale the recorded check is.
@@ -307,12 +311,11 @@ async function start() {
     void subscriptions
       .observe(provider)
       .then(({ observation }) => {
-        try {
-          store.recordAccountObservation(observation);
-          win?.webContents.send('office:changed');
-        } catch {}
+        store.recordAccountObservation(observation);
+        win?.webContents.send('office:changed');
       })
-      .catch(() => {});
+      // The last recorded state stays standing with its real timestamp; the failure is logged.
+      .catch(error => writeLog(logDir(), 'WARN', `startup ${provider} observation failed ${describeError(error)}`));
 }
 function register() {
   const handle = (channel: string, fn: (value: unknown) => unknown | Promise<unknown>) =>
@@ -365,6 +368,40 @@ function register() {
       }
     });
   const changed = () => win?.webContents.send('office:changed');
+  /**
+   * Launches a minted hop that is still at INTENT. A failed automatic launch never loses the work:
+   * the reason is recorded on the job as an office-local status line and the hop stays prepared
+   * for a manual launch. `what` names the hop in that line; `label` prefixes its external id.
+   */
+  const launchPreparedHop = async (assignmentId: string, label: string, what: string): Promise<void> => {
+    const job = latestJobFor(store.snapshot({ history: false }).jobs, assignmentId);
+    if (job?.state !== 'INTENT') return;
+    try {
+      await controller.handoff(assignmentId);
+    } catch (error) {
+      const at = new Date().toISOString();
+      store.recordJobEvents(job.id, [
+        {
+          externalId: `${label}:${randomUUID()}`,
+          cursor: '',
+          kind: 'STATUS',
+          text: `${what} could not run: ${error instanceof Error ? error.message : 'unknown error'} The work stays prepared; launch it manually when the blocker clears.`,
+          occurredAt: at,
+          receivedAt: at,
+          evidence: 'OFFICE_LOCAL',
+        },
+      ]);
+    }
+  };
+  /** Where one local session record's packet directory lives (flat sessions or a project worktree). */
+  const localRecordDir = (record: LocalSessionRecord): string =>
+    path.join(
+      workspaceDirectory(app.getPath('userData')),
+      record.layout === 'PROJECT_WORKTREE'
+        ? path.join('local-repos', record.projectId, WORKTREES_DIR)
+        : 'local-sessions',
+      record.archiveRelativePath ?? record.storageRelativePath,
+    );
   handle('office:claude-local-usage', async value => {
     const chooseFolder = z.boolean().parse(value);
     return transfer(async () => {
@@ -767,27 +804,11 @@ function register() {
         pipelineKey: input.pipelineKey,
         expectedRevision: input.expectedRevision,
       });
-      const snapshot = store.snapshot({ history: false });
-      const assignment = (snapshot.assignments ?? []).find(
+      const assignment = (store.snapshot({ history: false }).assignments ?? []).find(
         item => item.requestId === input.requestId && item.pipelineKey === input.pipelineKey,
       );
-      const job = assignment ? latestJobFor(snapshot.jobs, assignment.id) : undefined;
-      if (assignment && job?.state === 'INTENT')
-        try {
-          await controller.handoff(assignment.id);
-        } catch (error) {
-          store.recordJobEvents(job.id, [
-            {
-              externalId: `pipeline-retry-launch:${randomUUID()}`,
-              cursor: '',
-              kind: 'STATUS',
-              text: `The hop was re-armed but its launch could not run: ${error instanceof Error ? error.message : 'unknown error'} The work stays prepared; launch it manually when the blocker clears.`,
-              occurredAt: new Date().toISOString(),
-              receivedAt: new Date().toISOString(),
-              evidence: 'OFFICE_LOCAL',
-            },
-          ]);
-        }
+      if (assignment)
+        await launchPreparedHop(assignment.id, 'pipeline-retry-launch', 'The hop was re-armed but its launch');
       changed();
       return store.snapshot({ history: false });
     });
@@ -924,33 +945,9 @@ function register() {
     const input = z.object({ jobId: id, limit: pageLimit }).strict().parse(value);
     return { entries: store.appliedReports(input.jobId, input.limit ?? 50) };
   });
-  handle('office:local-session-summary', value => {
-    const jobId = id.parse(value);
-    const workspace = workspaceDirectory(app.getPath('userData'));
-    return store.localSessionSummary(jobId, record =>
-      path.join(
-        workspace,
-        record.layout === 'PROJECT_WORKTREE'
-          ? path.join('local-repos', record.projectId, WORKTREES_DIR)
-          : 'local-sessions',
-        record.archiveRelativePath ?? record.storageRelativePath,
-      ),
-    );
-  });
+  handle('office:local-session-summary', value => store.localSessionSummary(id.parse(value), localRecordDir));
   // The launch plan for one bound packet — where it lives, its proven hash, and the manual steps.
-  handle('office:local-launch-plan', value => {
-    const jobId = id.parse(value);
-    const workspace = workspaceDirectory(app.getPath('userData'));
-    return store.localLaunchPlan(jobId, record =>
-      path.join(
-        workspace,
-        record.layout === 'PROJECT_WORKTREE'
-          ? path.join('local-repos', record.projectId, WORKTREES_DIR)
-          : 'local-sessions',
-        record.archiveRelativePath ?? record.storageRelativePath,
-      ),
-    );
-  });
+  handle('office:local-launch-plan', value => store.localLaunchPlan(id.parse(value), localRecordDir));
   // Retire one settled local session: packet dir moves under archive/ (bytes retained), then a
   // provider-side archive is attempted only through a supported exact-id verb. The result is
   // schema-validated at the boundary with a fresh summary of the post-retire record.
@@ -960,18 +957,7 @@ function register() {
       const { state, archive } = await controller.retireLocal(assignmentId);
       changed();
       const job = latestJobFor(state.jobs, assignmentId);
-      const workspace = workspaceDirectory(app.getPath('userData'));
-      const summary = job
-        ? store.localSessionSummary(job.id, record =>
-            path.join(
-              workspace,
-              record.layout === 'PROJECT_WORKTREE'
-                ? path.join('local-repos', record.projectId, WORKTREES_DIR)
-                : 'local-sessions',
-              record.archiveRelativePath ?? record.storageRelativePath,
-            ),
-          )
-        : null;
+      const summary = job ? store.localSessionSummary(job.id, localRecordDir) : null;
       return { state, archive: localArchiveResultSchema.parse({ ...archive, summary }) };
     });
   });
@@ -1128,25 +1114,12 @@ function register() {
           const minted = await mintPipelineBrief(ctx, request);
           if (!minted.minted)
             throw new Error(`The request is ready but its director brief could not be minted: ${minted.detail}`);
-          const briefJob = latestJobFor(store.snapshot({ history: false }).jobs, minted.assignment!.id);
           // A re-start with the hop already launched is a no-op — only an INTENT job can hand off.
-          if (briefJob?.state === 'INTENT')
-            try {
-              await controller.handoff(minted.assignment.id);
-            } catch (error) {
-              if (briefJob)
-                store.recordJobEvents(briefJob.id, [
-                  {
-                    externalId: `pipeline-brief-launch:${randomUUID()}`,
-                    cursor: '',
-                    kind: 'STATUS',
-                    text: `The director brief hop was minted but its automatic launch could not run: ${error instanceof Error ? error.message : 'unknown error'} The work stays prepared; launch it manually when the blocker clears.`,
-                    occurredAt: new Date().toISOString(),
-                    receivedAt: new Date().toISOString(),
-                    evidence: 'OFFICE_LOCAL',
-                  },
-                ]);
-            }
+          await launchPreparedHop(
+            minted.assignment!.id,
+            'pipeline-brief-launch',
+            'The director brief hop was minted but its automatic launch',
+          );
         } else if (type === 'request.pipeline.note') {
           const minted = await mintPipelineRefine(ctx, request, String((value as { text?: string }).text ?? ''));
           if (!minted.minted)
@@ -1161,23 +1134,8 @@ function register() {
             item =>
               item.requestId === request.id && item.pipelineKey === (value as { pipelineKey?: string }).pipelineKey,
           );
-          const retriedJob = retried ? latestJobFor(store.snapshot({ history: false }).jobs, retried.id) : undefined;
-          if (retried && retriedJob?.state === 'INTENT')
-            try {
-              await controller.handoff(retried.id);
-            } catch (error) {
-              store.recordJobEvents(retriedJob.id, [
-                {
-                  externalId: `pipeline-retry-launch:${randomUUID()}`,
-                  cursor: '',
-                  kind: 'STATUS',
-                  text: `The hop was re-armed but its launch could not run: ${error instanceof Error ? error.message : 'unknown error'} The work stays prepared; launch it manually when the blocker clears.`,
-                  occurredAt: new Date().toISOString(),
-                  receivedAt: new Date().toISOString(),
-                  evidence: 'OFFICE_LOCAL',
-                },
-              ]);
-            }
+          if (retried)
+            await launchPreparedHop(retried.id, 'pipeline-retry-launch', 'The hop was re-armed but its launch');
         } else if (type === 'request.pipeline.decide' && (value as { decision?: string }).decision === 'REVISE') {
           // The decision transaction minted the linked revision request; starting it runs the same
           // brief-mint path a user-initiated start would, so a REVISE always ends in a live round.
@@ -1198,24 +1156,11 @@ function register() {
                 throw new Error(
                   `The revision request was recorded but its director brief could not be minted: ${minted.detail}`,
                 );
-              const briefJob = latestJobFor(store.snapshot({ history: false }).jobs, minted.assignment!.id);
-              if (briefJob?.state === 'INTENT')
-                try {
-                  await controller.handoff(minted.assignment.id);
-                } catch (error) {
-                  if (briefJob)
-                    store.recordJobEvents(briefJob.id, [
-                      {
-                        externalId: `pipeline-brief-launch:${randomUUID()}`,
-                        cursor: '',
-                        kind: 'STATUS',
-                        text: `The revision's director brief hop was minted but its automatic launch could not run: ${error instanceof Error ? error.message : 'unknown error'} The work stays prepared; launch it manually when the blocker clears.`,
-                        occurredAt: new Date().toISOString(),
-                        receivedAt: new Date().toISOString(),
-                        evidence: 'OFFICE_LOCAL',
-                      },
-                    ]);
-                }
+              await launchPreparedHop(
+                minted.assignment!.id,
+                'pipeline-brief-launch',
+                "The revision's director brief hop was minted but its automatic launch",
+              );
             }
           }
         }
@@ -1334,12 +1279,13 @@ function register() {
       capabilities: {
         agentCommunication: {
           state: 'READY',
-          detail: 'Labeled terminal handoff is available; programmatic observe/retrieve is not part of this build.',
+          detail:
+            'Office-spawned local agents are launched and observed programmatically; the labeled terminal handoff remains available.',
         },
         agentToolExecution: {
-          state: 'HANDOFF_ONLY',
+          state: 'READY',
           detail:
-            'Agent work runs through the manual terminal handoff; hosted dispatch requires the separately scoped provider route.',
+            'Agent work runs on local CLI agents or through the terminal handoff; hosted dispatch requires the separately scoped provider route.',
         },
         manualExperimentHandoff: {
           state: caps.packageExport ? 'READY' : 'BLOCKED',
@@ -1367,7 +1313,8 @@ function register() {
   handle('office:pipeline', async value =>
     dispatch(async () => {
       const result = await pipeline.run(value);
-      if (result.assignments?.length || result.state !== store.snapshot({ history: false })) changed();
+      // The renderer refreshes after every stage action; a no-op action costs one extra state read.
+      changed();
       return result;
     }),
   );
@@ -1599,21 +1546,16 @@ function buildController(): AssignmentController {
   // The child's environment is built per provider: the subscriptionEnvironment() scrub that
   // removes ACP_* and billing overrides, plus the one provider key variable when the user saved
   // their own key locally (LR-15). The secrets store is injected — the adapter never imports it.
-  exec = new LocalCliExecAdapter(
-    () => path.join(workspace(), 'local-sessions'),
-    provider => subscriptions.toolPath(provider),
-    undefined,
-    undefined,
-    undefined,
-    provider => agentEnvironment(provider, secrets),
-    undefined,
-    undefined,
-    agentId => store.snapshot().agents.find(a => a.id === agentId)?.provider,
+  exec = new LocalCliExecAdapter({
+    sessionsRoot: () => path.join(workspace(), 'local-sessions'),
+    executable: provider => subscriptions.toolPath(provider),
+    environment: provider => agentEnvironment(provider, secrets),
+    providerFor: agentId => store.snapshot({ history: false }).agents.find(a => a.id === agentId)?.provider,
     // A spawned child's exit or a receipt write fires this — the office observes the job through the
     // same validated reader a manual Observe uses, then advances any dependent the completion
     // unlocked. It runs outside the request-action mutex; a refused or racing pass leaves the job
     // for the next trigger or startup reconciliation, never a silently claimed outcome.
-    jobId => {
+    onLocalEvent: jobId => {
       void (async () => {
         if (workspaceLocked) return;
         try {
@@ -1623,23 +1565,20 @@ function buildController(): AssignmentController {
           await controller.advanceLocalChain(job.assignmentId);
           win?.webContents.send('office:changed');
         } catch (error) {
-          console.warn('automatic local observation failed:', error);
+          writeLog(logDir(), 'WARN', `automatic local observation failed job=${jobId} ${describeError(error)}`);
         }
       })();
     },
-    undefined,
-    undefined,
     // The evidence drop-box edge: caller identity is bound from the assignment record inside the
     // adapter — an agent's query file can never choose whose grants are checked.
-    (caller, line) => handleEvidenceFrame(evidence, caller, line),
-    undefined,
+    evidenceFrames: (caller, line) => handleEvidenceFrame(evidence, caller, line),
     // The launch record states which credential context the spawn used — metadata only, never a key.
-    provider => (secrets.providerKeyState(provider).saved ? 'api-key' : 'subscription'),
+    authMode: provider => (secrets.providerKeyState(provider).saved ? 'api-key' : 'subscription'),
     // LR-16: the isolated spawn surface, present only when a QRO-Agent credential is saved and the
     // escape hatch is not set. When it is, dispatches without a saved API key are refused — the
     // office profile's subscription sign-ins do not exist in the agent account's profile.
-    agentHost,
-  );
+    spawnAs: agentHost,
+  });
   const execRoute = new LocalSessionRouter(
     jobId => store.localSessionForJob(jobId),
     { FLAT_PACKET: exec, PROJECT_WORKTREE: exec },

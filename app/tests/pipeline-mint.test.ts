@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync as removeTreeSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync as removeTreeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
@@ -19,7 +19,7 @@ import {
   type PipelineMintContext,
 } from '../src/main/pipeline-runner';
 import { RESULT_FILE } from '../src/main/local-packet';
-import type { Agent, AppState, ProviderJob, Request } from '../src/shared/types';
+import type { Agent, ProviderJob, Request } from '../src/shared/types';
 
 const sha = (text: string) => createHash('sha256').update(text, 'utf8').digest('hex');
 const key = () => randomUUID();
@@ -176,17 +176,15 @@ async function fixture(
     agents[role] = agent;
   }
   const spawn: CliSpawn = () => new FakeChild() as never;
-  const exec = new LocalCliExecAdapter(
-    () => sessionsRoot,
-    provider => `${provider}.exe`,
-    clock,
-    undefined,
-    spawn,
-    () => ({ TEST_ENV: 'scrubbed' }),
-    undefined,
-    undefined,
-    agentId => store.snapshot().agents.find(a => a.id === agentId)?.provider,
-  );
+  const exec = new LocalCliExecAdapter({
+    sessionsRoot: () => sessionsRoot,
+    executable: provider => `${provider}.exe`,
+    now: clock,
+    spawnChild: spawn,
+    environment: () => ({ TEST_ENV: 'scrubbed' }),
+    providerFor: agentId => store.snapshot().agents.find(a => a.id === agentId)?.provider,
+    claudeSpawnGapMs: 0,
+  });
   execAdapter.current = exec;
   const local = new LocalSessionRouter(
     id => store.localSessionForJob(id),

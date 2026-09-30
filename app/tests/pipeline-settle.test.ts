@@ -133,7 +133,7 @@ class FakeSerenaChild {
     this.kills.push(signal);
     return true;
   }
-  on(event: string, listener: (...args: never[]) => void) {
+  on(_event: string, _listener: (...args: never[]) => void) {
     return this;
   }
 }
@@ -189,21 +189,18 @@ async function fixture(t: any): Promise<Fixture> {
     agents[role] = agent;
   }
   const spawn: CliSpawn = () => new FakeChild() as never;
-  const exec = new LocalCliExecAdapter(
-    () => sessionsRoot,
-    provider => `${provider}.exe`,
-    clock,
-    undefined,
-    spawn,
-    () => ({ TEST_ENV: 'scrubbed' }),
-    undefined,
-    undefined,
-    agentId => store.snapshot().agents.find(a => a.id === agentId)?.provider,
-    undefined,
-    () => new FakeSerenaChild() as never,
-    60,
-    async () => '{"answer":"fixture"}',
-  );
+  const exec = new LocalCliExecAdapter({
+    sessionsRoot: () => sessionsRoot,
+    executable: provider => `${provider}.exe`,
+    now: clock,
+    spawnChild: spawn,
+    environment: () => ({ TEST_ENV: 'scrubbed' }),
+    providerFor: agentId => store.snapshot().agents.find(a => a.id === agentId)?.provider,
+    serenaSpawn: () => new FakeSerenaChild() as never,
+    serenaReadyTimeoutMs: 60,
+    evidenceFrames: async () => '{"answer":"fixture"}',
+    claudeSpawnGapMs: 0,
+  });
   execAdapter.current = exec;
   const local = new LocalSessionRouter(
     id => store.localSessionForJob(id),

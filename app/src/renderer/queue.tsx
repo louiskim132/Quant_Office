@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { ListTodo } from 'lucide-react';
 import type { AppState, Experiment, Command, Request } from '../shared/types';
 import { queueScope, type QueueFilter } from '../shared/queue';

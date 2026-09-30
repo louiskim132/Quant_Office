@@ -1,6 +1,6 @@
 import { _electron as electron, type ElectronApplication } from 'playwright';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, writeFile, stat, readFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';

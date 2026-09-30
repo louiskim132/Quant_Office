@@ -67,7 +67,6 @@ export async function recoverInterruptedRestore(root: string): Promise<void> {
  */
 async function prepareStreamedRestore(
   file: string,
-  root: string,
   transactionId: string,
   candidate: string,
 ): Promise<{ transactionId: string; candidate: string; summary: string }> {
@@ -135,7 +134,7 @@ export async function prepareRestore(
       candidate = path.join(root, 'restore-candidates', transactionId);
     await mkdir(candidate, { recursive: true });
     try {
-      return await prepareStreamedRestore(file, root, transactionId, candidate);
+      return await prepareStreamedRestore(file, transactionId, candidate);
     } catch (error) {
       await discardCandidate(candidate, root);
       throw error;
@@ -161,7 +160,7 @@ export async function prepareRestore(
       candidate = path.join(root, 'restore-candidates', transactionId);
     await mkdir(candidate, { recursive: true });
     try {
-      return await prepareStreamedRestore(file, root, transactionId, candidate);
+      return await prepareStreamedRestore(file, transactionId, candidate);
     } catch (error) {
       await discardCandidate(candidate, root);
       throw error;

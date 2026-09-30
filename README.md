@@ -1,20 +1,21 @@
 # Quant Research Office
 
-A Windows desktop controller for subscription-based research planning. The source version is defined in [app/package.json](app/package.json). See [desktop instructions](app/README.md) and the [feature readiness matrix](app/docs/readiness.md).
+A local-first Windows desktop office for quant research teams. It plans work, runs office tasks on the user's own local coding agents (Claude Code, Codex, Devin), verifies what they return, and keeps an append-only record of every request, decision and piece of evidence. The main experiment always runs outside the office: the user runs the exported package manually (for example in Colab) and imports the returned files.
 
-The current revision adds canonical request drafts, named participants, single-agent/group/team selection, optional scientific details, project folders, lifecycle fixes, profile conflict checks and verified backup round trips. It preserves the SQLite event chain and keeps old records readable.
+The office never runs research compute on the desktop, never controls Colab, never uses a developer's account or key, and has no brokerage or trading connection. Hosted agent dispatch is not enabled (roadmap R5).
 
-**Hosted research execution is not connected.** Signing in verifies subscription metadata; Start request records readiness blockers and submits no provider work. No local research execution, paid API fallback or Colab connection exists. Exports are planning records, not approved ML deliverables.
-
-The [single roadmap](docs/ROADMAP.md) contains current readiness, the ordered repair backlog, the full research pipeline, validation commands and continuation instructions. Documents under docs/ describing earlier architectures are historical designs; their budget, fixed-team and execution claims do not establish runtime behavior.
+- Plans and status: [docs/ROADMAP.md](docs/ROADMAP.md) — section 11 for status, section 17 for the dated log.
+- The desktop app, development and tests: [app/README.md](app/README.md).
+- Rules for coding agents: [AGENTS.md](AGENTS.md); Claude Code also reads [CLAUDE.md](CLAUDE.md).
+- Workflow reference: [docs/workflow.md](docs/workflow.md). Earlier architecture documents and the roadmap archive are in [docs/history/](docs/history/).
 
 ## Parallel development
 
-Use one organizer plus up to seven isolated coding workers. The organizer reviews and combines exact worker commits, tests the combined result, and submits one integration PR to `main`. Session 8 may merge that PR only after the round is closed, its branch is current with `main`, and the required `verify` check succeeds for the exact PR head; direct pushes to `main` remain prohibited. The governing [roadmap protocol](docs/ROADMAP.md#15-parallel-coding-organizer-and-up-to-seven-workers-d2) covers ownership and GitHub/hosted clients. The detailed [desktop session manual](docs/DESKTOP-SESSIONS.md) covers the fixed Session 1–7 workers plus Session 8 organizer workflow.
+Two workflows are supported ([roadmap section 1.5](docs/ROADMAP.md#15-parallel-coding-and-packet-workflows-d2)). The fixed desktop batch runs up to seven local workers plus an organizer through `tools/desktop.mjs` and the [desktop session manual](docs/DESKTOP-SESSIONS.md). Packet waves give each pre-written packet its own branch from `main` and its own PR. Either way, changes reach `main` only through the protected GitHub PR after the exact head passes the required `verify` check.
 
 ```powershell
 git fetch origin
 node tools/parallel.mjs init ui-round-1 7
 ```
 
-The general command creates isolated checkouts under the sibling `quant-team-sessions/ui-round-1` folder, all pinned to one commit. It creates no model sessions. Use `assign` to validate a task's ownership and `check` to inspect its committed diff. A prepared fixed eight-session batch is configured with `node tools/desktop.mjs setup <batch-directory>` and then operated only through the desktop manual. Shared rules are in [AGENTS.md](AGENTS.md); Claude Code starts with [CLAUDE.md](CLAUDE.md). GitHub connection and model sign-in are separate from launching workers.
+`init` creates an organizer and worker worktrees in the sibling `<repo>-sessions/<batch>` folder, all pinned to one commit. It launches no model sessions. `assign` validates a task's file ownership and `check` inspects a worker's committed diff. A fixed eight-session batch is configured with `node tools/desktop.mjs setup <batch-directory>` and then operated only through the desktop manual.

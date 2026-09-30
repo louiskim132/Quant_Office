@@ -7,7 +7,6 @@ import { researchFixture } from './fixtures/research-workflow';
 import { EvidenceService } from '../src/main/evidence';
 import { OfficeStore } from '../src/core/store';
 import { ArtifactService } from '../src/main/artifacts';
-import { canonicalHash } from '../src/core/canonical';
 import { lineageCounters } from '../src/shared/research';
 
 async function s8(f: Awaited<ReturnType<typeof researchFixture>>) {

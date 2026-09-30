@@ -57,7 +57,7 @@ test('runner issues the four probes in order and passes a correctly isolated acc
 });
 
 test('runner fails when agents still run as the office account', async () => {
-  const { spawnAs } = scriptedSpawn((exe, args, cwd) =>
+  const { spawnAs } = scriptedSpawn((exe, _args, cwd) =>
     cwd === 'C:\\'
       ? { out: 'pc\\office\r\n' }
       : exe.endsWith('cmd.exe')

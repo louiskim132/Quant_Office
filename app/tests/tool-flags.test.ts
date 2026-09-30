@@ -16,7 +16,7 @@ import {
 } from '../src/main/tool-flags';
 import type { LocalSessionRecord } from '../src/shared/local-session';
 import type { ToolProfile } from '../src/shared/tool-profile';
-import type { Assignment, InputSnapshot, Provider, ProviderJob } from '../src/shared/types';
+import type { Assignment, InputSnapshot, Provider } from '../src/shared/types';
 
 const at = (minutes: number) => new Date(Date.UTC(2026, 8, 8, 10, 0, 0) + minutes * 60000).toISOString();
 const sha = (text: string) => createHash('sha256').update(text).digest('hex');
@@ -280,14 +280,14 @@ function fixture(t: test.TestContext, options: { provider?: Provider; profile?: 
     calls.push({ executable, args, options: spawnOptions, child });
     return child;
   };
-  const adapter = new LocalCliExecAdapter(
-    () => sessions,
-    provider => `${provider}.exe`,
-    () => at(1),
-    undefined,
-    spawn,
-    () => ({ TEST_ENV: 'scrubbed' }),
-  );
+  const adapter = new LocalCliExecAdapter({
+    sessionsRoot: () => sessions,
+    executable: provider => `${provider}.exe`,
+    now: () => at(1),
+    spawnChild: spawn,
+    environment: () => ({ TEST_ENV: 'scrubbed' }),
+    claudeSpawnGapMs: 0,
+  });
   t.after(() => {
     adapter.disposeAll();
     removeTreeSync(root);
