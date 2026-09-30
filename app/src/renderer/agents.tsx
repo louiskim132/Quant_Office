@@ -17,6 +17,7 @@ import { LocalConsumption } from './activity';
 import { TRANSPORT_PROBE_CONTAINMENT } from '../shared/transport';
 import './agents.css';
 import { formatDateTime } from './format';
+import { Checkbox } from './components';
 const roleNames: Record<Role, string> = {
   DIRECTOR: 'Director',
   PM_A: 'PM · Implementation',
@@ -177,6 +178,11 @@ export function AgentSetup({ onAdded }: { onAdded: (state: AppState, execution?:
           </p>
         </div>
       </div>
+      <ol className="setup-stepper" aria-label="Add agent steps">
+        <li aria-current={!ticket && !busy ? 'step' : undefined}>1 · Profile &amp; permissions</li>
+        <li aria-current={busy ? 'step' : undefined}>2 · Verify account</li>
+        <li aria-current={ticket ? 'step' : undefined}>3 · Review &amp; confirm</li>
+      </ol>
       <form
         onSubmit={e => {
           e.preventDefault();
@@ -191,6 +197,7 @@ export function AgentSetup({ onAdded }: { onAdded: (state: AppState, execution?:
           <label className="field">
             Provider
             <select
+              aria-label="Provider"
               value={draft.provider}
               onChange={e => {
                 const provider = e.target.value as Provider;
@@ -251,14 +258,13 @@ export function AgentSetup({ onAdded }: { onAdded: (state: AppState, execution?:
             </label>
           )}
           {spawnsLocally && (
-            <label className="field consent">
-              <span>
-                <input type="checkbox" checked={riskAccepted} onChange={e => setRiskAccepted(e.target.checked)} /> I
-                understand that this agent runs unattended on this computer with my Windows account's permissions. It
+            <div className="field consent">
+              <Checkbox checked={riskAccepted} onChange={setRiskAccepted}>
+                I understand that this agent runs unattended on this computer with my Windows account's permissions. It
                 can read, change and delete files my account can reach, and run programs. Files it reads are not a
                 security boundary.
-              </span>
-            </label>
+              </Checkbox>
+            </div>
           )}
           <label className="field">
             Model
@@ -415,7 +421,7 @@ export function AgentSetup({ onAdded }: { onAdded: (state: AppState, execution?:
             <p>{ticket.connection.note}</p>
             <small>
               {ticket.draft.execution === 'LOCAL'
-                ? 'Runs on this machine through the official CLI. Not provider-hosted, isolated or independently attested; no local transport has been exercised, so dispatch stays blocked.'
+                ? 'Runs on this machine through the signed-in official CLI. Launch remains subject to the recorded capability checks; local execution is not independently attested.'
                 : 'Provider-hosted research execution still requires setup. This agent will be added with research dispatch blocked.'}
             </small>
           </div>
@@ -518,14 +524,16 @@ export function SubscriptionUsage({ state }: { state: AppState }) {
                     <span>{w.label}</span>
                     <strong>{w.remainingPercent.toFixed(0)}% remaining</strong>
                     <progress max="100" value={w.remainingPercent} />
-                    <small>Resets {formatDateTime(w.resetsAt * 1000)}</small>
+                    <small>
+                      Resets {formatDateTime(w.resetsAt * 1000)} ·{' '}
+                      {Math.max(0, Math.ceil((w.resetsAt * 1000 - Date.now()) / 3600000))}h remaining
+                    </small>
                   </div>
                 ))}
               </div>
             ) : (
               <div className="usage-unavailable">
-                <strong>5 hour: Unavailable</strong>
-                <strong>Weekly: Unavailable</strong>
+                <span className="muted">{c ? 'Usage windows unavailable from this tool' : 'Not checked yet'}</span>
               </div>
             )}
             <p>
@@ -866,8 +874,11 @@ function ApiKeyEntry({ provider, onSaved }: { provider: Provider; onSaved: () =>
       open={open}
       onToggle={event => setOpen((event.target as HTMLDetailsElement).open)}
     >
-      <summary>Use my own API key</summary>
-      <p className="muted">Enter your own provider API key. Calls are billed to your account by the provider.</p>
+      <summary>Advanced · Use my own API key</summary>
+      <p className="muted">
+        API calls are billed separately from your subscription. Enter a key only if you explicitly want this billing
+        mode.
+      </p>
       <input
         type="password"
         aria-label={`API key for ${providerNames[provider]}`}
@@ -931,6 +942,26 @@ export function AgentIsolation() {
       setBusy(false);
     }
   }
+  async function verify() {
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      const result = await window.office.agentIsolationVerify();
+      const failed = Object.entries(result.checks)
+        .filter(([, ok]) => !ok)
+        .map(([name]) => name);
+      if (result.passed)
+        setNotice(
+          `Isolation check passed: all ${Object.keys(result.checks).length} checks. Evidence saved to ${result.evidencePath}`,
+        );
+      else setError(`Isolation check failed: ${failed.join(', ')}. Evidence saved to ${result.evidencePath}`);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
   async function remove() {
     setBusy(true);
     setError('');
@@ -958,8 +989,8 @@ export function AgentIsolation() {
               reach their own session folders.
             </p>
             <p className="muted">
-              While isolation is on, agents authenticate with your saved API keys — subscription sign-ins stay in your
-              profile.
+              This isolation route requires saved API keys and is unavailable for subscription-only launches.
+              Subscription sign-ins stay in your Windows profile.
             </p>
           </div>
           <button
@@ -979,11 +1010,20 @@ export function AgentIsolation() {
             <strong>Separate Windows account</strong>
             <p>Agents run as Windows user QRO-Agent with access limited to agent session folders.</p>
             <p className="muted">
-              While isolation is on, agents authenticate with your saved API keys — subscription sign-ins stay in your
-              profile.
+              This isolation route requires saved API keys and is unavailable for subscription-only launches.
+              Subscription sign-ins stay in your Windows profile.
             </p>
           </div>
           <div>
+            <button
+              className="secondary"
+              disabled={busy}
+              aria-label="Check agent isolation"
+              aria-busy={busy}
+              onClick={() => void verify()}
+            >
+              {busy ? 'Working…' : 'Check isolation'}
+            </button>
             <button
               className="secondary"
               disabled={busy}

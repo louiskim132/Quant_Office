@@ -4,6 +4,8 @@ import type { AppState } from '../shared/types';
 import type { OfficeChatEntry, OfficeChatPage } from '../shared/office-chat';
 import './office-chat.css';
 import { formatDateTime } from './format';
+import { Avatar } from './components';
+import { useOfficeActivity } from './use-activity';
 
 const time = (value: string) => new Date(value).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 const day = (value: string) => {
@@ -12,19 +14,16 @@ const day = (value: string) => {
     ? 'Today'
     : date.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
 };
-const initials = (name: string) =>
-  name
-    .split(/\s+/)
-    .slice(0, 2)
-    .map(s => s[0])
-    .join('')
-    .toUpperCase();
 const compare = (a: OfficeChatEntry, b: OfficeChatEntry) =>
   a.timestamp.localeCompare(b.timestamp) || a.id.localeCompare(b.id);
 
-export function OfficeChat({ state }: { state: AppState }) {
+export function OfficeChat({ state, initialAgentId = '' }: { state: AppState; initialAgentId?: string }) {
+  const { activity } = useOfficeActivity(state);
+  const [requestId, setRequestId] = useState(''),
+    [search, setSearch] = useState(''),
+    [kind, setKind] = useState('');
   const [projectId, setProjectId] = useState(''),
-    [agentId, setAgentId] = useState('');
+    [agentId, setAgentId] = useState(initialAgentId);
   const [entries, setEntries] = useState<OfficeChatEntry[]>([]),
     [cursor, setCursor] = useState<string | null>(null);
   const [busy, setBusy] = useState(false),
@@ -156,6 +155,14 @@ export function OfficeChat({ state }: { state: AppState }) {
     }
   }
   const participants = [...new Set(entries.flatMap(e => [e.agentId, e.toAgentId]).filter((id): id is string => !!id))];
+  const shown = entries.filter(
+    e =>
+      (!requestId || e.requestId === requestId) &&
+      (!kind ||
+        (kind === 'HANDOFF' ? e.source === 'AGENT_MESSAGE' && e.label.startsWith('handoff') : e.kind === kind)) &&
+      `${e.text} ${name(e.agentId)}`.toLowerCase().includes(search.toLowerCase()),
+  );
+  const plainText = (text: string) => text.replace(/\b[a-f0-9]{64}\b/gi, 'stored packet');
   return (
     <section className="office-chat" aria-label="Office group chat">
       <header className="office-chat-heading">
@@ -182,7 +189,14 @@ export function OfficeChat({ state }: { state: AppState }) {
       <div className="office-chat-filters">
         <label>
           Project
-          <select aria-label="Chat project" value={projectId} onChange={e => setProjectId(e.target.value)}>
+          <select
+            aria-label="Chat project"
+            value={projectId}
+            onChange={e => {
+              setProjectId(e.target.value);
+              setRequestId('');
+            }}
+          >
             <option value="">All projects</option>
             {state.projects
               .filter(p => !p.removedAt)
@@ -195,13 +209,52 @@ export function OfficeChat({ state }: { state: AppState }) {
         </label>
         <label>
           Participant
-          <select aria-label="Chat participant" value={agentId} onChange={e => setAgentId(e.target.value)}>
+          <select
+            disabled={!!initialAgentId}
+            aria-label="Chat participant"
+            value={agentId}
+            onChange={e => setAgentId(e.target.value)}
+          >
             <option value="">Everyone</option>
             {state.agents.map(a => (
               <option key={a.id} value={a.id}>
                 {a.name}
               </option>
             ))}
+          </select>
+        </label>
+      </div>
+      <div className="office-chat-filters">
+        <label>
+          Thread
+          <select aria-label="Chat thread" value={requestId} onChange={e => setRequestId(e.target.value)}>
+            <option value="">All request threads</option>
+            {(state.requests ?? [])
+              .filter(r => !projectId || r.projectId === projectId)
+              .map(r => (
+                <option key={r.id} value={r.id}>
+                  {r.name}
+                </option>
+              ))}
+          </select>
+        </label>
+        <label>
+          Search
+          <input
+            aria-label="Search conversation"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search loaded messages"
+          />
+        </label>
+        <label>
+          Updates
+          <select aria-label="Chat update type" value={kind} onChange={e => setKind(e.target.value)}>
+            <option value="">All updates</option>
+            <option value="STATUS">Status</option>
+            <option value="HANDOFF">Handoffs</option>
+            <option value="MESSAGE">Messages</option>
+            <option value="TOOL">Tools</option>
           </select>
         </label>
       </div>
@@ -236,7 +289,7 @@ export function OfficeChat({ state }: { state: AppState }) {
             Load earlier updates
           </button>
         )}
-        {!entries.length && (
+        {!shown.length && (
           <div className="office-chat-empty">
             <MessageCircle size={34} />
             <h3>{busy ? 'Loading conversation…' : 'The conversation starts here'}</h3>
@@ -247,18 +300,18 @@ export function OfficeChat({ state }: { state: AppState }) {
             </p>
           </div>
         )}
-        {entries.map((entry, index) => {
+        {shown.map((entry, index) => {
           const author = agent(entry.agentId),
             system = entry.kind === 'STATUS',
             role = author?.role.replaceAll('_', ' ');
           const requestName = state.requests?.find(r => r.id === entry.requestId)?.name;
           const color = author?.role === 'DIRECTOR' ? '#9c641b' : author?.role.startsWith('PM') ? '#7a5bad' : '#167d78';
           // Status updates show their first line; anything further stays behind the expander.
-          const firstLine = entry.text.split('\n', 1)[0];
+          const firstLine = plainText(entry.text).split('\n', 1)[0];
           const preview = firstLine.length > 220 ? `${firstLine.slice(0, 220)}…` : firstLine;
           return (
             <React.Fragment key={entry.id}>
-              {(index === 0 || day(entries[index - 1].timestamp) !== day(entry.timestamp)) && (
+              {(index === 0 || day(shown[index - 1].timestamp) !== day(entry.timestamp)) && (
                 <div className="office-chat-day">
                   <span>{day(entry.timestamp)}</span>
                 </div>
@@ -271,7 +324,7 @@ export function OfficeChat({ state }: { state: AppState }) {
                   <p>{preview}</p>
                   {preview !== entry.text && (
                     <details>
-                      <summary>Details</summary>
+                      <summary>Technical details</summary>
                       <p>{entry.text}</p>
                     </details>
                   )}
@@ -282,9 +335,7 @@ export function OfficeChat({ state }: { state: AppState }) {
                   className={`office-chat-message ${author?.role === 'DIRECTOR' ? 'director-message' : ''}`}
                   data-chat-source={entry.source}
                 >
-                  <span className="office-chat-avatar" style={{ color }} aria-hidden="true">
-                    {initials(name(entry.agentId))}
-                  </span>
+                  <Avatar id={entry.agentId ?? 'office'} name={name(entry.agentId)} />
                   <div className="office-chat-bubble">
                     <div className="office-chat-author">
                       <strong style={{ color }}>{name(entry.agentId)}</strong>
@@ -295,8 +346,12 @@ export function OfficeChat({ state }: { state: AppState }) {
                       {requestName || 'Office work'}
                       {entry.kind === 'TOOL' ? ' · Tool activity' : ''}
                     </div>
-                    <p>{entry.text.length > 1400 ? `${entry.text.slice(0, 1400)}…` : entry.text}</p>
-                    {entry.text.length > 1400 && (
+                    <p>
+                      {plainText(entry.text).length > 1400
+                        ? `${plainText(entry.text).slice(0, 1400)}…`
+                        : plainText(entry.text)}
+                    </p>
+                    {(entry.text.length > 1400 || plainText(entry.text) !== entry.text) && (
                       <details>
                         <summary>Read full message</summary>
                         <p>{entry.text}</p>
@@ -320,6 +375,20 @@ export function OfficeChat({ state }: { state: AppState }) {
             </React.Fragment>
           );
         })}
+        {activity
+          .filter(
+            a =>
+              a.kind === 'WORKING' &&
+              (!agentId || a.agentId === agentId) &&
+              (!requestId || a.requestId === requestId) &&
+              (!projectId || state.requests?.find(r => r.id === a.requestId)?.projectId === projectId),
+          )
+          .map(a => (
+            <p key={a.agentId} className="office-chat-working">
+              <Avatar id={a.agentId} name={name(a.agentId)} /> {name(a.agentId)} is working ·{' '}
+              {a.evidence === 'OFFICE_OBSERVED' ? 'office-observed process' : 'provider-reported activity'}
+            </p>
+          ))}
       </div>
       {unread && (
         <button

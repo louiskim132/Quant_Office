@@ -1,0 +1,740 @@
+/* The office floor. Night office in the dark theme, day office in the light theme; every colour is a token. */
+.sky-office {
+  /* night (default = dark theme) */
+  --of-border: #2f4256;
+  --of-text: #cfe0ec;
+  --of-muted: #8fa6b8;
+  --of-wall-a: #14202c;
+  --of-wall-b: #1b2b3a;
+  --of-wall-edge: #253a4d;
+  --of-floor-a: #18232d;
+  --of-floor-b: #202d39;
+  --of-window-a: #0c1a2b;
+  --of-window-b: #223a55;
+  --of-window-frame: #3a536b;
+  --of-window-shadow: #0d1720;
+  --of-suite: #1c2b39;
+  --of-suite-edge: #3b5a75;
+  --of-row-edge: #34495c;
+  --of-row-bg: #ffffff08;
+  --of-desk: #8a6a48;
+  --of-desk-edge: #6c5236;
+  --of-desk-shadow: #57402a;
+  --of-desk-leg: #2d3f4e;
+  --of-monitor-body: #0e161e;
+  --of-monitor-edge: #415568;
+  --of-monitor-stand: #2c3d4c;
+  --of-key-a: #566a79;
+  --of-key-b: #a9bac6;
+  --of-key-edge: #8fa0ac;
+  --of-mug: #d9e4ea;
+  --of-chair: #3a5670;
+  --of-chair-edge: #284056;
+  --of-chair-shadow: #223649;
+  --of-legs: #253649;
+  --of-label-bg: #101a24e6;
+  --of-label-text: #e2edf5;
+  --of-card-bg: #0f1a25;
+  --of-room: #182633;
+  --of-room-edge: #3a536b;
+  --of-table: #2a3f52;
+  --of-table-edge: #46647d;
+  --of-table-shadow: #1c2d3c;
+  --of-vacant: #7f97a9;
+  --of-focus: #f3c777;
+  --of-glow: 0 0 22px;
+
+  border: 1px solid var(--of-border);
+  border-radius: 18px;
+  color: var(--of-text);
+  box-shadow: 0 10px 35px #0006;
+  position: relative;
+}
+:root[data-theme='light'] .sky-office {
+  --of-border: #a2cce3;
+  --of-text: #25475c;
+  --of-muted: #526d80;
+  --of-wall-a: #bfdff3;
+  --of-wall-b: #e1f4ff;
+  --of-wall-edge: #a9c9dc;
+  --of-floor-a: #e9eff1;
+  --of-floor-b: #d5e3e9;
+  --of-window-a: #88ccec;
+  --of-window-b: #f8fdff;
+  --of-window-frame: #ffffff;
+  --of-window-shadow: #96b9cc;
+  --of-suite: #e3f1fa;
+  --of-suite-edge: #7fa6bd;
+  --of-row-edge: #b4cedd;
+  --of-row-bg: #eef6fa80;
+  --of-desk: #efc896;
+  --of-desk-edge: #c69e70;
+  --of-desk-shadow: #b98c5f;
+  --of-desk-leg: #708c9d;
+  --of-monitor-body: #283d4f;
+  --of-monitor-edge: #627c91;
+  --of-monitor-stand: #465e72;
+  --of-key-a: #8499a7;
+  --of-key-b: #e6edf1;
+  --of-key-edge: #c1cdd4;
+  --of-mug: #faffff;
+  --of-chair: #6e94ae;
+  --of-chair-edge: #446881;
+  --of-chair-shadow: #476077;
+  --of-legs: #354a60;
+  --of-label-bg: #ffffffdf;
+  --of-label-text: #24465d;
+  --of-card-bg: #ffffff;
+  --of-room: #f2faffc9;
+  --of-room-edge: #9cbcd0;
+  --of-table: #bcdbeb;
+  --of-table-edge: #80aabe;
+  --of-table-shadow: #6c93aa;
+  --of-vacant: #7c96a8;
+  --of-focus: #1262a0;
+  --of-glow: 0 0 18px;
+  box-shadow: 0 10px 35px #172c441a;
+}
+
+.sky-wall {
+  background: linear-gradient(115deg, var(--of-wall-a), var(--of-wall-b));
+  min-height: 96px;
+  padding: 18px 26px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border-bottom: 8px solid var(--of-wall-edge);
+  border-radius: 17px 17px 0 0;
+}
+.sky-wall > span:first-child {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 3px;
+}
+.wall-summary {
+  margin-left: auto;
+  font-size: var(--fs-1);
+  color: var(--of-muted);
+  letter-spacing: 0.04em;
+}
+.sky-windows {
+  display: flex;
+  gap: 14px;
+}
+.sky-windows i {
+  display: block;
+  width: 64px;
+  height: 60px;
+  background: linear-gradient(150deg, var(--of-window-a), var(--of-window-b));
+  border: 5px solid var(--of-window-frame);
+  box-shadow: 3px 4px var(--of-window-shadow);
+  position: relative;
+}
+.sky-windows i:after {
+  content: '';
+  position: absolute;
+  height: 100%;
+  width: 4px;
+  left: 50%;
+  background: var(--of-window-frame);
+}
+.sky-floor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 270px;
+  background: repeating-linear-gradient(0deg, var(--of-floor-a) 0 49px, var(--of-floor-b) 50px 51px);
+  min-height: 380px;
+}
+
+.office-main {
+  display: flex;
+  flex-direction: column;
+  padding: 20px;
+  gap: 18px;
+  min-width: 0;
+}
+.director-suite {
+  border: 3px solid var(--of-suite-edge);
+  border-radius: 14px;
+  background: var(--of-suite);
+  padding: 12px 16px 14px;
+}
+.director-suite > h3,
+.staff-row > h3 {
+  font-size: 10px;
+  letter-spacing: 2px;
+  margin: 0 0 2px;
+  color: var(--of-muted);
+}
+.staff-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  flex: 1;
+}
+.staff-row {
+  border: 2px dashed var(--of-row-edge);
+  border-radius: 14px;
+  padding: 12px 16px;
+  background: var(--of-row-bg);
+}
+.workstations {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(155px, 1fr));
+  gap: 30px 15px;
+  align-content: start;
+  padding: 14px 4px 6px;
+}
+.vacant-seat {
+  display: block;
+  color: var(--of-vacant);
+  font-size: 11px;
+  font-style: italic;
+  padding: 26px 0;
+  text-align: center;
+}
+
+/* One seat: monitor, desk, chair, person, then a label that takes part in layout. */
+.workstation {
+  position: relative;
+  min-width: 130px;
+  min-height: 190px;
+  padding-top: 140px;
+}
+.workstation:hover,
+.workstation:focus-within {
+  z-index: 15;
+}
+.office-desk {
+  position: absolute;
+  top: 50px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 125px;
+  height: 42px;
+  background: var(--of-desk);
+  border: 3px solid var(--of-desk-edge);
+  border-radius: 5px;
+  box-shadow:
+    0 9px var(--of-desk-shadow),
+    0 22px 0 -9px var(--of-desk-leg);
+}
+.keyboard {
+  position: absolute;
+  left: 30px;
+  top: 15px;
+  width: 48px;
+  height: 12px;
+  background: repeating-linear-gradient(90deg, var(--of-key-a) 0 3px, var(--of-key-b) 3px 5px);
+  border: 2px solid var(--of-key-edge);
+}
+.coffee {
+  position: absolute;
+  right: 9px;
+  top: 8px;
+  width: 10px;
+  height: 14px;
+  background: var(--of-mug);
+  border-radius: 2px;
+}
+.office-chair {
+  position: absolute;
+  top: 90px;
+  left: calc(50% - 24px);
+  height: 35px;
+  width: 48px;
+  background: var(--of-chair);
+  border: 3px solid var(--of-chair-edge);
+  border-radius: 12px;
+  box-shadow: 0 12px 0 -9px var(--of-chair-shadow);
+}
+
+/* Monitor states. Lit only when the evidence says so; unknown is a static dim question mark. */
+.office-monitor {
+  position: absolute;
+  z-index: 1;
+  left: calc(50% - 28px);
+  top: 20px;
+  width: 56px;
+  height: 37px;
+  background: var(--of-monitor-body);
+  border: 5px solid var(--of-monitor-edge);
+  border-radius: 4px;
+  box-shadow: 0 12px 0 -9px var(--of-monitor-stand);
+  overflow: hidden;
+  transition:
+    background var(--dur-3) var(--ease),
+    box-shadow var(--dur-3) var(--ease);
+}
+.office-monitor i {
+  position: absolute;
+  inset: 0;
+  display: block;
+}
+.office-monitor[data-state='working'],
+.office-monitor[data-state='stalled'] {
+  background: #0f2e2b;
+  box-shadow:
+    0 12px 0 -9px var(--of-monitor-stand),
+    var(--of-glow) color-mix(in srgb, var(--st-working) 70%, transparent);
+}
+.office-monitor[data-state='working'] i {
+  background: repeating-linear-gradient(0deg, transparent 0 5px, var(--st-working) 5px 7px);
+  opacity: 0.85;
+  background-size: 100% 14px;
+  animation: monitor-scroll 1.4s linear infinite;
+}
+.office-monitor[data-state='stalled'] {
+  background: #33290f;
+  box-shadow:
+    0 12px 0 -9px var(--of-monitor-stand),
+    var(--of-glow) color-mix(in srgb, var(--st-stalled) 60%, transparent);
+}
+.office-monitor[data-state='stalled'] i {
+  background: repeating-linear-gradient(0deg, transparent 0 5px, var(--st-stalled) 5px 7px);
+  opacity: 0.55;
+}
+.office-monitor[data-state='unknown'] i::after {
+  content: '?';
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font:
+    700 16px/1 Consolas,
+    monospace;
+  color: var(--st-unknown);
+  opacity: 0.7;
+}
+.office-monitor[data-state='away'] i::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 10px;
+  height: 7px;
+  border-radius: 2px;
+  transform: translate(-50%, -30%);
+  background: var(--st-meeting);
+  opacity: 0.6;
+  box-shadow: 0 -6px 0 -3px var(--st-meeting);
+}
+.office-monitor[data-state='done'] {
+  background: #10301f;
+  box-shadow:
+    0 12px 0 -9px var(--of-monitor-stand),
+    var(--of-glow) color-mix(in srgb, var(--st-done) 60%, transparent);
+}
+.office-monitor[data-state='done'] i::after,
+.office-monitor[data-state='failed'] i::after {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font:
+    800 18px/1 Consolas,
+    monospace;
+}
+.office-monitor[data-state='done'] i::after {
+  content: '✓';
+  color: var(--st-done);
+}
+.office-monitor[data-state='failed'] {
+  background: #3a1612;
+  box-shadow:
+    0 12px 0 -9px var(--of-monitor-stand),
+    var(--of-glow) color-mix(in srgb, var(--st-failed) 65%, transparent);
+}
+.office-monitor[data-state='failed'] i::after {
+  content: '!';
+  color: var(--st-failed);
+}
+@keyframes monitor-scroll {
+  to {
+    background-position-y: 14px;
+  }
+}
+
+.office-person {
+  position: absolute !important;
+  z-index: 3;
+  top: 64px;
+  left: calc(50% - 25px);
+  width: 50px;
+  height: 64px;
+  padding: 0 !important;
+  background: transparent !important;
+  border: 0 !important;
+  cursor: pointer;
+}
+.office-person.walking {
+  z-index: 12;
+}
+.office-person:hover {
+  filter: brightness(1.1);
+}
+.office-person:focus-visible {
+  outline: 3px solid var(--of-focus) !important;
+  border-radius: 8px;
+}
+.office-person span {
+  position: absolute;
+  display: block;
+}
+.person-head {
+  width: 23px;
+  height: 23px;
+  background: var(--skin);
+  left: 14px;
+  top: 7px;
+  border-radius: 7px;
+  box-shadow: inset 0 -4px #0002;
+}
+.person-hair {
+  z-index: 2;
+  left: 12px;
+  top: 2px;
+  width: 27px;
+  height: 14px;
+  background: var(--hair);
+  border-radius: 10px 10px 3px 3px;
+}
+.person-body {
+  left: 9px;
+  top: 29px;
+  width: 33px;
+  height: 26px;
+  background: var(--shirt);
+  border-radius: 10px 10px 3px 3px;
+}
+.person-arms {
+  left: 4px;
+  top: 34px;
+  width: 8px;
+  height: 18px;
+  background: var(--skin);
+  border-radius: 4px;
+  box-shadow: 34px 0 var(--skin);
+}
+.person-legs {
+  left: 13px;
+  top: 54px;
+  width: 10px;
+  height: 10px;
+  background: var(--of-legs);
+  box-shadow: 16px 0 var(--of-legs);
+}
+.office-person.walking .person-legs {
+  animation: step 0.32s steps(2) infinite;
+}
+@keyframes step {
+  50% {
+    transform: translateY(-2px);
+  }
+}
+.bubble {
+  z-index: 4;
+  left: calc(100% - 6px);
+  top: 10px;
+  padding: 2px 7px;
+  border-radius: 8px;
+  background: var(--of-card-bg);
+  color: var(--st, var(--of-text));
+  border: 1px solid var(--st, var(--of-border));
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.bubble::after {
+  content: '';
+  position: absolute;
+  left: -4px;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  background: var(--of-card-bg);
+  border-left: 1px solid var(--st, var(--of-border));
+  border-bottom: 1px solid var(--st, var(--of-border));
+  transform: translateY(-50%) rotate(45deg);
+}
+.bubble[data-status='working'] {
+  --st: var(--st-working);
+}
+.bubble[data-status='stalled'] {
+  --st: var(--st-stalled);
+}
+.bubble[data-status='unknown'] {
+  --st: var(--st-unknown);
+}
+.bubble[data-status='meeting'] {
+  --st: var(--st-meeting);
+}
+.bubble[data-status='done'] {
+  --st: var(--st-done);
+}
+.bubble[data-status='failed'] {
+  --st: var(--st-failed);
+}
+
+.station-label {
+  position: static;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+  text-align: center;
+  width: 100%;
+  color: var(--of-muted);
+}
+.person-name {
+  position: static;
+  transform: none;
+  white-space: normal;
+  max-width: 100%;
+  background: var(--of-label-bg);
+  color: var(--of-label-text);
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.hover-card {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% - 118px);
+  transform: translateX(-50%) translateY(4px);
+  width: 210px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--of-card-bg);
+  color: var(--of-label-text);
+  border: 1px solid var(--of-border);
+  box-shadow: var(--shadow-pop);
+  font-size: 11px;
+  line-height: 1.45;
+  text-align: left;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    opacity var(--dur-1),
+    transform var(--dur-1);
+}
+.hover-card strong {
+  font-size: 12px;
+}
+.hover-role,
+.hover-evidence {
+  color: var(--of-muted);
+}
+.workstation:hover .hover-card,
+.workstation:focus-within .hover-card {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* Meeting wing */
+.meeting-wing {
+  padding: 18px;
+  border-left: 6px solid var(--of-wall-edge);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  background: color-mix(in srgb, var(--of-wall-a) 45%, transparent);
+}
+.meeting-room {
+  min-height: 190px;
+  border: 2px solid var(--of-room-edge);
+  border-radius: 10px;
+  background: var(--of-room);
+  position: relative;
+  padding: 12px 12px 35px;
+  text-align: center;
+}
+.meeting-room h3 {
+  font-size: 10px;
+  letter-spacing: 1px;
+  margin: 0;
+  color: var(--of-muted);
+}
+.meeting-room > span {
+  position: absolute;
+  bottom: 8px;
+  left: 0;
+  width: 100%;
+  padding: 0 8px;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.meeting-table {
+  position: absolute;
+  top: 65px;
+  left: calc(50% - 64px);
+  width: 128px;
+  height: 55px;
+  background: var(--of-table);
+  border: 5px solid var(--of-table-edge);
+  border-radius: 30px;
+  box-shadow: 0 8px var(--of-table-shadow);
+}
+.meeting-people {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 5px;
+  margin-top: 15px;
+}
+.meeting-member {
+  width: 90px;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+}
+.meeting-people .office-person {
+  position: relative !important;
+  left: auto;
+  top: 0;
+  display: block;
+  margin: 0 auto 8px;
+}
+.rooms-free {
+  font-size: 11px;
+  color: var(--of-muted);
+  padding: 8px 10px;
+  border: 1px dashed var(--of-room-edge);
+  border-radius: 8px;
+  text-align: center;
+}
+
+/* Now panel */
+.now-panel {
+  padding: 12px 20px 14px;
+  border-top: 1px solid var(--of-border);
+  background: var(--of-card-bg);
+  color: var(--of-label-text);
+}
+.now-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.now-head h3 {
+  font-size: 10px;
+  letter-spacing: 2px;
+  color: var(--of-muted);
+}
+.now-head .text-button {
+  padding: 0;
+  font-size: 10px;
+  color: var(--of-muted);
+}
+.now-panel ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.now-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 22px minmax(90px, 0.9fr) auto minmax(0, 2fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 4px;
+  border-radius: 6px;
+  text-align: left;
+  font-size: 12px;
+  color: inherit;
+}
+.now-row:hover {
+  background: color-mix(in srgb, var(--of-border) 35%, transparent);
+}
+.now-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.now-line {
+  color: var(--of-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.now-elapsed {
+  color: var(--of-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.sky-caption {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--of-wall-a);
+  padding: 10px 22px;
+  font-size: 10px;
+  letter-spacing: 0.03em;
+  color: var(--of-muted);
+  border-radius: 0 0 17px 17px;
+}
+
+[data-motion='reduced'] .sky-office * {
+  animation: none !important;
+  transition: none !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sky-office * {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+@media (max-width: 1150px) {
+  .sky-floor {
+    grid-template-columns: minmax(0, 1fr) 220px;
+  }
+  .sky-windows i {
+    width: 44px;
+  }
+  .sky-wall {
+    padding: 16px 20px;
+  }
+  .sky-caption {
+    flex-direction: column;
+  }
+}
+@media (max-width: 850px) {
+  .sky-floor {
+    grid-template-columns: 1fr;
+  }
+  .meeting-wing {
+    border-left: 0;
+    border-top: 6px solid var(--of-wall-edge);
+  }
+  .sky-windows {
+    display: none;
+  }
+  .now-row {
+    grid-template-columns: 22px minmax(80px, 1fr) auto;
+  }
+  .now-line,
+  .now-elapsed {
+    display: none;
+  }
+}

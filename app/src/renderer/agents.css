@@ -364,3 +364,21 @@
 .connection-row .evidence-list {
   margin-top: 8px;
 }
+
+.setup-stepper {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  list-style: none;
+  padding: 0;
+  margin: 16px 0 24px;
+  color: var(--muted);
+}
+.setup-stepper li {
+  padding: 10px;
+  border-bottom: 2px solid var(--border);
+}
+.setup-stepper [aria-current='step'] {
+  color: var(--text);
+  border-color: var(--accent);
+}

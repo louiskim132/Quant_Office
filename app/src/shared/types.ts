@@ -1175,6 +1175,11 @@ export interface OfficeAPI {
   agentIsolationSetup(): Promise<{ ok: true }>;
   /** Stops launching agents as QRO-Agent. The Windows account itself is left in place. */
   agentIsolationRemove(): Promise<{ ok: true }>;
+  /**
+   * Runs the LR-16 real-account acceptance probes through the isolated spawn surface and saves
+   * the evidence file. Returns the per-check verdict and where the evidence was written.
+   */
+  agentIsolationVerify(): Promise<{ passed: boolean; checks: Record<string, boolean>; evidencePath: string }>;
   selectProviderTool(provider: Provider): Promise<void>;
   openProviderUsage(provider: Provider): Promise<void>;
   /** Freeze one request's inputs and record the intent to submit. Nothing is transferred. */
@@ -1327,6 +1332,11 @@ export interface OfficeAPI {
   retryPipelineHop(input: { requestId: string; pipelineKey: string; expectedRevision: number }): Promise<AppState>;
   searchMemory(input: { projectId: string; text: string; limit?: number }): Promise<{ findings: MemoryFinding[] }>;
   memoryGraph(projectId: string): Promise<MemoryGraph>;
+  /** Reports how many items wait on the user, for the taskbar badge. A count only. */
+  setAttentionCount(count: number): Promise<void>;
+  /** The office's own view of the agent processes it spawned; in memory only, empty when none run. */
+  livePresence(): Promise<import('./activity').LivePresence[]>;
+  onPresence(callback: (presence: import('./activity').LivePresence[]) => void): () => void;
   onChanged(callback: () => void): () => void;
 }
 /** Reported, never acted on by the renderer: promotion is decided in main, from gate receipts. */

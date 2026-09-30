@@ -1,0 +1,52 @@
+/*
+ * Design tokens shared by every surface. Component CSS reads these; it does not carry its own literal
+ * colours, durations or type sizes for the things below.
+ */
+:root {
+  /* Status vocabulary: one colour per status, used with an icon and a word. */
+  --st-working: #5fd4b8;
+  --st-stalled: #dcb44f;
+  --st-needs: #eaa84a;
+  --st-failed: #ee7c6a;
+  --st-done: #7bd09b;
+  --st-unknown: #a9b3b2;
+  --st-idle: #7f8c8b;
+  --st-meeting: #93aef0;
+
+  /* Type scale (base body text is --fs-3). */
+  --fs-1: 11px;
+  --fs-2: 12px;
+  --fs-3: 13px;
+  --fs-4: 15px;
+  --fs-5: 18px;
+  --fs-6: 24px;
+  --fs-7: 32px;
+
+  /* Radius and spacing. */
+  --r-1: 5px;
+  --r-2: 8px;
+  --r-3: 12px;
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+
+  /* Motion: three durations and one easing. Nothing moves unless its meaning changed. */
+  --dur-1: 120ms;
+  --dur-2: 200ms;
+  --dur-3: 320ms;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --shadow-pop: 0 10px 30px #0006;
+}
+:root[data-theme='light'] {
+  --st-working: #167a64;
+  --st-stalled: #8a6408;
+  --st-needs: #98590a;
+  --st-failed: #b23c2b;
+  --st-done: #2a7748;
+  --st-unknown: #5f6b6a;
+  --st-idle: #67736f;
+  --st-meeting: #3b56a3;
+  --shadow-pop: 0 10px 30px #20302826;
+}
