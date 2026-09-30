@@ -942,6 +942,26 @@ export function AgentIsolation() {
       setBusy(false);
     }
   }
+  async function verify() {
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      const result = await window.office.agentIsolationVerify();
+      const failed = Object.entries(result.checks)
+        .filter(([, ok]) => !ok)
+        .map(([name]) => name);
+      if (result.passed)
+        setNotice(
+          `Isolation check passed: all ${Object.keys(result.checks).length} checks. Evidence saved to ${result.evidencePath}`,
+        );
+      else setError(`Isolation check failed: ${failed.join(', ')}. Evidence saved to ${result.evidencePath}`);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
   async function remove() {
     setBusy(true);
     setError('');
@@ -995,6 +1015,15 @@ export function AgentIsolation() {
             </p>
           </div>
           <div>
+            <button
+              className="secondary"
+              disabled={busy}
+              aria-label="Check agent isolation"
+              aria-busy={busy}
+              onClick={() => void verify()}
+            >
+              {busy ? 'Working…' : 'Check isolation'}
+            </button>
             <button
               className="secondary"
               disabled={busy}

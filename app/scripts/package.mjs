@@ -4,6 +4,7 @@
 // plain-Node view the packager expects.
 process.noAsar = true;
 import { packager } from '@electron/packager';
+import { flipFuses, FuseVersion, FuseV1Options } from '@electron/fuses';
 import { mkdir, cp, readFile, writeFile } from 'node:fs/promises';
 import { resolve, relative, isAbsolute } from 'node:path';
 import { createRequire } from 'node:module';
@@ -75,4 +76,14 @@ const output = await packager({
     ProductName: pkg.productName,
   },
 });
+// Release hardening. QRO_TEST_BUILD=1 keeps the inspector fuse on, because Playwright's
+// Electron launcher drives the app through it (the desktop e2e runs on test builds).
+for (const dir of output)
+  await flipFuses(resolve(dir, 'Quant Research Office.exe'), {
+    version: FuseVersion.V1,
+    [FuseV1Options.RunAsNode]: false,
+    [FuseV1Options.EnableNodeOptionsEnvironmentVariable]: false,
+    [FuseV1Options.EnableNodeCliInspectArguments]: process.env.QRO_TEST_BUILD === '1',
+    [FuseV1Options.EnableCookieEncryption]: true,
+  });
 for (const path of output) console.log(`Packaged: ${path}`);

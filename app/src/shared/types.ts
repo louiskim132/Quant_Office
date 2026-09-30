@@ -1175,6 +1175,11 @@ export interface OfficeAPI {
   agentIsolationSetup(): Promise<{ ok: true }>;
   /** Stops launching agents as QRO-Agent. The Windows account itself is left in place. */
   agentIsolationRemove(): Promise<{ ok: true }>;
+  /**
+   * Runs the LR-16 real-account acceptance probes through the isolated spawn surface and saves
+   * the evidence file. Returns the per-check verdict and where the evidence was written.
+   */
+  agentIsolationVerify(): Promise<{ passed: boolean; checks: Record<string, boolean>; evidencePath: string }>;
   selectProviderTool(provider: Provider): Promise<void>;
   openProviderUsage(provider: Provider): Promise<void>;
   /** Freeze one request's inputs and record the intent to submit. Nothing is transferred. */

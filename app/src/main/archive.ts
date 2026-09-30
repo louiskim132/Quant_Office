@@ -1,10 +1,11 @@
 import { createHash } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
-import { mkdir, rename, rm, stat } from 'node:fs/promises';
+import { mkdir, open, rename, rm, stat, type FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { pipeline } from 'node:stream/promises';
-import { AsyncZipDeflate, AsyncUnzipInflate, Unzip, Zip } from 'fflate';
+import { once } from 'node:events';
+import { createInflateRaw, crc32 } from 'node:zlib';
+import { AsyncZipDeflate, Zip } from 'fflate';
 import { safeEntry } from './artifacts.js';
 import { removeTree } from './fsx.js';
 
@@ -130,9 +131,44 @@ export interface ExtractResult {
   totalBytes: number;
 }
 
+const LOCAL_HEADER = 0x04034b50;
+const CENTRAL_HEADER = 0x02014b50;
+const DATA_DESCRIPTOR = 0x08074b50;
+const END_OF_CENTRAL = 0x06054b50;
+/** Compressed bytes fed to the inflater per step; bounds what one step can expand to (deflate is at most 1032:1). */
+const INFLATE_STEP = 64 * 1024;
+const ZIP32 = 2 ** 32;
+
+interface LocalRecord {
+  name: string;
+  offset: number;
+  crc: number;
+  compressed: number;
+  size: number;
+}
+
+/** Exact positional read; a short read means the archive ends early. */
+async function readAt(handle: FileHandle, position: number, length: number): Promise<Buffer> {
+  const buffer = Buffer.alloc(length);
+  let done = 0;
+  while (done < length) {
+    const { bytesRead } = await handle.read(buffer, done, length - done, position + done);
+    if (!bytesRead) throw new Error('unexpected end of archive');
+    done += bytesRead;
+  }
+  return buffer;
+}
+
 /**
  * Extracts a ZIP entry by entry, enforcing the limits as it goes rather than after expansion, and
  * hashing what it writes. Returns what was actually written, not what the archive claimed.
+ *
+ * The archives are written with data descriptors, so a local header does not say how long its entry
+ * is. An entry ends where its deflate stream ends — the inflater reports how many bytes it consumed —
+ * never at a ZIP signature found by searching, which incompressible data can contain by chance
+ * (roadmap C12, N3b). The descriptor's CRC and sizes and the central directory are then checked
+ * against what was read. fflate writes no ZIP64 records, so sizes and offsets are compared modulo
+ * 2^32; the lengths themselves always come from the deflate streams.
  */
 export async function extractStreamedArchive(
   source: string,
@@ -142,86 +178,151 @@ export async function extractStreamedArchive(
   await mkdir(directory, { recursive: true });
   const entries: ArchiveEntry[] = [];
   const seen = new Set<string>();
+  const records: LocalRecord[] = [];
   let totalBytes = 0;
-  const writes: Promise<void>[] = [];
-  const inflating: { terminate?: () => void }[] = [];
-  let failure: Error | null = null;
-  const unzip = new Unzip();
-  unzip.register(AsyncUnzipInflate);
-  unzip.onfile = file => {
-    let settle: () => void = () => {};
-    writes.push(
-      new Promise<void>(resolve => {
-        settle = resolve;
-      }),
-    );
-    try {
-      assertPath(file.name, seen, limits);
-    } catch (error) {
-      failure ??= error as Error;
-      settle();
-      return;
-    }
-    const target = path.join(directory, file.name);
-    const hash = createHash('sha256');
-    let size = 0;
-    let stream: ReturnType<typeof createWriteStream> | null = null;
-    const ready = mkdir(path.dirname(target), { recursive: true }).then(() => {
-      stream = createWriteStream(target);
-    });
-    file.ondata = (error, chunk, final) => {
-      if (error) {
-        failure ??= error as unknown as Error;
-        settle();
-        return;
-      }
-      size += chunk.length;
-      totalBytes += chunk.length;
-      if (size > limits.maxEntryBytes || totalBytes > limits.maxTotalBytes) {
-        failure ??= new Error('The archive expands beyond the supported size.');
-        settle();
-        return;
-      }
-      hash.update(chunk);
-      void ready.then(() => {
-        stream!.write(Buffer.from(chunk));
-        if (final)
-          stream!.end(() => {
-            entries.push({ path: file.name, size, sha256: hash.digest('hex') });
-            settle();
-          });
+  const handle = await open(source, 'r');
+  try {
+    const fileSize = (await handle.stat()).size;
+    let position = 0;
+    for (;;) {
+      const signature = (await readAt(handle, position, 4)).readUInt32LE(0);
+      if (signature === CENTRAL_HEADER || signature === END_OF_CENTRAL) break;
+      if (signature !== LOCAL_HEADER) throw new Error('invalid zip data');
+      const header = await readAt(handle, position, 30);
+      const flags = header.readUInt16LE(6),
+        method = header.readUInt16LE(8),
+        nameLength = header.readUInt16LE(26),
+        extraLength = header.readUInt16LE(28);
+      if (flags & 1) throw new Error('Encrypted archive entries are not supported.');
+      const name = (await readAt(handle, position + 30, nameLength)).toString(flags & 0x800 ? 'utf8' : 'latin1');
+      assertPath(name, seen, limits);
+      const dataStart = position + 30 + nameLength + extraLength;
+      const target = path.join(directory, name);
+      await mkdir(path.dirname(target), { recursive: true });
+      const output = createWriteStream(target);
+      const closed = new Promise<void>((resolve, reject) => {
+        output.once('close', resolve);
+        output.once('error', reject);
       });
-    };
-    inflating.push(file as unknown as { terminate?: () => void });
-    void ready.then(() => file.start());
-  };
-  await pipeline(
-    createReadStream(source, { highWaterMark: 1024 * 1024 }),
-    async function* (chunks) {
-      for await (const chunk of chunks) {
-        unzip.push(chunk as Uint8Array, false);
-        yield chunk;
+      const hash = createHash('sha256');
+      let size = 0;
+      let crc = 0;
+      let failure: Error | null = null;
+      let drained: Promise<void> | null = null;
+      const accept = (chunk: Buffer) => {
+        if (failure) return;
+        size += chunk.length;
+        totalBytes += chunk.length;
+        if (size > limits.maxEntryBytes || totalBytes > limits.maxTotalBytes) {
+          failure = new Error('The archive expands beyond the supported size.');
+          return;
+        }
+        hash.update(chunk);
+        crc = crc32(chunk, crc);
+        if (!output.write(chunk))
+          drained ??= once(output, 'drain').then(() => {
+            drained = null;
+          });
+      };
+      let consumed = 0;
+      try {
+        if (method === 8) {
+          const inflater = createInflateRaw();
+          const ended = new Promise<void>((resolve, reject) => {
+            inflater.once('end', resolve);
+            inflater.once('error', reject);
+          });
+          ended.catch(() => {});
+          inflater.on('data', accept);
+          inflater.on('error', error => {
+            failure ??= error;
+          });
+          let fed = 0;
+          try {
+            // Feed until the inflater stops consuming: that is where this entry's deflate stream ends.
+            while (!failure) {
+              const length = Math.min(INFLATE_STEP, fileSize - dataStart - fed);
+              if (length <= 0) throw new Error('unexpected end of archive');
+              const chunk = await readAt(handle, dataStart + fed, length);
+              fed += length;
+              await new Promise<void>(resolve => inflater.write(chunk, () => resolve()));
+              if (drained) await drained;
+              if (inflater.bytesWritten < fed) break;
+            }
+            if (!failure) await ended;
+            if (failure) throw failure;
+            consumed = inflater.bytesWritten;
+          } finally {
+            inflater.destroy();
+          }
+        } else if (method === 0 && !(flags & 8)) {
+          consumed = header.readUInt32LE(18);
+          for (let at = 0; at < consumed && !failure; at += INFLATE_STEP) {
+            accept(await readAt(handle, dataStart + at, Math.min(INFLATE_STEP, consumed - at)));
+            if (drained) await drained;
+          }
+          if (failure) throw failure;
+        } else {
+          throw new Error(`Unsupported archive entry format: ${name}`);
+        }
+        output.end();
+        await closed;
+      } catch (error) {
+        output.destroy();
+        await closed.catch(() => {});
+        throw error;
       }
-      unzip.push(new Uint8Array(0), true);
-    },
-    async function* (chunks) {
-      for await (const _ of chunks) {
-        /* the archive is consumed by the unzipper */
+      let end = dataStart + consumed;
+      let recorded = {
+        crc: header.readUInt32LE(14),
+        compressed: header.readUInt32LE(18),
+        size: header.readUInt32LE(22),
+      };
+      if (flags & 8) {
+        const descriptor = await readAt(handle, end, 16);
+        const skip = descriptor.readUInt32LE(0) === DATA_DESCRIPTOR ? 4 : 0;
+        recorded = {
+          crc: descriptor.readUInt32LE(skip),
+          compressed: descriptor.readUInt32LE(skip + 4),
+          size: descriptor.readUInt32LE(skip + 8),
+        };
+        end += skip + 12;
       }
-    },
-  );
-  await Promise.all(writes);
-  for (const file of inflating) {
-    try {
-      file.terminate?.();
-    } catch {
-      /* already finished */
+      if (recorded.crc !== crc >>> 0 || recorded.compressed !== consumed % ZIP32 || recorded.size !== size % ZIP32)
+        throw new Error(`The archive entry ${name} does not match its recorded checksum or sizes`);
+      records.push({ name, offset: position, crc: recorded.crc, compressed: consumed, size });
+      entries.push({ path: name, size, sha256: hash.digest('hex') });
+      position = end;
     }
-  }
-  if (failure) {
+    // The central directory must list exactly the entries read, in order, at the offsets they were found.
+    const central = await readAt(handle, position, fileSize - position);
+    let at = 0;
+    for (const record of records) {
+      if (central.length < at + 46 || central.readUInt32LE(at) !== CENTRAL_HEADER)
+        throw new Error('The archive directory does not list every entry');
+      const flags = central.readUInt16LE(at + 8),
+        nameLength = central.readUInt16LE(at + 28),
+        extraLength = central.readUInt16LE(at + 30),
+        commentLength = central.readUInt16LE(at + 32);
+      const name = central.subarray(at + 46, at + 46 + nameLength).toString(flags & 0x800 ? 'utf8' : 'latin1');
+      if (
+        name !== record.name ||
+        central.readUInt32LE(at + 16) !== record.crc ||
+        central.readUInt32LE(at + 20) !== record.compressed % ZIP32 ||
+        central.readUInt32LE(at + 24) !== record.size % ZIP32 ||
+        central.readUInt32LE(at + 42) !== record.offset % ZIP32
+      )
+        throw new Error(`The archive directory does not match the entry ${record.name}`);
+      at += 46 + nameLength + extraLength + commentLength;
+    }
+    if (central.length < at + 22 || central.readUInt32LE(at) !== END_OF_CENTRAL)
+      throw new Error('The archive directory lists entries that were not found');
+  } catch (error) {
+    await handle.close().catch(() => {});
     await removeTree(directory);
-    throw failure;
+    throw error;
   }
+  await handle.close();
   return { entries: entries.sort((a, b) => a.path.localeCompare(b.path)), totalBytes };
 }
 

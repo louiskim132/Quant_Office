@@ -26,6 +26,7 @@ const api: OfficeAPI = {
   agentIsolationStatus: () => request('office:agent-isolation-status'),
   agentIsolationSetup: () => request('office:agent-isolation-setup'),
   agentIsolationRemove: () => request('office:agent-isolation-remove'),
+  agentIsolationVerify: () => request('office:agent-isolation-verify'),
   selectProviderTool: provider => request('office:provider-tool', provider),
   openProviderUsage: provider => request('office:provider-usage', provider),
   prepareRequest: input => request('office:request-prepare', input),
