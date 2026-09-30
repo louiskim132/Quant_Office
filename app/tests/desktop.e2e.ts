@@ -93,7 +93,7 @@ try {
   await page.getByRole('button', { name: 'Memory', exact: true }).click();
   await page.getByRole('heading', { name: 'Choose a project', exact: true }).waitFor();
   assert.equal(await page.getByRole('button', { name: 'Create project', exact: true }).count(), 0);
-  await page.locator('.project-choices').getByRole('button', { name: 'Volatility research', exact: true }).click();
+  await page.locator('.project-picks').getByRole('button', { name: /Volatility research/ }).click();
   await page.getByRole('heading', { name: 'Choose a project', exact: true }).waitFor({ state: 'hidden' });
   await page.getByRole('button', { name: 'Projects', exact: true }).click();
   await page.getByRole('button', { name: 'Open project', exact: true }).waitFor();
@@ -194,7 +194,7 @@ try {
   // R1-A containment. The bridge method is preserved for compatibility, but the trusted main handler
   // must refuse it before any effect, so a stale window or a direct bridge call cannot create a session.
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  const verifyButton = page.getByRole('button', { name: 'Verify cloud transport…' });
+  const verifyButton = page.getByRole('button', { name: /Verify cloud transport/ });
   await verifyButton.waitFor();
   assert.equal(await verifyButton.isDisabled(), true, 'the live-create flow cannot be opened from Settings');
   assert.equal(
