@@ -2,6 +2,44 @@ export type Point = { x: number; y: number };
 type Node = { findingId: string };
 type Edge = { from: string; to: string; status: string };
 
+/** Recorded non-refuted link count per finding — drives dot size and repulsion room. */
+export function memoryDegrees(edges: readonly Edge[]) {
+  const degrees: Record<string, number> = {};
+  for (const edge of edges) {
+    if (edge.status === 'REFUTED') continue;
+    degrees[edge.from] = (degrees[edge.from] ?? 0) + 1;
+    degrees[edge.to] = (degrees[edge.to] ?? 0) + 1;
+  }
+  return degrees;
+}
+
+/** Obsidian-style dot radius: subtly larger with link count, bounded 6.5–15. */
+export function memoryRadius(degree: number) {
+  return Math.round((6.5 + Math.min(8.5, 1.7 * Math.sqrt(Math.max(0, degree)))) * 10) / 10;
+}
+
+/**
+ * Deterministic trim of a directed edge so the line stops at each dot's rim and the
+ * arrowhead lands on the target rim. `short` means the dots nearly touch — callers
+ * draw the untrimmed line and no arrow.
+ */
+export function memoryEdgeTrim(a: Point, b: Point, fromRadius: number, toRadius: number) {
+  const dx = b.x - a.x || 0.01,
+    dy = b.y - a.y || 0.01;
+  const distance = Math.hypot(dx, dy),
+    ux = dx / distance,
+    uy = dy / distance;
+  const gap = 2;
+  const x1 = a.x + ux * (fromRadius + 1),
+    y1 = a.y + uy * (fromRadius + 1);
+  const x2 = b.x - ux * (toRadius + gap),
+    y2 = b.y - uy * (toRadius + gap);
+  const wing = 4.6,
+    depth = 7;
+  const arrow = `M ${x2} ${y2} L ${x2 - ux * depth - uy * wing} ${y2 - uy * depth + ux * wing} L ${x2 - ux * depth + uy * wing} ${y2 - uy * depth - ux * wing} Z`;
+  return { x1, y1, x2, y2, arrow, short: distance <= fromRadius + toRadius + gap + 2 };
+}
+
 /** Bounded deterministic force layout. User pins are fixed; computed positions never enter storage. */
 export function layoutMemory(nodes: readonly Node[], edges: readonly Edge[], pins: Record<string, Point> = {}) {
   const sorted = [...nodes].sort((a, b) => a.findingId.localeCompare(b.findingId)).slice(0, 100);
@@ -20,7 +58,13 @@ export function layoutMemory(nodes: readonly Node[], edges: readonly Edge[], pin
       .filter(n => pins[n.findingId] && Number.isFinite(pins[n.findingId].x) && Number.isFinite(pins[n.findingId].y))
       .map(n => n.findingId),
   );
-  const links = edges.filter(e => e.status !== 'REFUTED' && points[e.from] && points[e.to]).slice(0, 200);
+  // Links are canonically ordered before the bound so the same edge set yields the same
+  // accumulation order — output is identical for any input ordering.
+  const links = edges
+    .filter(e => e.status !== 'REFUTED' && points[e.from] && points[e.to])
+    .sort((a, b) => `${a.from}|${a.to}|${a.status}`.localeCompare(`${b.from}|${b.to}|${b.status}`))
+    .slice(0, 200);
+  const degrees = memoryDegrees(links);
   for (let tick = 0; tick < 180; tick++) {
     const forces = Object.fromEntries(sorted.map(n => [n.findingId, { x: 0, y: 0 }]));
     for (let i = 0; i < sorted.length; i++)
@@ -30,7 +74,9 @@ export function layoutMemory(nodes: readonly Node[], edges: readonly Edge[], pin
         const dx = points[b].x - points[a].x || 0.01,
           dy = points[b].y - points[a].y || 0.01;
         const distance = Math.max(0.1, Math.hypot(dx, dy));
-        const strength = distance < 105 ? (105 - distance) * 0.3 : 150 / (distance * distance);
+        // High-degree dots are drawn bigger; give their pairs more repulsion room.
+        const spread = 105 + Math.min(45, ((degrees[a] ?? 0) + (degrees[b] ?? 0)) * 3);
+        const strength = distance < spread ? (spread - distance) * 0.3 : 150 / (distance * distance);
         forces[a].x -= (dx / distance) * strength;
         forces[a].y -= (dy / distance) * strength;
         forces[b].x += (dx / distance) * strength;

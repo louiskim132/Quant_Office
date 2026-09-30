@@ -104,6 +104,81 @@
   text-transform: lowercase;
   cursor: pointer;
 }
+
+/* Graph legend: the kind chips carry a dot swatch; edge/status glyphs sit beside them. */
+.memory-kind .mem-legend-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: 5px;
+  vertical-align: -1px;
+  background: var(--muted);
+}
+.memory-kind.kind-observation .mem-legend-dot {
+  background: #7fa8c9;
+}
+.memory-kind.kind-hypothesis .mem-legend-dot {
+  background: #b58fc9;
+}
+.memory-kind.kind-result .mem-legend-dot {
+  background: var(--teal);
+}
+.memory-kind.kind-defect .mem-legend-dot {
+  background: #c97f7f;
+}
+.memory-kind.kind-decision .mem-legend-dot {
+  background: var(--accent);
+}
+.memory-kind.kind-note .mem-legend-dot {
+  background: var(--muted);
+}
+.mem-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 10px;
+  color: var(--subtle);
+  text-transform: lowercase;
+}
+.mem-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.mem-legend-item svg {
+  overflow: visible;
+}
+.mem-legend .legend-line {
+  stroke: var(--subtle);
+  stroke-width: 1.6;
+}
+.mem-legend .legend-line.confirmed {
+  stroke: var(--teal);
+}
+.mem-legend .legend-arrow.confirmed {
+  fill: var(--teal);
+}
+.mem-legend .legend-line.proposed {
+  stroke-dasharray: 5 3;
+}
+.mem-legend .legend-arrow.proposed {
+  fill: var(--subtle);
+}
+.mem-legend .legend-line.refuted {
+  stroke-dasharray: 2.5 3;
+  opacity: 0.6;
+}
+.mem-legend .legend-dot.superseded {
+  fill: var(--panel);
+  stroke: var(--subtle);
+  stroke-width: 1.4;
+  stroke-dasharray: 2 1.8;
+}
+.mem-legend .legend-strike {
+  stroke: var(--text);
+  stroke-width: 1.4;
+}
 .memory-graph svg {
   display: block;
   width: 100%;
@@ -120,11 +195,14 @@
   border-top: 1px solid var(--border);
 }
 
-/* Edges: CONFIRMED solid, PROPOSED dashed — a proposed link is never drawn as established. */
+/* Edges: thin directed lines — CONFIRMED solid, PROPOSED dashed — a proposed link is never drawn as established. */
 .mem-edge-line {
   stroke: var(--subtle);
-  stroke-width: 1.6;
+  stroke-width: 1.4;
   fill: none;
+}
+.mem-edge-arrow {
+  fill: var(--subtle);
 }
 .mem-edge-hit {
   stroke: transparent;
@@ -137,17 +215,38 @@
   stroke: var(--subtle);
   opacity: 0.75;
 }
+.mem-edge.status-proposed .mem-edge-arrow {
+  fill: var(--subtle);
+  opacity: 0.75;
+}
 .mem-edge.status-confirmed .mem-edge-line {
   stroke: var(--teal);
-  stroke-width: 2;
+  stroke-width: 1.8;
+}
+.mem-edge.status-confirmed .mem-edge-arrow {
+  fill: var(--teal);
 }
 .mem-edge.selected .mem-edge-line {
   stroke: var(--accent);
   stroke-width: 2.4;
 }
+.mem-edge.selected .mem-edge-arrow {
+  fill: var(--accent);
+}
 .mem-edge.status-refuted .mem-edge-line {
   stroke-dasharray: 3 4;
   opacity: 0.5;
+}
+.mem-edge.status-refuted .mem-edge-arrow {
+  opacity: 0.5;
+}
+/* Hovering a node dims unrelated edges and slightly emphasizes its incident ones. */
+.mem-edge.dim .mem-edge-line,
+.mem-edge.dim .mem-edge-arrow {
+  opacity: 0.12;
+}
+.mem-edge.near .mem-edge-line {
+  stroke-width: 2.4;
 }
 .mem-edge.status-refuted .mem-edge-label {
   text-decoration: line-through;
@@ -163,39 +262,46 @@
   fill: var(--accent);
 }
 
-/* Nodes: one hue per finding kind; superseded nodes dim and carry a strike marker. */
+/* Nodes: Obsidian-style filled dots — one hue per finding kind, size set per node by
+   recorded link count (see memoryRadius); superseded nodes hollow out and carry a strike. */
 .mem-node {
   cursor: move;
 }
-.mem-node circle {
-  fill: var(--panel-2);
-  stroke: var(--subtle);
-  stroke-width: 1.6;
+.mem-node .mem-node-hit {
+  fill: #000;
+  fill-opacity: 0;
+  stroke: none;
+  pointer-events: all;
 }
-.mem-node.kind-observation circle {
-  stroke: #7fa8c9;
+.mem-node .mem-node-dot {
+  fill: var(--muted);
+  stroke: var(--panel);
+  stroke-width: 1.5;
 }
-.mem-node.kind-hypothesis circle {
-  stroke: #b58fc9;
+.mem-node.kind-observation .mem-node-dot {
+  fill: #7fa8c9;
 }
-.mem-node.kind-result circle {
-  stroke: var(--teal);
+.mem-node.kind-hypothesis .mem-node-dot {
+  fill: #b58fc9;
 }
-.mem-node.kind-defect circle {
-  stroke: #c97f7f;
+.mem-node.kind-result .mem-node-dot {
+  fill: var(--teal);
 }
-.mem-node.kind-decision circle {
-  stroke: var(--accent);
+.mem-node.kind-defect .mem-node-dot {
+  fill: #c97f7f;
 }
-.mem-node.kind-note circle {
-  stroke: var(--muted);
+.mem-node.kind-decision .mem-node-dot {
+  fill: var(--accent);
 }
-.mem-node.selected circle {
+.mem-node.kind-note .mem-node-dot {
+  fill: var(--muted);
+}
+.mem-node.selected .mem-node-dot {
   stroke: var(--accent);
   stroke-width: 3;
 }
 @media (prefers-reduced-motion: no-preference) {
-  .mem-node.selected circle {
+  .mem-node.selected .mem-node-dot {
     animation: mem-pulse 1.8s ease-out 3;
   }
 }
@@ -211,11 +317,16 @@
   }
 }
 .mem-node.superseded {
-  opacity: 0.42;
+  opacity: 0.6;
+}
+.mem-node.superseded .mem-node-dot {
+  fill: var(--panel);
+  stroke: var(--subtle);
+  stroke-dasharray: 2.5 2.2;
 }
 .mem-node .mem-supersede {
   stroke: var(--text);
-  stroke-width: 2.4;
+  stroke-width: 1.8;
   pointer-events: none;
 }
 .mem-node-title {
@@ -371,7 +482,7 @@
   padding: 10px;
   flex-wrap: wrap;
 }
-.mem-node:focus-visible circle {
+.mem-node:focus-visible .mem-node-dot {
   stroke: var(--accent);
   stroke-width: 4px;
 }
@@ -393,6 +504,6 @@
   }
 }
 
-html[data-motion='reduced'] .mem-node.selected circle {
+html[data-motion='reduced'] .mem-node.selected .mem-node-dot {
   animation: none;
 }
