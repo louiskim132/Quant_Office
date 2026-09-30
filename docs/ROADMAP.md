@@ -892,7 +892,7 @@ pnpm build          # node scripts/build.mjs
 pnpm package        # node scripts/package.mjs
 ~~~
 
-CI (`.github/workflows/verify.yml`) runs the coordination tests (`node --test tools/parallel.test.mjs tools/desktop.test.mjs`), then the locked install, format check, typecheck, unit tests, build, package and the packaged desktop e2e. To run the packaged e2e locally after `pnpm package`:
+CI runs on pull requests, on demand (Actions → Verify → Run workflow) and weekly on `main`. It does not run on branch pushes or after a merge to `main`: the merge gate (section 1.5) already requires `verify` on the exact head that lands. CI (`.github/workflows/verify.yml`) runs the coordination tests (`node --test tools/parallel.test.mjs tools/desktop.test.mjs`), then the locked install, format check, typecheck, unit tests, build, package and the packaged desktop e2e. To run the packaged e2e locally after `pnpm package`:
 
 ~~~powershell
 $env:QRO_EXECUTABLE = "$PWD\release\Quant Research Office-win32-x64\Quant Research Office.exe"
