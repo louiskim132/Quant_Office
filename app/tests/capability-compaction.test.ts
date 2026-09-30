@@ -190,3 +190,57 @@ test('LR-6: downgradeWorkspaceToV3 restores the old format losslessly, including
   assert.equal(userVersion(file), SCHEMA_VERSION);
   assert.equal(historyHash(file), before);
 });
+
+test('B2: the window-facing projection keeps only latest-per-connection plus assignment-cited snapshots', t => {
+  const file = workspace('window-capabilities');
+  const store = new OfficeStore(file);
+  t.after(() => {
+    try {
+      store.close();
+    } catch {
+      /* already closed */
+    }
+  });
+  for (let i = 0; i < 5; i++) store.recordAccountObservation(observation(i));
+  const state = store.snapshot({ history: false });
+  assert.equal((state.capabilities ?? []).length, 5, 'the store still holds the full history');
+
+  const windowed = OfficeStore.publicState(state);
+  assert.equal((windowed.capabilities ?? []).length, 1, 'the window sees one snapshot for the connection');
+  const connection = currentConnection(state, 'claude')!;
+  assert.equal(
+    windowed.capabilities![0].id,
+    latestCapability(state, connection.id)!.id,
+    'the window snapshot is the newest',
+  );
+
+  const cited = state.capabilities![1];
+  const assignment = {
+    id: 'assign-1',
+    projectId: 'proj-1',
+    requestId: 'req-1',
+    requestRevision: 1,
+    agentId: 'agent-1',
+    agentRevision: 1,
+    connectionId: connection.id,
+    capabilitySnapshotId: cited.id,
+    snapshotId: 'snap-1',
+    route: 'LOCAL_MAILBOX',
+    requestedModel: 'model-1',
+    resolvedModel: 'model-1',
+    requestedEffort: 'default',
+    appliedEffort: 'default',
+    delegation: false,
+    objectiveHash: 'hash-1',
+    createdAt: at(0),
+  } as import('../src/shared/types').Assignment;
+  const withCited = OfficeStore.publicState({ ...state, assignments: [assignment] });
+  assert.equal((withCited.capabilities ?? []).length, 2, 'a cited snapshot survives the trim');
+  assert.ok(
+    withCited.capabilities!.some(item => item.id === cited.id),
+    'the cited snapshot is the one retained',
+  );
+
+  const internal = store.snapshot({ history: false });
+  assert.equal((internal.capabilities ?? []).length, 5, 'the internal projection is unchanged');
+});

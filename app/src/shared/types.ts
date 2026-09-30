@@ -1334,6 +1334,9 @@ export interface OfficeAPI {
   memoryGraph(projectId: string): Promise<MemoryGraph>;
   /** Reports how many items wait on the user, for the taskbar badge. A count only. */
   setAttentionCount(count: number): Promise<void>;
+  /** The user's desktop-notification preference: on, an OS notification fires only when the
+   *  needs-you count grows while the window is unfocused. A local signal, never provider-reported. */
+  setDesktopNotifications(enabled: boolean): Promise<void>;
   /** The office's own view of the agent processes it spawned; in memory only, empty when none run. */
   livePresence(): Promise<import('./activity').LivePresence[]>;
   onPresence(callback: (presence: import('./activity').LivePresence[]) => void): () => void;

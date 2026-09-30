@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, session, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, session, shell } from 'electron';
 import { attentionBadgePng } from './attention-badge.js';
 import path from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
@@ -971,7 +971,8 @@ function register() {
   });
   handle('office:state', value => {
     noInput(value);
-    return store.snapshot({ history: false });
+    const state = store.snapshot({ history: false });
+    return { ...state, capabilities: OfficeStore.capabilitiesForWindow(state) };
   });
   handle('office:message-page', value =>
     store.messagePage(
@@ -1338,7 +1339,14 @@ function register() {
   });
   handle('office:memory-graph', value => store.memoryGraph(id.parse(value)));
   // The taskbar badge for items waiting on the user. A count only: no content leaves the window.
+  // Desktop notifications ride the same channel: the renderer reports the count and a user-held
+  // preference; the main process fires an OS notification only when the count grows while the
+  // window is unfocused — a local signal, never provider-reported.
   let lastAttention = 0;
+  let desktopNotifications = false;
+  handle('office:desktop-notifications', value => {
+    desktopNotifications = z.boolean().parse(value);
+  });
   handle('office:attention', value => {
     const count = z.number().int().min(0).max(999).parse(value);
     if (!win || win.isDestroyed()) return;
@@ -1349,7 +1357,22 @@ function register() {
       );
     else win.setOverlayIcon(null, '');
     if (count === 0) win.flashFrame(false);
-    else if (count > lastAttention && !win.isFocused()) win.flashFrame(true);
+    else if (count > lastAttention && !win.isFocused()) {
+      win.flashFrame(true);
+      if (desktopNotifications && Notification.isSupported()) {
+        const note = new Notification({
+          title: 'Quant Research Office',
+          body: `${count} item${count === 1 ? '' : 's'} need${count === 1 ? 's' : ''} you`,
+          silent: true,
+        });
+        note.on('click', () => {
+          if (!win || win.isDestroyed()) return;
+          if (win.isMinimized()) win.restore();
+          win.focus();
+        });
+        note.show();
+      }
+    }
     lastAttention = count;
   });
   // Live presence of the children this office spawned: in memory, read-only, never an event-chain record.

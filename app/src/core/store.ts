@@ -2170,9 +2170,29 @@ export class OfficeStore {
   officeChatPage(query: OfficeChatQuery = {}) {
     return officeChatPage(this.snapshot({ history: false }), query);
   }
+  /**
+   * The capability snapshots the window can actually use: the newest per connection (what the
+   * settings cards render) plus every snapshot a live assignment cites as evidence. The full
+   * history stays in the store — on a real-size workspace it was about 1.8 MB of every state
+   * push before this bound (B2).
+   */
+  static capabilitiesForWindow(state: AppState): ProviderCapabilitySnapshot[] {
+    const referenced = new Set<string>();
+    for (const a of state.assignments ?? []) {
+      if (a.capabilitySnapshotId) referenced.add(a.capabilitySnapshotId);
+      for (const id of a.capabilitySnapshotIds ?? []) referenced.add(id);
+    }
+    const latest = new Map<string, ProviderCapabilitySnapshot>();
+    for (const c of state.capabilities ?? []) {
+      const prev = latest.get(c.connectionId);
+      if (!prev || c.observedAt >= prev.observedAt) latest.set(c.connectionId, c);
+    }
+    return (state.capabilities ?? []).filter(c => latest.get(c.connectionId) === c || referenced.has(c.id));
+  }
   static publicState(state: AppState): AppState {
     return {
       ...state,
+      capabilities: OfficeStore.capabilitiesForWindow(state),
       events: [],
       messages: [],
       jobEvents: [],
