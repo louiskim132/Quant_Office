@@ -88,6 +88,15 @@ try {
   // The Projects nav always lands on the list even while a project is selected; a project row reopens the detail page.
   await page.getByRole('button', { name: 'Projects', exact: true }).click();
   await page.getByRole('button', { name: 'Open project', exact: true }).waitFor();
+  // The Projects page clears the selection. A project page opened now offers the existing projects,
+  // not "Create project", and picking one opens that project's page.
+  await page.getByRole('button', { name: 'Memory', exact: true }).click();
+  await page.getByRole('heading', { name: 'Choose a project', exact: true }).waitFor();
+  assert.equal(await page.getByRole('button', { name: 'Create project', exact: true }).count(), 0);
+  await page.locator('.project-choices').getByRole('button', { name: 'Volatility research', exact: true }).click();
+  await page.getByRole('heading', { name: 'Choose a project', exact: true }).waitFor({ state: 'hidden' });
+  await page.getByRole('button', { name: 'Projects', exact: true }).click();
+  await page.getByRole('button', { name: 'Open project', exact: true }).waitFor();
   // The card region itself, not only the explicit link, opens the detail page.
   await page.getByRole('button', { name: 'Open Volatility research', exact: true }).click();
   await page.getByText('PROJECT MANDATE', { exact: true }).waitFor();
