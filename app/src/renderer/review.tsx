@@ -70,10 +70,12 @@ export function PipelineReviews({
         superseded.
       </p>
       {!groups.length ? (
-        <p className="muted">
-          No pipeline reviews on record for this scope. A request's critique, falsification, response and verification
-          hops appear here once a launched pipeline mints them.
-        </p>
+        <Empty
+          icon={ShieldCheck}
+          title="No pipeline reviews on record for this scope"
+          description="A request's critique, falsification, response and verification hops appear here once a launched pipeline mints them."
+          hint="Pipeline critiques are a separate record from the research-stage reviews below."
+        />
       ) : (
         groups.map(group => (
           <article key={group.requestId} className="task-card">

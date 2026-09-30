@@ -3,16 +3,18 @@ import { ArrowDown, MessageCircle, RefreshCw, Users } from 'lucide-react';
 import type { AppState } from '../shared/types';
 import type { OfficeChatEntry, OfficeChatPage } from '../shared/office-chat';
 import './office-chat.css';
-import { formatDateTime } from './format';
-import { Avatar } from './components';
+import { formatDateTime, plural, UI_LOCALE } from './format';
+import { Avatar, Empty } from './components';
 import { useOfficeActivity } from './use-activity';
 
-const time = (value: string) => new Date(value).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-const day = (value: string) => {
+/** Chat timestamps use the fixed UI locale, not the host locale, so copy and dates never mix languages. */
+export const chatTime = (value: string) =>
+  new Date(value).toLocaleTimeString(UI_LOCALE, { hour: 'numeric', minute: '2-digit' });
+export const chatDay = (value: string) => {
   const date = new Date(value);
   return date.toDateString() === new Date().toDateString()
     ? 'Today'
-    : date.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+    : date.toLocaleDateString(UI_LOCALE, { month: 'short', day: 'numeric', year: 'numeric' });
 };
 const compare = (a: OfficeChatEntry, b: OfficeChatEntry) =>
   a.timestamp.localeCompare(b.timestamp) || a.id.localeCompare(b.id);
@@ -162,6 +164,9 @@ export function OfficeChat({ state, initialAgentId = '' }: { state: AppState; in
         (kind === 'HANDOFF' ? e.source === 'AGENT_MESSAGE' && e.label.startsWith('handoff') : e.kind === kind)) &&
       `${e.text} ${name(e.agentId)}`.toLowerCase().includes(search.toLowerCase()),
   );
+  // An empty feed is either a truly silent scope or a filter/scope miss — never blur the two.
+  const filteredEmpty =
+    !shown.length && (!!entries.length || !!(agentId || projectId || requestId || kind || search));
   const plainText = (text: string) => text.replace(/\b[a-f0-9]{64}\b/gi, 'stored packet');
   return (
     <section className="office-chat" aria-label="Office group chat">
@@ -173,7 +178,7 @@ export function OfficeChat({ state, initialAgentId = '' }: { state: AppState; in
           <h2>Office chat</h2>
           <p>
             {participants.length
-              ? `${participants.length} participants · ${projectId ? (state.projects.find(p => p.id === projectId)?.name ?? 'Project') : 'All projects'}`
+              ? `${plural(participants.length, 'participant')} · ${projectId ? (state.projects.find(p => p.id === projectId)?.name ?? 'Project') : 'All projects'}`
               : 'Your team’s work, in one conversation'}
           </p>
         </div>
@@ -244,7 +249,7 @@ export function OfficeChat({ state, initialAgentId = '' }: { state: AppState; in
             aria-label="Search conversation"
             value={search}
             onChange={e => setSearch(e.target.value)}
-            placeholder="Search loaded messages"
+            placeholder="Search loaded messages only"
           />
         </label>
         <label>
@@ -290,15 +295,28 @@ export function OfficeChat({ state, initialAgentId = '' }: { state: AppState; in
           </button>
         )}
         {!shown.length && (
-          <div className="office-chat-empty">
-            <MessageCircle size={34} />
-            <h3>{busy ? 'Loading conversation…' : 'The conversation starts here'}</h3>
-            <p>
-              {agentId || projectId
-                ? 'No recorded updates match these filters.'
-                : 'Agent messages, handoffs and work updates will appear here as they are recorded.'}
-            </p>
-          </div>
+          <Empty
+            icon={MessageCircle}
+            title={
+              busy
+                ? 'Loading conversation…'
+                : filteredEmpty
+                  ? 'No recorded updates match these filters'
+                  : 'The conversation starts here'
+            }
+            description={
+              filteredEmpty
+                ? 'Search and filters cover only the loaded conversation — widen them, or load earlier updates.'
+                : 'Agent messages, handoffs and work updates will appear here as they are recorded.'
+            }
+            secondary={
+              cursor && filteredEmpty ? (
+                <button className="secondary" disabled={busy} onClick={() => void older()}>
+                  Load earlier updates
+                </button>
+              ) : undefined
+            }
+          />
         )}
         {shown.map((entry, index) => {
           const author = agent(entry.agentId),
@@ -311,9 +329,9 @@ export function OfficeChat({ state, initialAgentId = '' }: { state: AppState; in
           const preview = firstLine.length > 220 ? `${firstLine.slice(0, 220)}…` : firstLine;
           return (
             <React.Fragment key={entry.id}>
-              {(index === 0 || day(shown[index - 1].timestamp) !== day(entry.timestamp)) && (
+              {(index === 0 || chatDay(shown[index - 1].timestamp) !== chatDay(entry.timestamp)) && (
                 <div className="office-chat-day">
-                  <span>{day(entry.timestamp)}</span>
+                  <span>{chatDay(entry.timestamp)}</span>
                 </div>
               )}
               {system ? (
@@ -328,7 +346,7 @@ export function OfficeChat({ state, initialAgentId = '' }: { state: AppState; in
                       <p>{entry.text}</p>
                     </details>
                   )}
-                  <time dateTime={entry.timestamp}>{time(entry.timestamp)}</time>
+                  <time dateTime={entry.timestamp}>{chatTime(entry.timestamp)}</time>
                 </article>
               ) : (
                 <article
@@ -366,7 +384,7 @@ export function OfficeChat({ state, initialAgentId = '' }: { state: AppState; in
                             : 'Provider reported'}
                       </span>
                       <time dateTime={entry.timestamp} title={formatDateTime(entry.timestamp)}>
-                        {time(entry.timestamp)}
+                        {chatTime(entry.timestamp)}
                       </time>
                     </footer>
                   </div>

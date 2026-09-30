@@ -4,6 +4,7 @@ import type { AppState, Experiment, FileActionResult, Project } from '../shared/
 import { Empty, SearchField, Checkbox } from './components';
 import { projectJobOutputs } from './job-outputs';
 import { FilePreviewPane, type FilePreview } from './file-preview';
+import { plural } from './format';
 import { timeAgo } from './status';
 import './explorer.css';
 
@@ -118,7 +119,7 @@ export function ArtifactsPage({
     <section className="artifact-explorer">
       <div className="section-toolbar artifact-toolbar">
         <span>
-          {imported.length} imported · {rows.length - imported.length} agent outputs
+          {plural(imported.length, 'imported file')} · {plural(rows.length - imported.length, 'agent output')}
         </span>
         <div className="button-row">
           <button
@@ -182,12 +183,29 @@ export function ArtifactsPage({
           icon={Box}
           title="A cabinet for your evidence"
           description="Import references or results. Agent files appear after the office stores their outputs."
+          action={
+            <button
+              className="primary"
+              disabled={busy || project?.archived}
+              onClick={() =>
+                files(() =>
+                  window.office.importFiles({ projectId, experimentId: experiment?.id || null, kind: 'REFERENCE' }),
+                )
+              }
+            >
+              Import references
+            </button>
+          }
         />
       ) : (
         <div className="explorer-layout">
           <div className="explorer-files" aria-label="Files">
-            <p className="muted">{visible.length} matching files</p>
-            {!visible.length && <p>No files match these filters.</p>}
+            <p className="muted">
+              {visible.length === rows.length
+                ? plural(rows.length, 'file')
+                : `${visible.length} of ${rows.length} files shown`}
+            </p>
+            {!visible.length && <p>No files match these filters — widen the search or clear the filters.</p>}
             {visible.map(row => {
               const ext = extension(row.name),
                 Icon = ext === 'csv' ? Table : ['ts', 'js', 'py', 'json'].includes(ext) ? FileCode : FileText;

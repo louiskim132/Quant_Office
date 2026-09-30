@@ -359,3 +359,18 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* Empty contract additions: the hint line sits tighter under the value statement, and a
+   secondary affordance stacks under the primary action instead of replacing it. */
+.empty-state .empty-hint {
+  font-size: 11px;
+  color: var(--subtle);
+  margin: -10px auto 20px;
+  max-width: 460px;
+}
+.empty-state .empty-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}

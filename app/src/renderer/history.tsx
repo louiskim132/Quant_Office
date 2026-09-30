@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { History } from 'lucide-react';
 import type { AgentLog, AppState, LineageEvent } from '../shared/types';
 import { Empty } from './components';
-import { formatDateTime } from './format';
+import { formatDateTime, plural } from './format';
 import './history.css';
 
 type RecordView = 'all' | 'yours' | 'messages' | 'work' | 'between';
@@ -17,7 +17,6 @@ export function HistoryView({
   state,
   projectId,
   label,
-  date,
 }: {
   state: AppState;
   projectId: string | null;
@@ -86,6 +85,12 @@ export function HistoryView({
     ...state.agents.map(a => ({ id: a.id, label: a.name })),
   ];
   const needle = search.toLowerCase();
+  const clearFilters = () => {
+    setSubject('');
+    setPeer('');
+    setView('all');
+    setSearch('');
+  };
   const rows: Row[] = [
     ...entries.map(event => ({ id: event.id, time: event.createdAt, sequence: event.sequence, event, log: null })),
     ...logs
@@ -135,7 +140,7 @@ export function HistoryView({
     <>
       <div className="section-toolbar">
         <span>
-          {recorded} recorded record{recorded === 1 ? '' : 's'} · showing {visible.length}
+          {plural(recorded, 'event')} · showing {visible.length}
         </span>
       </div>
       <div className="button-row history-mode" role="group" aria-label="History display">
@@ -147,8 +152,8 @@ export function HistoryView({
         </button>
       </div>
       <p className="muted">
-        {entries.length} loaded events of {total}. Integrity hashes are available in Technical events; this view does
-        not perform a new chain verification.
+        {plural(entries.length, 'loaded event')} of {total}. Integrity hashes are available in Technical events; this
+        view does not perform a new chain verification.
       </p>
       <div className="history-filters">
         <label className="field">
@@ -206,22 +211,38 @@ export function HistoryView({
         </p>
       )}
       {visible.length === 0 ? (
-        <Empty
-          icon={History}
-          title="No matching records"
-          description={
-            entries.length + logs.length === 0
-              ? 'No events or work-log records have been recorded in this scope yet.'
-              : 'No loaded records match the current filters. Load older events or widen the filters.'
-          }
-        />
+        entries.length + logs.length === 0 ? (
+          <Empty
+            icon={History}
+            title="Nothing recorded in this scope yet"
+            description="Office events and work-log records appear here as they are recorded."
+          />
+        ) : (
+          <Empty
+            icon={History}
+            title="No loaded records match these filters"
+            description="Widen the filters, or load older events — only the loaded records are searched."
+            action={
+              <button className="secondary" onClick={clearFilters}>
+                Clear filters
+              </button>
+            }
+            secondary={
+              cursor !== null ? (
+                <button className="secondary" disabled={busy} onClick={() => void load(cursor, false)}>
+                  {busy ? 'Loading…' : 'Load older events'}
+                </button>
+              ) : undefined
+            }
+          />
+        )
       ) : !technical ? (
         <div className="timeline history-activity">
           {[...groups.entries()].map(([key, rows]) => (
             <article key={key}>
               <div className="card-heading">
                 <h3>{subjectTitle(rows[0])}</h3>
-                <time>{date(rows[0].time)}</time>
+                <time>{formatDateTime(rows[0].time)}</time>
               </div>
               <p>{title(rows[0]).split('\n')[0]}</p>
               <details>
@@ -230,7 +251,7 @@ export function HistoryView({
                 </summary>
                 {rows.map(row => (
                   <div className="activity-record" key={row.id}>
-                    <time>{date(row.time)}</time>
+                    <time>{formatDateTime(row.time)}</time>
                     <p>{title(row)}</p>
                     <small className="muted">
                       {row.event ? name(row.event.actor) : `${name(row.log!.from)} → ${name(row.log!.to)}`}
@@ -249,7 +270,7 @@ export function HistoryView({
                 <span className="timeline-dot" />
                 <div className="card-heading">
                   <h3>{label(row.event.kind.replaceAll('.', ' '))}</h3>
-                  <time>{date(row.event.createdAt)}</time>
+                  <time>{formatDateTime(row.event.createdAt)}</time>
                 </div>
                 <p>{row.event.reason}</p>
                 <div className="event-meta">
@@ -269,7 +290,7 @@ export function HistoryView({
                   <h3>
                     {name(row.log!.from)} → {name(row.log!.to)}
                   </h3>
-                  <time>{date(row.log!.timestamp)}</time>
+                  <time>{formatDateTime(row.log!.timestamp)}</time>
                 </div>
                 <p>{row.log!.text}</p>
                 <div className="event-meta">
@@ -292,6 +313,9 @@ export function HistoryView({
         </div>
       )}
       <div className="button-row">
+        {cursor !== null && (
+          <p className="muted">{plural(Math.max(0, total - entries.length), 'older event')} not yet loaded.</p>
+        )}
         {cursor !== null && (
           <button className="secondary" disabled={busy} onClick={() => void load(cursor, false)}>
             {busy ? 'Loading…' : 'Load older events'}
