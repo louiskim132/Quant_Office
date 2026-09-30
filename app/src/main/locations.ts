@@ -1042,21 +1042,3 @@ export function reserveOutputDestination(input: {
 
 /** Names the reservation holder, so a re-entry can be told apart from another caller's directory. */
 export const RESERVATION_FILE = '.office-attempt';
-
-/**
- * Releases a reservation that was never used.
- *
- * Only a directory holding our own key and nothing else is removed. A reservation somebody wrote
- * results into is evidence, and a failed preflight is not a reason to delete it.
- */
-export function releaseUnusedReservation(destination: string, idempotencyKey: string): boolean {
-  assertNoLinkedAncestor(
-    path.join(destination, RESERVATION_FILE),
-    component => `The output reservation is reached through a link at ${component}.`,
-  );
-  const marker = path.join(destination, RESERVATION_FILE);
-  if (!existsSync(marker) || readFileSync(marker, 'utf8').trim() !== idempotencyKey) return false;
-  if (readdirSync(destination).some(name => name !== RESERVATION_FILE)) return false;
-  removeTreeSync(destination);
-  return true;
-}

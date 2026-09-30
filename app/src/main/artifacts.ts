@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream, existsSync } from 'node:fs';
 import { mkdir, open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { unzipSync, zipSync, zip, strFromU8, strToU8 } from 'fflate';
+import { unzipSync, zip, strFromU8, strToU8 } from 'fflate';
 import { z } from 'zod';
 import { writeStreamedArchive } from './archive.js';
 import { removeTree } from './fsx.js';
@@ -11,9 +11,6 @@ import { canonicalHash } from '../core/canonical.js';
 import { parseStrictJson } from '../core/strict-json.js';
 import { objectInventory } from '../core/object-inventory.js';
 import type { Artifact } from '../shared/types.js';
-import { catBoostPackageSchema, type CatBoostPackage, type GateEvaluation } from '../shared/research-contracts.js';
-import { advanceable, evaluatePackage } from '../core/research-gates.js';
-import { assertHonestApproval, releaseManifestSchema } from '../shared/shadow.js';
 
 export const MAX_FILE = 64 * 1024 * 1024;
 export const MAX_TOTAL = 256 * 1024 * 1024;
@@ -178,133 +175,6 @@ export function inspectResultArchive(
     manifestValid: true,
     summary: `Manifest and ${manifest.artifacts.length} artifact byte identities match. External run ${manifest.runId}: ${manifest.status}. No approved run package or provider verification is available; kept in quarantine.`,
   };
-}
-/**
- * Reads a delivered CatBoost research package and says exactly what it is.
- *
- * The import is where a post-hoc result gets its one chance to claim it was preregistered, so the
- * registration class is taken from the package, checked against the frozen specification, and never
- * inferred from the fact that a specification identifier happens to be present. Every declared
- * prediction file is matched by bytes and row count, and the failed-run ledger is carried through
- * whole: a package that reports only its successful attempt is a selected package, and it is
- * recorded as such rather than quietly accepted.
- *
- * Nothing in the archive is executed. The importer parses documents.
- */
-export function inspectResearchPackage(
-  bytes: Uint8Array,
-  projectId: string,
-  spec: { id: string; hash: string; frozenAt: string } | null,
-): {
-  package: CatBoostPackage;
-  evaluations: GateEvaluation[];
-  canAdvance: boolean;
-  summary: string;
-} {
-  if (bytes.length > MAX_FILE) throw new Error('Archive exceeds the 64 MiB limit.');
-  validateZipHeaders(bytes);
-  const seen = new Set<string>();
-  let total = 0;
-  const files = unzipSync(bytes, {
-    filter: entry => {
-      if (!safeEntry(entry.name) || seen.has(entry.name.toLowerCase()) || seen.size >= MAX_ENTRIES)
-        throw new Error('Archive contains unsafe, duplicate, or too many entries.');
-      seen.add(entry.name.toLowerCase());
-      total += entry.originalSize;
-      if (entry.originalSize > MAX_FILE || total > MAX_TOTAL)
-        throw new Error('Archive expands beyond the permitted size.');
-      return true;
-    },
-  });
-  const document = files['research-package.json'];
-  if (!document || document.length > 4 * 1024 * 1024)
-    throw new Error('A research package needs a research-package.json smaller than 4 MiB.');
-  const parsed = catBoostPackageSchema.parse(parseStrictJson(strFromU8(document)));
-  if (parsed.projectId !== projectId) throw new Error('This research package belongs to a different project.');
-
-  // Predictions are read as delivered rows so the integrity and timing gates judge the actual file,
-  // not the package's description of it.
-  const delivered = new Map<string, { sha256: string; rows: number }>();
-  const predictions: unknown[] = [];
-  for (const declared of parsed.predictionInventory) {
-    const file = files[declared.path];
-    if (!file) continue;
-    const rows = strFromU8(file)
-      .split(/\r?\n/)
-      .filter(line => line.trim().length > 0)
-      .map(line => parseStrictJson(line));
-    delivered.set(declared.path, { sha256: createHash('sha256').update(file).digest('hex'), rows: rows.length });
-    predictions.push(...rows);
-  }
-  const undeclared = Object.keys(files).filter(
-    name => name !== 'research-package.json' && !parsed.predictionInventory.some(item => item.path === name),
-  );
-  if (undeclared.length) throw new Error('The research package contains files it does not declare.');
-
-  const evaluations = evaluatePackage(parsed, { predictions, deliveredFiles: delivered, spec });
-  const verdict = advanceable(evaluations);
-  const failedRuns = parsed.failedRuns.length;
-  const summary = [
-    parsed.registration === 'PROSPECTIVE'
-      ? `Prospective run ${parsed.runId} against specification ${parsed.specId ?? 'unnamed'}.`
-      : `Exploratory run ${parsed.runId}. It cannot satisfy S0 registration or an S8 holdout evaluation, whatever it reports.`,
-    `${parsed.predictionInventory.length} prediction file${parsed.predictionInventory.length === 1 ? '' : 's'}, ${predictions.length} rows.`,
-    failedRuns
-      ? `${failedRuns} failed attempt${failedRuns === 1 ? ' is' : 's are'} recorded in the ledger.`
-      : 'The ledger records no failed attempts, which is itself a claim about this lineage.',
-    verdict.canAdvance
-      ? 'Every deterministic gate passes on the delivered evidence.'
-      : `Blocked or failed gates: ${[...verdict.failed, ...verdict.blocked].join(', ')}.`,
-    'No approved run package or provider verification is implied by this import.',
-  ].join(' ');
-  return { package: parsed, evaluations, canAdvance: verdict.canAdvance, summary };
-}
-/**
- * Builds a reproducible research package: the exact code, data and approvals behind one candidate.
- *
- * Everything in the manifest is a reference rather than a copy, because the package's job is to let
- * somebody reconstruct what was done, not to become a second source of truth for it. The approval
- * statement is validated rather than accepted: a package that reads as authorisation to trade is the
- * artefact somebody points at later, and the office does not grant that.
- */
-export function buildResearchPackage(manifest: unknown, files: Record<string, Uint8Array> = {}): Uint8Array {
-  const release = releaseManifestSchema.parse(manifest);
-  assertHonestApproval(release);
-  const contents: Record<string, Uint8Array> = {
-    ...files,
-    'release-manifest.json': strToU8(JSON.stringify(release, null, 2)),
-    'README.txt': strToU8(
-      [
-        'Reproducible research package.',
-        '',
-        'This package records what was done and under what recorded standing. It is not an approved run',
-        'package, not a deployment authorisation and not a statement that capital should be committed.',
-        '',
-        'Approved scope: ' + release.approvedScope,
-        'What this approval means: ' + release.approvalMeaning,
-        '',
-        'Limitations:',
-        ...release.limitations.map(item => '  - ' + item),
-        '',
-      ].join('\n'),
-    ),
-  };
-  const entries = Object.entries(contents).map(([name, bytes]) => ({
-    path: name,
-    size: bytes.length,
-    sha256: createHash('sha256').update(bytes).digest('hex'),
-  }));
-  contents['inventory.json'] = strToU8(
-    JSON.stringify(
-      { schemaVersion: 1, kind: 'RESEARCH_PACKAGE', entries, inventoryHash: canonicalHash(entries) },
-      null,
-      2,
-    ),
-  );
-  validateArchiveFiles(contents);
-  const zipped = zipSync(contents, { level: 6 });
-  validateZipHeaders(zipped);
-  return zipped;
 }
 function mediaType(name: string): string {
   const ext = path.extname(name).toLowerCase();

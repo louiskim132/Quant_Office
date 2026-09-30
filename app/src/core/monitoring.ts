@@ -1,4 +1,4 @@
-import type { PredictionRecord, ResearchBranch, ResearchRecords, TrialLedgerEntry } from '../shared/research.js';
+import type { PredictionRecord, ResearchBranch, ResearchRecords } from '../shared/research.js';
 
 /**
  * Reading the ledger back: what has already been tried, what was retired and why, and how well the
@@ -8,58 +8,6 @@ import type { PredictionRecord, ResearchBranch, ResearchRecords, TrialLedgerEntr
  * unsearchable is a study that will be repeated, and the repetition will eventually produce a
  * positive by chance — which is the exact failure the ledger was built to prevent.
  */
-
-export interface LedgerMatch {
-  entry: TrialLedgerEntry;
-  branch: ResearchBranch | undefined;
-  /** Why this is worth reading before starting again. */
-  relevance: string;
-}
-
-/**
- * Searches settled trials, including the ones that failed.
- *
- * Failures rank first. Not as a display preference: the reason to search this ledger before starting
- * is usually to find out that the idea has already been tried and did not work, and burying that
- * under the successes defeats the search.
- */
-export function searchLedger(
-  records: ResearchRecords,
-  query: { text?: string; lineageId?: string; includePending?: boolean },
-): LedgerMatch[] {
-  const text = (query.text ?? '').trim().toLowerCase();
-  const branches = records.branches ?? [];
-  return (records.trials ?? [])
-    .filter(
-      entry =>
-        (!query.lineageId || entry.lineageId === query.lineageId) &&
-        (query.includePending || entry.outcome !== 'PENDING') &&
-        (!text ||
-          entry.description.toLowerCase().includes(text) ||
-          (branches.find(branch => branch.id === entry.branchId)?.name ?? '').toLowerCase().includes(text)),
-    )
-    .map(entry => {
-      const branch = branches.find(item => item.id === entry.branchId);
-      const relevance =
-        entry.outcome === 'FAILED'
-          ? 'This attempt failed. Read it before spending another trial on the same idea.'
-          : entry.outcome === 'CANCELED'
-            ? 'This attempt was abandoned before it settled; its reason may still apply.'
-            : entry.outcome === 'PRUNED'
-              ? 'This variant was pruned during the registered search.'
-              : branch?.outcome === 'VALID_NEGATIVE'
-                ? 'This lineage concluded a valid negative, which is a result and not an absence of one.'
-                : branch?.outcome === 'RETIRED'
-                  ? 'This lineage was retired: ' +
-                    (branch.retiredReason ?? 'Read the recorded retirement before re-entry.')
-                  : 'A completed attempt in this lineage.';
-      return { entry, branch, relevance };
-    })
-    .sort((a, b) => rank(a.entry) - rank(b.entry) || b.entry.settledAt.localeCompare(a.entry.settledAt));
-}
-const rank = (entry: TrialLedgerEntry) =>
-  entry.outcome === 'FAILED' ? 0 : entry.outcome === 'CANCELED' ? 1 : entry.outcome === 'PRUNED' ? 2 : 3;
-
 export interface AncestryNode {
   branch: ResearchBranch;
   depth: number;
@@ -90,16 +38,6 @@ export function lineageAncestry(records: ResearchRecords, branchId: string): Anc
     depth++;
   }
   return nodes;
-}
-
-/** Whether a retired idea may be re-entered, and what the person doing it has to have seen. */
-export function reEntryBlockers(records: ResearchRecords, branchId: string): string[] {
-  return lineageAncestry(records, branchId)
-    .filter(node => node.retiredReason !== null)
-    .map(
-      node =>
-        `${node.branch.name} was retired: ${node.retiredReason} Re-entering this line repeats an idea that was already stopped.`,
-    );
 }
 
 export interface CalibrationReport {
