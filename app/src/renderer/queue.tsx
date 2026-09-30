@@ -1,22 +1,60 @@
 import { useEffect, useState } from 'react';
 import { ChevronRight, ListTodo, Search } from 'lucide-react';
-import type { AppState, Experiment, Command, Request } from '../shared/types';
+import type { AppState, Experiment, Command, JobEvidence, Request } from '../shared/types';
+import { isTerminalJob, latestJobFor } from '../core/jobs';
 import { queueScope, type QueueEntry, type QueueFilter } from '../shared/queue';
 import { summarizeRequest, type RequestBucket, type RequestSummary } from '../shared/request-summary';
 import { Avatar, Drawer, Empty, StatusPill } from './components';
+import { formatDateTime } from './format';
 import { timeAgo, type StatusKey } from './status';
 import { RequestDispatch } from './dispatch';
 import { PipelineCard } from './pipeline-card';
 import './queue.css';
 import './office.css';
 
-const GROUPS: { key: RequestBucket; title: string; hint: string }[] = [
-  { key: 'needs', title: 'Needs you', hint: 'The next move is yours' },
+/**
+ * Attention classes for the work queue — a reordering of the recorded request buckets, never a new
+ * state. `summarizeRequest` remains the source of truth: `needs` splits into work the user must fix
+ * (`needs`) and work waiting on a user decision (`awaiting`), `queued` reads as `drafts`, and
+ * `done`/`canceled` settle together last.
+ */
+export type AttentionGroup = 'needs' | 'awaiting' | 'running' | 'drafts' | 'settled';
+export const ATTENTION_GROUPS: { key: AttentionGroup; title: string; hint: string }[] = [
+  { key: 'needs', title: 'Needs you', hint: 'Failed or blocked — the next move is yours' },
+  { key: 'awaiting', title: 'Awaiting your decision', hint: 'Work is recorded; you decide what happens next' },
   { key: 'running', title: 'Running', hint: 'Agents are working' },
-  { key: 'queued', title: 'Drafts & waiting', hint: 'Not started, or between steps' },
-  { key: 'done', title: 'Done', hint: 'Finished with a recorded outcome' },
-  { key: 'canceled', title: 'Canceled', hint: 'Kept for the record' },
+  { key: 'drafts', title: 'Drafts & waiting', hint: 'Not started, or between steps' },
+  { key: 'settled', title: 'Done & canceled', hint: 'Finished with a recorded outcome' },
 ];
+/** The summarizeRequest labels that mean "review the product and decide", not "fix something". */
+const DECISION_LABELS = new Set(['Decision needed', 'Brief ready']);
+
+export function attentionGroupOf(summary: Pick<RequestSummary, 'bucket' | 'label'>): AttentionGroup {
+  if (summary.bucket === 'needs') return DECISION_LABELS.has(summary.label) ? 'awaiting' : 'needs';
+  if (summary.bucket === 'running') return 'running';
+  if (summary.bucket === 'queued') return 'drafts';
+  return 'settled';
+}
+
+export interface QueueRowData {
+  entry: QueueEntry;
+  summary: RequestSummary;
+}
+/** Groups rows by attention class in fixed order, newest recorded activity first inside a group. */
+export function groupByAttention(rows: QueueRowData[]): { key: AttentionGroup; rows: QueueRowData[] }[] {
+  const grouped = new Map<AttentionGroup, QueueRowData[]>();
+  for (const row of rows) {
+    const key = attentionGroupOf(row.summary);
+    const list = grouped.get(key) ?? [];
+    list.push(row);
+    grouped.set(key, list);
+  }
+  return ATTENTION_GROUPS.map(g => ({
+    key: g.key,
+    rows: (grouped.get(g.key) ?? []).sort((a, b) => b.summary.lastAt.localeCompare(a.summary.lastAt)),
+  })).filter(g => g.rows.length > 0);
+}
+
 const BUCKET_STATUS: Record<RequestBucket, StatusKey> = {
   needs: 'needs',
   running: 'working',
@@ -25,6 +63,95 @@ const BUCKET_STATUS: Record<RequestBucket, StatusKey> = {
   canceled: 'idle',
 };
 const DONE_SHOWN = 8;
+
+/** Who recorded the event — the office itself, the provider's own report, or a user's import. */
+export type TimelineProvenance = 'office-observed' | 'provider-reported' | 'user-reported';
+export interface QueueTimelineEvent {
+  at: string;
+  label: string;
+  provenance: TimelineProvenance;
+}
+
+const provenanceOf = (evidence: JobEvidence | undefined): TimelineProvenance =>
+  evidence === 'PROVIDER_REPORTED' ? 'provider-reported' : evidence === 'USER_REPORTED' ? 'user-reported' : 'office-observed';
+
+const jobStateText = (state: string) => state.toLowerCase().replaceAll('_', ' ');
+
+/**
+ * The recorded lifecycle of one request — minted → hop minted → dispatched → observed/receipted →
+ * settled/failed — assembled only from assignment, job and localSession rows already on the state.
+ * Every event carries who said it; a hop with no job on record appears minted and nothing more.
+ */
+export function requestTimeline(
+  state: Pick<AppState, 'assignments' | 'jobs' | 'localSessions' | 'agents'>,
+  entry: QueueEntry,
+): QueueTimelineEvent[] {
+  const events: QueueTimelineEvent[] = [];
+  const minted = entry.request?.createdAt ?? entry.root.createdAt;
+  if (minted) events.push({ at: minted, label: 'Request minted', provenance: 'office-observed' });
+  const agentName = (id: string) => state.agents?.find(a => a.id === id)?.name ?? 'assigned agent';
+  const all = (state.assignments ?? []).filter(a => a.requestId === entry.id);
+  const hops = all.filter(a => a.pipelineKey);
+  const scoped = (hops.length ? hops : all)
+    .slice()
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+  for (const a of scoped) {
+    const name = `${agentName(a.agentId)}${a.pipelineKey ? ` · ${a.pipelineKey}` : ''}`;
+    const job = latestJobFor(state.jobs, a.id);
+    if (!job) {
+      events.push({ at: a.createdAt, label: `Hop minted for ${name} — no provider job on record`, provenance: 'office-observed' });
+      continue;
+    }
+    const attempt = job.attempt ?? 1;
+    const suffix = attempt > 1 ? ` (attempt ${attempt})` : '';
+    events.push({ at: a.createdAt, label: `Hop minted for ${name}`, provenance: 'office-observed' });
+    if (job.dispatchedAt)
+      events.push({ at: job.dispatchedAt, label: `Dispatched to ${name}${suffix}`, provenance: 'office-observed' });
+    else if (job.createdAt)
+      events.push({ at: job.createdAt, label: `Job record opened for ${name}${suffix}`, provenance: 'office-observed' });
+    const session = (state.localSessions ?? []).find(s => s.jobId === job.id);
+    if (session?.lastReceipt)
+      events.push({
+        at: session.lastReceipt.observedAt,
+        label: `Receipt ${session.lastReceipt.sequence} verified`,
+        provenance: 'office-observed',
+      });
+    if (isTerminalJob(job.state) && job.settledAt)
+      events.push({ at: job.settledAt, label: `Settled — ${jobStateText(job.state)}`, provenance: provenanceOf(job.evidence) });
+    else if (job.updatedAt)
+      events.push({ at: job.updatedAt, label: `Observed — ${jobStateText(job.state)}`, provenance: provenanceOf(job.evidence) });
+  }
+  return events.sort((x, y) => x.at.localeCompare(y.at) || x.label.localeCompare(y.label));
+}
+
+/** Per-request "seen" marks kept renderer-locally in localStorage — no store schema, no IPC. */
+const SEEN_KEY = 'qro.workQueue.seen.v1';
+interface SeenStore {
+  /** When the queue was last open — the baseline for rows the user never opened. */
+  lastView: string;
+  /** When each request's detail was last opened. */
+  seen: Record<string, string>;
+}
+function loadSeenStore(): SeenStore {
+  try {
+    const raw = localStorage.getItem(SEEN_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed.lastView === 'string' && parsed.seen && typeof parsed.seen === 'object')
+        return { lastView: parsed.lastView, seen: parsed.seen as Record<string, string> };
+    }
+  } catch {
+    /* storage can be unavailable or corrupted — falling back to a fresh store is honest */
+  }
+  return { lastView: '', seen: {} };
+}
+function writeSeenStore(store: SeenStore) {
+  try {
+    localStorage.setItem(SEEN_KEY, JSON.stringify(store));
+  } catch {
+    /* best-effort marker only — a failed write loses nothing recorded elsewhere */
+  }
+}
 
 export function WorkQueue({
   state,
@@ -55,8 +182,25 @@ export function WorkQueue({
   const [scopeAgent, setScopeAgent] = useState('');
   const [scopeTeam, setScopeTeam] = useState('');
   const [search, setSearch] = useState('');
-  const [only, setOnly] = useState<RequestBucket | ''>('');
+  const [only, setOnly] = useState<AttentionGroup | ''>('');
   const [showAllDone, setShowAllDone] = useState(false);
+  // Last-look baseline: the previous visit's timestamp, plus per-request opens recorded this session.
+  const [store] = useState(loadSeenStore);
+  const [seen, setSeen] = useState(store.seen);
+  const [mountAt] = useState(() => new Date().toISOString());
+  const lastView = store.lastView || mountAt;
+  useEffect(() => {
+    // Advance the baseline once per mount so a stale view never marks everything forever.
+    writeSeenStore({ lastView: new Date().toISOString(), seen });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const markSeen = (id: string) =>
+    setSeen(prev => {
+      const at = new Date().toISOString();
+      const next = { ...prev, [id]: at };
+      writeSeenStore({ lastView: at, seen: next });
+      return next;
+    });
   const queueFilter: QueueFilter = {
     lifecycle: 'ALL',
     ...(scopeProject ? { projectId: scopeProject } : {}),
@@ -66,9 +210,15 @@ export function WorkQueue({
   };
   const scope = queueScope(state, queueFilter);
   const rows = scope.entries.map(entry => ({ entry, summary: summarizeRequest(state, entry, watchedJobIds) }));
-  const byBucket = (key: RequestBucket) =>
-    rows.filter(r => r.summary.bucket === key).sort((a, b) => b.summary.lastAt.localeCompare(a.summary.lastAt));
-  const counts = Object.fromEntries(GROUPS.map(g => [g.key, byBucket(g.key).length])) as Record<RequestBucket, number>;
+  const groups = groupByAttention(rows);
+  // The header count line stays on the recorded buckets: everything that needs the user is `needs`.
+  const bucketCounts = Object.fromEntries(
+    (['needs', 'running', 'done'] as RequestBucket[]).map(key => [
+      key,
+      rows.filter(r => r.summary.bucket === key).length,
+    ]),
+  ) as Record<'needs' | 'running' | 'done', number>;
+  const isNew = (row: QueueRowData) => row.summary.lastAt > (seen[row.entry.id] ?? lastView);
   const open = openRequestId ? rows.find(r => r.entry.id === openRequestId) : undefined;
   // A request that no longer exists must not leave a stale panel behind.
   useEffect(() => {
@@ -82,7 +232,7 @@ export function WorkQueue({
           <p className="muted">
             {scope.counts.all === 0
               ? 'Nothing yet. A request is a question for the team.'
-              : `${counts.needs ? counts.needs + ' need you · ' : ''}${counts.running} running · ${counts.done} done`}
+              : `${bucketCounts.needs ? bucketCounts.needs + ' need you · ' : ''}${bucketCounts.running} running · ${bucketCounts.done} done`}
           </p>
         </div>
         <button className="primary" onClick={onNew}>
@@ -131,14 +281,14 @@ export function WorkQueue({
           <button className={only === '' ? 'on' : ''} aria-pressed={only === ''} onClick={() => setOnly('')}>
             All {scope.counts.all}
           </button>
-          {GROUPS.filter(g => counts[g.key] > 0).map(g => (
+          {groups.map(g => (
             <button
               key={g.key}
               className={only === g.key ? 'on' : ''}
               aria-pressed={only === g.key}
               onClick={() => setOnly(g.key)}
             >
-              {g.title} {counts[g.key]}
+              {ATTENTION_GROUPS.find(x => x.key === g.key)!.title} {g.rows.length}
             </button>
           ))}
         </div>
@@ -154,37 +304,42 @@ export function WorkQueue({
           }
         />
       )}
-      {GROUPS.filter(g => (!only || only === g.key) && counts[g.key] > 0).map(g => {
-        const list = byBucket(g.key);
-        const collapsed = g.key === 'canceled' && !only;
-        const shown = g.key === 'done' && !showAllDone && !only ? list.slice(0, DONE_SHOWN) : list;
-        return (
-          <details className="queue-group" key={g.key} open={!collapsed} data-bucket={g.key}>
-            <summary>
-              <h3>{g.title}</h3>
-              <span className="chip">{list.length}</span>
-              <span className="muted">{g.hint}</span>
-            </summary>
-            <ul className="queue-list">
-              {shown.map(({ entry, summary }) => (
-                <QueueRow
-                  key={entry.id}
-                  entry={entry}
-                  summary={summary}
-                  state={state}
-                  selected={openRequestId === entry.id}
-                  onOpen={() => onOpenRequest(entry.id)}
-                />
-              ))}
-            </ul>
-            {shown.length < list.length && (
-              <button className="text-button" onClick={() => setShowAllDone(true)}>
-                Show all {list.length} finished requests
-              </button>
-            )}
-          </details>
-        );
-      })}
+      {groups
+        .filter(g => !only || only === g.key)
+        .map(g => {
+          const info = ATTENTION_GROUPS.find(x => x.key === g.key)!;
+          const shown = g.key === 'settled' && !showAllDone && !only ? g.rows.slice(0, DONE_SHOWN) : g.rows;
+          return (
+            <details className="queue-group" key={g.key} open data-bucket={g.key}>
+              <summary>
+                <h3>{info.title}</h3>
+                <span className="chip">{g.rows.length}</span>
+                <span className="muted">{info.hint}</span>
+              </summary>
+              <ul className="queue-list">
+                {shown.map(row => (
+                  <QueueRow
+                    key={row.entry.id}
+                    entry={row.entry}
+                    summary={row.summary}
+                    state={state}
+                    fresh={isNew(row)}
+                    selected={openRequestId === row.entry.id}
+                    onOpen={() => {
+                      markSeen(row.entry.id);
+                      onOpenRequest(row.entry.id);
+                    }}
+                  />
+                ))}
+              </ul>
+              {shown.length < g.rows.length && (
+                <button className="text-button" onClick={() => setShowAllDone(true)}>
+                  Show all {g.rows.length} finished requests
+                </button>
+              )}
+            </details>
+          );
+        })}
       {open && (
         <RequestDetail
           key={open.entry.id}
@@ -222,12 +377,15 @@ function QueueRow({
   entry,
   summary,
   state,
+  fresh,
   selected,
   onOpen,
 }: {
   entry: QueueEntry;
   summary: RequestSummary;
   state: AppState;
+  /** Updated since the user last looked — a renderer-local mark, not a record claim. */
+  fresh: boolean;
   selected: boolean;
   onOpen: () => void;
 }) {
@@ -242,23 +400,34 @@ function QueueRow({
       ? entry.request.workType.toLowerCase().replaceAll('_', ' ')
       : 'Legacy task';
   const agents = summary.runningAgentIds.map(id => state.agents.find(a => a.id === id)).filter(Boolean);
+  const jobs = entry.jobs ?? [];
+  const focusJob = jobs.find(j => j.unresolved) ?? jobs.at(-1);
+  const jobLine = focusJob
+    ? `Provider job: ${jobStateText(focusJob.state)}${jobs.length > 1 ? ` · ${jobs.length} on record` : ''}`
+    : 'No provider job';
   return (
     <li>
       <button
         className={`queue-row${selected ? ' selected' : ''}`}
-        data-bucket={summary.bucket}
+        data-bucket={attentionGroupOf(summary)}
         onClick={onOpen}
         aria-label={`${name}. ${summary.label}. Open details`}
       >
         <span className="queue-main">
-          <strong>{name}</strong>
+          <strong>
+            {name}
+            {fresh && (
+              <span className="queue-new" title="Recorded activity since you last looked at this request">
+                New
+              </span>
+            )}
+          </strong>
           <span className="muted">
             {project?.name ?? 'Project'} · {kind}
           </span>
         </span>
         <span className="queue-status">
           <StatusPill status={BUCKET_STATUS[summary.bucket]} label={summary.label} />
-          {summary.reason && <span className="muted queue-reason">{summary.reason}</span>}
         </span>
         <Stepper {...summary.steps} />
         <span className="queue-agents">
@@ -266,8 +435,11 @@ function QueueRow({
             <Avatar key={a!.id} id={a!.id} name={a!.name} size={22} status="working" />
           ))}
         </span>
-        <span className="muted queue-time">{timeAgo(summary.lastAt)}</span>
         <ChevronRight size={16} />
+        <span className="queue-sub muted">
+          {summary.reason ? `${summary.reason} · ` : ''}
+          {jobLine} · {timeAgo(summary.lastAt)}
+        </span>
       </button>
     </li>
   );
@@ -338,6 +510,7 @@ function RequestDetail({
         <p className="task-prompt">{root.prompt}</p>
         {request?.pipeline && <PipelineCard request={request} state={state} busy={busy} onAction={onAction} />}
         {!canceled && root.blocker && <p className="blocker">{root.blocker}</p>}
+        <JobTimeline state={state} entry={entry} />
         {request && (
           <>
             {request.blockers.map(b => (
@@ -457,6 +630,27 @@ function RequestDetail({
         </div>
       </article>
     </Drawer>
+  );
+}
+
+/** The recorded lifecycle of the request — each event tagged by who recorded it. */
+function JobTimeline({ state, entry }: { state: AppState; entry: QueueEntry }) {
+  const events = requestTimeline(state, entry);
+  return (
+    <details className="job-timeline" open>
+      <summary>Job timeline — {events.length} recorded event{events.length === 1 ? '' : 's'}</summary>
+      <ol className="timeline">
+        {events.map(ev => (
+          <li key={`${ev.at}|${ev.label}`}>
+            <time className="muted">{formatDateTime(ev.at)}</time>
+            <span className="tl-label">{ev.label}</span>
+            <span className="tl-prov" data-prov={ev.provenance}>
+              {ev.provenance}
+            </span>
+          </li>
+        ))}
+      </ol>
+    </details>
   );
 }
 
