@@ -317,10 +317,11 @@ test('submit writes a real v2 packet and spawns the claude command with cwd insi
     '-p',
     prompt,
     '--output-format',
-    'json',
+    'stream-json',
     '--dangerously-skip-permissions',
     '--model',
     'fixture-model',
+    '--verbose',
     ...CLAUDE_TAIL,
   ]);
   assert.equal(call.options.cwd, f.dir, 'the spawn cwd is the packet directory — authoritative over any -C flag');
@@ -640,6 +641,25 @@ test('failures before any child could spawn throw NotLaunchedError; a spawn thro
   );
 });
 
+test('oversized structured tool events fit the store limit without losing their kind', async t => {
+  const f = fixture(t, { provider: 'openai' });
+  const { bound } = await submitted(f);
+  f.calls[0].child.stdout.write(
+    JSON.stringify({
+      type: 'item.completed',
+      item: {
+        type: 'command_execution',
+        output: 'x'.repeat(70000),
+      },
+    }) + '\n',
+  );
+  const observed = await f.adapter.observe(f.job(), bound);
+  const event = observed.events![0];
+  assert.equal(event.kind, 'TOOL');
+  assert.ok(event.text.length <= 64000);
+  assert.match(event.text, /event text truncated/);
+});
+
 test('buffered child output drains into deduped PROVIDER_REPORTED job events', async t => {
   const f = fixture(t, { provider: 'claude' });
   await submitted(f);
@@ -773,10 +793,11 @@ test('plan returns the exact spawn command for the preview, prompt included', as
     '-p',
     prompt,
     '--output-format',
-    'json',
+    'stream-json',
     '--dangerously-skip-permissions',
     '--model',
     'fixture-model',
+    '--verbose',
     '--effort',
     'low',
     ...CLAUDE_TAIL,

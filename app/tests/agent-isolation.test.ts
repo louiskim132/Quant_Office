@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir, userInfo } from 'node:os';
 import path from 'node:path';
 import { removeTreeSync } from '../src/main/fsx';
 import {
@@ -91,6 +91,7 @@ function spawnFixture(
   const spawnAs = qroAgentSpawn({
     secrets,
     agentsRoot,
+    expectedUser: userInfo().username,
     hostLauncher,
     hostSource: HOST_SOURCE,
     readyTimeoutMs: 10000,
@@ -124,6 +125,43 @@ function collect(child: CliChild) {
     }),
   };
 }
+
+test('isolated channel delivers stdin queued before host startup in order, including EOF', async t => {
+  const f = spawnFixture(t, root(t));
+  const child = f.spawnAs(process.execPath, ['-e', 'process.stdin.pipe(process.stdout)'], {
+    ...OPTS(f.sessionDir),
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  const streams = collect(child);
+  child.stdin!.write('first\n');
+  child.stdin!.end('second\n');
+  const settled = await deadline(streams.settled, 'stdin echo');
+  assert.equal(settled.kind, 'exit');
+  assert.equal(streams.out.join(''), 'first\nsecond\n');
+});
+
+test('host readiness from a different Windows identity fails closed', async t => {
+  const dir = root(t);
+  const agentsRoot = path.join(dir, 'agents'),
+    cwd = path.join(agentsRoot, 'packet');
+  mkdirSync(cwd, { recursive: true });
+  const { hostLauncher } = sameUserHost(t);
+  const spawnAs = qroAgentSpawn({
+    secrets: {
+      agentCredential: () => ({ user: 'different-account', password: 'unused', savedAt: new Date().toISOString() }),
+    },
+    agentsRoot,
+    hostLauncher,
+    hostSource: HOST_SOURCE,
+    readyTimeoutMs: 5000,
+  });
+  t.after(() => spawnAs.shutdown());
+  const streams = collect(spawnAs(process.execPath, ['-e', 'console.log("never")'], OPTS(cwd)));
+  const settled = await deadline(streams.settled, 'wrong identity refusal');
+  assert.equal(settled.kind, 'error');
+  if (settled.kind === 'error') assert.match(settled.error.message, /identity does not match/);
+  assert.equal(streams.out.join(''), '');
+});
 
 /**
  * Every host-driven await races a REF'd deadline timer: it holds the event loop open while the

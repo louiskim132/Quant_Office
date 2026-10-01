@@ -32,7 +32,7 @@ function scriptedSpawn(script: (exe: string, args: string[], cwd: string) => Scr
 }
 
 const sessionDir = 'C:\\ws\\local-sessions\\acceptance-1';
-const protectedDir = 'C:\\Users\\office\\AppData\\Roaming\\Quant Research Office';
+const protectedFile = 'C:\\Users\\office\\AppData\\Roaming\\Quant Research Office\\secrets.dat';
 
 function isolatedAccount(exe: string, args: string[], cwd: string): Script {
   if (cwd === 'C:\\') return { error: 'refused: cwd is outside the agent sessions root' };
@@ -43,12 +43,12 @@ function isolatedAccount(exe: string, args: string[], cwd: string): Script {
 
 test('runner issues the four probes in order and passes a correctly isolated account', async () => {
   const { spawnAs, calls } = scriptedSpawn(isolatedAccount);
-  const report = await runAgentIsolationAcceptance({ spawnAs, username: 'QRO-Agent', sessionDir, protectedDir });
+  const report = await runAgentIsolationAcceptance({ spawnAs, username: 'QRO-Agent', sessionDir, protectedFile });
   assert.deepEqual(
     report.probes.map(p => p.label),
     ['whoami', 'whoami /groups', 'office profile read', 'cwd escape C:\\'],
   );
-  assert.equal(calls[2].args.at(-1), protectedDir);
+  assert.equal(calls[2].args.at(-1), protectedFile);
   assert.deepEqual(
     calls.map(c => c.cwd),
     [sessionDir, sessionDir, sessionDir, 'C:\\'],
@@ -64,7 +64,7 @@ test('runner fails when agents still run as the office account', async () => {
         ? { out: 'Volume in drive C' }
         : { out: 'pc\\office\r\n' },
   );
-  const report = await runAgentIsolationAcceptance({ spawnAs, username: 'QRO-Agent', sessionDir, protectedDir });
+  const report = await runAgentIsolationAcceptance({ spawnAs, username: 'QRO-Agent', sessionDir, protectedFile });
   assert.equal(report.passed, false);
   assert.equal(report.checks['whoami is qro-agent'], false);
   assert.equal(report.checks['office profile denied'], false);
@@ -77,7 +77,7 @@ test('runner fails closed when the host never starts or a probe hangs', async ()
     spawnAs: failed.spawnAs,
     username: 'QRO-Agent',
     sessionDir,
-    protectedDir,
+    protectedFile,
   });
   assert.equal(down.passed, false);
   assert.ok(Object.values(down.checks).every(ok => !ok));
@@ -87,7 +87,7 @@ test('runner fails closed when the host never starts or a probe hangs', async ()
     spawnAs: hung.spawnAs,
     username: 'QRO-Agent',
     sessionDir,
-    protectedDir,
+    protectedFile,
     timeoutMs: 50,
   });
   assert.equal(slow.passed, false);

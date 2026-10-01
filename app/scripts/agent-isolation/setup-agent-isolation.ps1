@@ -87,6 +87,20 @@ if ($b) {
         Where-Object { $_ -eq $user -or $_ -like "*\$user" }).Count -gt 0
     }
     if ($admin) { throw "$user is a member of Administrators — refusing to use an admin account for agent isolation" }
+    if ($b.officeRoot) {
+      $privateRoot = [IO.Path]::GetFullPath([string]$b.officeRoot).TrimEnd('\')
+      $packetRoot = [IO.Path]::GetFullPath([string]$b.agentsRoot)
+      if (-not $packetRoot.StartsWith($privateRoot + '\', [StringComparison]::OrdinalIgnoreCase) -or
+          [string]$b.officeSid -notmatch '^S-1-5-[0-9-]+$') { throw 'Invalid office privacy scope or identity' }
+      # Grant the owner before removing inherited broad Users access. The packet-root grant below
+      # remains explicit; no ACL outside the selected office data root is tightened.
+      $out = icacls $privateRoot /grant:r "*$($b.officeSid):(OI)(CI)F" "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" 2>&1
+      if ($LASTEXITCODE -ne 0) { throw "Office owner grant failed: $out" }
+      $out = icacls $privateRoot /inheritance:r 2>&1
+      if ($LASTEXITCODE -ne 0) { throw "Office privacy inheritance failed: $out" }
+      $out = icacls $privateRoot /remove:g '*S-1-1-0' '*S-1-5-11' '*S-1-5-32-545' $user 2>&1
+      if ($LASTEXITCODE -ne 0) { throw "Office broad-access removal failed: $out" }
+    }
     New-Item -ItemType Directory -Force ([string]$b.agentsRoot) | Out-Null
     $out = icacls ([string]$b.agentsRoot) /grant "${user}:(OI)(CI)M" /T 2>&1
     if ($LASTEXITCODE -ne 0) { throw "icacls on the sessions root failed ($LASTEXITCODE): $out" }

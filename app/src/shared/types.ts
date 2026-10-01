@@ -225,7 +225,7 @@ export interface AgentDraft {
   execution?: ExecutionEnvironment;
   toolProfile?: ToolProfile;
   /** Which local adapter serves a LOCAL profile: the manual mailbox packet or the office-spawned CLI run. Absent means mailbox. */ localRoute?:
-    'LOCAL_MAILBOX' | 'LOCAL_CLI_EXEC';
+    'LOCAL_MAILBOX' | 'LOCAL_CLI_EXEC' | 'LOCAL_ACP';
 }
 /** `account` is the identity this profile was created for. `connectionId` is set only by an explicit, verified binding. */
 /**
@@ -1168,6 +1168,7 @@ export interface OfficeAPI {
   providerKeyState(provider: Provider): Promise<{ saved: boolean; savedAt?: string }>;
   /** Whether the separate low-privilege Windows account for agent sessions is configured (LR-16). */
   agentIsolationStatus(): Promise<{ configured: boolean }>;
+  agentIsolationLogin(provider: Provider): Promise<{ ok: true }>;
   /**
    * The one-time consented elevated setup: creates the QRO-Agent account and grants it the agent
    * session folders. The UAC prompt is the consent; the renderer sees only success or a failure.

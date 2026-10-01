@@ -286,6 +286,7 @@ try {
       'agentIsolationSetup',
       'agentIsolationRemove',
       'agentIsolationVerify',
+      'agentIsolationLogin',
       'importFiles',
       'onChanged',
       'livePresence',

@@ -76,8 +76,12 @@ export interface AgentIsolationAcceptanceInput {
   username: string;
   /** A folder inside the agent sessions root — the probes' working directory. */
   sessionDir: string;
-  /** A folder of the office account the agent account must not be able to list. */
-  protectedDir: string;
+  /**
+   * An existing office-account file the agent account must not be able to read. A file, not a
+   * folder: cmd reports an unlistable folder as "File Not Found", which cannot be told apart from
+   * a wrong path, while an unreadable existing file reports "Access is denied".
+   */
+  protectedFile: string;
   /** Outside the sessions root; the host must refuse it as a working directory. */
   escapeCwd?: string;
   system32?: string;
@@ -142,7 +146,12 @@ export async function runAgentIsolationAcceptance(
   const plan: [string, string, string[], string][] = [
     ['whoami', whoami, [], input.sessionDir],
     ['whoami /groups', whoami, ['/groups'], input.sessionDir],
-    ['office profile read', path.win32.join(sys, 'cmd.exe'), ['/d', '/c', 'dir', input.protectedDir], input.sessionDir],
+    [
+      'office profile read',
+      path.win32.join(sys, 'cmd.exe'),
+      ['/d', '/c', 'type', input.protectedFile],
+      input.sessionDir,
+    ],
     ['cwd escape C:\\', whoami, [], input.escapeCwd ?? 'C:\\'],
   ];
   const probes: AgentIsolationProbe[] = [];

@@ -33,6 +33,7 @@ const toolProfileNames: Record<ToolProfile, string> = { STANDARD: 'Standard', CO
 const localRouteNames: Record<NonNullable<AgentDraft['localRoute']>, string> = {
   LOCAL_MAILBOX: 'Manual packet — you launch the session',
   LOCAL_CLI_EXEC: 'Office-spawned CLI — unattended run',
+  LOCAL_ACP: 'Devin ACP — unattended run',
 };
 let setupDraft: AgentDraft | undefined;
 export function AgentSetup({ onAdded }: { onAdded: (state: AppState, execution?: ExecutionEnvironment) => void }) {
@@ -58,7 +59,7 @@ export function AgentSetup({ onAdded }: { onAdded: (state: AppState, execution?:
   const [riskAccepted, setRiskAccepted] = useState(false);
   const spawnsLocally =
     (draft.provider === 'devin' ? 'LOCAL' : draft.execution) === 'LOCAL' &&
-    (draft.localRoute ?? 'LOCAL_CLI_EXEC') === 'LOCAL_CLI_EXEC';
+    (draft.localRoute ?? 'LOCAL_CLI_EXEC') !== 'LOCAL_MAILBOX';
   const operation = useRef(0);
   useEffect(
     () => () => {
@@ -203,6 +204,8 @@ export function AgentSetup({ onAdded }: { onAdded: (state: AppState, execution?:
                 setConnection(null);
                 edit({
                   provider,
+                  localRoute:
+                    provider !== 'devin' && draft.localRoute === 'LOCAL_ACP' ? 'LOCAL_CLI_EXEC' : draft.localRoute,
                   model:
                     provider === 'openai'
                       ? PROVIDER_MODEL_SUGGESTIONS.openai[0].id
@@ -248,9 +251,10 @@ export function AgentSetup({ onAdded }: { onAdded: (state: AppState, execution?:
               >
                 <option value="LOCAL_MAILBOX">Manual packet — you launch the session</option>
                 <option value="LOCAL_CLI_EXEC">Office-spawned CLI — unattended run</option>
+                {draft.provider === 'devin' && <option value="LOCAL_ACP">Devin ACP — unattended run</option>}
               </select>
               <small>
-                {(draft.localRoute ?? 'LOCAL_CLI_EXEC') === 'LOCAL_CLI_EXEC'
+                {(draft.localRoute ?? 'LOCAL_CLI_EXEC') !== 'LOCAL_MAILBOX'
                   ? 'The office spawns the provider CLI on this machine and owns the process (cancel kills it); not provider-hosted, isolated or independently attested.'
                   : 'The office writes the packet; you run the session yourself in the official tool. Not provider-hosted, isolated or independently attested.'}
               </small>

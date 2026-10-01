@@ -623,7 +623,7 @@ export const agentDraftSchema = z
     effort: effortSchema.optional(),
     execution: z.enum(['HOSTED_SETUP_REQUIRED', 'LOCAL']).optional(),
     toolProfile: z.enum(['STANDARD', 'CODE_NAV']).optional(),
-    localRoute: z.enum(['LOCAL_MAILBOX', 'LOCAL_CLI_EXEC']).optional(),
+    localRoute: z.enum(['LOCAL_MAILBOX', 'LOCAL_CLI_EXEC', 'LOCAL_ACP']).optional(),
   })
   .strict();
 // `account` stays the historical setup identity. `connectionId` is a durable binding fact and is never writable through a profile edit.

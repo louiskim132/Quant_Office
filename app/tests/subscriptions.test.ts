@@ -4,6 +4,10 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
+import { PassThrough } from 'node:stream';
+import { EventEmitter } from 'node:events';
+import type { SubmitContext } from '../src/main/controller';
+import type { CliSpawn } from '../src/main/local-cli-exec';
 import {
   Subscriptions,
   usageWindows,
@@ -172,6 +176,80 @@ test('unlimited same-role agents persist through restart with event verification
     f.service.close();
   }
 });
+test('isolated observations run through the host, exclude saved API mode and cannot reuse the office identity', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'qro-subscriptions-isolated-'));
+  const calls: string[][] = [];
+  let identified = true;
+  const spawn: CliSpawn = (_executable, args) => {
+    const child = Object.assign(new EventEmitter(), {
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+      pid: 123,
+      kill: () => true,
+    });
+    calls.push(args);
+    queueMicrotask(() => {
+      child.stdout.write(
+        args[0] === '--version'
+          ? 'synthetic-cli-1'
+          : args[0] === 'models'
+            ? '[]'
+            : identified
+              ? 'Logged in\nEmail: agent@example.test'
+              : 'Logged in',
+      );
+      child.emit('exit', 0, null);
+    });
+    return child;
+  };
+  const service = new Subscriptions(
+    root,
+    async () => {
+      throw new Error('No office browser');
+    },
+    () => ({ identity: 'office@example.test', lastCheckedAt: new Date().toISOString() }),
+    { providerKeyState: () => ({ saved: true }) },
+  );
+  (service as any).executable = () => 'synthetic-cli';
+  service.setIsolation(spawn, root);
+  try {
+    const { observation } = await service.observe('devin');
+    assert.equal(observation.identity, 'agent@example.test');
+    assert.equal(observation.credentialContext, 'devin-cli@qro-agent');
+    assert.ok(calls.some(args => args[0] === 'auth'));
+    const context = {
+      localSession: { provider: 'devin' },
+      assignment: {
+        frozen: {
+          accountIdentity: 'agent@example.test',
+          credentialContext: 'devin-cli@qro-agent',
+        },
+      },
+    } as SubmitContext;
+    assert.equal(service.isolatedAccountVerified(context), true);
+    assert.equal(
+      service.isolatedAccountVerified({
+        ...context,
+        assignment: {
+          ...context.assignment,
+          frozen: { ...context.assignment.frozen!, credentialContext: 'devin-cli' },
+        },
+      }),
+      false,
+    );
+    identified = false;
+    const unknown = await service.observe('devin');
+    assert.equal(unknown.observation.identity, '');
+    assert.equal(service.isolatedAccountVerified(context), false);
+    await assert.rejects(
+      service.connect({ ...draft, provider: 'devin', execution: 'LOCAL' }),
+      /did not identify|cannot.*unidentified/,
+    );
+  } finally {
+    service.close();
+  }
+});
+
 test('Claude identity accepts subscription metadata only, never Console or missing identity', () => {
   assert.equal(
     claudeIdentity({ loggedIn: true, authMethod: 'claude.ai', subscriptionType: 'max', email: 'a@example.test' }),

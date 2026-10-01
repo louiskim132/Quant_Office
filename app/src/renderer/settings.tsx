@@ -715,6 +715,7 @@ function ApiKeyEntry({ provider, onSaved }: { provider: Provider; onSaved: () =>
 // ---- agent isolation --------------------------------------------------------------------------
 
 type StepState = 'done' | 'todo' | 'blocked' | 'unknown';
+const SIGNIN_PROVIDERS = PROVIDERS;
 const STEP_ICON: Record<StepState, typeof Check> = { done: Check, todo: Minus, blocked: X, unknown: Minus };
 
 /**
@@ -728,7 +729,36 @@ export function AgentIsolation({ isolation }: { isolation: ReturnType<typeof use
   const [busy, setBusy] = useState<'' | 'setup' | 'verify' | 'remove'>(''),
     [confirming, setConfirming] = useState<'' | 'setup' | 'remove'>(''),
     [error, setError] = useState(''),
-    [notice, setNotice] = useState('');
+    [notice, setNotice] = useState(''),
+    [signins, setSignins] = useState<Partial<Record<Provider, { account?: string; at: string }>>>({});
+  /** Official sign-in as QRO-Agent (opens its own window), or a fresh check through the isolated host. */
+  async function agentSubscription(provider: Provider, login: boolean) {
+    setBusy('verify');
+    setError('');
+    setNotice('');
+    try {
+      if (login) {
+        await window.office.agentIsolationLogin(provider);
+        setNotice(`Finish the ${providerCopy[provider].name} sign-in in the QRO-Agent window, then check it here.`);
+      } else {
+        const connection = await window.office.connectionStatus(provider);
+        const at = new Date().toISOString();
+        setSignins(prev => ({
+          ...prev,
+          [provider]: { account: connection.connected ? connection.account : undefined, at },
+        }));
+        if (connection.connected && connection.account)
+          setNotice(
+            `${providerCopy[provider].name} verified for QRO-Agent as ${connection.account}. Prepare new work to use it.`,
+          );
+        else setError(connection.note || `${providerCopy[provider].name} is not signed in for QRO-Agent.`);
+      }
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy('');
+    }
+  }
   async function setup() {
     setBusy('setup');
     setConfirming('');
@@ -798,12 +828,19 @@ export function AgentIsolation({ isolation }: { isolation: ReturnType<typeof use
       state: configured === null ? 'unknown' : configured ? 'done' : 'todo',
       detail: configured ? 'Only the agent session folders are reachable' : 'Agents can reach your whole profile',
     },
-    {
-      name: 'Subscription sign-in for this account',
-      state: 'blocked',
-      detail:
-        'Not available yet — this route needs saved API keys, so subscription-only agents cannot launch through it',
-    },
+    (() => {
+      // Derived from checks run through the isolated host in this view — never assumed.
+      const verified = SIGNIN_PROVIDERS.filter(p => signins[p]?.account);
+      return {
+        name: 'Subscription sign-in for this account',
+        state: (!configured ? 'todo' : verified.length === SIGNIN_PROVIDERS.length ? 'done' : 'todo') as StepState,
+        detail: !configured
+          ? 'Needs the QRO-Agent account first'
+          : verified.length
+            ? `Verified: ${verified.map(p => `${providerCopy[p].name} (${signins[p]!.account})`).join(' · ')}`
+            : 'Sign in each provider as QRO-Agent, then check it',
+      };
+    })(),
     {
       name: 'Isolation check',
       state: last ? (last.passed ? 'done' : 'blocked') : 'todo',
@@ -862,12 +899,12 @@ export function AgentIsolation({ isolation }: { isolation: ReturnType<typeof use
           {configured === false && confirming === 'setup' && (
             <div className="iso-confirm" role="alertdialog" aria-label="Confirm agent isolation setup">
               <p>
-                Setup needs administrator approval. Agents that use your subscription sign-in cannot launch through this
-                route yet, so set it up only if you have saved API keys.
+                Setup needs administrator approval. Afterwards, sign in each provider separately as QRO-Agent; your own
+                sign-ins are not shared with it.
               </p>
               <div className="button-row">
                 <button className="primary" disabled={!!busy} onClick={() => void setup()}>
-                  Set up anyway
+                  Set up
                 </button>
                 <button className="text-button" onClick={() => setConfirming('')}>
                   Cancel
@@ -886,6 +923,26 @@ export function AgentIsolation({ isolation }: { isolation: ReturnType<typeof use
               >
                 {busy === 'verify' ? 'Checking…' : 'Check isolation'}
               </button>
+              {SIGNIN_PROVIDERS.map(provider => (
+                <span key={provider} className="button-row">
+                  <button
+                    className="secondary"
+                    disabled={!!busy}
+                    aria-label={`Sign in ${provider} for agent account`}
+                    onClick={() => void agentSubscription(provider, true)}
+                  >
+                    Sign in {providerCopy[provider].name}
+                  </button>
+                  <button
+                    className="text-button"
+                    disabled={!!busy}
+                    aria-label={`Check ${provider} agent subscription`}
+                    onClick={() => void agentSubscription(provider, false)}
+                  >
+                    Check
+                  </button>
+                </span>
+              ))}
               {confirming !== 'remove' ? (
                 <button
                   className="text-button danger"
