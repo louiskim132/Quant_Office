@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Agent, AppState, InputSnapshot, ProviderJob, Request, JobEvent } from '../shared/types';
 import type { LocalSessionSummary, LocalLaunchPlan } from '../shared/local-session';
 import { agentDispatchReadiness } from '../shared/readiness';
@@ -17,6 +17,36 @@ const jobLabels: Record<ProviderJob['state'], string> = {
   CANCEL_REQUESTED: 'Cancellation requested · not acknowledged',
   CANCEL_ACKNOWLEDGED: 'Cancellation acknowledged',
 };
+
+/** States whose record can still change: a settled job's event list is history, a live one's is not. */
+const LIVE_STATES: ReadonlySet<ProviderJob['state']> = new Set([
+  'INTENT',
+  'SUBMITTING',
+  'ACCEPTED',
+  'RUNNING',
+  'UNKNOWN',
+  'CANCEL_REQUESTED',
+]);
+
+/**
+ * Whether a store-change signal can mean new recorded rows for the open job's panels. Events append
+ * without touching job.revision, so a live job re-reads its record on every change; a settled job's
+ * panels already show the final record and skip the refetch.
+ */
+export function shouldRefreshJobDetail(state: ProviderJob['state'] | null | undefined): boolean {
+  return state != null && LIVE_STATES.has(state);
+}
+
+/**
+ * Fold a freshly paged event prefix into the displayed list: rows already on screen keep their
+ * recorded order, newly recorded entries land where occurred_at places them, and a refetch can
+ * never duplicate a row — records are keyed by id, never re-shown.
+ */
+export function mergeJobEvents(current: JobEvent[], fresh: JobEvent[]): JobEvent[] {
+  const byId = new Map(current.map(event => [event.id, event] as const));
+  for (const event of fresh) byId.set(event.id, event);
+  return [...byId.values()].sort((a, b) => a.occurredAt.localeCompare(b.occurredAt) || a.id.localeCompare(b.id));
+}
 
 /**
  * The request actions, each shown with the evidence that allows or blocks it.
@@ -81,26 +111,63 @@ export function RequestDispatch({
     : undefined;
   const [events, setEvents] = useState<JobEvent[]>([]);
   const [eventCursor, setEventCursor] = useState<string | null>(null);
+  // eventsRef mirrors the displayed list so a refresh can fold a re-paged prefix into exactly what
+  // is on screen — a stale closure can never decide which rows survive.
+  const eventsRef = useRef<JobEvent[]>([]);
   useEffect(() => {
-    let canceled = false;
+    eventsRef.current = [];
     setEvents([]);
     setEventCursor(null);
-    if (job)
-      void window.office
-        .jobEventPage({ jobId: job.id, limit: 50 })
-        .then(page => {
-          if (!canceled) {
-            setEvents(page.entries);
-            setEventCursor(page.nextCursor);
-          }
-        })
-        .catch(e => {
-          if (!canceled) setError((e as Error).message);
-        });
+  }, [job?.id]);
+  useEffect(() => {
+    const jobId = job?.id;
+    if (!jobId) return;
+    const jobState = job?.state;
+    let canceled = false;
+    let ticket = 0;
+    const load = async () => {
+      const my = ++ticket;
+      try {
+        // Re-page enough of the record to cover what is on screen plus headroom: events page in
+        // chronological order, so a live job's new entries land inside the refetched range and the
+        // merge folds them in without duplicating rows or dropping already-loaded history.
+        const want = Math.max(50, eventsRef.current.length + 50);
+        const collected: JobEvent[] = [];
+        let cursor: string | undefined;
+        let total = 0;
+        let pages = 0;
+        do {
+          const page = await window.office.jobEventPage({
+            jobId,
+            limit: Math.min(500, Math.max(50, want - collected.length)),
+            ...(cursor ? { cursor } : {}),
+          });
+          if (canceled || my !== ticket) return;
+          collected.push(...page.entries);
+          total = page.total;
+          cursor = page.nextCursor ?? undefined;
+          pages++;
+        } while (cursor && collected.length < Math.min(want, total) && pages < 10);
+        const merged = mergeJobEvents(eventsRef.current, collected);
+        eventsRef.current = merged;
+        setEvents(merged);
+        const tail = merged.at(-1);
+        setEventCursor(tail && merged.length < total ? `${tail.occurredAt}|${tail.id}` : null);
+      } catch (e) {
+        if (!canceled && my === ticket) setError((e as Error).message);
+      }
+    };
+    void load();
+    const unsubscribe = window.office.onChanged(() => {
+      // A settled job's event list is its history; a live job can gain recorded events on a change
+      // that never touched job.revision — the revision-scoped load above never saw them.
+      if (!canceled && shouldRefreshJobDetail(jobState)) void load();
+    });
     return () => {
       canceled = true;
+      unsubscribe();
     };
-  }, [job?.id, job?.revision]);
+  }, [job?.id, job?.revision, job?.state]);
   useEffect(() => {
     let canceled = false;
     if (job) {
@@ -596,7 +663,9 @@ export function RequestDispatch({
                 void window.office
                   .jobEventPage({ jobId: job.id, limit: 50, cursor: eventCursor })
                   .then(page => {
-                    setEvents(current => [...current, ...page.entries]);
+                    const merged = mergeJobEvents(eventsRef.current, page.entries);
+                    eventsRef.current = merged;
+                    setEvents(merged);
                     setEventCursor(page.nextCursor);
                   })
                   .catch(e => setError((e as Error).message))
