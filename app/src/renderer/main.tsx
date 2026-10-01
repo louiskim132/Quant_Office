@@ -29,7 +29,7 @@ import { AgentRoster, ProfileEditor, ConnectionBinding } from './office';
 import { OfficeScene } from './office-scene';
 import { useOfficeActivity } from './use-activity';
 import { AgentDrawer } from './agent-drawer';
-import { AgentStrip, AttentionBell, ToastStack } from './shell-widgets';
+import { AgentStrip, AttentionBell, ToastStack, recordedProgress } from './shell-widgets';
 import { attentionItems } from '../shared/attention';
 import type { AttentionItem } from '../shared/attention';
 import type { OfficeActivity } from '../shared/activity';
@@ -378,11 +378,17 @@ function App() {
   useEffect(() => {
     const reported = taskbarAttention ? needsYou : 0;
     void window.office?.setAttentionCount?.(reported).catch(() => {});
+    // The taskbar bar mirrors recorded work on the current project only — terminal jobs ÷ recorded
+    // jobs. No jobs or all-terminal clears it (-1); it never reads queue position or provider prose.
+    const progress = recordedProgress((state?.jobs ?? []).filter(job => job.projectId === projectId));
+    void window.office
+      ?.setProgress?.(progress !== null && progress > 0 && progress < 1 ? progress : -1)
+      .catch(() => {});
     // The cue rides the flash edge exactly — the reported count grows while unfocused.
     // A hidden window can never hold focus, so hasFocus covers document.hidden too.
     if (notifSound && reported > lastAttentionCount.current && !document.hasFocus()) attentionCue();
     lastAttentionCount.current = reported;
-  }, [needsYou, taskbarAttention, notifSound]);
+  }, [needsYou, taskbarAttention, notifSound, state?.jobs, projectId]);
   useEffect(() => {
     // Main owns the popup itself; the renderer only reports the pref, once on mount then per change.
     void window.office?.setDesktopNotifications?.(desktopPopups).catch(() => {});
@@ -947,7 +953,9 @@ function App() {
                 <p className="muted">
                   Popups fire only when the needs-you count grows while the window is unfocused. They carry a count only
                   — no request content leaves the app — and clicking one focuses the window. The sound is a short, quiet
-                  cue on the same edge. The in-app inbox stays available.
+                  cue on the same edge. The in-app inbox stays available. The taskbar progress bar shows recorded work
+                  on the current project — progress = recorded terminal jobs ÷ recorded jobs — and clears when no jobs
+                  are recorded or all recorded jobs are terminal.
                 </p>
               </div>
               <div className="settings-card" hidden={!['all', 'appearance'].includes(settingsSection)}>
