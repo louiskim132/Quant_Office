@@ -374,3 +374,31 @@
   align-items: center;
   gap: 10px;
 }
+
+/* Provenance chip — canonical home; office.css keeps an identical copy for the roster. A dashed
+   border marks the weakest attestation (user-reported, unverified). */
+.prov-chip {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--subtle);
+  vertical-align: 2px;
+}
+.prov-chip[data-evidence='unverified'],
+.prov-chip[data-evidence='user-reported'] {
+  border-style: dashed;
+}
+
+/* The evidence results table wraps long sources and match text instead of scrolling the row. */
+.evidence .table-wrap td {
+  overflow-wrap: anywhere;
+}
+.evidence .table-wrap td code {
+  white-space: pre-wrap;
+  word-break: break-word;
+}

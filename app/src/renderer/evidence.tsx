@@ -1,5 +1,7 @@
 import { useCallback, useState } from 'react';
+import { Search } from 'lucide-react';
 import type { ObjectDescription, ReadResult, SearchMatch, SearchResult } from '../shared/evidence';
+import { Empty, ProvChip } from './components';
 
 /**
  * Search across one agent's permitted evidence, with every result expandable to its exact source.
@@ -86,6 +88,13 @@ export function EvidencePanel({ agentId, projectId }: { agentId: string; project
           {error}
         </p>
       )}
+      {!result && !error && (
+        <Empty
+          icon={Search}
+          title="Search the permitted evidence"
+          description="Results quote the stored record with line-level sources; a coverage warning appears before any match set that could be partial."
+        />
+      )}
       {result && result.coverage !== 'COMPLETE' && (
         <p className="notice warning" role="status">
           Incomplete coverage. {result.detail} Treat this result as a partial view, not as the absence of a finding.
@@ -99,23 +108,47 @@ export function EvidencePanel({ agentId, projectId }: { agentId: string; project
             {result.omitted > 0 && ` · ${result.omitted} not returned`}
             {result.unreadableObjects.length > 0 && ` · unreadable: ${result.unreadableObjects.join(', ')}`}
           </p>
-          <ul className="evidence-matches">
-            {result.matches.map(match => (
-              <li key={`${match.sha256}:${match.line}`}>
-                <button className="link" onClick={() => void expand(match)}>
-                  {match.name}:{match.line}
-                </button>
-                <code>{match.text}</code>
-              </li>
-            ))}
-          </ul>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Source</th>
+                  <th>Line</th>
+                  <th>Matched text</th>
+                </tr>
+              </thead>
+              <tbody>
+                {result.matches.map(match => (
+                  <tr key={`${match.sha256}:${match.line}`}>
+                    <td>
+                      <button className="link" onClick={() => void expand(match)}>
+                        {match.name}
+                      </button>
+                    </td>
+                    <td>{match.line}</td>
+                    <td>
+                      <code>{match.text}</code>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           {result.nextCursor && (
             <button className="secondary" disabled={busy} onClick={() => void search(result.nextCursor!)}>
               Load more matches
             </button>
           )}
-          {!result.matches.length && result.coverage === 'COMPLETE' && (
-            <p className="muted">No match, and every object in scope was read in full.</p>
+          {!result.matches.length && (
+            <Empty
+              icon={Search}
+              title="No matches in the permitted evidence"
+              description={
+                result.coverage === 'COMPLETE'
+                  ? 'Every object in scope was read in full — a complete empty answer, not a missing one.'
+                  : 'Some objects could not be read — the coverage note above says what was missed, so this is not the absence of a finding.'
+              }
+            />
           )}
         </>
       )}
@@ -128,7 +161,7 @@ export function EvidencePanel({ agentId, projectId }: { agentId: string; project
             </span>
           </div>
           <p className="muted">
-            {expanded.description.provenance} Attested {expanded.description.evidence}.
+            {expanded.description.provenance} <ProvChip evidence={expanded.description.evidence} />
           </p>
           <pre>
             {expanded.read.lines.map((line, index) => {
