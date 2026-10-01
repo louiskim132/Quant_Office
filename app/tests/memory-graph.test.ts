@@ -1,6 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { layoutMemory, memoryDegrees, memoryRadius, memoryEdgeTrim } from '../src/renderer/memory-layout';
+import {
+  layoutMemory,
+  memoryDegrees,
+  memoryRadius,
+  memoryEdgeTrim,
+  memoryInWindow,
+  MEMORY_WINDOWS,
+} from '../src/renderer/memory-layout';
 
 test('memoryDegrees counts both endpoints of non-refuted links only', () => {
   const edges = [
@@ -56,4 +63,28 @@ test('layoutMemory stays deterministic and separated while degree-aware spread o
     ),
     layoutMemory(star, []),
   );
+});
+
+test('memoryInWindow filters by createdAt, fails open on unknown ids and never guesses ages', () => {
+  assert.deepEqual(
+    MEMORY_WINDOWS.map(w => w.id),
+    ['all', '24h', '7d', '30d'],
+  );
+  const nodes = [{ findingId: 'a' }, { findingId: 'b' }, { findingId: 'c' }];
+  const now = Date.parse('2026-09-30T12:00:00Z');
+  const stamps: Record<string, string> = {
+    a: '2026-09-30T11:00:00Z', // 1h old
+    b: '2026-09-28T12:00:00Z', // 2d old
+    // c has no recorded createdAt — admitted only by 'all', never by a guessed age
+  };
+  const of = (id: string) => stamps[id];
+  assert.deepEqual([...memoryInWindow(nodes, of, 'all', now)].sort(), ['a', 'b', 'c']);
+  assert.deepEqual([...memoryInWindow(nodes, of, '24h', now)], ['a']);
+  assert.deepEqual([...memoryInWindow(nodes, of, '7d', now)].sort(), ['a', 'b']);
+  // An unknown window id must fail open — a bad filter value must not hide records.
+  assert.deepEqual([...memoryInWindow(nodes, of, 'bogus', now)].sort(), ['a', 'b', 'c']);
+  // Boundary is inclusive and future stamps (clock skew) stay visible.
+  const edge = [{ findingId: 'x' }, { findingId: 'y' }];
+  const edgeStamps: Record<string, string> = { x: '2026-09-23T12:00:00Z', y: '2026-10-01T00:00:00Z' };
+  assert.deepEqual([...memoryInWindow(edge, id => edgeStamps[id], '7d', now)], ['x', 'y']);
 });
