@@ -108,6 +108,9 @@ export class LocalSessionRouter implements ProviderAdapter {
   cancelEvidence(job: ProviderJob) {
     return this.resolve(job).adapter.cancelEvidence?.(job) ?? [];
   }
+  settled(job: ProviderJob): void {
+    this.resolve(job).adapter.settled?.(job);
+  }
 
   async fetch(job: ProviderJob, output: { path: string; sha256: string; bytes: number }) {
     const { adapter, binding } = this.resolve(job);

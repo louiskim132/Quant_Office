@@ -18,6 +18,7 @@ import type { SignedResearchClaim } from '../shared/research-admission';
 import type { RunPackageBuilder, RunReturnInspector } from '../shared/run-package';
 import { buildBlindedPacket, buildAdversarialPackets } from './context-policy';
 import { z } from 'zod';
+import { judgeReturnedAnalysis, DIAGNOSTIC_POLICY_PREFIX } from './returned-analysis';
 export interface ResearchRuntime {
   prepareReview(input: {
     operationId: string;
@@ -750,6 +751,9 @@ export class PipelineService {
       bytes,
       expect: { packageId: pkg.packageId, packageHash: pkg.packageHash },
     });
+    const spec = state.specs?.find(s => s.id === pkg.specId);
+    if (!spec) throw new Error('The frozen specification for this package is missing.');
+    const analysis = inspection.manifest.status === 'COMPLETED' ? judgeReturnedAnalysis(spec, inspection) : null;
     for (const object of inspection.objects) await this.io.writeObject(object.bytes);
     this.store.admitRunReturn({
       branchId: branch.id,
@@ -759,7 +763,14 @@ export class PipelineService {
       manifestHash: inspection.manifestHash,
       outputHashes: inspection.objects.map(o => o.sha256),
     });
-    return { state: this.store.snapshot({ history: false }), detail: inspection.summary };
+    return {
+      state: this.store.snapshot({ history: false }),
+      detail:
+        inspection.summary +
+        (analysis
+          ? ` Registered diagnostic adequacy: ${analysis.adequate ? 'PASS' : 'INCONCLUSIVE; see diagnostic/stress problems before S6 validation'}.`
+          : ''),
+    };
   }
 
   /**
@@ -785,7 +796,35 @@ export class PipelineService {
   }
 
   /** Office stages validate the bound evidence already admitted — return, custody, monitoring. */
-  private validateReturn(action: Extract<PipelineAction, { type: 'validateReturn' }>): PipelineResult {
+  private async validateReturn(action: Extract<PipelineAction, { type: 'validateReturn' }>): Promise<PipelineResult> {
+    const before = this.store.snapshot({ history: false });
+    const subject = this.branch(before, action.branchId, action.expectedRevision);
+    if (subject.stage === 'S6') {
+      const spec = before.specs?.find(s => s.id === subject.specId);
+      const returned = before.pipeline
+        ?.filter(r => r.kind === 'RUN_RETURN' && r.branchId === subject.id && r.specId === subject.specId)
+        .at(-1);
+      if (spec?.sections.metricsAndGates.startsWith(DIAGNOSTIC_POLICY_PREFIX) && returned?.kind === 'RUN_RETURN') {
+        const artifact = before.artifacts.find(a => a.id === returned.artifactId);
+        const bytes = artifact ? await this.readObject(artifact.sha256) : null;
+        if (!bytes || !this.packages.inspect)
+          throw new Error('The bound return bytes are unavailable for analysis validation.');
+        if (createHash('sha256').update(bytes).digest('hex') !== artifact!.sha256)
+          throw new Error('The bound return bytes no longer match their stored identity.');
+        const inspection = this.packages.inspect.inspect({
+          bytes,
+          expect: { packageId: returned.packageId, packageHash: returned.packageHash },
+        });
+        if (inspection.manifestHash !== returned.manifestHash)
+          throw new Error('Analysis must use the admitted return manifest.');
+        const analysis = judgeReturnedAnalysis(spec, inspection);
+        if (analysis && !analysis.adequate)
+          throw new Error(
+            'Registered analysis is inconclusive: ' +
+              [...analysis.diagnostic.problems, ...analysis.stress.problems].map(p => p.detail).join(' '),
+          );
+      }
+    }
     this.store.validateOfficeStage({ branchId: action.branchId, expectedRevision: action.expectedRevision });
     const state = this.store.snapshot({ history: false });
     const branch = (state.branches ?? []).find(b => b.id === action.branchId);

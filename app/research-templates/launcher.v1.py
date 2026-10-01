@@ -336,6 +336,10 @@ def _drive_check(check_id, run, doc):
         columns, rows = (doc.get("columns"), doc.get("rows")) if isinstance(doc, dict) else (None, None)
         if not isinstance(spec, dict) or not isinstance(columns, list) or not isinstance(rows, int):
             return None, "the input needs spec, columns and rows"
+        source = spec.get("sourceBytes")
+        if not isinstance(source, list) or any(type(value) is not int or not 0 <= value <= 255 for value in source):
+            return None, "spec.sourceBytes must be a JSON array of byte values (0 to 255)"
+        spec = dict(spec, sourceBytes=bytes(source))
         return ns["manifest"](_Columns(columns, rows), spec), None
     if check_id == "diagnostics":
         predictions = doc.get("predictions") if isinstance(doc, dict) else None

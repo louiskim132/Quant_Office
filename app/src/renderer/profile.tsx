@@ -1,5 +1,5 @@
 import { OfficeChat } from './office-chat';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { Agent, AppState, Assignment, JobEvent, ProviderJob, Request, WorkLog } from '../shared/types';
 import { agentDispatchReadiness } from '../shared/readiness';
 import { formatDateTime } from './format';
@@ -87,6 +87,9 @@ export function ProfileTabs({
   const [logs, setLogs] = useState<WorkLog[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [events, setEvents] = useState<JobEvent[]>([]);
+  const [eventCursor, setEventCursor] = useState<string | null>(null);
+  const [eventsLoading, setEventsLoading] = useState(false);
+  const eventGeneration = useRef(0);
   const [error, setError] = useState('');
   const assignments = (state.assignments ?? []).filter(item => item.agentId === agent.id);
   const jobs = (state.jobs ?? []).filter(job => assignments.some(item => item.id === job.assignmentId));
@@ -114,16 +117,29 @@ export function ProfileTabs({
     };
   }, [tab, agent.id]);
   useEffect(() => {
-    if (tab !== 'Assignments' || !jobs.length) return;
+    eventGeneration.current++;
+    setEvents([]);
+    setEventCursor(null);
+    if (tab !== 'Assignments' || !selectedJob) return;
     let cancelled = false;
+    setEventsLoading(true);
     void window.office
       .jobEventPage({ jobId: selectedJob!.id, limit: 50 })
       .then(page => {
-        if (!cancelled) setEvents(page.entries);
+        if (!cancelled) {
+          setEvents(page.entries);
+          setEventCursor(page.nextCursor);
+        }
       })
-      .catch(e => setError((e as Error).message));
+      .catch(e => {
+        if (!cancelled) setError((e as Error).message);
+      })
+      .finally(() => {
+        if (!cancelled) setEventsLoading(false);
+      });
     return () => {
       cancelled = true;
+      eventGeneration.current++;
     };
   }, [tab, selectedJob?.id, selectedJob?.revision]);
   return (
@@ -181,7 +197,7 @@ export function ProfileTabs({
           ))}
           {events.length > 0 && (
             <details>
-              <summary>Latest provider events ({events.length})</summary>
+              <summary>Provider events ({events.length}, oldest first)</summary>
               <ul className="evidence-list">
                 {events.map(event => (
                   <li key={event.id}>
@@ -189,6 +205,34 @@ export function ProfileTabs({
                   </li>
                 ))}
               </ul>
+              {eventCursor && selectedJob && (
+                <button
+                  disabled={eventsLoading}
+                  onClick={() => {
+                    const jobId = selectedJob.id;
+                    const generation = eventGeneration.current;
+                    setEventsLoading(true);
+                    void window.office
+                      .jobEventPage({ jobId, limit: 50, cursor: eventCursor })
+                      .then(page => {
+                        if (eventGeneration.current !== generation) return;
+                        setEvents(current => [
+                          ...current,
+                          ...page.entries.filter(entry => !current.some(old => old.id === entry.id)),
+                        ]);
+                        setEventCursor(page.nextCursor);
+                      })
+                      .catch(e => {
+                        if (eventGeneration.current === generation) setError((e as Error).message);
+                      })
+                      .finally(() => {
+                        if (eventGeneration.current === generation) setEventsLoading(false);
+                      });
+                  }}
+                >
+                  More provider events
+                </button>
+              )}
             </details>
           )}
         </div>

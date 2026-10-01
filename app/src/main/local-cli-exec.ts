@@ -759,12 +759,28 @@ export class LocalCliExecAdapter implements ProviderAdapter {
     return fresh.map(line => ({
       externalId: `spawn:${owner}:${line.seq}`,
       cursor: `spawn:${owner}:${line.seq}`,
-      kind: 'MESSAGE' as const,
+      kind: this.streamKind(record.launch.provider, line),
       text: line.text,
       occurredAt: line.at,
       receivedAt: this.now(),
       evidence: 'PROVIDER_REPORTED' as const,
     }));
+  }
+
+  /** Classify only documented structured tool events; arbitrary log text stays a message. */
+  private streamKind(provider: Provider, line: BufferedLine): JobEvent['kind'] {
+    if (provider !== 'openai' || line.stream !== 'stdout') return 'MESSAGE';
+    try {
+      const frame = JSON.parse(line.text) as { type?: string; item?: { type?: string } };
+      if (
+        ['item.started', 'item.updated', 'item.completed'].includes(frame.type ?? '') &&
+        ['command_execution', 'mcp_tool_call', 'web_search'].includes(frame.item?.type ?? '')
+      )
+        return 'TOOL';
+    } catch {
+      /* a non-JSON line is ordinary provider output */
+    }
+    return 'MESSAGE';
   }
 
   /**
@@ -836,9 +852,8 @@ export class LocalCliExecAdapter implements ProviderAdapter {
       );
     // An office-killed run is failed work: the office ended the process, so a receipt it may never
     // write is not awaited. This is the office's own kill — OFFICE_LOCAL, not a provider report.
-    // The outcome is terminal here, so the spawn's watcher and timers are released with it.
+    // The controller releases its watcher and timers after durably recording the terminal state.
     if (record?.officeKill) {
-      this.dispose(job.id);
       return attach(
         {
           state: 'FAILED',
@@ -862,7 +877,6 @@ export class LocalCliExecAdapter implements ProviderAdapter {
         // in its output is. When the CLI reported is_error, that is what the job is.
         const terminalError = this.providerTerminalError(record);
         if (terminalError) {
-          this.dispose(job.id);
           return attach(
             {
               state: 'FAILED',
@@ -907,22 +921,25 @@ export class LocalCliExecAdapter implements ProviderAdapter {
     // The verified receipt's identity rides to the caller — the binding persists it as lastReceipt
     // so a replayed or rewound receipt is refused on the next observation.
     observed.receipt = { sequence: result.sequence, hash: read.value.receiptHash };
-    // A verified terminal receipt or a cooperative cancel acknowledgement ends the spawn's watch:
-    // nothing this watcher could still report would change the recorded outcome.
-    if (result.state === 'COMPLETED' || result.state === 'FAILED' || ack.ack) this.dispose(job.id);
+    // The controller acknowledges settlement after output storage and the terminal transition.
+    // Merely reading a terminal receipt must not release recovery triggers or process ownership.
     return attach(observed, result.state === 'COMPLETED' || result.state === 'FAILED');
   }
 
+  settled(job: ProviderJob): void {
+    if (['COMPLETED', 'FAILED', 'CANCEL_ACKNOWLEDGED'].includes(job.state)) this.dispose(job.id);
+  }
+
   /**
-   * The provider's own terminal record in the drained output. Only claude's `--output-format
-   * json` stream documents one — the last `{"type":"result"}` line — so codex/devin output is
-   * never classified here. `is_error: true` is a provider-reported failure the office reports
+   * The provider's own terminal record in the drained output: Claude's result/is_error and
+   * Codex exec's turn.failed/error.message. Arbitrary stderr and exit codes remain UNKNOWN.
+   * A recognized terminal record is a provider-reported failure the office reports
    * verbatim; a success record or no record is not a failure claim. The single documented
    * transient signature — `terminal_reason` 'api_error' over an OAuth-refresh failure text —
    * flags transientProviderError for the office's one-shot retry; nothing else qualifies.
    */
   private providerTerminalError(record: SpawnRecord): { detail: string; transient: boolean } | undefined {
-    if (record.launch.provider !== 'claude') return undefined;
+    if (record.launch.provider !== 'claude' && record.launch.provider !== 'openai') return undefined;
     for (let index = record.lines.length - 1; index >= 0; index--) {
       const line = record.lines[index];
       if (line.stream !== 'stdout') continue;
@@ -932,7 +949,17 @@ export class LocalCliExecAdapter implements ProviderAdapter {
       } catch {
         continue;
       }
-      if (!parsed || typeof parsed !== 'object' || (parsed as { type?: unknown }).type !== 'result') continue;
+      if (!parsed || typeof parsed !== 'object') continue;
+      if (record.launch.provider === 'openai') {
+        const terminal = parsed as { type?: unknown; error?: { message?: unknown } };
+        if (terminal.type !== 'turn.failed') continue;
+        const message = typeof terminal.error?.message === 'string' ? terminal.error.message : '';
+        return {
+          detail: `the provider reported a failed turn${message ? `: ${message.slice(0, 3900)}` : ''}`,
+          transient: false,
+        };
+      }
+      if ((parsed as { type?: unknown }).type !== 'result') continue;
       const terminal = parsed as { is_error?: unknown; result?: unknown; errors?: unknown; terminal_reason?: unknown };
       if (terminal.is_error !== true) return undefined;
       const text =

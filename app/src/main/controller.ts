@@ -257,6 +257,8 @@ export interface ProviderAdapter {
   submitEvidence?(context: SubmitContext, result: SubmitResult): CapabilityEvidence[];
   observeEvidence?(job: ProviderJob, result: ObserveResult): CapabilityEvidence[];
   cancelEvidence?(job: ProviderJob): CapabilityEvidence[];
+  /** Release process/watch resources only after the office durably records a terminal outcome. */
+  settled?(job: ProviderJob): void;
   /** Reads bytes for an output this route verifies itself, when the office has no fetcher for it. */
   fetch?(
     job: ProviderJob,
@@ -1605,7 +1607,9 @@ export class AssignmentController {
     } catch {
       /* an observation note never blocks the observation it describes */
     }
-    this.recordLocalObservation(job, result);
+    // Receipt consumption waits for durable output storage and the outcome transaction. A failed
+    // write must leave the same receipt eligible for the next observation, including after restart.
+    this.recordLocalObservation(job, { ...result, receipt: undefined });
     job = this.job(assignmentId);
     if (isTerminalJob(job.state)) return this.store.snapshot({ history: false });
     // An adapter that cannot observe anything is describing its own limits, not reporting what the
@@ -1776,7 +1780,10 @@ export class AssignmentController {
     const fresh = retrieved.filter(
       output => !job.outputs.some(old => old.path === output.path && old.sha256 === output.sha256 && old.stored),
     );
-    if (job.state === result.state && !fresh.length) return this.store.snapshot({ history: false });
+    if (job.state === result.state && !fresh.length) {
+      this.recordLocalObservation(job, result);
+      return this.store.snapshot({ history: false });
+    }
     // The receipt contract allows a longer detail than a job record holds; the full text stays in
     // the session's result.json, so the record keeps a bounded prefix instead of refusing it.
     const boundedDetail = detail.length > 2000 ? `${detail.slice(0, 1999)}…` : detail;
@@ -1793,10 +1800,8 @@ export class AssignmentController {
         at: this.now(),
       });
     } catch (error) {
-      // A verified receipt is already bound as lastReceipt, so every later observation refuses it as
-      // a replay. A refused COMPLETED (for example, no attributable output) must therefore land as a
-      // visible FAILED outcome here — otherwise the job would sit UNKNOWN forever with the reason
-      // lost. Other refusals keep their original behavior.
+      // A receipt with no attributable output is a contract failure, rather than a retryable storage
+      // failure. Record the visible refusal durably before consuming the receipt.
       if (!completed || !result.receipt) throw error;
       completed = false;
       const reason = error instanceof Error ? error.message : 'the store refused the transition';
@@ -1810,6 +1815,10 @@ export class AssignmentController {
         at: this.now(),
       });
     }
+    this.recordLocalObservation(job, result);
+    const settledJob = this.job(assignmentId);
+    if (isTerminalJob(settledJob.state)) adapter.settled?.(settledJob);
+    transitioned = this.store.snapshot({ history: false });
     // A verified observation of a local session is itself office evidence — recorded only when the
     // observation changed something, so repeated polls do not churn capability snapshots.
     this.noteLocalEvidence(job, adapter.observeEvidence?.(job, result) ?? []);

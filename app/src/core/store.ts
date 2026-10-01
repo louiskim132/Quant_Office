@@ -2172,7 +2172,7 @@ export class OfficeStore {
   }
   /**
    * The capability snapshots the window can actually use: the newest per connection (what the
-   * settings cards render) plus every snapshot a live assignment cites as evidence. The full
+   * settings cards render), current-version evidence suppliers, and assignment-cited snapshots. The full
    * history stays in the store — on a real-size workspace it was about 1.8 MB of every state
    * push before this bound (B2).
    */
@@ -2183,11 +2183,36 @@ export class OfficeStore {
       for (const id of a.capabilitySnapshotIds ?? []) referenced.add(id);
     }
     const latest = new Map<string, ProviderCapabilitySnapshot>();
-    for (const c of state.capabilities ?? []) {
-      const prev = latest.get(c.connectionId);
-      if (!prev || c.observedAt >= prev.observedAt) latest.set(c.connectionId, c);
+    for (const c of state.capabilities ?? []) latest.set(c.connectionId, c);
+    const identities = new Map((state.connections ?? []).map(c => [c.id, c.identity]));
+    // Within the candidate set effectiveEvidence reads, a later entry of the same scope and
+    // evidence rank supersedes an earlier one for every possible query. Preserve both ranks:
+    // OBSERVED outranks DOCUMENTED even when the documented entry was appended later.
+    const suppliers = new Map<string, ProviderCapabilitySnapshot>();
+    for (const snapshot of state.capabilities ?? []) {
+      if (
+        snapshot.toolVersion !== latest.get(snapshot.connectionId)?.toolVersion ||
+        snapshot.identity !== identities.get(snapshot.connectionId)
+      )
+        continue;
+      for (const entry of snapshot.operations) {
+        const scope = JSON.stringify([
+          snapshot.connectionId,
+          entry.operation,
+          entry.route,
+          entry.model,
+          entry.environment ?? snapshot.environment,
+          entry.effort,
+          entry.delegation,
+          entry.evidence === 'OBSERVED' ? 'OBSERVED' : 'DOCUMENTED',
+        ]);
+        suppliers.set(scope, snapshot);
+      }
     }
-    return (state.capabilities ?? []).filter(c => latest.get(c.connectionId) === c || referenced.has(c.id));
+    const supplying = new Set(suppliers.values());
+    return (state.capabilities ?? []).filter(
+      c => latest.get(c.connectionId) === c || referenced.has(c.id) || supplying.has(c),
+    );
   }
   static publicState(state: AppState): AppState {
     return {

@@ -191,7 +191,7 @@ test('LR-6: downgradeWorkspaceToV3 restores the old format losslessly, including
   assert.equal(historyHash(file), before);
 });
 
-test('B2: the window-facing projection keeps only latest-per-connection plus assignment-cited snapshots', t => {
+test('B2b: the window-facing projection retains current-version evidence and assignment-cited snapshots', t => {
   const file = workspace('window-capabilities');
   const store = new OfficeStore(file);
   t.after(() => {
@@ -206,10 +206,10 @@ test('B2: the window-facing projection keeps only latest-per-connection plus ass
   assert.equal((state.capabilities ?? []).length, 5, 'the store still holds the full history');
 
   const windowed = OfficeStore.publicState(state);
-  assert.equal((windowed.capabilities ?? []).length, 1, 'the window sees one snapshot for the connection');
+  assert.equal((windowed.capabilities ?? []).length, 1, 'superseded entries of the same scope and rank can be omitted');
   const connection = currentConnection(state, 'claude')!;
   assert.equal(
-    windowed.capabilities![0].id,
+    windowed.capabilities!.at(-1)!.id,
     latestCapability(state, connection.id)!.id,
     'the window snapshot is the newest',
   );

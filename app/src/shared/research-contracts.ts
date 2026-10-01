@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { GATES, type GateId, type GateOutcome, type Stage } from './research.js';
+import { GATES, type GateId, type Stage } from './research.js';
 
 /**
  * The exact shapes a research result must arrive in before any gate can say anything about it.
@@ -209,71 +209,6 @@ export const diagnosticReportSchema = z
   })
   .strict();
 export type DiagnosticReport = z.infer<typeof diagnosticReportSchema>;
-
-/**
- * An imported CatBoost run, either registered before the fact or submitted after it.
- *
- * The distinction is the whole point. EXPLORATORY results are useful and are kept; what they can
- * never do is stand in for a preregistration that did not exist, so the importer records the class
- * and the gate layer refuses to advance S0 or S8 on one.
- */
-export const catBoostPackageSchema = z
-  .object({
-    schemaVersion: z.literal(1),
-    runId: z.string().uuid(),
-    projectId: z.string().uuid(),
-    registration: z.enum(['PROSPECTIVE', 'EXPLORATORY']),
-    /** Present only on a prospective run: the frozen spec it was registered against, before results. */
-    specId: z.string().uuid().nullable(),
-    specHash: hash.nullable(),
-    registeredAt: z.string().datetime().nullable(),
-    source: z
-      .object({ repository: z.string().trim().max(400), commit: z.string().trim().max(200), sourceHash: hash })
-      .strict(),
-    model: z
-      .object({
-        library: z.literal('catboost'),
-        version: z.string().trim().min(1).max(60),
-        lossFunction: z.string().trim().min(1).max(120),
-        iterations: z.number().int().min(1),
-        configHash: hash,
-        seed: z.number().int(),
-      })
-      .strict(),
-    dataset: datasetManifestSchema,
-    split: splitPlanSchema,
-    fitScopes: z.array(fitScopeSchema).min(1).max(200),
-    predictionInventory: z
-      .array(
-        z.object({ path: z.string().trim().min(1).max(240), sha256: hash, rows: z.number().int().min(0) }).strict(),
-      )
-      .min(1)
-      .max(200),
-    /** Every attempt, including the ones that failed. A ledger with only successes is a selected ledger. */
-    failedRuns: z
-      .array(
-        z
-          .object({
-            runId: z.string().uuid(),
-            reason: z.string().trim().min(1).max(1000),
-            failedAt: z.string().datetime(),
-          })
-          .strict(),
-      )
-      .max(500),
-    receipts: z.array(templateReceiptSchema).max(200),
-  })
-  .strict();
-export type CatBoostPackage = z.infer<typeof catBoostPackageSchema>;
-
-/** One gate's deterministic verdict, with the exact numbers it was reached from. */
-export interface GateEvaluation {
-  gate: GateId;
-  outcome: GateOutcome;
-  detail: string;
-  /** Machine-readable evidence for the receipt, so a later reader is not re-deriving it from prose. */
-  measurements: Record<string, number | string | null>;
-}
 
 export const GATE_STAGE: Record<GateId, Stage> = {
   'G-SPEC': 'S0',

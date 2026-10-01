@@ -170,6 +170,7 @@ export async function fixture(
     clock?: () => string;
     shadowPolicy?: boolean;
     gateEvidence?: { gate: GateId; tier: 'SIGNED_HARNESS' }[];
+    metricsAndGates?: string;
   } = {},
 ) {
   const root = mkdtempSync(path.join(tmpdir(), 'qro-pipeline-'));
@@ -249,7 +250,7 @@ export async function fixture(
     idempotencyKey: key(),
     projectId: project.id,
     name: 'Lineage A',
-    sections: SECTIONS,
+    sections: { ...SECTIONS, ...(options.metricsAndGates ? { metricsAndGates: options.metricsAndGates } : {}) },
     thresholds: [],
     notApplicable: [],
     ...(options.gateEvidence ? { gateEvidence: options.gateEvidence } : {}),

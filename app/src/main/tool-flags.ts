@@ -210,6 +210,7 @@ function codexFlags(input: ToolFlagInput): ToolFlagResult {
   const { model, effort, prompt, profile, delegation } = input;
   // The prompt stays the final argument; the lean flags sit between -m and it.
   const lean = [
+    '--json',
     '-c',
     'mcp_servers={}',
     ...[...CODEX_DISABLED_FEATURES, ...(delegation ? [] : ['multi_agent'])].flatMap(feature => ['--disable', feature]),

@@ -19,6 +19,7 @@ import { CONTRACT_FILE, PACKET_FILE, RESULT_FILE } from '../src/main/local-packe
 import { PACKET_HASH_FILE, PACKET_READY_FILE } from '../src/main/local-packet';
 import { CLAUDE_DEFAULT_TOOLS, CLAUDE_ISOLATION_FLAGS, CODEX_DISABLED_FEATURES } from '../src/main/tool-flags';
 const CODEX_LEAN = [
+  '--json',
   '-c',
   'mcp_servers={}',
   ...[...CODEX_DISABLED_FEATURES, 'multi_agent'].flatMap(feature => ['--disable', feature]),
@@ -571,7 +572,7 @@ test('the transient flag needs the whole documented signature — partial matche
   assert.equal(second.transientProviderError, undefined);
 });
 
-test('a codex self-exit with a result-looking line stays UNKNOWN — no documented terminal record', async t => {
+test('a codex self-exit with a Claude result-looking line stays UNKNOWN', async t => {
   const f = fixture(t, { provider: 'openai' });
   await submitted(f);
   f.calls[0].child.stdout.write('{"type":"result","is_error":true,"result":"not a documented record"}\n');
@@ -580,6 +581,44 @@ test('a codex self-exit with a result-looking line stays UNKNOWN — no document
   assert.equal(observed.state, 'UNKNOWN');
   assert.equal(observed.provenance, 'OFFICE_LOCAL');
   assert.match(observed.detail, /no receipt, no provider error record/);
+});
+
+test('Codex turn.failed is a provider terminal failure; a standalone error remains UNKNOWN', async t => {
+  for (const terminal of [false, true]) {
+    const f = fixture(t, { provider: 'openai' });
+    const { bound } = await submitted(f);
+    f.calls[0].child.stdout.write(
+      JSON.stringify(
+        terminal
+          ? { type: 'turn.failed', error: { message: 'Invalid model' } }
+          : { type: 'error', message: 'Reconnecting' },
+      ) + '\n',
+    );
+    f.calls[0].child.emitExit(1);
+    const observed = await f.adapter.observe(f.job(), bound);
+    assert.equal(observed.state, terminal ? 'FAILED' : 'UNKNOWN');
+    if (terminal) {
+      assert.equal(observed.provenance, 'PROVIDER_REPORTED');
+      assert.match(observed.detail, /provider reported a failed turn: Invalid model/);
+      assert.equal(observed.transientProviderError, undefined);
+    }
+  }
+});
+
+test('Codex structured tool items stream as TOOL events before a receipt; prose stays MESSAGE', async t => {
+  const f = fixture(t, { provider: 'openai' });
+  const { bound } = await submitted(f);
+  for (const type of ['item.started', 'item.updated', 'item.completed'])
+    f.calls[0].child.stdout.write(
+      JSON.stringify({ type, item: { type: 'command_execution', command: 'synthetic command' } }) + '\n',
+    );
+  f.calls[0].child.stdout.write('ordinary tool-looking prose\n');
+  const observed = await f.adapter.observe(f.job(), bound);
+  assert.deepEqual(
+    observed.events!.map(e => e.kind),
+    ['TOOL', 'TOOL', 'TOOL', 'MESSAGE'],
+  );
+  assert.equal(observed.state, 'UNKNOWN', 'streaming does not invent a terminal receipt');
 });
 
 test('failures before any child could spawn throw NotLaunchedError; a spawn throw stays ordinary', async t => {

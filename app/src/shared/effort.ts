@@ -21,13 +21,16 @@ export function effortIsIndependentAxis(provider: Provider): boolean {
  * Suggestions only — the model input is free-text and provider-side validation stays authoritative.
  * Claude entries are Claude Code aliases plus pinned IDs for the current generation; OpenAI entries
  * are Codex catalog names that the live `model/list` response replaces after sign-in.
- * Reviewed 2026-09-16 against docs/model-catalogs.md: gpt-6-astra is the top recommended Codex
- * model since 2026-09-03; the codex-suffixed 5.x entries are deprecated for ChatGPT sign-in and
- * gpt-5.5 retires from Codex on 2026-10-14. Re-check at that date or the next roadmap cycle.
+ * Reviewed 2026-10-01 against the official Codex pricing list and the signed-in catalog.
+ * GPT-6.1 Sol was exercised by the B5 local acceptance. Suggestions do not establish account
+ * availability or effort support; the live catalog stays authoritative. Re-check at the next cycle.
  */
 export const PROVIDER_MODEL_SUGGESTIONS: Record<Provider, { id: string; name: string }[]> = {
   openai: [
     { id: 'gpt-6-astra', name: 'GPT-6 Astra' },
+    { id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol' },
+    { id: 'gpt-6-sol', name: 'GPT-6 Sol' },
+    { id: 'gpt-6-luna', name: 'GPT-6 Luna' },
     { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna' },
     { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra' },
     { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol' },

@@ -38,6 +38,7 @@ const CLAUDE_ISOLATION = [...CLAUDE_ISOLATION_FLAGS];
 const CLAUDE_DEFAULT = ['--tools', CLAUDE_DEFAULT_TOOLS.join(',')];
 /** codex's lean baseline: user MCP servers detached, unused tool features (and sub-agents) disabled. */
 const CODEX_LEAN = [
+  '--json',
   '-c',
   'mcp_servers={}',
   ...[...CODEX_DISABLED_FEATURES, 'multi_agent'].flatMap(feature => ['--disable', feature]),

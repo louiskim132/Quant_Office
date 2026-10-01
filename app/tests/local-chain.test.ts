@@ -179,6 +179,7 @@ async function fixture(
     route?: 'LOCAL_MAILBOX' | 'LOCAL_CLI_EXEC';
     readObject?: (hash: string) => Promise<Uint8Array>;
     events?: string[];
+    storeOutput?: OutputService['storeBytes'];
   } = {},
 ) {
   const route = options.route ?? 'LOCAL_CLI_EXEC';
@@ -297,7 +298,7 @@ async function fixture(
     undefined,
     undefined,
     undefined,
-    outputs.storeBytes,
+    options.storeOutput ?? outputs.storeBytes,
     undefined,
     ref =>
       ref.route
@@ -721,6 +722,79 @@ test('watcher and timers are released once a job reaches a verified terminal sta
   assert.equal(jobState(f, a.job.id), 'COMPLETED');
   assert.equal(registry.has(a.job.id), false, 'a verified completion releases the spawn record, watcher and timers');
 });
+
+for (const restart of [false, true])
+  test(`B5: output-storage failure preserves the receipt and recovers ${restart ? 'after restart' : 'on observe'} without another spawn`, async t => {
+    let blocked = true;
+    let outputService: OutputService;
+    const f = await fixture(t, {
+      storeOutput: async (...args) => {
+        if (blocked) throw new Error('Synthetic output destination unavailable');
+        await outputService.storeBytes(...args);
+      },
+    });
+    outputService = f.outputs;
+    const a = await prepared(f);
+    const { bound, dir } = await launched(f, a.assignment.id, a.job.id);
+    const output = { path: 'outputs/report.txt', sha256: sha('recoverable'), bytes: Buffer.byteLength('recoverable') };
+    mkdirSync(path.join(dir, 'outputs'), { recursive: true });
+    writeFileSync(path.join(dir, output.path), 'recoverable');
+    writeFileSync(path.join(dir, RESULT_FILE), receipt(a.job, bound, { outputs: [output] }));
+    await assert.rejects(f.controller.observe(a.assignment.id), /Synthetic output destination unavailable/);
+    assert.notEqual(jobState(f, a.job.id), 'COMPLETED');
+    assert.equal(
+      f.store.localSessionForJob(a.job.id)!.lastReceipt,
+      null,
+      'failed storage must not consume the receipt',
+    );
+    assert.equal(f.exec.presence().length, 1, 'watch bookkeeping remains until durable settlement');
+    assert.ok(readFileSync(path.join(dir, RESULT_FILE)).length, 'the on-disk receipt remains');
+    blocked = false;
+    if (restart) {
+      f.exec.disposeAll();
+      f.store.close();
+      const reopened = new OfficeStore(path.join(f.root, 'workspace.sqlite'));
+      const adapter = new LocalCliExecAdapter({
+        sessionsRoot: () => f.sessionsRoot,
+        executable: () => 'unused',
+        now: clock,
+        spawnChild: () => {
+          throw new Error('must not respawn');
+        },
+        environment: () => ({}),
+      });
+      t.after(() => adapter.disposeAll());
+      const router = new LocalSessionRouter(
+        id => reopened.localSessionForJob(id),
+        { FLAT_PACKET: adapter, PROJECT_WORKTREE: adapter },
+        'LOCAL_CLI_EXEC',
+      );
+      const outputs = new OutputService(reopened, f.root);
+      const controller = new AssignmentController(
+        reopened,
+        router,
+        clock,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        outputs.storeBytes,
+      );
+      try {
+        await controller.observe(a.assignment.id);
+        assert.equal(reopened.snapshot({ history: false }).jobs!.find(j => j.id === a.job.id)!.state, 'COMPLETED');
+        assert.equal(reopened.localSessionForJob(a.job.id)!.lastReceipt!.sequence, 1);
+      } finally {
+        adapter.disposeAll();
+        reopened.close();
+      }
+    } else {
+      await f.controller.observe(a.assignment.id);
+      assert.equal(jobState(f, a.job.id), 'COMPLETED');
+      assert.equal(f.exec.presence().length, 0);
+    }
+    assert.equal(f.calls.length, 1, 'recovery never redispatches');
+  });
 
 test('visible stdout triggers an office update before any receipt or child exit', async t => {
   const events: string[] = [];

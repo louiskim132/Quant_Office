@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, writeFileSync, cpSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -257,4 +257,48 @@ test('a tampered package aborts with EXECUTION_FAILED and a failed artifact chec
   assert.equal(artifact.outcome, 'FAIL');
   assert.equal(artifact.stage, 'S3');
   assert.ok(returned.failedRuns.length >= 1, 'the aborted run is recorded as a failed attempt');
+});
+
+test('the data driver accepts JSON byte arrays and rejects non-byte values', t => {
+  const binary = python();
+  if (!binary) return t.skip('no python binary on PATH');
+  const input = {
+    columns: ['time', 'target'],
+    rows: 1,
+    spec: {
+      sourceBytes: [0, 127, 255],
+      datasetId: 'synthetic',
+      timezone: 'UTC',
+      timestampColumn: 'time',
+      targetColumn: 'target',
+      firstTimestamp: '2026-01-01T00:00:00Z',
+      lastTimestamp: '2026-01-01T00:00:00Z',
+      roles: { time: 'TIMESTAMP', target: 'TARGET' },
+      dtypes: { time: 'string', target: 'float' },
+      availability: { time: 0, target: 3600 },
+      groups: { time: 'keys', target: 'labels' },
+    },
+  };
+  for (const bytes of [[0, 127, 255], [256], [-1], [1.5], [true], 'bytes']) {
+    const run: SpawnSyncReturns<string> = spawnSync(
+      binary,
+      [
+        '-c',
+        'import json,runpy,sys; launcher=runpy.run_path(sys.argv[1]); data=runpy.run_path(sys.argv[2]); print(json.dumps(launcher["_drive_check"]("data", {"ns":data}, json.loads(sys.argv[3]))))',
+        launcher,
+        path.join(templates, 'data.v1.py'),
+        JSON.stringify({ ...input, spec: { ...input.spec, sourceBytes: bytes } }),
+      ],
+      { encoding: 'utf8' },
+    );
+    assert.equal(run.status, 0, run.stderr);
+    const [manifest, defect] = JSON.parse(run.stdout);
+    if (Array.isArray(bytes) && bytes.length === 3) {
+      assert.equal(defect, null);
+      assert.equal(manifest.sourceHash, sha256(Uint8Array.from([0, 127, 255])));
+    } else {
+      assert.equal(manifest, null);
+      assert.match(defect, /JSON array of byte values/);
+    }
+  }
 });
