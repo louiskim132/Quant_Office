@@ -43,6 +43,29 @@
   --of-vacant: #7f97a9;
   --of-focus: #f3c777;
   --of-glow: 0 0 22px;
+  /* Isometric depth: one light, one projection. Light falls from the back-left windows, so every
+     side face recedes up-right and every shadow falls down-right. */
+  --of-grid: #243444;
+  --of-floor-lit: #ffffff09;
+  --of-cast: #00000042;
+  --of-inlay: #cfe0ec3d;
+  --of-desk-side: #5b4327;
+  --of-monitor-side: #18242f;
+  --of-chair-side: #2b4356;
+  --of-table-side: #1e3040;
+  --of-room-side: #132030;
+  --of-rack: #22303d;
+  --of-rack-edge: #3d5468;
+  --of-rack-led: #6fd3a4;
+  --of-pot: #8a5a3c;
+  --of-leaf: #3f7d5a;
+  --of-board: #c9d7de;
+  --of-board-edge: #4a6172;
+  --of-prop-leg: #3d4f5e;
+  --of-lamp: #3d4f5e;
+  --of-lamp-glow: #f3c777;
+  --of-rug: #22404a;
+  --of-rug-edge: #35606e;
 
   border: 1px solid var(--of-border);
   border-radius: 18px;
@@ -93,6 +116,27 @@
   --of-vacant: #7c96a8;
   --of-focus: #1262a0;
   --of-glow: 0 0 18px;
+  --of-grid: #c3d5dc;
+  --of-floor-lit: #ffffffb0;
+  --of-cast: #2c4a5e2e;
+  --of-inlay: #25475c3a;
+  --of-desk-side: #a97e52;
+  --of-monitor-side: #4a6478;
+  --of-chair-side: #537894;
+  --of-table-side: #8cb4c6;
+  --of-room-side: #c2d8e2;
+  --of-rack: #8ba6b8;
+  --of-rack-edge: #647e90;
+  --of-rack-led: #2c8a5e;
+  --of-pot: #b87f55;
+  --of-leaf: #4f9468;
+  --of-board: #f4fafc;
+  --of-board-edge: #9cb8c6;
+  --of-prop-leg: #7c93a3;
+  --of-lamp: #7c93a3;
+  --of-lamp-glow: #e8a83e;
+  --of-rug: #b8d4dc;
+  --of-rug-edge: #8fb4c0;
   box-shadow: 0 10px 35px #172c441a;
 }
 
@@ -142,7 +186,14 @@
 .sky-floor {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 270px;
-  background: repeating-linear-gradient(0deg, var(--of-floor-a) 0 49px, var(--of-floor-b) 50px 51px);
+  /* Isometric tile floor: two crossing sets of 2:1 diagonals draw the rhombus grid, light pools
+     under the windows and the wall throws a soft shade line where floor meets wall. */
+  background:
+    radial-gradient(130% 100% at 26% -8%, var(--of-floor-lit) 0%, transparent 52%),
+    repeating-linear-gradient(26.57deg, transparent 0 38px, var(--of-grid) 38px 40px),
+    repeating-linear-gradient(-26.57deg, transparent 0 38px, var(--of-grid) 38px 40px),
+    linear-gradient(180deg, var(--of-floor-a) 0%, var(--of-floor-b) 100%);
+  box-shadow: inset 0 20px 18px -18px var(--of-cast);
   min-height: 380px;
 }
 
@@ -152,6 +203,7 @@
   padding: 18px 22px 26px;
   gap: 6px;
   min-width: 0;
+  position: relative;
 }
 /* One open floor: zones are painted on the floor as signage and markings, never walled. */
 .floor-zone {
@@ -172,16 +224,19 @@
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 2.5px;
-  color: var(--of-muted);
+  /* painted flat on the floor: sheared and squashed into the tile plane, not a floating pill */
+  color: var(--of-inlay);
+  transform: skewX(-24deg) scaleY(0.72);
+  transform-origin: left top;
+  text-shadow: 0 1px 0 var(--of-floor-a);
 }
 .zone-tag::after {
-  /* floor tape: the only boundary a zone gets */
+  /* floor tape: the only boundary a zone gets — a dashed paint line on the same plane */
   content: '';
   display: block;
-  height: 1px;
-  width: 84px;
-  background: repeating-linear-gradient(90deg, var(--of-row-edge) 0 7px, transparent 7px 12px);
-  opacity: 0.8;
+  height: 2px;
+  width: 92px;
+  background: repeating-linear-gradient(90deg, var(--of-inlay) 0 7px, transparent 7px 13px);
 }
 .floor-zone[data-zone='director'] {
   /* a rug, not a room — the director keeps a patch of floor, nothing more */
@@ -225,16 +280,19 @@
   position: absolute;
   top: 50px;
   left: 50%;
-  transform: translateX(-50%);
+  /* The top face shears into a parallelogram — the fixed isometric angle every slab shares. */
+  transform: translateX(-50%) skewX(-12deg);
   width: 125px;
   height: 42px;
   background: var(--of-desk);
   border: 3px solid var(--of-desk-edge);
   border-radius: 5px;
   box-shadow:
-    0 9px var(--of-desk-shadow),
-    0 22px 0 -9px var(--of-desk-leg);
+    0 22px 0 -9px var(--of-desk-leg),
+    10px 8px 0 var(--of-desk-side),
+    20px 22px 18px -12px var(--of-cast);
 }
+
 .keyboard {
   position: absolute;
   left: 30px;
@@ -262,7 +320,9 @@
   background: var(--of-chair);
   border: 3px solid var(--of-chair-edge);
   border-radius: 12px;
-  box-shadow: 0 12px 0 -9px var(--of-chair-shadow);
+  box-shadow:
+    8px 7px 0 var(--of-chair-side),
+    16px 15px 14px -9px var(--of-cast);
 }
 
 /* Monitor states. Lit only when the evidence says so; unknown is a static dim question mark. */
@@ -276,7 +336,11 @@
   background: var(--of-monitor-body);
   border: 5px solid var(--of-monitor-edge);
   border-radius: 4px;
-  box-shadow: 0 12px 0 -9px var(--of-monitor-stand);
+  /* stand stub + the slab's right face + the cast shadow it throws down-right */
+  box-shadow:
+    0 12px 0 -9px var(--of-monitor-stand),
+    7px 6px 0 var(--of-monitor-side),
+    15px 13px 14px -10px var(--of-cast);
   overflow: hidden;
   transition:
     background var(--dur-3) var(--ease),
@@ -287,11 +351,25 @@
   inset: 0;
   display: block;
 }
+.office-monitor::after {
+  /* the screen's inner casing edge — the lit face faces left toward the windows */
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 5px;
+  background: linear-gradient(90deg, transparent, var(--of-monitor-side));
+  opacity: 0.8;
+  pointer-events: none;
+}
 .office-monitor[data-state='working'],
 .office-monitor[data-state='stalled'] {
   background: #0f2e2b;
   box-shadow:
     0 12px 0 -9px var(--of-monitor-stand),
+    7px 6px 0 var(--of-monitor-side),
+    15px 13px 14px -10px var(--of-cast),
     var(--of-glow) color-mix(in srgb, var(--st-working) 70%, transparent);
 }
 .office-monitor[data-state='working'] i {
@@ -304,6 +382,8 @@
   background: #33290f;
   box-shadow:
     0 12px 0 -9px var(--of-monitor-stand),
+    7px 6px 0 var(--of-monitor-side),
+    15px 13px 14px -10px var(--of-cast),
     var(--of-glow) color-mix(in srgb, var(--st-stalled) 60%, transparent);
 }
 .office-monitor[data-state='stalled'] i {
@@ -340,6 +420,8 @@
   background: #10301f;
   box-shadow:
     0 12px 0 -9px var(--of-monitor-stand),
+    7px 6px 0 var(--of-monitor-side),
+    15px 13px 14px -10px var(--of-cast),
     var(--of-glow) color-mix(in srgb, var(--st-done) 60%, transparent);
 }
 .office-monitor[data-state='done'] i::after,
@@ -361,6 +443,8 @@
   background: #3a1612;
   box-shadow:
     0 12px 0 -9px var(--of-monitor-stand),
+    7px 6px 0 var(--of-monitor-side),
+    15px 13px 14px -10px var(--of-cast),
     var(--of-glow) color-mix(in srgb, var(--st-failed) 65%, transparent);
 }
 .office-monitor[data-state='failed'] i::after {
@@ -394,6 +478,20 @@
 .office-person:focus-visible {
   outline: 3px solid var(--of-focus) !important;
   border-radius: 8px;
+}
+.office-person::after {
+  /* contact shadow: everyone stands on the same floor, so each person drops a small
+     ellipse under their feet, offset toward the down-right light fall */
+  content: '';
+  position: absolute;
+  z-index: -1;
+  left: 11px;
+  bottom: -4px;
+  width: 34px;
+  height: 9px;
+  border-radius: 50%;
+  background: radial-gradient(ellipse, var(--of-cast) 0%, transparent 72%);
+  pointer-events: none;
 }
 .office-person span {
   position: absolute;
@@ -567,6 +665,156 @@
   transform: translateX(-50%) translateY(0);
 }
 
+/* Ambient furniture along the front edge of the room — in-flow so it can never overlap a station.
+   Decorative only: pointer-events off, aria-hidden in markup, hidden under 850px. */
+.floor-props {
+  margin-top: auto;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-around;
+  gap: 24px;
+  padding: 14px 26px 4px;
+  pointer-events: none;
+}
+.floor-props i,
+.prop-rug {
+  position: relative;
+  display: block;
+}
+/* server rack: a tall slab with vent slats and one status LED */
+.prop-rack {
+  width: 42px;
+  height: 56px;
+  background: var(--of-rack);
+  border: 3px solid var(--of-rack-edge);
+  border-radius: 4px;
+  box-shadow:
+    7px 6px 0 var(--of-monitor-side),
+    14px 12px 12px -8px var(--of-cast);
+}
+.prop-rack::before {
+  content: '';
+  position: absolute;
+  inset: 6px 7px;
+  background: repeating-linear-gradient(0deg, transparent 0 5px, var(--of-rack-edge) 5px 7px);
+}
+.prop-rack::after {
+  content: '';
+  position: absolute;
+  top: 8px;
+  right: 6px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--of-rack-led);
+  box-shadow: 0 0 6px var(--of-rack-led);
+}
+/* freestanding whiteboard on an easel foot */
+.prop-board {
+  width: 52px;
+  height: 38px;
+  background: var(--of-board);
+  border: 3px solid var(--of-board-edge);
+  border-radius: 3px;
+  box-shadow:
+    6px 5px 0 var(--of-room-side),
+    13px 12px 12px -8px var(--of-cast);
+}
+.prop-board::before {
+  /* two marker squiggles so the board reads as used */
+  content: '';
+  position: absolute;
+  top: 8px;
+  left: 7px;
+  width: 24px;
+  height: 8px;
+  background: repeating-linear-gradient(90deg, var(--of-board-edge) 0 5px, transparent 5px 9px);
+  opacity: 0.55;
+}
+.prop-board::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 6px;
+  right: -4px;
+  height: 8px;
+  border-left: 4px solid var(--of-prop-leg);
+  border-right: 4px solid var(--of-prop-leg);
+  transform: skewX(-26.57deg);
+}
+/* potted plant: pot below, foliage blob above */
+.prop-plant {
+  width: 22px;
+  height: 18px;
+  align-self: flex-end;
+  background: var(--of-pot);
+  border-radius: 3px 3px 8px 8px;
+  box-shadow:
+    5px 4px 0 var(--of-room-side),
+    11px 9px 10px -7px var(--of-cast);
+}
+.prop-plant::before {
+  content: '';
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  width: 34px;
+  height: 34px;
+  transform: translateX(-50%);
+  border-radius: 46% 54% 52% 48%;
+  background:
+    radial-gradient(circle at 62% 30%, var(--of-leaf) 0 8px, transparent 9px),
+    radial-gradient(circle at 34% 42%, var(--of-leaf) 0 10px, transparent 11px),
+    radial-gradient(circle at 55% 60%, var(--of-leaf) 0 9px, transparent 10px);
+}
+/* floor lamp: slim pole, warm head, a small pool of light on the tiles */
+.prop-lamp {
+  width: 4px;
+  height: 46px;
+  background: var(--of-lamp);
+  border-radius: 2px;
+  box-shadow: 6px 5px 0 var(--of-room-side);
+}
+.prop-lamp::before {
+  content: '';
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  width: 16px;
+  height: 12px;
+  transform: translateX(-50%);
+  background: var(--of-lamp-glow);
+  border-radius: 8px 8px 3px 3px;
+  opacity: 0.85;
+}
+.prop-lamp::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  width: 54px;
+  height: 16px;
+  transform: translateX(-46%) skewX(-26.57deg);
+  border-radius: 50%;
+  background: radial-gradient(ellipse, var(--of-lamp-glow) 0%, transparent 68%);
+  opacity: 0.3;
+}
+/* the director's rug: a flat parallelogram laid on the tile plane under the suite seat */
+.prop-rug {
+  position: absolute;
+  top: 46px;
+  /* the skew shears the bottom edge left by tan(26.57°)·height — compensate so it stays on the floor */
+  left: 54px;
+  width: 172px;
+  height: 104px;
+  background: var(--of-rug);
+  border: 2px solid var(--of-rug-edge);
+  border-radius: 10px;
+  transform: skewX(-26.57deg);
+  transform-origin: left top;
+  opacity: 0.85;
+}
+
 /* Meeting wing */
 .meeting-wing {
   padding: 18px;
@@ -584,6 +832,7 @@
   position: relative;
   padding: 12px 12px 35px;
   text-align: center;
+  box-shadow: 8px 10px 14px -10px var(--of-cast);
 }
 .meeting-room h3 {
   font-size: 10px;
@@ -611,7 +860,10 @@
   background: var(--of-table);
   border: 5px solid var(--of-table-edge);
   border-radius: 30px;
-  box-shadow: 0 8px var(--of-table-shadow);
+  /* the ellipse is the table top; the offset layers give it slab thickness and a shadow */
+  box-shadow:
+    8px 8px 0 var(--of-table-side),
+    16px 16px 16px -10px var(--of-cast);
 }
 .meeting-people {
   position: relative;
@@ -749,6 +1001,12 @@
     border-top: 6px solid var(--of-wall-edge);
   }
   .sky-windows {
+    display: none;
+  }
+  .floor-props {
+    display: none;
+  }
+  .prop-rug {
     display: none;
   }
   .now-row {
