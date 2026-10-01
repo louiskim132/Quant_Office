@@ -38,7 +38,8 @@ import { PipelineService } from './pipeline.js';
 import { HoldoutCustody } from './holdout.js';
 import { OutputService } from './outputs.js';
 import { TerminalHandoffAdapter } from './handoff.js';
-import { LocalCliExecAdapter } from './local-cli-exec.js';
+import { LocalCliExecAdapter, type LocalCliExecOptions } from './local-cli-exec.js';
+import { LocalAcpAdapter } from './local-acp.js';
 import { LocalMailboxAdapter } from './local-session.js';
 import { LocalWorktreeMailboxAdapter } from './local-worktree-session.js';
 import { WORKTREES_DIR } from './local-worktree-repo.js';
@@ -61,6 +62,7 @@ import { Subscriptions, providerSchema, subscriptionEnvironment } from './subscr
 import { Secrets, agentEnvironment } from './secrets.js';
 import { AGENT_USERNAME, qroAgentSpawn, setupAgentIsolation, type QroAgentSpawn } from './agent-isolation.js';
 import { runAgentIsolationAcceptance } from './agent-isolation-acceptance.js';
+import { launchIsolatedLogin } from './agent-isolation-login.js';
 import type { Connection, Provider } from '../shared/types.js';
 import { describeError, writeLog } from './diagnostics.js';
 let subscriptions: Subscriptions;
@@ -81,6 +83,7 @@ let activeWorkspaceCalls = 0;
 let workspaceLocked = false;
 let controller: AssignmentController;
 let exec: LocalCliExecAdapter | undefined;
+let acp: LocalAcpAdapter | undefined;
 /** The QRO-Agent host's spawn surface and shutdown handle — set only while isolation is live. */
 let agentHost: QroAgentSpawn | undefined;
 let pipeline: PipelineService;
@@ -148,6 +151,7 @@ else {
   app.on('before-quit', () => {
     agentHost?.shutdown();
     exec?.disposeAll();
+    acp?.disposeAll();
     subscriptions?.close();
     if (store) store.close();
   });
@@ -560,6 +564,18 @@ function register() {
     noInput(value);
     return { configured: secrets.hasAgentCredential() };
   });
+  handle('office:agent-isolation-login', async value => {
+    const provider = providerSchema.parse(value);
+    const credential = secrets.agentCredential();
+    if (!credential || !agentHost) throw new Error('Set up agent isolation first.');
+    await launchIsolatedLogin({
+      credential,
+      provider,
+      executable: subscriptions.toolPath(provider),
+      agentsRoot: path.join(workspaceDirectory(app.getPath('userData')), 'local-sessions'),
+    });
+    return { ok: true };
+  });
   handle('office:agent-isolation-setup', async value => {
     noInput(value);
     await setupAgentIsolation({
@@ -595,7 +611,8 @@ function register() {
       spawnAs: agentHost,
       username: AGENT_USERNAME,
       sessionDir,
-      protectedDir: app.getPath('userData'),
+      // The DPAPI secrets file always exists once isolation is configured (it holds the credential).
+      protectedFile: path.join(app.getPath('userData'), 'secrets.dat'),
     });
     const evidenceDir = path.join(app.getPath('userData'), 'acceptance');
     mkdirSync(evidenceDir, { recursive: true });
@@ -1378,7 +1395,7 @@ function register() {
   // Live presence of the children this office spawned: in memory, read-only, never an event-chain record.
   handle('office:presence', value => {
     noInput(value);
-    return exec?.presence() ?? [];
+    return [...(exec?.presence() ?? []), ...(acp?.presence() ?? [])];
   });
   handle('office:preview', value => artifacts.preview(id.parse(value)));
   // Bounded content search over one project's stored text artifacts; the result carries the
@@ -1583,6 +1600,8 @@ function rejectInternalDestination(destination: string) {
 /** One place that wires the controller, so start-up and post-restore rebuild stay identical. */
 function buildController(): AssignmentController {
   const workspace = () => workspaceDirectory(app.getPath('userData'));
+  exec?.disposeAll();
+  acp?.disposeAll();
   // A rebuilt controller drops the previous host channel — ask the old QRO-Agent host to kill its
   // children and exit before its requests dir is orphaned. The host also self-exits if the office
   // pid dies, so a missed shutdown costs it at most one watchdog tick.
@@ -1597,6 +1616,7 @@ function buildController(): AssignmentController {
       agentsRoot: path.join(workspace(), 'local-sessions'),
       log: line => writeLog(logDir(), 'WARN', line),
     });
+  subscriptions.setIsolation(agentHost, path.join(workspace(), 'local-sessions', '.account-checks'));
   const outputs = new OutputService(store, workspace());
   const handoff = new TerminalHandoffAdapter({ executable: () => subscriptions.toolPath('claude') });
   const flat = new LocalMailboxAdapter(() => path.join(workspace(), 'local-sessions'));
@@ -1614,10 +1634,10 @@ function buildController(): AssignmentController {
   // The child's environment is built per provider: the subscriptionEnvironment() scrub that
   // removes ACP_* and billing overrides, plus the one provider key variable when the user saved
   // their own key locally (LR-15). The secrets store is injected — the adapter never imports it.
-  exec = new LocalCliExecAdapter({
+  const localOptions: LocalCliExecOptions = {
     sessionsRoot: () => path.join(workspace(), 'local-sessions'),
     executable: provider => subscriptions.toolPath(provider),
-    environment: provider => agentEnvironment(provider, secrets),
+    environment: provider => (agentHost ? subscriptionEnvironment() : agentEnvironment(provider, secrets)),
     providerFor: agentId => store.snapshot({ history: false }).agents.find(a => a.id === agentId)?.provider,
     // A spawned child's exit or a receipt write fires this — the office observes the job through the
     // same validated reader a manual Observe uses, then advances any dependent the completion
@@ -1641,19 +1661,35 @@ function buildController(): AssignmentController {
     // adapter — an agent's query file can never choose whose grants are checked.
     evidenceFrames: (caller, line) => handleEvidenceFrame(evidence, caller, line),
     // The launch record states which credential context the spawn used — metadata only, never a key.
-    authMode: provider => (secrets.providerKeyState(provider).saved ? 'api-key' : 'subscription'),
+    authMode: provider => (!agentHost && secrets.providerKeyState(provider).saved ? 'api-key' : 'subscription'),
     // LR-16: the isolated spawn surface, present only when a QRO-Agent credential is saved and the
     // escape hatch is not set. When it is, dispatches without a saved API key are refused — the
     // office profile's subscription sign-ins do not exist in the agent account's profile.
     spawnAs: agentHost,
+    isolatedAccountVerified: context => subscriptions.isolatedAccountVerified(context),
+  };
+  exec = new LocalCliExecAdapter(localOptions);
+  acp = new LocalAcpAdapter({
+    ...localOptions,
+    recoveryVerified: async job => {
+      const frozen = store.snapshot({ history: false }).assignments?.find(item => item.id === job.assignmentId)?.frozen;
+      if (!frozen) return false;
+      const { observation } = await subscriptions.observe('devin');
+      store.recordAccountObservation(observation);
+      return (
+        observation.state === 'SIGNED_IN' &&
+        observation.identity === frozen.accountIdentity &&
+        observation.credentialContext === frozen.credentialContext
+      );
+    },
   });
   // Children start, speak and end far faster than the window needs to hear about it: one push per second.
   let presenceTimer: ReturnType<typeof setTimeout> | undefined;
-  exec.onPresence = () => {
+  exec.onPresence = acp.onPresence = () => {
     if (presenceTimer) return;
     presenceTimer = setTimeout(() => {
       presenceTimer = undefined;
-      win?.webContents.send('office:presence', exec?.presence() ?? []);
+      win?.webContents.send('office:presence', [...(exec?.presence() ?? []), ...(acp?.presence() ?? [])]);
     }, 1000);
     presenceTimer.unref?.();
   };
@@ -1661,6 +1697,11 @@ function buildController(): AssignmentController {
     jobId => store.localSessionForJob(jobId),
     { FLAT_PACKET: exec, PROJECT_WORKTREE: exec },
     'LOCAL_CLI_EXEC',
+  );
+  const acpRoute = new LocalSessionRouter(
+    jobId => store.localSessionForJob(jobId),
+    { FLAT_PACKET: acp, PROJECT_WORKTREE: acp },
+    'LOCAL_ACP',
   );
   return new AssignmentController(
     store,
@@ -1701,14 +1742,18 @@ function buildController(): AssignmentController {
             ? mailbox
             : ref.route === execRoute.route
               ? execRoute
-              : undefined;
+              : ref.route === acpRoute.route
+                ? acpRoute
+                : undefined;
       if (ref.agent)
         return ref.agent.execution === 'HOSTED_SETUP_REQUIRED'
           ? handoff
           : ref.agent.execution === 'LOCAL'
             ? ref.agent.localRoute === 'LOCAL_CLI_EXEC'
               ? execRoute
-              : mailbox
+              : ref.agent.localRoute === 'LOCAL_ACP'
+                ? acpRoute
+                : mailbox
             : undefined;
       return undefined;
     },

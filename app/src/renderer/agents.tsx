@@ -36,6 +36,7 @@ const toolProfileNames: Record<ToolProfile, string> = { STANDARD: 'Standard', CO
 const localRouteNames: Record<NonNullable<AgentDraft['localRoute']>, string> = {
   LOCAL_MAILBOX: 'Manual packet — you launch the session',
   LOCAL_CLI_EXEC: 'Office-spawned CLI — unattended run',
+  LOCAL_ACP: 'Devin ACP — unattended run',
 };
 let setupDraft: AgentDraft | undefined;
 export function AgentSetup({ onAdded }: { onAdded: (state: AppState, execution?: ExecutionEnvironment) => void }) {
@@ -61,7 +62,7 @@ export function AgentSetup({ onAdded }: { onAdded: (state: AppState, execution?:
   const [riskAccepted, setRiskAccepted] = useState(false);
   const spawnsLocally =
     (draft.provider === 'devin' ? 'LOCAL' : draft.execution) === 'LOCAL' &&
-    (draft.localRoute ?? 'LOCAL_CLI_EXEC') === 'LOCAL_CLI_EXEC';
+    (draft.localRoute ?? 'LOCAL_CLI_EXEC') !== 'LOCAL_MAILBOX';
   const operation = useRef(0);
   useEffect(
     () => () => {
@@ -206,6 +207,8 @@ export function AgentSetup({ onAdded }: { onAdded: (state: AppState, execution?:
                 setConnection(null);
                 edit({
                   provider,
+                  localRoute:
+                    provider !== 'devin' && draft.localRoute === 'LOCAL_ACP' ? 'LOCAL_CLI_EXEC' : draft.localRoute,
                   model:
                     provider === 'openai'
                       ? PROVIDER_MODEL_SUGGESTIONS.openai[0].id
@@ -251,9 +254,10 @@ export function AgentSetup({ onAdded }: { onAdded: (state: AppState, execution?:
               >
                 <option value="LOCAL_MAILBOX">Manual packet — you launch the session</option>
                 <option value="LOCAL_CLI_EXEC">Office-spawned CLI — unattended run</option>
+                {draft.provider === 'devin' && <option value="LOCAL_ACP">Devin ACP — unattended run</option>}
               </select>
               <small>
-                {(draft.localRoute ?? 'LOCAL_CLI_EXEC') === 'LOCAL_CLI_EXEC'
+                {(draft.localRoute ?? 'LOCAL_CLI_EXEC') !== 'LOCAL_MAILBOX'
                   ? 'The office spawns the provider CLI on this machine and owns the process (cancel kills it); not provider-hosted, isolated or independently attested.'
                   : 'The office writes the packet; you run the session yourself in the official tool. Not provider-hosted, isolated or independently attested.'}
               </small>
@@ -1145,6 +1149,28 @@ export function AgentIsolation() {
       setBusy(false);
     }
   }
+  async function agentSubscription(provider: Provider, login: boolean) {
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      if (login) {
+        await window.office.agentIsolationLogin(provider);
+        setNotice(`Finish the official ${provider} sign-in in the QRO-Agent window, then check its subscription here.`);
+      } else {
+        const connection = await window.office.connectionStatus(provider);
+        if (connection.connected && connection.account)
+          setNotice(
+            `${provider} agent subscription verified for ${connection.account}. Prepare new work to bind this account.`,
+          );
+        else setError(connection.note || `No verified ${provider} agent-account subscription.`);
+      }
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
   async function remove() {
     setBusy(true);
     setError('');
@@ -1172,8 +1198,8 @@ export function AgentIsolation() {
               reach their own session folders.
             </p>
             <p className="muted">
-              This isolation route requires saved API keys and is unavailable for subscription-only launches.
-              Subscription sign-ins stay in your Windows profile.
+              Sign in to each provider separately as QRO-Agent. Your subscription credentials stay in that account's
+              profile.
             </p>
           </div>
           <button
@@ -1193,11 +1219,31 @@ export function AgentIsolation() {
             <strong>Separate Windows account</strong>
             <p>Agents run as Windows user QRO-Agent with access limited to agent session folders.</p>
             <p className="muted">
-              This isolation route requires saved API keys and is unavailable for subscription-only launches.
-              Subscription sign-ins stay in your Windows profile.
+              Each provider must report the subscription identity bound to new work. Existing work prepared under your
+              Windows account must be prepared again.
             </p>
           </div>
           <div>
+            {(['devin', 'claude', 'openai'] as Provider[]).map(provider => (
+              <div key={provider}>
+                <button
+                  className="secondary"
+                  disabled={busy}
+                  onClick={() => void agentSubscription(provider, true)}
+                  aria-label={`Sign in ${provider} for agent account`}
+                >
+                  Sign in {provider}
+                </button>
+                <button
+                  className="secondary"
+                  disabled={busy}
+                  onClick={() => void agentSubscription(provider, false)}
+                  aria-label={`Check ${provider} agent subscription`}
+                >
+                  Check {provider} subscription
+                </button>
+              </div>
+            ))}
             <button
               className="secondary"
               disabled={busy}

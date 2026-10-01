@@ -151,7 +151,16 @@ const CODEX_EFFORTS = new Set<Effort>(['low', 'medium', 'high', 'xhigh', 'max'])
 
 function claudeFlags(input: ToolFlagInput): ToolFlagResult {
   const { model, effort, prompt, profile, delegation } = input;
-  const args = ['-p', prompt, '--output-format', 'json', '--dangerously-skip-permissions', '--model', model];
+  const args = [
+    '-p',
+    prompt,
+    '--output-format',
+    'stream-json',
+    '--dangerously-skip-permissions',
+    '--model',
+    model,
+    '--verbose',
+  ];
   let effortFlag: string | null = null;
   let unmappedEffort: Effort | null = null;
   if (effort !== 'default') {

@@ -72,6 +72,7 @@ const MAX_EVENTS_PER_OBSERVE = MAX_BUFFERED_LINES;
  * scripted child without a real process.
  */
 export interface CliChild {
+  readonly stdin?: NodeJS.WritableStream | null;
   readonly pid?: number;
   readonly stdout: NodeJS.ReadableStream | null;
   readonly stderr: NodeJS.ReadableStream | null;
@@ -83,13 +84,13 @@ export interface CliSpawnOptions {
   cwd: string;
   env: NodeJS.ProcessEnv;
   windowsHide: boolean;
-  stdio: ['ignore', 'pipe', 'pipe'];
+  stdio: ['ignore' | 'pipe', 'pipe', 'pipe'];
 }
 export type CliSpawn = (executable: string, args: string[], options: CliSpawnOptions) => CliChild;
 
 /** What the office recorded about the process it launched — the evidence payload, verbatim. */
 export interface LaunchRecord {
-  route: 'LOCAL_CLI_EXEC';
+  route: 'LOCAL_CLI_EXEC' | 'LOCAL_ACP';
   provider: Provider;
   pid: number | undefined;
   executable: string;
@@ -194,6 +195,7 @@ export function spawnTreeKillable(command: string, args: string[], options: CliS
 
 /** Construction options for LocalCliExecAdapter. Only `sessionsRoot` is required. */
 export interface LocalCliExecOptions {
+  route?: 'LOCAL_CLI_EXEC' | 'LOCAL_ACP';
   sessionsRoot: () => string;
   /**
    * Resolves the installed CLI path for a provider. The production wiring passes the
@@ -245,6 +247,8 @@ export interface LocalCliExecOptions {
    * key, because the office user's subscription sign-ins do not exist in the agent's profile.
    */
   spawnAs?: CliSpawn;
+  /** Fresh identity observed through the isolated host, bound to the prepared credential context. */
+  isolatedAccountVerified?: (context: SubmitContext) => boolean;
 }
 
 /**
@@ -264,7 +268,7 @@ export interface LocalCliExecOptions {
  * office never claims ownership of a process it did not spawn.
  */
 export class LocalCliExecAdapter implements ProviderAdapter {
-  readonly route = 'LOCAL_CLI_EXEC' as const;
+  readonly route: 'LOCAL_CLI_EXEC' | 'LOCAL_ACP';
   // Same provider-agnostic contract as the mailbox — every provider runs the v2 packet shape.
   readonly providers: readonly Provider[] = ['devin', 'claude', 'openai'];
   // The exec route only writes bound v2 packets; there is no unbound v1 fallback.
@@ -300,8 +304,10 @@ export class LocalCliExecAdapter implements ProviderAdapter {
   private readonly claudeSpawnGapMs: number;
   private readonly authMode: (provider: Provider) => 'subscription' | 'api-key';
   private readonly spawnAs?: CliSpawn;
+  private readonly isolatedAccountVerified?: (context: SubmitContext) => boolean;
 
   constructor(options: LocalCliExecOptions) {
+    this.route = options.route ?? 'LOCAL_CLI_EXEC';
     this.sessionsRoot = options.sessionsRoot;
     this.executable = options.executable ?? (provider => provider);
     this.now = options.now ?? (() => new Date().toISOString());
@@ -326,6 +332,7 @@ export class LocalCliExecAdapter implements ProviderAdapter {
     this.claudeSpawnGapMs = options.claudeSpawnGapMs ?? CLAUDE_SPAWN_GAP_MS;
     this.authMode = options.authMode ?? (() => 'subscription');
     this.spawnAs = options.spawnAs;
+    this.isolatedAccountVerified = options.isolatedAccountVerified;
   }
 
   /** Waits until a claude launch would be at least claudeSpawnGapMs after the previous one. */
@@ -361,6 +368,17 @@ export class LocalCliExecAdapter implements ProviderAdapter {
     profile?: ToolProfile,
     delegation = false,
   ): ToolFlagResult {
+    if (this.route === 'LOCAL_ACP')
+      return {
+        args: ['acp', '--model', model, JSON.stringify({ prompt, profile })],
+        bypassFlags: [],
+        effortFlag: null,
+        unmappedEffort: effort === 'default' ? null : effort,
+        applied: ['ACP session/prompt; scoped allow-once permission responses'],
+        unmapped: [
+          'Agent tools execute under the account filesystem permissions; ACP permission metadata is not filesystem isolation.',
+        ],
+      };
     return mapToolFlags({ provider, model, effort, prompt, profile, delegation });
   }
 
@@ -431,6 +449,8 @@ export class LocalCliExecAdapter implements ProviderAdapter {
   }
 
   async submit(context: SubmitContext): Promise<SubmitResult> {
+    if (this.route === 'LOCAL_ACP' && context.localSession?.provider !== 'devin')
+      throw new NotLaunchedError('The installed ACP route supports Devin only.');
     const binding = context.localSession;
     if (!binding)
       throw new NotLaunchedError(
@@ -444,9 +464,9 @@ export class LocalCliExecAdapter implements ProviderAdapter {
     // The isolation credential boundary (LR-16): spawned CLIs inherit the agent account's
     // profile, where the office user's subscription sign-ins do not exist — so an isolated run
     // must authenticate with the provider API key saved in Settings. No key, no dispatch.
-    if (this.spawnAs && this.authMode(binding.provider) !== 'api-key')
+    if (this.spawnAs && this.authMode(binding.provider) !== 'api-key' && !this.isolatedAccountVerified?.(context))
       throw new NotLaunchedError(
-        `Agent isolation is on and no API key is saved for ${binding.provider} — add one in Settings.`,
+        `Sign in ${binding.provider} for the agent account (Settings → Agent isolation), then prepare this work again.`,
       );
     // Everything before the spawn is a NotLaunchedError: a packet that was never written or a
     // probe that refused means no child could have come into existence — there is no provider
@@ -554,7 +574,10 @@ export class LocalCliExecAdapter implements ProviderAdapter {
       provider: binding.provider,
       pid: child.pid,
       executable,
-      args: command.args.map(arg => (arg === prompt ? `<prompt:${sha256Text(prompt)}>` : arg)),
+      args:
+        this.route === 'LOCAL_ACP'
+          ? [...command.args.slice(0, -1), `<ACP prompt:${sha256Text(prompt)}>`]
+          : command.args.map(arg => (arg === prompt ? `<prompt:${sha256Text(prompt)}>` : arg)),
       bypassFlags: command.bypassFlags,
       spawnedAt: this.now(),
       authMode: this.authMode(binding.provider),
@@ -760,7 +783,7 @@ export class LocalCliExecAdapter implements ProviderAdapter {
       externalId: `spawn:${owner}:${line.seq}`,
       cursor: `spawn:${owner}:${line.seq}`,
       kind: this.streamKind(record.launch.provider, line),
-      text: line.text,
+      text: line.text.length > 64000 ? line.text.slice(0, 63960) + '\n[office: event text truncated]' : line.text,
       occurredAt: line.at,
       receivedAt: this.now(),
       evidence: 'PROVIDER_REPORTED' as const,
@@ -769,10 +792,25 @@ export class LocalCliExecAdapter implements ProviderAdapter {
 
   /** Classify only documented structured tool events; arbitrary log text stays a message. */
   private streamKind(provider: Provider, line: BufferedLine): JobEvent['kind'] {
-    if (provider !== 'openai' || line.stream !== 'stdout') return 'MESSAGE';
+    if (line.stream !== 'stdout') return 'MESSAGE';
     try {
-      const frame = JSON.parse(line.text) as { type?: string; item?: { type?: string } };
+      const frame = JSON.parse(line.text) as {
+        type?: string;
+        item?: { type?: string };
+        message?: { content?: { type?: string }[] };
+      };
+      if (this.route === 'LOCAL_ACP' && (frame as { method?: string }).method === 'session/update') {
+        const update = (frame as { params?: { update?: { sessionUpdate?: string } } }).params?.update;
+        if (['tool_call', 'tool_call_update'].includes(update?.sessionUpdate ?? '')) return 'TOOL';
+      }
       if (
+        provider === 'claude' &&
+        ['assistant', 'user'].includes(frame.type ?? '') &&
+        frame.message?.content?.some(item => ['tool_use', 'tool_result'].includes(item.type ?? ''))
+      )
+        return 'TOOL';
+      if (
+        provider === 'openai' &&
         ['item.started', 'item.updated', 'item.completed'].includes(frame.type ?? '') &&
         ['command_execution', 'mcp_tool_call', 'web_search'].includes(frame.item?.type ?? '')
       )

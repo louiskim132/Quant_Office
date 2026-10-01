@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
 import {
   copyFileSync,
@@ -18,7 +18,7 @@ import {
 } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { PassThrough } from 'node:stream';
+import { PassThrough, Writable } from 'node:stream';
 import type { CliChild, CliSpawnOptions } from './local-cli-exec.js';
 import type { Provider } from '../shared/types.js';
 
@@ -48,6 +48,8 @@ export interface IsolationBundle {
   agentsRoot: string;
   toolDirs: string[];
   resultPath: string;
+  officeRoot?: string;
+  officeSid?: string;
 }
 
 /** The elevated setup script's always-written report. */
@@ -235,7 +237,18 @@ export async function setupAgentIsolation(deps: AgentIsolationSetupDeps): Promis
       agentsRoot,
       toolDirs: [...toolDirs],
       resultPath,
+      officeRoot: deps.userData,
+      officeSid:
+        process.platform === 'win32'
+          ? execFileSync(
+              path.win32.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'whoami.exe'),
+              ['/user', '/fo', 'csv', '/nh'],
+              { encoding: 'utf8', windowsHide: true },
+            ).match(/S-1-5-[0-9-]+/)?.[0]
+          : undefined,
     };
+    if (process.platform === 'win32' && !bundle.officeSid)
+      throw new Error('The office Windows identity could not be resolved.');
     writeFileSync(bundlePath, JSON.stringify(bundle), 'utf8');
     copyFileSync(deps.scriptPath ?? isolationSetupScriptPath(), scriptCopy);
     const elevate = deps.elevate ?? defaultElevate;
@@ -271,6 +284,9 @@ interface HostProcess {
 }
 
 export interface QroAgentSpawnDeps {
+  /** Test-only same-user host identity; production uses the saved agent credential's username. */
+  expectedUser?: string;
+
   secrets: { agentCredential(): { user: string; password: string; savedAt: string } | null };
   /** <userData>\workspace\local-sessions — the ACL'd root the host polices. */
   agentsRoot: string;
@@ -473,6 +489,21 @@ export function qroAgentSpawn(deps: QroAgentSpawnDeps): QroAgentSpawn {
           return;
         }
         if (existsSync(readyFile)) {
+          try {
+            const ready = JSON.parse(readFileSync(readyFile, 'utf8'));
+            const expected = deps.expectedUser ?? deps.secrets.agentCredential()?.user;
+            if (!expected || String(ready.user).toLowerCase() !== expected.toLowerCase()) {
+              proc.kill();
+              clearInterval(timer);
+              fail('the host Windows identity does not match the agent account');
+              return;
+            }
+          } catch {
+            clearInterval(timer);
+            proc.kill();
+            fail('the host identity report is unreadable');
+            return;
+          }
           clearInterval(timer);
           hostState = { kind: 'ready', channelDir };
           resolve();
@@ -508,6 +539,10 @@ export function qroAgentSpawn(deps: QroAgentSpawnDeps): QroAgentSpawn {
     readonly pid = undefined;
     readonly stdout = new PassThrough();
     readonly stderr = new PassThrough();
+    readonly stdin: Writable;
+    private inputSequence = 0;
+    private pendingInput: { name: string; value: Record<string, unknown> }[] = [];
+    private pendingInputBytes = 0;
     private readonly listeners = {
       exit: [] as ((code: number | null, signal: NodeJS.Signals | null) => void)[],
       error: [] as ((error: Error) => void)[],
@@ -518,7 +553,30 @@ export function qroAgentSpawn(deps: QroAgentSpawnDeps): QroAgentSpawn {
     private done = false;
     private timer: ReturnType<typeof setInterval> | undefined;
     private watcher: FSWatcher | null = null;
-    constructor(private readonly id: string) {}
+    constructor(private readonly id: string) {
+      this.stdin = new Writable({
+        write: (chunk, _encoding, callback) => {
+          const text = String(chunk);
+          if (Buffer.byteLength(text) > 1024 * 1024 || this.pendingInputBytes + Buffer.byteLength(text) > 1024 * 1024)
+            return callback(new Error('isolated stdin exceeds the bound'));
+          this.input({ op: 'stdin', id, text });
+          callback();
+        },
+        final: callback => {
+          this.input({ op: 'stdin', id, end: true });
+          callback();
+        },
+      });
+      this.stdin.on('error', error => this.fail(error));
+    }
+    private input(value: Record<string, unknown>): void {
+      const name = `req-${this.id}-stdin-${String(++this.inputSequence).padStart(10, '0')}.json`;
+      if (this.channelDir) this.deliver(name, value);
+      else {
+        this.pendingInputBytes += Buffer.byteLength(JSON.stringify(value));
+        this.pendingInput.push({ name, value });
+      }
+    }
     on(event: 'exit', listener: (code: number | null, signal: NodeJS.Signals | null) => void): unknown;
     on(event: 'error', listener: (error: Error) => void): unknown;
     on(event: 'exit' | 'error', listener: unknown) {
@@ -547,6 +605,9 @@ export function qroAgentSpawn(deps: QroAgentSpawnDeps): QroAgentSpawn {
       this.channelDir = channelDir;
       try {
         post(channelDir, `req-${this.id}.json`, request);
+        for (const input of this.pendingInput) post(channelDir, input.name, input.value);
+        this.pendingInput = [];
+        this.pendingInputBytes = 0;
         // A cancel that arrived before the host was up still lands: the host records cancelled
         // ids, so whichever order the two files are read the spawn is refused cleanly.
         if (this.wantsCancel) post(channelDir, `req-${this.id}-cancel.json`, { op: 'cancel', id: this.id });
@@ -649,6 +710,7 @@ export function qroAgentSpawn(deps: QroAgentSpawnDeps): QroAgentSpawn {
       argv: args,
       cwd: options.cwd,
       env: sanitizedEnv(options.env),
+      stdin: options.stdio[0] === 'pipe',
     };
     void ensureHost().then(() => {
       if (hostState.kind === 'ready') child.bind(hostState.channelDir, request);

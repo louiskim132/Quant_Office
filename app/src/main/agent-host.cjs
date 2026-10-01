@@ -39,12 +39,29 @@ if (!sessionDir || !Number.isInteger(officePid) || officePid <= 0) {
 const channelParent = path.dirname(sessionDir);
 const agentsRoot = path.basename(channelParent) === '.host' ? path.dirname(channelParent) : channelParent;
 const sessionId = path.basename(sessionDir);
+// Derived in the host account; office profile variables never cross the channel.
+const hostUser = os.userInfo();
+const hostProfile = hostUser.homedir;
+if (process.platform === 'win32') {
+  Object.assign(process.env, {
+    USERPROFILE: hostProfile, HOME: hostProfile, USERNAME: hostUser.username,
+    HOMEDRIVE: path.parse(hostProfile).root.replace(/[\\/]+$/, ''),
+    HOMEPATH: hostProfile.slice(path.parse(hostProfile).root.length - 1),
+    APPDATA: path.join(hostProfile, 'AppData', 'Roaming'),
+    LOCALAPPDATA: path.join(hostProfile, 'AppData', 'Local'),
+    TEMP: path.join(hostProfile, 'AppData', 'Local', 'Temp'),
+    TMP: path.join(hostProfile, 'AppData', 'Local', 'Temp'),
+    DISABLE_AUTOUPDATER: '1',
+  });
+  fs.mkdirSync(process.env.TEMP, { recursive: true });
+}
 
 /** The only env keys the office may push into an agent child — API keys and office flags. */
 const ALLOWED_ENV = /^(ANTHROPIC_API_KEY|OPENAI_API_KEY|CODEX_API_KEY|DEVIN_API_KEY|QRO_|NO_COLOR$|CI$)/;
 
 const REQ = /^req-.+\.json$/;
 const children = new Map(); // id → ChildProcess
+const pendingInput = new Map();
 const outStreams = new Map(); // id → {out, err} append-mode write streams, closed after exit
 const pendingExits = new Map(); // id → {code, signal} waiting on the log streams to flush
 const exitTimers = new Map(); // id → the bounded flush fallback
@@ -192,7 +209,7 @@ function onSpawn(req) {
       cwd: path.resolve(req.cwd),
       // Only whitelisted office env crosses; everything else is this account's own environment.
       env: { ...process.env, ...sanitizeEnv(req.env) },
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: [req.stdin === true ? 'pipe' : 'ignore', 'pipe', 'pipe'],
       windowsHide: true,
     });
   } catch (error) {
@@ -216,6 +233,9 @@ function onSpawn(req) {
   child.stdout.pipe(outStream);
   child.stderr.pipe(errStream);
   children.set(id, child);
+  child.stdin?.on('error', () => {});
+  for (const input of pendingInput.get(id) || []) onInput(input);
+  pendingInput.delete(id);
   child.on('error', error => {
     children.delete(id);
     writeJson(`exit-${id}.json`, { code: null, signal: null, error: `spawn failed: ${error.message}` });
@@ -244,6 +264,7 @@ function onCancel(req) {
   const id = String(req.id || '');
   if (!id) return;
   cancelled.add(id);
+  pendingInput.delete(id);
   const child = children.get(id);
   if (child && child.pid) taskkillTree(child.pid);
   // Already-exited ids need no kill — the exit record reports the truth.
@@ -258,6 +279,21 @@ function onShutdown() {
 }
 
 /** One ordered pass over the channel: every new req-*.json, in filename order. */
+function onInput(req) {
+  const id = String(req.id || '');
+  if (!id || cancelled.has(id) || (typeof req.text === 'string' && Buffer.byteLength(req.text) > 1024 * 1024)) return;
+  const child = children.get(id);
+  if (!child) {
+    const queue = pendingInput.get(id) || [];
+    if (queue.length >= 128 || queue.reduce((sum, r) => sum + Buffer.byteLength(r.text || ''), 0) + Buffer.byteLength(req.text || '') > 1024 * 1024) return;
+    queue.push(req);
+    pendingInput.set(id, queue);
+    return;
+  }
+  if (req.end === true) child.stdin?.end();
+  else if (typeof req.text === 'string') child.stdin?.write(req.text);
+}
+
 function scan() {
   let names;
   try {
@@ -281,6 +317,7 @@ function scan() {
     try {
       trace(`req ${name} op=${req && req.op}`);
       if (req && req.op === 'spawn') onSpawn(req);
+      else if (req && req.op === 'stdin') onInput(req);
       else if (req && req.op === 'cancel') onCancel(req);
       else if (req && req.op === 'shutdown') onShutdown();
     } catch (error) {
@@ -312,5 +349,5 @@ setInterval(() => {
   }
 }, 5000);
 trace(`host up pid=${process.pid} user=${process.env.USERNAME || process.env.USER || 'unknown'}`);
-writeJson(`ready-${sessionId}.json`, { pid: process.pid, user: os.userInfo().username });
+writeJson(`ready-${sessionId}.json`, { pid: process.pid, user: hostUser.username, profile: hostProfile });
 scan();

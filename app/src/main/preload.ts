@@ -24,6 +24,7 @@ const api: OfficeAPI = {
   removeProviderApiKey: provider => request('office:provider-api-key-remove', provider),
   providerKeyState: provider => request('office:provider-key-state', provider),
   agentIsolationStatus: () => request('office:agent-isolation-status'),
+  agentIsolationLogin: provider => request('office:agent-isolation-login', provider),
   agentIsolationSetup: () => request('office:agent-isolation-setup'),
   agentIsolationRemove: () => request('office:agent-isolation-remove'),
   agentIsolationVerify: () => request('office:agent-isolation-verify'),

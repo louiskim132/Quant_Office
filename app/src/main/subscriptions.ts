@@ -1,5 +1,7 @@
 import packageInfo from '../../package.json' with { type: 'json' };
-import { spawn, execFile, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, execFile } from 'node:child_process';
+import type { CliChild, CliSpawn } from './local-cli-exec.js';
+import type { SubmitContext } from './controller.js';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -170,7 +172,11 @@ export function devinStatusIdentity(raw: string): string {
 class CodexMetadata {
   /** When this process started; an auth file newer than this is evidence the in-process answer may be stale. */
   readonly spawnedAt = Date.now();
-  private child: ChildProcessWithoutNullStreams;
+  private child: CliChild & {
+    stdin: NodeJS.WritableStream;
+    stdout: NodeJS.ReadableStream;
+    stderr: NodeJS.ReadableStream;
+  };
   private pending = new Map<
     number,
     { resolve: (value: any) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }
@@ -179,13 +185,15 @@ class CodexMetadata {
   private buffer = '';
   private closed = false;
   private ready: Promise<void>;
-  constructor(executable: string, cwd: string) {
-    this.child = spawn(executable, ['app-server', '--listen', 'stdio://'], {
+  constructor(executable: string, cwd: string, spawnAs?: CliSpawn) {
+    const child = (spawnAs ?? spawn)(executable, ['app-server', '--listen', 'stdio://'], {
       cwd,
       env: subscriptionEnvironment(),
       windowsHide: true,
-      stdio: 'pipe',
+      stdio: ['pipe', 'pipe', 'pipe'],
     });
+    if (!child.stdin || !child.stdout || !child.stderr) throw new Error('Account metadata requires piped stdio.');
+    this.child = child as typeof this.child;
     this.child.stderr.resume();
     this.child.on('error', () => this.stop());
     this.child.on('exit', () => this.stop());
@@ -256,6 +264,84 @@ class CodexMetadata {
   }
 }
 export class Subscriptions {
+  private isolated?: { spawn: CliSpawn; cwd: string };
+  private isolatedFresh = new Map<Provider, { identity: string; at: number }>();
+  setIsolation(spawnAs?: CliSpawn, cwd?: string): void {
+    this.codex?.stop();
+    this.codex = undefined;
+    this.versions.clear();
+    this.isolatedFresh.clear();
+    this.isolated = spawnAs && cwd ? { spawn: spawnAs, cwd } : undefined;
+    if (this.isolated) mkdirSync(cwd!, { recursive: true });
+  }
+  isolatedAccountVerified(context: SubmitContext): boolean {
+    const provider = context.localSession?.provider;
+    const frozen = context.assignment.frozen;
+    const current = provider && this.isolatedFresh.get(provider);
+    return !!(
+      this.isolated &&
+      provider &&
+      frozen &&
+      current &&
+      Date.now() - current.at < 60_000 &&
+      current.identity === frozen.accountIdentity &&
+      frozen.credentialContext === this.credentialContext(provider)
+    );
+  }
+  private credentialContext(provider: Provider): string {
+    return (
+      (provider === 'openai' ? 'codex-cli' : provider === 'devin' ? 'devin-cli' : 'claude-code-cli') +
+      (this.isolated ? '@qro-agent' : '')
+    );
+  }
+  private async runOfficial(
+    provider: Provider,
+    args: string[],
+    timeout = 30_000,
+  ): Promise<{ stdout: string; failed: boolean }> {
+    if (!this.isolated)
+      return new Promise((resolve, reject) =>
+        execFile(
+          this.executable(provider),
+          args,
+          { cwd: this.root, env: subscriptionEnvironment(), windowsHide: true, timeout, maxBuffer: 1024 * 1024 },
+          (error, stdout) =>
+            error && !stdout
+              ? reject(new Error(`${provider} status unavailable from the official tool.`))
+              : resolve({ stdout: String(stdout), failed: !!error }),
+        ),
+      );
+    return new Promise((resolve, reject) => {
+      const child = this.isolated!.spawn(this.executable(provider), args, {
+        cwd: this.isolated!.cwd,
+        env: subscriptionEnvironment(),
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      let stdout = '',
+        finished = false;
+      const timer = setTimeout(() => {
+        child.kill();
+        finish(new Error('Agent-account check timed out.'));
+      }, timeout);
+      const finish = (error?: Error, code?: number | null) => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timer);
+        error ? reject(error) : resolve({ stdout, failed: code !== 0 });
+      };
+      child.stdout?.on('data', chunk => {
+        stdout += String(chunk);
+        if (Buffer.byteLength(stdout) > 1024 * 1024) {
+          child.kill();
+          finish(new Error('Agent-account response exceeds the bound.'));
+        }
+      });
+      child.stderr?.resume();
+      child.on('error', error => finish(error));
+      child.on('exit', code => finish(undefined, code));
+    });
+  }
   private paths: Partial<Record<Provider, string>> = {};
   private versions = new Map<string, string>();
   private codex?: CodexMetadata;
@@ -365,7 +451,7 @@ export class Subscriptions {
     return (this.codex ??= this.spawnCodex());
   }
   private spawnCodex() {
-    return new CodexMetadata(this.executable('openai'), this.root);
+    return new CodexMetadata(this.executable('openai'), this.isolated?.cwd ?? this.root, this.isolated?.spawn);
   }
   /** The durable OpenAI sign-in record; its mtime is evidence the in-process answer may be stale. */
   private authFile() {
@@ -458,7 +544,7 @@ export class Subscriptions {
     if (provider === 'openai') {
       try {
         let result = await this.openAiConnection(this.client());
-        if (!result.connected && !this.loginId && this.codex?.spawnedAt) {
+        if (!this.isolated && !result.connected && !this.loginId && this.codex?.spawnedAt) {
           // A long-lived app-server can keep serving the account snapshot it had at spawn. If the
           // durable auth file changed after this process started, its answer is provably suspect —
           // re-read once on a fresh process. Never while this process owns a live login listener:
@@ -480,27 +566,7 @@ export class Subscriptions {
         throw error;
       }
     } else if (provider === 'devin') {
-      const run = (args: string[]) =>
-        new Promise<{ stdout: string; failed: boolean }>((resolve, reject) =>
-          execFile(
-            this.executable('devin'),
-            args,
-            {
-              cwd: this.root,
-              env: subscriptionEnvironment(),
-              windowsHide: true,
-              timeout: 30000,
-              maxBuffer: 1024 * 1024,
-            },
-            (error, stdout) => {
-              if (error && !stdout) {
-                reject(new Error('Devin CLI unavailable. Update the official tool and retry.'));
-                return;
-              }
-              resolve({ stdout, failed: Boolean(error) });
-            },
-          ),
-        );
+      const run = (args: string[]) => this.runOfficial('devin', args);
       let status = await run(['auth', 'status']),
         raw = status.stdout;
       // The Email: line rides on a GetUserStatus fetch that can fail while sign-in itself is fine —
@@ -529,20 +595,7 @@ export class Subscriptions {
         connection.note =
           'Devin CLI sign-in verified. Model entitlement has not been tested. Local sessions only; no usage windows are tracked.';
     } else {
-      const raw = await new Promise<string>((resolve, reject) =>
-        execFile(
-          this.executable('claude'),
-          ['auth', 'status'],
-          { cwd: this.root, env: subscriptionEnvironment(), windowsHide: true, timeout: 30000, maxBuffer: 1024 * 1024 },
-          (error, stdout) => {
-            if (error && !stdout) {
-              reject(new Error('Claude Code status unavailable. Update the official tool and retry.'));
-              return;
-            }
-            resolve(stdout);
-          },
-        ),
-      );
+      const raw = (await this.runOfficial('claude', ['auth', 'status'])).stdout;
       try {
         connection.account = claudeIdentity(JSON.parse(raw));
         connection.connected = true;
@@ -567,14 +620,8 @@ export class Subscriptions {
     const executable = this.executable(provider);
     const cached = this.versions.get(executable);
     if (cached) return cached;
-    const raw = await new Promise<string>(resolve =>
-      execFile(
-        executable,
-        ['--version'],
-        { cwd: this.root, env: subscriptionEnvironment(), windowsHide: true, timeout: 20000, maxBuffer: 64 * 1024 },
-        (error, stdout) => resolve(error && !stdout ? '' : String(stdout)),
-      ),
-    );
+    const raw = (await this.runOfficial(provider, ['--version'], 20_000).catch(() => ({ stdout: '', failed: true })))
+      .stdout;
     const value = raw.split('\n')[0]?.trim().slice(0, 120) || 'unknown';
     this.versions.set(executable, value);
     return value;
@@ -587,7 +634,7 @@ export class Subscriptions {
   async observe(provider: Provider): Promise<{ connection: Connection; observation: AccountObservation }> {
     // API-key mode: a saved local key is the auth mode itself. The office reports the configured
     // credential honestly — never SIGNED_IN, since nothing verified it — and spawns no provider CLI.
-    if (this.apiKeys?.providerKeyState(provider).saved) {
+    if (!this.isolated && this.apiKeys?.providerKeyState(provider).saved) {
       const at = new Date().toISOString();
       const note = 'API key saved locally (encrypted with Windows DPAPI). The provider was not contacted.';
       const connection: Connection = {
@@ -799,12 +846,17 @@ export class Subscriptions {
             accountSource,
           ),
         );
+    if (this.isolated) {
+      if (connection.connected && connection.account)
+        this.isolatedFresh.set(provider, { identity: connection.account, at: Date.now() });
+      else this.isolatedFresh.delete(provider);
+    }
     return {
       connection,
       observation: {
         provider,
         identity: connection.account,
-        credentialContext: provider === 'openai' ? 'codex-cli' : provider === 'devin' ? 'devin-cli' : 'claude-code-cli',
+        credentialContext: this.credentialContext(provider),
         state: connection.connected ? 'SIGNED_IN' : 'SIGNED_OUT',
         allowance: connection.windows,
         note: connection.note,
@@ -848,6 +900,7 @@ export class Subscriptions {
    * such record exists — the caller keeps its refusal.
    */
   private recordedIdentity(provider: Provider, localScope: boolean): string {
+    if (this.isolated) return ''; // Office-user observations cannot fill an isolated identity gap.
     const recorded = this.recordedAccount?.(provider);
     if (!recorded?.identity) return '';
     return Date.now() - Date.parse(recorded.lastCheckedAt) <= (localScope ? LOCAL_ACCOUNT_STALE_MS : ACCOUNT_STALE_MS)
@@ -914,6 +967,8 @@ export class Subscriptions {
   private async runLogin(provider: Provider, generation: number): Promise<Connection> {
     let connection = await this.status(provider);
     if (!connection.connected) {
+      if (this.isolated)
+        throw new Error('Sign in through Settings → Agent isolation, then check the agent subscription here.');
       if (provider === 'openai') {
         const result = await this.client().request('account/login/start', { type: 'chatgpt' });
         this.loginId = result.loginId;

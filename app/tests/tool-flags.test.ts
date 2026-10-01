@@ -29,10 +29,11 @@ const CLAUDE_BASE = [
   '-p',
   PROMPT,
   '--output-format',
-  'json',
+  'stream-json',
   '--dangerously-skip-permissions',
   '--model',
   'fixture-model',
+  '--verbose',
 ];
 const CLAUDE_ISOLATION = [...CLAUDE_ISOLATION_FLAGS];
 const CLAUDE_DEFAULT = ['--tools', CLAUDE_DEFAULT_TOOLS.join(',')];
@@ -209,7 +210,8 @@ test('devin on a sandboxed OS carries filesystem via --sandbox and still cannot 
 
 test('a documented effort flag and a tool profile coexist on the same argv', () => {
   const result = flags('claude', { allowedTools: ['Read'] }, 'high');
-  assert.deepEqual(result.args.slice(7, 9), ['--effort', 'high']);
+  const effortIndex = result.args.indexOf('--effort');
+  assert.deepEqual(result.args.slice(effortIndex, effortIndex + 2), ['--effort', 'high']);
   assert.deepEqual(result.args.slice(-2), ['--tools', 'Read']);
   const unmapped = flags('claude', { allowedTools: ['Read'] }, 'minimal');
   assert.equal(unmapped.unmappedEffort, 'minimal', 'an undocumented effort is still recorded alongside the profile');
@@ -427,10 +429,11 @@ test('an unprofiled binding keeps the baseline argv and declares no tool restric
     '-p',
     prompt,
     '--output-format',
-    'json',
+    'stream-json',
     '--dangerously-skip-permissions',
     '--model',
     'fixture-model',
+    '--verbose',
     ...CLAUDE_ISOLATION,
     ...CLAUDE_DEFAULT,
   ]);
