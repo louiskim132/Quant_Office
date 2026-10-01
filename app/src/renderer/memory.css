@@ -154,13 +154,15 @@
   align-items: center;
   gap: 4px;
 }
-.mem-legend-item svg {
+/* Two classes deep so the .memory-graph svg width:100% rule (which ties this selector on
+   specificity but is declared later) cannot inflate legend marks inside the graph area. */
+.mem-legend .mem-legend-item svg {
   flex: 0 0 auto;
   width: 26px;
   height: 10px;
   overflow: visible;
 }
-.mem-legend-item svg.legend-mark {
+.mem-legend .mem-legend-item svg.legend-mark {
   width: 12px;
   height: 12px;
 }
