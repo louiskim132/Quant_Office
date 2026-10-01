@@ -1381,6 +1381,30 @@ function register() {
     return exec?.presence() ?? [];
   });
   handle('office:preview', value => artifacts.preview(id.parse(value)));
+  // Bounded content search over one project's stored text artifacts; the result carries the
+  // scanned/skipped/truncated counts so the window can state exactly what was searched.
+  handle('office:artifact-search', async value => {
+    const input = z
+      .object({ projectId: id, query: z.string().min(1).max(200) })
+      .strict()
+      .parse(value);
+    return artifacts.searchContent(input.projectId, input.query);
+  });
+  // The taskbar progress the renderer reports from recorded job counts: -1 clears the bar,
+  // [0,1] shows a fraction, >1 is indeterminate. A display signal only — never a stored record.
+  handle('office:progress', value => {
+    const progress = z.number().min(-1).max(2).parse(value);
+    if (!win || win.isDestroyed()) return;
+    win.setProgressBar(progress);
+  });
+  // One page of recorded local sessions for the usage history surface — office records only.
+  handle('office:local-sessions', value => {
+    const input = z
+      .object({ projectId: id.optional(), limit: pageLimit, offset: z.number().int().min(0).max(100000).optional() })
+      .strict()
+      .parse(value);
+    return store.localSessionFeed(input);
+  });
   handle('office:import', async value => {
     const input = importSchema.parse(value);
     const state = store.snapshot({ history: false });

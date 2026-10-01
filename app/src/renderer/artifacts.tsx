@@ -60,6 +60,34 @@ export function artifactMatches(row: ArtifactExplorerRow, query: string): boolea
   return !q || artifactSearchText(row).toLowerCase().includes(q);
 }
 
+/** Byte-content search goes through the office:artifact-search seam — a bounded main-process scan. */
+export interface ArtifactContentResult {
+  matches: { artifactId: string; name: string; line: number; snippet: string }[];
+  scanned: number;
+  skippedBinary: number;
+  truncated: number;
+}
+export type ContentSearch =
+  | { status: 'idle' }
+  | { status: 'short' }
+  | { status: 'searching' }
+  | { status: 'done'; result: ArtifactContentResult }
+  | { status: 'error'; message: string };
+
+/** Below this length a query is rejected before the seam is ever called. */
+export const MIN_CONTENT_QUERY = 2;
+export const contentQueryReady = (query: string) => query.trim().length >= MIN_CONTENT_QUERY;
+
+/**
+ * The honesty contract line — every count comes verbatim from the returned result, so the sentence
+ * always says exactly what was searched, skipped and cut off; it is never hard-coded.
+ */
+export function contentSearchBoundary(
+  r: Pick<ArtifactContentResult, 'scanned' | 'skippedBinary' | 'truncated'>,
+): string {
+  return `Searched ${plural(r.scanned, 'text artifact')} · ${r.skippedBinary} binary skipped · ${r.truncated} truncated at 1 MB`;
+}
+
 /**
  * The group heading for one row under `by` — every name comes from a recorded field. Imported
  * records carry no origin beyond their kind, so 'source' groups them as user imports and outputs
@@ -122,12 +150,17 @@ export function ArtifactsPage({
   const [selected, setSelected] = useState(''),
     [preview, setLocalPreview] = useState<FilePreview | null>(null),
     [loading, setLoading] = useState(false);
+  const [contentQuery, setContentQuery] = useState(''),
+    [content, setContent] = useState<ContentSearch>({ status: 'idle' });
   const ticket = useRef(0);
+  const searchTicket = useRef(0);
   useEffect(() => {
     ticket.current++;
+    searchTicket.current++;
     setSelected('');
     setLocalPreview(null);
     setLoading(false);
+    setContent({ status: 'idle' });
   }, [projectId, experiment?.id]);
   useEffect(
     () => () => {
@@ -209,6 +242,27 @@ export function ArtifactsPage({
       if (current === ticket.current) setLoading(false);
     }
   }
+  async function runContentSearch() {
+    const query = contentQuery.trim();
+    if (!contentQueryReady(query)) {
+      setContent({ status: 'short' });
+      return;
+    }
+    const current = ++searchTicket.current;
+    setContent({ status: 'searching' });
+    try {
+      const result = await window.office.artifactSearch({ projectId, query });
+      if (current === searchTicket.current) setContent({ status: 'done', result });
+    } catch (e) {
+      if (current === searchTicket.current)
+        setContent({ status: 'error', message: e instanceof Error ? e.message : String(e) });
+    }
+  }
+  /** A content match selects the artifact exactly how its list row does — same preview path. */
+  function selectMatch(artifactId: string) {
+    const row = rows.find(r => r.key === artifactId);
+    if (row) void choose(row);
+  }
   return (
     <section className="artifact-explorer">
       <div className="section-toolbar artifact-toolbar">
@@ -256,7 +310,7 @@ export function ArtifactsPage({
       <div className="explorer-filters">
         <label
           className="search-field"
-          title="Searches the listed records' names, paths, kinds, hashes, project/experiment labels and timestamps — never file contents"
+          title="Searches the listed records' names, paths, kinds, hashes, project/experiment labels and timestamps — 'Search contents' below covers file bytes"
         >
           <Search size={15} />
           <input
@@ -292,6 +346,63 @@ export function ArtifactsPage({
         <Checkbox checked={showOld} onChange={setShowOld}>
           Include superseded attempts
         </Checkbox>
+      </div>
+      <div className="content-search">
+        <div className="content-search-row">
+          <label
+            className="search-field"
+            title="Searches the bytes of this project's imported text artifacts — binary files are skipped"
+          >
+            <Search size={15} />
+            <input
+              aria-label="Search artifact contents"
+              placeholder={projectId ? 'Search artifact contents' : 'Select a project to search contents'}
+              disabled={!projectId}
+              value={contentQuery}
+              onChange={e => setContentQuery(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') void runContentSearch();
+              }}
+            />
+          </label>
+          <button
+            className="secondary"
+            disabled={!projectId || content.status === 'searching'}
+            onClick={() => void runContentSearch()}
+          >
+            Search contents
+          </button>
+          {!projectId && <span className="muted">Select a project to search file contents.</span>}
+        </div>
+        {content.status === 'searching' && <p className="muted">Searching stored text artifacts…</p>}
+        {content.status === 'short' && (
+          <p className="muted">Type at least {MIN_CONTENT_QUERY} characters to search contents.</p>
+        )}
+        {content.status === 'error' && <p className="blocker">Content search failed: {content.message}</p>}
+        {content.status === 'done' && (
+          <section className="content-matches" aria-label="Content matches">
+            <p className="muted content-boundary">{contentSearchBoundary(content.result)}</p>
+            {content.result.matches.length ? (
+              <ol className="content-match-list">
+                {content.result.matches.map((m, i) => (
+                  <li key={`${m.artifactId}:${m.line}:${i}`}>
+                    <button
+                      className="content-match"
+                      title="Select this artifact"
+                      onClick={() => selectMatch(m.artifactId)}
+                    >
+                      <strong>{m.name}</strong>
+                      <span className="muted">line {m.line}</span>
+                      <code className="snippet">{m.snippet}</code>
+                    </button>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p className="muted">No matches in the searched artifacts.</p>
+            )}
+          </section>
+        )}
       </div>
       {!rows.length ? (
         <Empty

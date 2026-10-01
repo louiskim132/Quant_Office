@@ -1337,6 +1337,20 @@ export interface OfficeAPI {
   /** The user's desktop-notification preference: on, an OS notification fires only when the
    *  needs-you count grows while the window is unfocused. A local signal, never provider-reported. */
   setDesktopNotifications(enabled: boolean): Promise<void>;
+  /** Taskbar progress derived from recorded job counts: -1 clears, [0,1] a fraction, >1 indeterminate. */
+  setProgress(progress: number): Promise<void>;
+  /** Bounded content search over a project's stored text artifacts; counts say what was searched. */
+  artifactSearch(input: { projectId: string; query: string }): Promise<{
+    matches: { artifactId: string; name: string; line: number; snippet: string }[];
+    scanned: number;
+    skippedBinary: number;
+    truncated: number;
+  }>;
+  /** One page of recorded local sessions (all projects when projectId is absent) — office records. */
+  localSessions(input?: { projectId?: string; limit?: number; offset?: number }): Promise<{
+    entries: import('./local-session').LocalSessionRecord[];
+    total: number;
+  }>;
   /** The office's own view of the agent processes it spawned; in memory only, empty when none run. */
   livePresence(): Promise<import('./activity').LivePresence[]>;
   onPresence(callback: (presence: import('./activity').LivePresence[]) => void): () => void;

@@ -229,6 +229,7 @@ export function OfficeScene({
         <div className="office-main">
           <section className="floor-zone" data-zone="director">
             <h3 className="zone-tag">DIRECTOR</h3>
+            <i className="prop-rug" aria-hidden="true" />
             <div className="workstations">
               {zones.directors.length ? (
                 zones.directors.map(a => station(a, seats.indexOf(a)))
@@ -259,6 +260,13 @@ export function OfficeScene({
               )}
             </div>
           </section>
+          {/* Ambient furniture along the front edge — set dressing only, never interactive. */}
+          <div className="floor-props" aria-hidden="true">
+            <i className="prop-rack" />
+            <i className="prop-board" />
+            <i className="prop-plant" />
+            <i className="prop-lamp" />
+          </div>
         </div>
         <aside className={`meeting-wing${busyRooms.length ? '' : ' quiet'}`}>
           {busyRooms.map(({ id, i }) => (

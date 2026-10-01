@@ -3,6 +3,7 @@ import './components.css';
 import { Check, Search, X } from 'lucide-react';
 import { STATUS, type StatusKey } from './status';
 import { avatarLook } from './avatar';
+import type { JobEvidence } from '../shared/types';
 
 export const label = (s: string) => s.replaceAll('_', ' ').toLowerCase();
 /**
@@ -86,6 +87,27 @@ export function Checkbox({
       </span>
       <span className="check-label">{children}</span>
     </label>
+  );
+}
+
+/** Who reported a record — a chip that names the evidence level and never upgrades it. */
+const PROV_LABEL: Record<JobEvidence, { label: string; title: string }> = {
+  OFFICE_LOCAL: { label: 'Office record', title: 'Stored or observed by the office itself.' },
+  PROVIDER_REPORTED: {
+    label: 'Provider reported',
+    title: 'Reported by the provider — the office records it but does not attest it.',
+  },
+  USER_REPORTED: {
+    label: 'User reported',
+    title: 'Imported or entered by a user — recorded as supplied, not verified.',
+  },
+};
+export function ProvChip({ evidence }: { evidence: JobEvidence }) {
+  const spec = PROV_LABEL[evidence];
+  return (
+    <small className="prov-chip" data-evidence={evidence.toLowerCase().replace('_', '-')} title={spec.title}>
+      {spec.label}
+    </small>
   );
 }
 
