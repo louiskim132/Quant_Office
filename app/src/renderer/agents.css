@@ -382,3 +382,23 @@
   color: var(--text);
   border-color: var(--accent);
 }
+
+/* Session history: office-recorded rows under the provider usage cards. The wrap scrolls inside
+   its border so a long provider session id never pushes the page wider. */
+.session-history .table-wrap {
+  margin-top: 12px;
+}
+.session-history td {
+  vertical-align: middle;
+}
+.session-hash {
+  font-size: 9px;
+  color: var(--subtle);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+.session-history .prov-chip {
+  margin: 0 0 0 6px;
+}
