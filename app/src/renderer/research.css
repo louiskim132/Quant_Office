@@ -244,12 +244,80 @@
   flex-basis: 100%;
   padding-left: 0;
 }
+/* List/Grid toggle beside the section title — a segmented control. */
+.request-view-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 6px;
+}
+.request-view-head h2 {
+  margin: 0;
+}
+.request-view {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.request-view button {
+  font-size: var(--fs-1);
+  padding: 4px 12px;
+  color: var(--muted);
+}
+.request-view button[aria-pressed='true'] {
+  color: var(--text);
+  background: var(--panel-2);
+}
+.request-view button + button {
+  border-left: 1px solid var(--border);
+}
+/* The cross-request lifecycle matrix: the name column flexes; the four recorded stages are even. */
+.request-grid-head,
+.request-grid-item > summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) repeat(4, minmax(66px, 112px));
+  gap: 10px;
+  align-items: center;
+}
+.request-grid-head {
+  padding: 0 16px 7px 28px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--subtle);
+}
+.request-grid-head span {
+  min-width: 0;
+}
+.request-grid-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.request-grid-cell.muted {
+  color: var(--subtle);
+}
+.request-grid-prov {
+  font-style: normal;
+  font-size: var(--fs-1);
+  color: var(--subtle);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 @media (max-width: 1040px) {
-  .request-head {
+  .request-head,
+  .request-grid-head {
     display: none;
   }
   .request-row-item > summary {
     grid-template-columns: minmax(0, 1fr) 140px 95px 80px;
+  }
+  .request-grid-item > summary {
+    grid-template-columns: minmax(0, 1fr) repeat(4, minmax(58px, 1fr));
   }
   .request-row-lead,
   .request-row-created {
