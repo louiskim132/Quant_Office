@@ -281,6 +281,28 @@
 .memory-tray .text-button {
   margin-left: auto;
 }
+.memory-bulk-ask {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  flex-basis: 100%;
+  margin-top: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-2);
+  font-size: 11px;
+  color: var(--text);
+}
+
+/* Guided supersede: the composer states the append-only contract before the fields. */
+.memory-supersede-note {
+  margin: 0 0 10px;
+  font-size: 11px;
+  color: var(--subtle);
+  line-height: 1.5;
+}
 .memory-graph svg {
   display: block;
   width: 100%;
