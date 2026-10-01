@@ -95,11 +95,11 @@ def analyze(root):
             peak = max(peak, equity)
             drawdown = max(drawdown, 1-equity/peak)
         stress.append({"multiple": multiple, "netReturn": equity-1, "maxDrawdown": drawdown, "periods": len(nets)})
-    data_spec = {"datasetId": "synthetic-100-20261001", "sourceBytes": source,
+    data_spec = {"datasetId": "bfd86a74-7e1e-4c58-b447-1559b9d2d101", "sourceBytes": source,
                  "timezone": "UTC", "timestampColumn": "timestamp", "targetColumn": "target",
-                 "firstTimestamp": times[0], "lastTimestamp": times[-1],
-                 "roles": {"row_id":"META", "timestamp":"TIMESTAMP", "asset":"ASSET", "feature":"FEATURE", "target":"TARGET"},
-                 "dtypes": {name:"string" if name in ["row_id","timestamp","asset"] else "float64" for name in rows[0]},
+                 "firstTimestamp": times[0].replace("+00:00", "Z"), "lastTimestamp": times[-1].replace("+00:00", "Z"),
+                 "roles": {"row_id":"ID", "timestamp":"TIMESTAMP", "asset":"GROUP", "feature":"FEATURE", "target":"TARGET"},
+                 "dtypes": {"row_id":"STRING", "timestamp":"TIMESTAMP", "asset":"CATEGORICAL", "feature":"FLOAT", "target":"FLOAT"},
                  "availability": {name:3600 if name=="target" else 0 for name in rows[0]},
                  "groups": {name:"synthetic" for name in rows[0]}}
     class Frame:

@@ -150,9 +150,12 @@ try {
     projectId: project.id,
     archived: true,
   });
-  await panel.getByText('Archived project · research is read-only.', { exact: true }).waitFor();
-  assert.equal(await panel.getByRole('button', { name: 'Prepare stage', exact: true }).count(), 0);
-  assert.equal(await panel.getByRole('button', { name: 'Export research evidence', exact: true }).count(), 1);
+  // Archiving clears the current-project selection. The old panel is unmounted; its archived
+  // banner is not a stable application-level target. Verify selection and the IPC boundary.
+  await page.waitForFunction(
+    () => (document.querySelector('[aria-label="Current project"]') as HTMLSelectElement)?.value === '',
+  );
+  assert.equal(await panel.count(), 0);
   await assert.rejects(
     page.evaluate(input => window.office.pipelineAction(input), {
       type: 'verifySpec' as const,
@@ -177,6 +180,7 @@ try {
           'probe refused',
           'S2 unappointed-reviewer blocker visible',
           'S2 prepare and advance refused through IPC without state changes',
+          'archiving clears selection and refuses research writes through IPC',
         ],
         workspace: data,
       },

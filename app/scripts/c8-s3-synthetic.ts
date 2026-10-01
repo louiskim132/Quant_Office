@@ -17,6 +17,7 @@ import type { PipelineRecord } from '../src/shared/pipeline';
 import type { Assignment, InputSnapshot } from '../src/shared/types';
 import { fixture, key, sha256 } from '../tests/fixtures/pipeline';
 import { DIAGNOSTIC_POLICY_PREFIX } from '../src/main/returned-analysis';
+import { datasetManifestSchema } from '../src/shared/research-contracts';
 
 /**
  * Explicitly authorized LOCAL_SIMULATION of the C8 S3 package workflow.
@@ -303,6 +304,7 @@ async function main() {
     writeFileSync(target, bytes);
   }
   const computation = runPython([analysisScript, 'analyze', runtime], runtime);
+  datasetManifestSchema.parse(JSON.parse(readFileSync(path.join(runtime, 'outputs/dataset-manifest.json'), 'utf8')));
   runPython(['launcher.v1.py'], runtime);
   const returnBytes = readFileSync(path.join(runtime, 'run-return.zip'));
   const members = unzipSync(returnBytes);
