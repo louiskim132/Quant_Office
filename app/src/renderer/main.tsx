@@ -1,10 +1,7 @@
 import { Onboarding } from './onboarding';
-import { OfficeChat } from './office-chat';
 import React, { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
-  ArrowDownToLine,
-  ArrowUpFromLine,
   Box,
   ChevronRight,
   Circle,
@@ -16,6 +13,7 @@ import {
   Network,
   Plus,
   RefreshCw,
+  Search,
   Settings2,
   ShieldCheck,
   Users,
@@ -26,7 +24,7 @@ import type { AppInfo, AppState, Command, WorkType, WorkMode } from '../shared/t
 import './tokens.css';
 import './styles.css';
 import { AgentRoster, ProfileEditor, ConnectionBinding } from './office';
-import { OfficeScene } from './office-scene';
+import { OfficeLive } from './office-stage';
 import { useOfficeActivity } from './use-activity';
 import { AgentDrawer } from './agent-drawer';
 import { AgentStrip, AttentionBell, ToastStack, recordedProgress } from './shell-widgets';
@@ -35,7 +33,8 @@ import type { AttentionItem } from '../shared/attention';
 import type { OfficeActivity } from '../shared/activity';
 import { activityStatus } from './status';
 import { WorkQueue } from './queue';
-import { AgentSetup, AgentIsolation, ProviderConnections, SubscriptionUsage } from './agents';
+import { AgentSetup, SubscriptionUsage } from './agents';
+import { SettingsPage, type SettingsSection } from './settings';
 import { ProjectsView } from './projects';
 import { HistoryView } from './history';
 import { ResearchView } from './research';
@@ -44,7 +43,7 @@ import { AgentDetails, ModelEffortEditor } from './activity';
 import { MemoryView } from './memory';
 import { ArtifactsPage } from './artifacts';
 import { ReviewsView } from './review';
-import { Empty, label, Checkbox } from './components';
+import { Empty, label } from './components';
 
 type Page =
   | 'Agents'
@@ -249,7 +248,7 @@ function App() {
   const [state, setState] = useState<AppState | null>(null);
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [page, setPage] = useState<Page>('Office');
-  const [settingsSection, setSettingsSection] = useState('all');
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>('connections');
   const [taskbarAttention, setTaskbarAttention] = useState(() => {
     try {
       return localStorage.getItem('qro.taskbar-attention') !== 'off';
@@ -643,11 +642,10 @@ function App() {
             <Plus size={15} />
             Add agent
           </button>
-          <div className="environment">
+          <div className="environment" title="Agents run on this computer through the official provider CLIs.">
             <span className="status-dot" />
             Local workspace
           </div>
-          <p>Agents run on this computer through the official provider CLIs.</p>
           <span className="version">DESKTOP · {info?.version || 'INITIAL RELEASE'}</span>
         </div>
       </aside>
@@ -696,7 +694,7 @@ function App() {
           </div>
           <div className="topbar-right">
             <button
-              className="text-button"
+              className="goto-button"
               aria-label="Go to a page, project, or request"
               title="Ctrl+K"
               onClick={() => {
@@ -705,7 +703,9 @@ function App() {
                 setPaletteIndex(0);
               }}
             >
+              <Search size={14} aria-hidden="true" />
               Go to…
+              <kbd aria-hidden="true">Ctrl K</kbd>
             </button>
             <AgentStrip agents={state.agents} activity={activity} onPick={setDrawerAgentId} />
             <AttentionBell
@@ -720,10 +720,6 @@ function App() {
                 }
               }}
             />
-            <span className="provider-status">
-              <span className="status-dot off" />
-              {agentCount} {agentCount === 1 ? 'agent' : 'agents'} registered
-            </span>
             <button className="spend-pill" onClick={() => setPage('Usage')}>
               <Wallet size={14} />
               Subscription usage
@@ -731,7 +727,7 @@ function App() {
           </div>
         </header>
         <main>
-          <div className="page-heading">
+          <div className={`page-heading${page === 'Office' || page === 'Settings' ? ' compact' : ''}`}>
             <div>
               <div className="eyebrow">{pageSection}</div>
               <h1>{page === 'Office' ? 'The office' : page}</h1>
@@ -788,16 +784,13 @@ function App() {
                 onProjects={() => setModal('project')}
                 onRequest={() => setModal('experiment')}
               />
-              <div className="office-live-layout">
-                <OfficeScene
-                  agents={state.agents}
-                  activity={activity}
-                  now={now}
-                  requests={state.requests}
-                  onAgent={setDrawerAgentId}
-                />
-                <OfficeChat state={state} />
-              </div>
+              <OfficeLive
+                state={state}
+                activity={activity}
+                now={now}
+                onAgent={setDrawerAgentId}
+                selectedId={drawerAgentId || null}
+              />
               <WorkQueue
                 watchedJobIds={watchedJobIds}
                 onState={acceptState}
@@ -891,206 +884,40 @@ function App() {
           {page === 'History' && <HistoryView state={state} projectId={projectId || null} label={label} date={date} />}
           {page === 'Usage' && <SubscriptionUsage state={state} />}
           {page === 'Settings' && (
-            <>
-              <nav className="settings-nav button-row" aria-label="Settings sections">
-                {[
-                  ['all', 'All settings'],
-                  ['connections', 'Connections'],
-                  ['isolation', 'Agents & isolation'],
-                  ['notifications', 'Notifications'],
-                  ['appearance', 'Appearance'],
-                  ['data', 'Data & recovery'],
-                  ['about', 'About'],
-                ].map(([id, title]) => (
-                  <button
-                    key={id}
-                    className="secondary"
-                    aria-pressed={settingsSection === id}
-                    onClick={() => setSettingsSection(id)}
-                  >
-                    {title}
-                  </button>
-                ))}
-              </nav>
-              {['all', 'connections'].includes(settingsSection) && <ProviderConnections state={state} />}
-              {['all', 'isolation'].includes(settingsSection) && <AgentIsolation />}
-
-              <div className="settings-card" hidden={!['all', 'notifications'].includes(settingsSection)}>
-                <h2>Notifications</h2>
-                <Checkbox
-                  checked={taskbarAttention}
-                  onChange={enabled => {
-                    setTaskbarAttention(enabled);
-                    try {
-                      localStorage.setItem('qro.taskbar-attention', enabled ? 'on' : 'off');
-                    } catch {}
-                  }}
-                >
-                  Taskbar badge and attention flash when the office needs you
-                </Checkbox>
-                <Checkbox
-                  checked={desktopPopups}
-                  onChange={enabled => {
-                    setDesktopPopups(enabled);
-                    try {
-                      localStorage.setItem('qro.desktop-notifications', enabled ? 'on' : 'off');
-                    } catch {}
-                  }}
-                >
-                  Desktop popups
-                </Checkbox>
-                <Checkbox
-                  checked={notifSound}
-                  onChange={enabled => {
-                    setNotifSound(enabled);
-                    try {
-                      localStorage.setItem('qro.notification-sound', enabled ? 'on' : 'off');
-                    } catch {}
-                  }}
-                >
-                  Notification sound
-                </Checkbox>
-                <p className="muted">
-                  Popups fire only when the needs-you count grows while the window is unfocused. They carry a count only
-                  — no request content leaves the app — and clicking one focuses the window. The sound is a short, quiet
-                  cue on the same edge. The in-app inbox stays available. The taskbar progress bar shows recorded work
-                  on the current project — progress = recorded terminal jobs ÷ recorded jobs — and clears when no jobs
-                  are recorded or all recorded jobs are terminal.
-                </p>
-              </div>
-              <div className="settings-card" hidden={!['all', 'appearance'].includes(settingsSection)}>
-                <h2>Appearance</h2>
-                <div className="setting-row">
-                  <div>
-                    <strong>Theme</strong>
-                    <p>Choose the appearance of your desktop workspace.</p>
-                  </div>
-                  <select
-                    aria-label="Theme"
-                    value={state.settings.theme}
-                    disabled={busy}
-                    onChange={e =>
-                      void command({
-                        type: 'settings.update',
-                        settings: { ...state.settings, theme: e.target.value as 'dark' | 'light' },
-                      })
-                    }
-                  >
-                    <option value="dark">Warm dark</option>
-                    <option value="light">Light</option>
-                  </select>
-                </div>
-                <div className="setting-row">
-                  <div>
-                    <strong>Reduce motion</strong>
-                    <p>Keep workspace transitions to a minimum.</p>
-                  </div>
-                  <button
-                    role="switch"
-                    aria-checked={state.settings.reducedMotion}
-                    aria-label="Reduce motion"
-                    className={`switch ${state.settings.reducedMotion ? 'on' : ''}`}
-                    disabled={busy}
-                    onClick={() =>
-                      void command({
-                        type: 'settings.update',
-                        settings: { ...state.settings, reducedMotion: !state.settings.reducedMotion },
-                      })
-                    }
-                  >
-                    <span />
-                  </button>
-                </div>
-              </div>
-              <div className="settings-card" hidden={!['all', 'data'].includes(settingsSection)}>
-                <h2>Data & recovery</h2>
-                <div className="setting-row">
-                  <div>
-                    <strong>Workspace backup</strong>
-                    <p>Save a portable copy of the local record and stored artifacts.</p>
-                  </div>
-                  <button
-                    className="secondary"
-                    disabled={busy}
-                    onClick={() => void files(() => window.office.backupWorkspace())}
-                  >
-                    <ArrowUpFromLine size={15} />
-                    Create backup
-                  </button>
-                </div>
-                <div className="setting-row">
-                  <div>
-                    <strong>Restore a backup</strong>
-                    <p>Choose a saved workspace to restore. Your current workspace is retained as a recovery copy.</p>
-                  </div>
-                  <button
-                    className="secondary"
-                    disabled={busy}
-                    onClick={() => void files(() => window.office.restoreWorkspace())}
-                  >
-                    <ArrowDownToLine size={15} />
-                    Restore backup
-                  </button>
-                </div>
-                <div className="setting-row">
-                  <div>
-                    <strong>Legacy records</strong>
-                    <p>
-                      Give old task records a native request. The workspace is copied first and the migration is
-                      verified by replay; historical outcomes stay marked as never observed.
-                    </p>
-                  </div>
-                  <button
-                    className="secondary"
-                    disabled={busy}
-                    onClick={() => {
-                      void window.office
-                        .migrateLegacyRecords()
-                        .then(result => {
-                          acceptState(result.state);
-                          setNotice(
-                            result.migrated
-                              ? `Migrated ${result.migrated} legacy record${result.migrated === 1 ? '' : 's'} as drafts carrying an explicit ambiguity blocker.`
-                              : 'No legacy records needed migrating.',
-                          );
-                        })
-                        .catch(error => setNotice(error.message));
-                    }}
-                  >
-                    Migrate legacy records
-                  </button>
-                </div>
-                <div className="setting-row">
-                  <div>
-                    <strong>Data location</strong>
-                    <p className="path-text">{info?.dataDirectory || 'Unavailable'}</p>
-                  </div>
-                </div>
-              </div>
-              <div className="settings-card" hidden={!['all', 'about'].includes(settingsSection)}>
-                <h2>Execution boundaries</h2>
-                <div className="boundary-grid">
-                  <div>
-                    <span className="boundary-number">01</span>
-                    <strong>This desktop</strong>
-                    <p>Prompts, task routing, local records, and explicit file transfers.</p>
-                  </div>
-                  <div>
-                    <span className="boundary-number">02</span>
-                    <strong>Provider infrastructure</strong>
-                    <p>
-                      Agent sessions use the configured official client. Main experiments run manually in your Colab
-                      session.
-                    </p>
-                  </div>
-                  <div>
-                    <span className="boundary-number">03</span>
-                    <strong>Your Colab session</strong>
-                    <p>Manual execution by you. No agent access or integration.</p>
-                  </div>
-                </div>
-              </div>
-            </>
+            <SettingsPage
+              state={state}
+              info={info}
+              busy={busy}
+              command={command}
+              files={files}
+              onState={acceptState}
+              onNotice={setNotice}
+              section={settingsSection}
+              onSection={setSettingsSection}
+              notifications={{
+                taskbar: taskbarAttention,
+                popups: desktopPopups,
+                sound: notifSound,
+                setTaskbar: enabled => {
+                  setTaskbarAttention(enabled);
+                  try {
+                    localStorage.setItem('qro.taskbar-attention', enabled ? 'on' : 'off');
+                  } catch {}
+                },
+                setPopups: enabled => {
+                  setDesktopPopups(enabled);
+                  try {
+                    localStorage.setItem('qro.desktop-notifications', enabled ? 'on' : 'off');
+                  } catch {}
+                },
+                setSound: enabled => {
+                  setNotifSound(enabled);
+                  try {
+                    localStorage.setItem('qro.notification-sound', enabled ? 'on' : 'off');
+                  } catch {}
+                },
+              }}
+            />
           )}
           {page === 'Add Agent' && (
             <AgentSetup

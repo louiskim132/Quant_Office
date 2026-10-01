@@ -1,0 +1,493 @@
+/* The 3D office stage. Overlays are glass over the canvas; every colour is a token or a stage variable. */
+/* The floor is the page: full width, with the textual Now list beneath it. The chat opens over the
+   lower right of the stage (the CHAT button), so the floor never changes size when it does. */
+.office-live3d {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.office3d {
+  /* Wide enough to show the whole floor, never taller than the window can hold. */
+  aspect-ratio: 16 / 10;
+  max-height: min(84vh, 900px);
+  --glass: #17120fcc;
+  --glass-edge: #ffffff17;
+  --glass-text: #f3ece0;
+  --glass-muted: #b4a998;
+  --stage-a: #2d221b;
+  --stage-b: #1b1511;
+  --stage-c: #110d0b;
+  position: relative;
+  width: 100%;
+  min-height: 460px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  overflow: hidden;
+  isolation: isolate;
+  container-type: inline-size;
+  background: radial-gradient(120% 95% at 50% 38%, var(--stage-a) 0%, var(--stage-b) 56%, var(--stage-c) 100%);
+  color: var(--glass-text);
+}
+.office3d:fullscreen {
+  aspect-ratio: auto;
+  max-height: none;
+  height: 100vh;
+  border-radius: 0;
+  border: 0;
+}
+:root[data-theme='light'] .office3d {
+  --glass: #fbf6ecd9;
+  --glass-edge: #3a2a1a22;
+  --glass-text: #2b2218;
+  --glass-muted: #6f6150;
+  --stage-a: #fbf4e8;
+  --stage-b: #efe4d1;
+  --stage-c: #e2d4bc;
+}
+.office3d-host {
+  position: absolute;
+  inset: 0;
+  outline-offset: -3px;
+  touch-action: none;
+}
+.office3d-host:focus-visible {
+  outline: 2px solid var(--accent);
+}
+.office3d-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.office3d-labels {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* Name tags: a dark plate with the person's shirt colour on its edge and a live status dot. */
+.office3d .person-tag {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  background: none;
+  pointer-events: auto;
+  transform: translate3d(-9999px, -9999px, 0);
+  will-change: transform;
+  --dot: var(--st-idle);
+}
+.office3d .person-tag[data-status='working'],
+.office3d .stage-chip[data-status='working'] {
+  --dot: var(--st-working);
+}
+.office3d [data-status='stalled'] {
+  --dot: var(--st-stalled);
+}
+.office3d [data-status='needs'] {
+  --dot: var(--st-needs);
+}
+.office3d [data-status='failed'] {
+  --dot: var(--st-failed);
+}
+.office3d [data-status='done'] {
+  --dot: var(--st-done);
+}
+.office3d [data-status='unknown'] {
+  --dot: var(--st-unknown);
+}
+.office3d [data-status='meeting'] {
+  --dot: var(--st-meeting);
+}
+.office3d .tag-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 9px 4px 8px;
+  border-radius: 6px;
+  border-left: 3px solid var(--shirt, var(--accent));
+  background: #120e0cdb;
+  color: #f7f0e5;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  box-shadow: 0 3px 10px #0007;
+  transition: background var(--dur-1) var(--ease);
+}
+.office3d .tag-name {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.office3d .tag-dot {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--dot, var(--st-idle));
+  box-shadow: 0 0 0 2px #0005;
+}
+.office3d .person-tag[data-status='working'] .tag-dot {
+  box-shadow:
+    0 0 0 2px #0005,
+    0 0 8px 1px var(--dot);
+}
+.office3d .person-tag:hover .tag-row,
+.office3d .person-tag[data-hovered='true'] .tag-row {
+  background: #000;
+}
+.office3d .person-tag[data-selected='true'] .tag-row {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.office3d .person-tag:focus-visible .tag-row {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.office3d .tag-bubble {
+  max-width: 190px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #120e0ccc;
+  color: #e7ddcc;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.office3d .tag-bubble[data-status='working'] {
+  color: var(--st-working);
+}
+.office3d .tag-bubble[data-status='stalled'],
+.office3d .tag-bubble[data-status='needs'] {
+  color: var(--st-stalled);
+}
+.office3d .tag-bubble[data-status='failed'] {
+  color: var(--st-failed);
+}
+.office3d .tag-bubble[data-status='done'] {
+  color: var(--st-done);
+}
+/* Names off, or a crowded spot: the tag shrinks to its status dot. The person stays clickable and
+   named for assistive tech, and the full tag returns on hover. */
+.office3d[data-names='off'] .tag-name,
+.office3d[data-names='off'] .tag-bubble,
+.office3d .person-tag[data-collapsed='true'] .tag-name,
+.office3d .person-tag[data-collapsed='true'] .tag-bubble {
+  display: none;
+}
+.office3d[data-names='off'] .tag-row,
+.office3d .person-tag[data-collapsed='true'] .tag-row {
+  padding: 5px;
+  border-left-width: 0;
+  border-radius: 999px;
+}
+.office3d .person-tag[data-hovered='true'] .tag-name,
+.office3d .person-tag:hover .tag-name,
+.office3d .person-tag:focus-visible .tag-name {
+  display: inline;
+}
+.office3d .person-tag[data-hovered='true'] .tag-row,
+.office3d .person-tag:hover .tag-row,
+.office3d .person-tag:focus-visible .tag-row {
+  padding: 5px 10px 5px 9px;
+  border-radius: 6px;
+  border-left-width: 3px;
+}
+
+.office3d .tag-card {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  width: max-content;
+  max-width: 250px;
+  padding: 10px 12px;
+  border: 1px solid #ffffff1f;
+  border-radius: 10px;
+  background: #17120ff2;
+  color: #f1eadc;
+  font-size: 12px;
+  text-align: left;
+  white-space: normal;
+  box-shadow: var(--shadow-pop);
+}
+.office3d .person-tag[data-hovered='true'] .tag-card,
+.office3d .person-tag:hover .tag-card,
+.office3d .person-tag:focus-visible .tag-card {
+  display: flex;
+}
+.office3d .tag-card strong {
+  font-size: 13px;
+}
+.office3d .tag-role,
+.office3d .tag-evidence {
+  color: #b9ad9a;
+}
+
+/* Overlays. */
+.office3d .stage-title,
+.office3d .stage-chips,
+.office3d .stage-banner,
+.office3d .stage-tools,
+.office3d .stage-status,
+.office3d .stage-chat,
+.office3d .stage-empty {
+  position: absolute;
+  z-index: 4;
+}
+.office3d .stage-title {
+  top: 14px;
+  left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  pointer-events: none;
+}
+.office3d .stage-title h3 {
+  margin: 0;
+  font:
+    600 12px/1 ui-monospace,
+    'Cascadia Mono',
+    Consolas,
+    monospace;
+  letter-spacing: 0.34em;
+  color: var(--accent);
+}
+.office3d .stage-title span {
+  font-size: 12px;
+  color: var(--glass-muted);
+}
+.office3d .stage-chips {
+  top: 12px;
+  left: 250px;
+  right: 66px;
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding: 2px;
+}
+.office3d .stage-chips::-webkit-scrollbar {
+  display: none;
+}
+.office3d .stage-chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px 6px 8px;
+  border: 1px solid var(--glass-edge);
+  border-radius: 999px;
+  background: var(--glass);
+  color: var(--glass-text);
+  font-size: 12px;
+  font-weight: 600;
+  backdrop-filter: blur(6px);
+}
+.office3d .stage-chip:hover,
+.office3d .stage-chip[data-selected='true'] {
+  border-color: var(--accent);
+}
+.office3d .chip-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 5px;
+  background: var(--shirt);
+}
+.office3d .stage-banner {
+  top: 58px;
+  left: 18px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border: 1px solid var(--glass-edge);
+  border-radius: 999px;
+  background: var(--glass);
+  font-size: 12px;
+  color: var(--st-meeting);
+  backdrop-filter: blur(6px);
+}
+.office3d .stage-tools {
+  top: 12px;
+  right: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--glass-edge);
+  border-radius: 12px;
+  background: var(--glass);
+  backdrop-filter: blur(6px);
+}
+.office3d .stage-tools button {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  color: var(--glass-muted);
+}
+.office3d .stage-tools button:hover {
+  background: #ffffff14;
+  color: var(--glass-text);
+}
+.office3d .stage-tools button[aria-pressed='true'] {
+  color: var(--accent);
+  background: #ffffff10;
+}
+.office3d .stage-status {
+  left: 14px;
+  bottom: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100% - 150px);
+  padding: 7px 14px;
+  border: 1px solid var(--glass-edge);
+  border-radius: 999px;
+  background: var(--glass);
+  font:
+    500 12px/1.2 ui-monospace,
+    'Cascadia Mono',
+    Consolas,
+    monospace;
+  color: var(--glass-text);
+  backdrop-filter: blur(6px);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.office3d .stage-status small {
+  color: var(--glass-muted);
+  font: inherit;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.office3d .stage-pulse {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--st-idle);
+}
+.office3d .stage-pulse[data-live='on'] {
+  background: var(--st-working);
+  box-shadow: 0 0 8px 1px var(--st-working);
+}
+@container (max-width: 820px) {
+  .office3d .stage-status small {
+    display: none;
+  }
+  .office3d .stage-chips {
+    left: 18px;
+    top: 84px;
+    right: 66px;
+  }
+}
+.office3d .stage-chat {
+  right: 12px;
+  bottom: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  background: var(--glass);
+  color: var(--accent);
+  font:
+    600 12px/1 ui-monospace,
+    'Cascadia Mono',
+    Consolas,
+    monospace;
+  letter-spacing: 0.18em;
+  backdrop-filter: blur(6px);
+}
+.office3d .stage-chat[aria-pressed='true'],
+.office3d .stage-chat:hover {
+  background: var(--accent);
+  color: #1c150e;
+}
+.office3d .stage-empty {
+  left: 50%;
+  bottom: 62px;
+  transform: translateX(-50%);
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: var(--glass);
+  color: var(--glass-muted);
+  font-size: 12px;
+}
+
+/* Table tags: the request a meeting is about, over its table. */
+.office3d .table-tag {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 5px 10px;
+  border: 1px solid #93aef066;
+  border-radius: 8px;
+  background: #101a2ccc;
+  color: #cfdcf8;
+  font-size: 11px;
+  white-space: nowrap;
+  pointer-events: none;
+  transform: translate3d(-9999px, -9999px, 0);
+  will-change: transform;
+}
+.office3d .table-tag b {
+  font:
+    600 10px/1.4 ui-monospace,
+    Consolas,
+    monospace;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--st-meeting);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .office3d .tag-row {
+    transition: none;
+  }
+}
+
+/* The office chat as a panel over the stage. */
+.office3d .stage-chat-panel {
+  position: absolute;
+  z-index: 6;
+  top: 64px;
+  right: 12px;
+  bottom: 62px;
+  width: min(400px, calc(100% - 24px));
+  border-radius: 16px;
+  box-shadow: var(--shadow-pop);
+  overflow: hidden;
+  color: var(--text);
+}
+.office3d .stage-chat-panel .office-chat {
+  position: absolute;
+  inset: 0;
+  height: auto;
+  max-height: none;
+  min-height: 0;
+  border-radius: 16px;
+}
+.office3d[data-chat='open'] {
+  min-height: 620px;
+}

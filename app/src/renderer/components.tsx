@@ -67,6 +67,82 @@ export function SearchField({
   );
 }
 
+/** An on/off switch: a real button with role=switch, named for assistive tech. */
+export function Switch({
+  on,
+  onChange,
+  label: name,
+  disabled,
+}: {
+  on: boolean;
+  onChange: (next: boolean) => void;
+  label: string;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      aria-label={name}
+      className={`switch${on ? ' on' : ''}`}
+      disabled={disabled}
+      onClick={() => onChange(!on)}
+    >
+      <span />
+    </button>
+  );
+}
+
+/** A small set of exclusive choices as one segmented control (a radio group, keyboard-friendly). */
+export function Segmented<T extends string>({
+  label: name,
+  value,
+  options,
+  onChange,
+  disabled,
+}: {
+  label: string;
+  value: T;
+  options: readonly { value: T; label: string; hint?: string }[];
+  onChange: (next: T) => void;
+  disabled?: boolean;
+}) {
+  const move = (delta: number) => {
+    const i = options.findIndex(o => o.value === value);
+    onChange(options[(i + delta + options.length) % options.length].value);
+  };
+  return (
+    <div className="segmented" role="radiogroup" aria-label={name}>
+      {options.map(option => (
+        <button
+          key={option.value}
+          type="button"
+          role="radio"
+          aria-checked={value === option.value}
+          tabIndex={value === option.value ? 0 : -1}
+          disabled={disabled}
+          title={option.hint}
+          className={value === option.value ? 'on' : ''}
+          onClick={() => onChange(option.value)}
+          onKeyDown={e => {
+            if (e.key === 'ArrowRight' || e.key === 'ArrowDown') (e.preventDefault(), move(1));
+            else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') (e.preventDefault(), move(-1));
+          }}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** A status dot with a tone; always paired with words by the caller, never colour alone. */
+export type Tone = 'ok' | 'warn' | 'bad' | 'off' | 'busy';
+export function Dot({ tone }: { tone: Tone }) {
+  return <i className="dot" data-tone={tone} aria-hidden="true" />;
+}
+
 /** A real checkbox: the native input stays for keyboard and screen readers, the box is drawn beside it. */
 export function Checkbox({
   checked,

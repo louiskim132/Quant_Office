@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Network } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { LocateFixed, Network, Pause, PanelLeft, Play, RotateCcw, SlidersHorizontal, Tag, X } from 'lucide-react';
 import type {
   AppState,
   FindingEvidenceRef,
@@ -13,24 +13,22 @@ import { Empty, SearchField, label } from './components';
 import './memory.css';
 import { formatDateTime } from './format';
 import {
-  layoutMemory,
-  fitMemory,
-  memoryLabels,
   memoryDegrees,
-  memoryRadius,
-  memoryEdgeTrim,
   memoryInWindow,
+  memoryNeighborhood,
+  MEMORY_EDGE_LIMIT,
+  MEMORY_NODE_LIMIT,
   MEMORY_WINDOWS,
 } from './memory-layout';
+import { MemoryBrain } from './memory-brain';
+import { DEFAULT_FORCES } from './brain-sim';
+import { useBoolPref, usePref } from './prefs';
 
 const KINDS: FindingKind[] = ['OBSERVATION', 'HYPOTHESIS', 'RESULT', 'DEFECT', 'DECISION', 'NOTE'];
 const REL_KINDS: RelationshipKind[] = ['SUPPORTS', 'CONTRADICTS', 'RELATES', 'DUPLICATES', 'REFINES'];
-// v2 holds only user-dragged seats. The v1 key stored every computed position once any node was
-// dragged, which froze stale ellipse seats that new nodes then landed on; it is discarded on load.
+// v2 holds only user-dragged seats. Computed positions are never stored: the layout is derived.
 const posKey = (projectId: string) => `qro.memory.seats.v2.${projectId}`;
 const legacyPosKey = (projectId: string) => `qro.memory.pos.${projectId}`;
-const W = 820,
-  H = 540;
 
 /** Proposed relationships with at least one endpoint in the selection — the bulk-settle target set. */
 export function memorySettleTargets(
@@ -45,6 +43,69 @@ const stamp = (iso: string) => formatDateTime(iso);
 const authorLine = (a: MemoryAuthor) =>
   `${a.surface.toLowerCase().replaceAll('_', ' ')}${a.agentId ? ` · agent ${a.agentId.slice(0, 8)}` : ''}${a.receiptHash ? ` · receipt ${shortHash(a.receiptHash)}` : ''}`;
 
+/** A numeric preference stored as text. */
+function useNumPref(name: string, fallback: number): [number, (value: number) => void] {
+  const [raw, set] = usePref(name, String(fallback));
+  const value = Number(raw);
+  return [Number.isFinite(value) ? value : fallback, (next: number) => set(String(next))];
+}
+
+function Toggle({
+  on,
+  onChange,
+  children,
+}: {
+  on: boolean;
+  onChange: (next: boolean) => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="brain-row">
+      <span>{children}</span>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={on}
+        aria-label={typeof children === 'string' ? children : undefined}
+        className={`switch ${on ? 'on' : ''}`}
+        onClick={() => onChange(!on)}
+      >
+        <span />
+      </button>
+    </div>
+  );
+}
+function Slider({
+  name,
+  value,
+  min,
+  max,
+  step,
+  onChange,
+}: {
+  name: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  onChange: (next: number) => void;
+}) {
+  return (
+    <label className="brain-row brain-slider">
+      <span>{name}</span>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        aria-label={name}
+        onChange={e => onChange(Number(e.target.value))}
+      />
+    </label>
+  );
+}
+
 export function MemoryView({ state, projectId }: { state: AppState; projectId: string }) {
   const [graph, setGraph] = useState<MemoryGraph | null>(null);
   const [error, setError] = useState('');
@@ -53,13 +114,10 @@ export function MemoryView({ state, projectId }: { state: AppState; projectId: s
   const [query, setQuery] = useState('');
   const [hits, setHits] = useState<MemoryFinding[] | null>(null);
   const [selectedNode, setSelectedNode] = useState('');
-  const [hovered, setHovered] = useState('');
-  const [graphScale, setGraphScale] = useState(1);
+  const [selectedEdge, setSelectedEdge] = useState('');
   const [localOnly, setLocalOnly] = useState(false);
   const [listQuery, setListQuery] = useState('');
-  const [selectedEdge, setSelectedEdge] = useState('');
-  const [pos, setPos] = useState<Record<string, { x: number; y: number }>>({});
-  const [view, setView] = useState({ x: 0, y: 0, k: 1 });
+  const [pins, setPins] = useState<Record<string, { x: number; y: number }>>({});
   const [hiddenKinds, setHiddenKinds] = useState<Set<FindingKind>>(new Set());
   const [showRefuted, setShowRefuted] = useState(false);
   const [windowSel, setWindowSel] = useState('all');
@@ -75,14 +133,36 @@ export function MemoryView({ state, projectId }: { state: AppState; projectId: s
   const [cRequest, setCRequest] = useState('');
   const [cRefs, setCRefs] = useState<string[]>([]);
   const [cSupersedes, setCSupersedes] = useState('');
-  const svgRef = useRef<SVGSVGElement>(null);
-  const gRef = useRef<SVGGElement>(null);
-  const posRef = useRef<Record<string, { x: number; y: number }>>({});
-  const draggedRef = useRef<Set<string>>(new Set());
-  const composerRef = useRef<HTMLDetailsElement>(null);
-  const dragRef = useRef<{ kind: 'pan' | 'node' | 'edge'; id?: string; x: number; y: number; moved: boolean } | null>(
-    null,
+  const [fitSignal, setFitSignal] = useState(0);
+  const [resetSignal, setResetSignal] = useState(0);
+  const [focus, setFocus] = useState<{ id: string; n: number } | null>(null);
+  // Display preferences (per viewer): the Names switch, arrows, sizes, forces and open panels.
+  const [names, setNames] = useBoolPref('memory-names', true);
+  const [arrows, setArrows] = useBoolPref('memory-arrows', true);
+  const [orphans, setOrphans] = useBoolPref('memory-orphans', true);
+  const [animate, setAnimate] = useBoolPref('memory-animate', true);
+  const [panelOpen, setPanelOpen] = useBoolPref('memory-panel', false);
+  const [listOpen, setListOpen] = useBoolPref(
+    'memory-list',
+    typeof window !== 'undefined' && window.innerWidth >= 1700,
   );
+  const [nodeScale, setNodeScale] = useNumPref('memory-node-size', 1);
+  const [linkWidth, setLinkWidth] = useNumPref('memory-link-width', 1);
+  const [textFade, setTextFade] = useNumPref('memory-text-fade', 0.35);
+  const [localDepth, setLocalDepth] = useNumPref('memory-local-depth', 1);
+  const [center, setCenter] = useNumPref('memory-force-center', DEFAULT_FORCES.center);
+  const [repel, setRepel] = useNumPref('memory-force-repel', DEFAULT_FORCES.repel);
+  const [linkStrength, setLinkStrength] = useNumPref('memory-force-link', DEFAULT_FORCES.linkStrength);
+  const [linkDistance, setLinkDistance] = useNumPref('memory-force-distance', DEFAULT_FORCES.linkDistance);
+  const forces = useMemo(
+    () => ({ center, repel, linkStrength, linkDistance }),
+    [center, repel, linkStrength, linkDistance],
+  );
+  const composerRef = useRef<HTMLDetailsElement>(null);
+  const reducedMotion =
+    typeof document !== 'undefined' &&
+    (document.documentElement.dataset.motion === 'reduced' ||
+      (typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches));
   const findings = state.findings ?? [];
   const relationships = state.relationships ?? [];
   const projectFindings = findings.filter(item => item.projectId === projectId);
@@ -104,7 +184,7 @@ export function MemoryView({ state, projectId }: { state: AppState; projectId: s
 
   // Dragged seats persist per project in localStorage; embedders that forbid storage keep them
   // session-local — a guarded access never blocks the page.
-  const loadStored = () => {
+  useEffect(() => {
     try {
       window.localStorage.removeItem(legacyPosKey(projectId));
     } catch {
@@ -112,136 +192,23 @@ export function MemoryView({ state, projectId }: { state: AppState; projectId: s
     }
     try {
       const parsed = JSON.parse(window.localStorage.getItem(posKey(projectId)) ?? '{}');
-      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-        ? (parsed as Record<string, { x: number; y: number }>)
-        : {};
+      setPins(
+        parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+          ? (parsed as Record<string, { x: number; y: number }>)
+          : {},
+      );
     } catch {
-      return {};
+      setPins({});
     }
-  };
-  const savePos = () => {
-    const seats = Object.fromEntries(Object.entries(posRef.current).filter(([id]) => draggedRef.current.has(id)));
+  }, [projectId]);
+  const savePins = (next: Record<string, { x: number; y: number }>) => {
+    setPins(next);
     try {
-      window.localStorage.setItem(posKey(projectId), JSON.stringify(seats));
+      window.localStorage.setItem(posKey(projectId), JSON.stringify(next));
     } catch {
       /* positions stay session-local */
     }
   };
-  useEffect(() => {
-    draggedRef.current = new Set();
-  }, [projectId]);
-
-  useEffect(() => {
-    const stored = loadStored();
-    for (const id of Object.keys(stored)) draggedRef.current.add(id);
-    setPos(current => {
-      const pins = {
-        ...stored,
-        ...Object.fromEntries(Object.entries(current).filter(([id]) => draggedRef.current.has(id))),
-      };
-      const next = layoutMemory(graph?.nodes ?? [], graph?.edges ?? [], pins);
-      posRef.current = next;
-      setView(fitMemory(next));
-      return next;
-    });
-  }, [graph, projectId]);
-
-  const toGraph = (clientX: number, clientY: number) => {
-    const ctm = gRef.current?.getScreenCTM();
-    const p = ctm ? new DOMPoint(clientX, clientY).matrixTransform(ctm.inverse()) : { x: 0, y: 0 };
-    return { x: p.x, y: p.y };
-  };
-  const onPointerDown = (e: React.PointerEvent) => {
-    const target = e.target as Element;
-    const nodeEl = target.closest?.('[data-finding]');
-    const edgeEl = target.closest?.('[data-rel]');
-    dragRef.current = nodeEl
-      ? { kind: 'node', id: nodeEl.getAttribute('data-finding')!, x: e.clientX, y: e.clientY, moved: false }
-      : edgeEl
-        ? { kind: 'edge', id: edgeEl.getAttribute('data-rel')!, x: e.clientX, y: e.clientY, moved: false }
-        : { kind: 'pan', x: e.clientX, y: e.clientY, moved: false };
-    e.currentTarget.setPointerCapture(e.pointerId);
-  };
-  const onPointerMove = (e: React.PointerEvent) => {
-    const drag = dragRef.current;
-    if (!drag) return;
-    if (Math.abs(e.clientX - drag.x) + Math.abs(e.clientY - drag.y) > 2) drag.moved = true;
-    if (drag.kind === 'pan') {
-      const matrix = svgRef.current?.getScreenCTM();
-      if (matrix) {
-        const current = new DOMPoint(e.clientX, e.clientY).matrixTransform(matrix.inverse());
-        const previous = new DOMPoint(drag.x, drag.y).matrixTransform(matrix.inverse());
-        setView(v => ({ ...v, x: v.x + current.x - previous.x, y: v.y + current.y - previous.y }));
-      }
-    } else if (drag.kind === 'node' && drag.id && drag.moved) {
-      draggedRef.current.add(drag.id);
-      const p = toGraph(e.clientX, e.clientY);
-      setPos(current => {
-        const next = { ...current, [drag.id!]: p };
-        posRef.current = next;
-        return next;
-      });
-    }
-    drag.x = e.clientX;
-    drag.y = e.clientY;
-  };
-  const onPointerUp = (e: React.PointerEvent) => {
-    const drag = dragRef.current;
-    dragRef.current = null;
-    if (!drag) return;
-    if (drag.moved) {
-      if (drag.kind === 'node' && drag.id) savePos();
-      return;
-    }
-    if (drag.kind === 'node' && drag.id) {
-      if (e.ctrlKey || e.metaKey) {
-        const id = drag.id;
-        setCompareIds(current => {
-          const next = new Set(current);
-          if (next.has(id)) next.delete(id);
-          else next.add(id);
-          return next;
-        });
-      } else {
-        setSelectedNode(drag.id);
-        setSelectedEdge('');
-      }
-    } else if (drag.kind === 'edge' && drag.id) {
-      setSelectedEdge(drag.id);
-      setSelectedNode('');
-    } else {
-      setSelectedNode('');
-      setSelectedEdge('');
-    }
-  };
-  useEffect(() => {
-    const svg = svgRef.current;
-    if (!svg) return;
-    const resize = () => {
-      const box = svg.getBoundingClientRect();
-      setGraphScale(Math.max(0.01, Math.min(box.width / W, box.height / H)));
-    };
-    resize();
-    const observer = new ResizeObserver(resize);
-    observer.observe(svg);
-    return () => observer.disconnect();
-  }, [!!graph?.nodes.length]);
-  const onWheel = (e: WheelEvent) => {
-    e.preventDefault();
-    const matrix = svgRef.current?.getScreenCTM();
-    if (!matrix) return;
-    const pointer = new DOMPoint(e.clientX, e.clientY).matrixTransform(matrix.inverse());
-    setView(v => {
-      const k = Math.min(4, Math.max(0.25, v.k * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
-      return { k, x: pointer.x - ((pointer.x - v.x) * k) / v.k, y: pointer.y - ((pointer.y - v.y) * k) / v.k };
-    });
-  };
-
-  useEffect(() => {
-    const svg = svgRef.current;
-    svg?.addEventListener('wheel', onWheel, { passive: false });
-    return () => svg?.removeEventListener('wheel', onWheel);
-  }, [!!graph?.nodes.length]);
 
   async function run(action: () => Promise<unknown>, done: string) {
     setBusy(done);
@@ -338,8 +305,8 @@ export function MemoryView({ state, projectId }: { state: AppState; projectId: s
       });
     // Same for the window: focusing a finding outside it widens the display filter.
     if (!memoryInWindow([{ findingId: id }], i => findingCreated.get(i), windowSel).has(id)) setWindowSel('all');
-    const p = posRef.current[id];
-    if (p) setView(v => ({ k: v.k, x: W / 2 - p.x * v.k, y: H / 2 - p.y * v.k }));
+    setLocalOnly(false);
+    setFocus(f => ({ id, n: (f?.n ?? 0) + 1 }));
   };
   const post = () =>
     void run(async () => {
@@ -386,50 +353,59 @@ export function MemoryView({ state, projectId }: { state: AppState; projectId: s
     const art = state.artifacts.find(item => item.sha256 === ref.id);
     return `Artifact · ${art ? `${art.name} · ` : ''}${shortHash(ref.id)}`;
   };
-  const nodeKind = new Map((graph?.nodes ?? []).map(node => [node.findingId, node.kind]));
+
+  // ---- what the brain shows ---------------------------------------------------------------
+  const allEdges = graph?.edges ?? [];
   // Dot size reflects every recorded non-refuted link, even ones a filter currently hides.
-  const degrees = memoryDegrees(graph?.edges ?? []);
-  const neighbors = new Set([
-    selectedNode,
-    ...(graph?.edges ?? [])
-      .filter(e => e.status !== 'REFUTED' && (e.from === selectedNode || e.to === selectedNode))
-      .flatMap(e => [e.from, e.to]),
-  ]);
-  // Window + kind chips are display filters over loaded graph data — records never change.
+  const degrees = useMemo(() => memoryDegrees(allEdges), [allEdges]);
+  const kindCounts = useMemo(() => {
+    const counts: Partial<Record<FindingKind, number>> = {};
+    for (const n of graph?.nodes ?? []) counts[n.kind] = (counts[n.kind] ?? 0) + 1;
+    return counts;
+  }, [graph]);
+  const presentKinds = KINDS.filter(kind => (kindCounts[kind] ?? 0) > 0);
+  // Window + kind + local filters are display cuts over loaded graph data — records never change.
   const inWindow = memoryInWindow(graph?.nodes ?? [], id => findingCreated.get(id), windowSel);
-  const presentKinds = KINDS.filter(kind => (graph?.nodes ?? []).some(node => node.kind === kind));
-  const visibleNodes = (graph?.nodes ?? [])
-    .slice(0, 100)
-    .filter(
-      node =>
-        inWindow.has(node.findingId) &&
-        !hiddenKinds.has(node.kind) &&
-        (!localOnly || !selectedNode || neighbors.has(node.findingId)),
-    );
-  const visibleIds = new Set(visibleNodes.map(n => n.findingId));
-  const labelIds = memoryLabels(visibleNodes, pos, view.k * graphScale, hovered || selectedNode);
-  const focusedIds = new Set([
-    hovered,
-    ...(graph?.edges ?? [])
-      .filter(e => e.status !== 'REFUTED' && (e.from === hovered || e.to === hovered))
-      .flatMap(e => [e.from, e.to]),
-  ]);
-  const visibleEdges = (graph?.edges ?? []).filter(
-    edge =>
-      (edge.status !== 'REFUTED' || showRefuted) &&
-      visibleIds.has(edge.from) &&
-      visibleIds.has(edge.to) &&
-      pos[edge.from] &&
-      pos[edge.to] &&
-      !hiddenKinds.has(nodeKind.get(edge.from) ?? 'NOTE') &&
-      !hiddenKinds.has(nodeKind.get(edge.to) ?? 'NOTE'),
+  const local = localOnly && selectedNode ? memoryNeighborhood(selectedNode, allEdges, localDepth) : null;
+  const eligible = (graph?.nodes ?? []).filter(
+    node =>
+      inWindow.has(node.findingId) &&
+      !hiddenKinds.has(node.kind) &&
+      (orphans || (degrees[node.findingId] ?? 0) > 0 || node.findingId === selectedNode) &&
+      (!local || local.has(node.findingId)),
   );
-  const boundedEdges = visibleEdges.slice(0, 200);
-  const refutedCount = (graph?.edges ?? []).filter(edge => edge.status === 'REFUTED').length;
+  const visibleNodes = useMemo(
+    () => eligible.slice(0, MEMORY_NODE_LIMIT),
+    [graph, hiddenKinds, windowSel, orphans, localOnly, selectedNode, localDepth],
+  );
+  const visibleIds = useMemo(() => new Set(visibleNodes.map(n => n.findingId)), [visibleNodes]);
+  const eligibleEdges = allEdges.filter(
+    edge => (edge.status !== 'REFUTED' || showRefuted) && visibleIds.has(edge.from) && visibleIds.has(edge.to),
+  );
+  const visibleEdges = useMemo(
+    () => eligibleEdges.slice(0, MEMORY_EDGE_LIMIT),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [graph, visibleIds, showRefuted],
+  );
+  const brainNodes = useMemo(
+    () => visibleNodes.map(n => ({ id: n.findingId, kind: n.kind, title: n.title, superseded: n.superseded })),
+    [visibleNodes],
+  );
+  const brainEdges = useMemo(
+    () => visibleEdges.map(e => ({ id: e.relationshipId, from: e.from, to: e.to, kind: e.kind, status: e.status })),
+    [visibleEdges],
+  );
+  const highlight = useMemo(() => {
+    const needle = listQuery.trim().toLowerCase();
+    if (!needle) return null;
+    return new Set((graph?.nodes ?? []).filter(n => n.title.toLowerCase().includes(needle)).map(n => n.findingId));
+  }, [graph, listQuery]);
+  const refutedCount = allEdges.filter(edge => edge.status === 'REFUTED').length;
   const selNode = graph?.nodes.find(n => n.findingId === selectedNode);
   const selFinding = projectFindings.find(f => f.id === selectedNode);
   const selEdge = graph?.edges.find(e => e.relationshipId === selectedEdge);
   const selRel = relationships.find(r => r.id === selectedEdge);
+  const hasDetail = !!selNode || !!selEdge;
   // Proposed links touching the selection drive the bulk-settle affordances in the tray.
   const settleTargets = memorySettleTargets(graph?.edges ?? [], compareIds);
   const onlySelected = compareIds.size === 1 ? graph?.nodes.find(n => n.findingId === [...compareIds][0]) : undefined;
@@ -457,6 +433,21 @@ export function MemoryView({ state, projectId }: { state: AppState; projectId: s
       text: `Finding · ${item.title}${item.supersededById ? ' (superseded)' : ''}`,
     })),
   ];
+  const toggleKind = (kind: FindingKind) =>
+    setHiddenKinds(current => {
+      const next = new Set(current);
+      if (current.has(kind)) next.delete(kind);
+      else next.add(kind);
+      return next;
+    });
+  const toggleCompare = (id: string) =>
+    setCompareIds(current => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const stageClass = `memory-stage${listOpen ? ' with-list' : ''}${hasDetail ? ' has-detail' : ''}`;
 
   return (
     <section className="memory-page">
@@ -508,471 +499,535 @@ export function MemoryView({ state, projectId }: { state: AppState; projectId: s
         />
       )}
       {!!graph?.nodes.length && (
-        <div className="memory-layout">
-          <aside className="memory-list" aria-label="Findings">
-            <h3>
-              Findings <span className="muted">{graph?.nodes.length}</span>
-            </h3>
-            <SearchField value={listQuery} onChange={setListQuery} placeholder="Filter finding titles" />
-            {(graph?.nodes ?? [])
-              .filter(n => n.title.toLowerCase().includes(listQuery.toLowerCase()))
-              .map(node => (
-                <button
-                  key={node.findingId}
-                  className={`memory-list-row${selectedNode === node.findingId ? ' selected' : ''}`}
-                  aria-pressed={selectedNode === node.findingId}
-                  onClick={() => focusNode(node.findingId)}
-                >
-                  <span className={`memory-kind kind-${node.kind.toLowerCase()}`}>{label(node.kind)}</span>
-                  <strong>{node.title}</strong>
-                  {node.superseded && <small>Superseded</small>}
-                </button>
-              ))}
-          </aside>
-          <div className="memory-graph">
-            <div className="memory-kindrow">
+        <div className={`memory-layout ${stageClass}`}>
+          {listOpen && (
+            <aside className="memory-list" aria-label="Findings">
+              <h3>
+                Findings <span className="muted">{graph?.nodes.length}</span>
+              </h3>
+              <SearchField value={listQuery} onChange={setListQuery} placeholder="Filter finding titles" />
+              {(graph?.nodes ?? [])
+                .filter(n => n.title.toLowerCase().includes(listQuery.toLowerCase()))
+                .map(node => (
+                  <button
+                    key={node.findingId}
+                    className={`memory-list-row${selectedNode === node.findingId ? ' selected' : ''}`}
+                    aria-pressed={selectedNode === node.findingId}
+                    onClick={() => focusNode(node.findingId)}
+                  >
+                    <span className={`memory-kind kind-${node.kind.toLowerCase()}`}>{label(node.kind)}</span>
+                    <strong>{node.title}</strong>
+                    {node.superseded && <small>Superseded</small>}
+                  </button>
+                ))}
+            </aside>
+          )}
+          <div className="brain-frame">
+            <MemoryBrain
+              nodes={brainNodes}
+              edges={brainEdges}
+              degrees={degrees}
+              selectedNode={selectedNode}
+              selectedEdge={selectedEdge}
+              compare={compareIds}
+              pins={pins}
+              names={names}
+              arrows={arrows}
+              nodeScale={nodeScale}
+              linkWidth={linkWidth}
+              textFade={textFade}
+              forces={forces}
+              animate={animate}
+              reducedMotion={reducedMotion}
+              highlight={highlight}
+              insetRight={hasDetail ? 354 : 0}
+              fitSignal={fitSignal}
+              resetSignal={resetSignal}
+              focus={focus}
+              onSelectNode={id => {
+                setSelectedNode(id);
+                setSelectedEdge('');
+              }}
+              onSelectEdge={id => {
+                setSelectedEdge(id);
+                setSelectedNode('');
+              }}
+              onClear={() => {
+                setSelectedNode('');
+                setSelectedEdge('');
+              }}
+              onToggleCompare={toggleCompare}
+              onPin={(id, x, y) => savePins({ ...pins, [id]: { x, y } })}
+              onUnpin={id => {
+                const { [id]: _removed, ...rest } = pins;
+                savePins(rest);
+              }}
+            />
+            <div className="brain-kinds" role="group" aria-label="Finding kinds">
               {presentKinds.map(kind => (
                 <button
                   key={kind}
                   type="button"
                   aria-pressed={!hiddenKinds.has(kind)}
                   className={`memory-kind kind-${kind.toLowerCase()}${hiddenKinds.has(kind) ? ' off' : ''}`}
-                  onClick={() =>
-                    setHiddenKinds(current => {
-                      const next = new Set(current);
-                      if (current.has(kind)) next.delete(kind);
-                      else next.add(kind);
-                      return next;
-                    })
-                  }
+                  onClick={() => toggleKind(kind)}
                 >
                   <span className="mem-legend-dot" aria-hidden="true" />
                   {label(kind)}
+                  <small>{kindCounts[kind]}</small>
                 </button>
               ))}
-              <span className="mem-legend" aria-hidden="true">
-                <span className="mem-legend-item">
-                  <svg viewBox="0 0 26 10" width="26" height="10">
-                    <line className="legend-line confirmed" x1="1" y1="5" x2="19" y2="5" />
-                    <path className="legend-arrow confirmed" d="M 25 5 L 18.5 2 L 18.5 8 Z" />
-                  </svg>
-                  confirmed
-                </span>
-                <span className="mem-legend-item">
-                  <svg viewBox="0 0 26 10" width="26" height="10">
-                    <line className="legend-line proposed" x1="1" y1="5" x2="19" y2="5" />
-                    <path className="legend-arrow proposed" d="M 25 5 L 18.5 2 L 18.5 8 Z" />
-                  </svg>
-                  proposed
-                </span>
-                <span className="mem-legend-item">
-                  <svg viewBox="0 0 26 10" width="26" height="10">
-                    <line className="legend-line refuted" x1="1" y1="5" x2="25" y2="5" />
-                  </svg>
-                  refuted
-                </span>
-                <span className="mem-legend-item">
-                  <svg className="legend-mark" viewBox="0 0 12 12" width="12" height="12">
-                    <circle className="legend-dot superseded" cx="6" cy="6" r="4" />
-                    <line className="legend-strike" x1="2.5" y1="9.5" x2="9.5" y2="2.5" />
-                  </svg>
-                  superseded
-                </span>
-              </span>
-              <label className="memory-refuted">
-                <input type="checkbox" checked={showRefuted} onChange={e => setShowRefuted(e.target.checked)} />
-                Show refuted
-              </label>
             </div>
-            <div className="memory-tools button-row">
-              <span className="memory-window" role="group" aria-label="Graph window — display filter only">
-                <span className="memory-window-label muted">Window · display only</span>
-                {MEMORY_WINDOWS.map(w => (
-                  <button
-                    key={w.id}
-                    type="button"
-                    aria-pressed={windowSel === w.id}
-                    className={`memory-window-chip${windowSel === w.id ? ' on' : ''}`}
-                    onClick={() => setWindowSel(w.id)}
-                  >
-                    {w.label}
-                  </button>
-                ))}
-              </span>
-              <button className="secondary" onClick={() => setView(fitMemory(pos))}>
-                Fit graph
+            <div className="brain-toolbar" role="toolbar" aria-label="Graph controls">
+              <button
+                type="button"
+                className={`brain-tool${listOpen ? ' on' : ''}`}
+                aria-pressed={listOpen}
+                aria-label="Findings list"
+                title="Findings list"
+                onClick={() => setListOpen(!listOpen)}
+              >
+                <PanelLeft size={15} />
               </button>
               <button
-                className="secondary"
+                type="button"
+                className={`brain-tool wide${names ? ' on' : ''}`}
+                aria-pressed={names}
+                aria-label="Names"
+                title={names ? 'Hide names on the graph (hover still shows one)' : 'Show names on the graph'}
+                onClick={() => setNames(!names)}
+              >
+                <Tag size={15} />
+                <span>Names</span>
+              </button>
+              <button
+                type="button"
+                className="brain-tool wide"
+                aria-label="Fit graph"
+                title="Fit graph"
+                onClick={() => setFitSignal(n => n + 1)}
+              >
+                <LocateFixed size={15} />
+                <span>Fit graph</span>
+              </button>
+              <button
+                type="button"
+                className="brain-tool"
+                aria-label="Reset layout"
+                title="Reset layout (also releases pinned findings)"
                 onClick={() => {
-                  draggedRef.current.clear();
+                  savePins({});
                   try {
-                    localStorage.removeItem(posKey(projectId));
-                  } catch {}
-                  const next = layoutMemory(graph?.nodes ?? [], graph?.edges ?? []);
-                  posRef.current = next;
-                  setPos(next);
-                  setView(fitMemory(next));
+                    window.localStorage.removeItem(posKey(projectId));
+                  } catch {
+                    /* session-local */
+                  }
+                  setResetSignal(n => n + 1);
                 }}
               >
-                Reset layout
+                <RotateCcw size={15} />
               </button>
               <button
-                className="secondary"
+                type="button"
+                className={`brain-tool wide${localOnly ? ' on' : ''}`}
                 aria-pressed={localOnly}
+                aria-label="Local graph"
                 disabled={!selectedNode}
+                title="Show only the selected finding and what it links to"
                 onClick={() => setLocalOnly(v => !v)}
               >
-                Local graph
+                <Network size={15} />
+                <span>Local graph</span>
+              </button>
+              <button
+                type="button"
+                className={`brain-tool${animate ? '' : ' on'}`}
+                aria-pressed={!animate}
+                aria-label={animate ? 'Pause physics' : 'Resume physics'}
+                title={animate ? 'Pause the layout physics' : 'Resume the layout physics'}
+                onClick={() => setAnimate(!animate)}
+              >
+                {animate ? <Pause size={15} /> : <Play size={15} />}
+              </button>
+              <button
+                type="button"
+                className={`brain-tool${panelOpen ? ' on' : ''}`}
+                aria-pressed={panelOpen}
+                aria-label="Graph settings"
+                title="Graph settings"
+                onClick={() => setPanelOpen(!panelOpen)}
+              >
+                <SlidersHorizontal size={15} />
               </button>
             </div>
-            <div className="memory-canvas">
-              <svg
-                ref={svgRef}
-                viewBox={`0 0 ${W} ${H}`}
-                role="img"
-                aria-label="Memory graph"
-                onPointerDown={onPointerDown}
-                onPointerMove={onPointerMove}
-                onPointerUp={onPointerUp}
-                onPointerLeave={onPointerUp}
-              >
-                <g ref={gRef} transform={`translate(${view.x} ${view.y}) scale(${view.k})`}>
-                  {boundedEdges.map(edge => {
-                    const a = pos[edge.from],
-                      b = pos[edge.to],
-                      mx = (a.x + b.x) / 2,
-                      my = (a.y + b.y) / 2;
-                    const trim = memoryEdgeTrim(
-                      a,
-                      b,
-                      memoryRadius(degrees[edge.from] ?? 0),
-                      memoryRadius(degrees[edge.to] ?? 0),
-                    );
-                    const near = edge.from === hovered || edge.to === hovered;
-                    return (
-                      <g
-                        key={edge.relationshipId}
-                        data-rel={edge.relationshipId}
-                        className={`mem-edge status-${edge.status.toLowerCase()}${selectedEdge === edge.relationshipId ? ' selected' : ''}${
-                          hovered && selectedEdge !== edge.relationshipId ? (near ? ' near' : ' dim') : ''
-                        }`}
+            {panelOpen && (
+              <div className="brain-panel" role="group" aria-label="Graph settings">
+                <details open>
+                  <summary>Filters</summary>
+                  <div className="brain-chips" role="group" aria-label="Graph window — display filter only">
+                    <span className="muted">Window · display only</span>
+                    {MEMORY_WINDOWS.map(w => (
+                      <button
+                        key={w.id}
+                        type="button"
+                        aria-pressed={windowSel === w.id}
+                        className={`memory-window-chip${windowSel === w.id ? ' on' : ''}`}
+                        onClick={() => setWindowSel(w.id)}
                       >
-                        <line className="mem-edge-hit" x1={a.x} y1={a.y} x2={b.x} y2={b.y} />
-                        <line
-                          className="mem-edge-line"
-                          x1={trim.short ? a.x : trim.x1}
-                          y1={trim.short ? a.y : trim.y1}
-                          x2={trim.short ? b.x : trim.x2}
-                          y2={trim.short ? b.y : trim.y2}
-                        />
-                        {!trim.short && <path className="mem-edge-arrow" d={trim.arrow} />}
-                        {(selectedEdge === edge.relationshipId || hovered === edge.from || hovered === edge.to) && (
-                          <text className="mem-edge-label" x={mx} y={my - 4} textAnchor="middle">
-                            {label(edge.kind)}
-                          </text>
-                        )}
-                      </g>
-                    );
-                  })}
-                  {visibleNodes.map(node => {
-                    const p = pos[node.findingId];
-                    if (!p) return null;
-                    const r = memoryRadius(degrees[node.findingId] ?? 0);
-                    return (
-                      <g
-                        key={node.findingId}
-                        data-finding={node.findingId}
-                        role="button"
-                        tabIndex={0}
-                        aria-label={`${node.title} — ${label(node.kind)}`}
-                        aria-pressed={selectedNode === node.findingId}
-                        onKeyDown={e => {
-                          if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault();
-                            setSelectedNode(node.findingId);
-                            setSelectedEdge('');
-                          }
-                        }}
-                        onMouseEnter={() => setHovered(node.findingId)}
-                        onMouseLeave={() => setHovered('')}
-                        opacity={hovered && !focusedIds.has(node.findingId) ? 0.25 : 1}
-                        className={`mem-node kind-${node.kind.toLowerCase()}${node.superseded ? ' superseded' : ''}${selectedNode === node.findingId ? ' selected' : ''}`}
-                        transform={`translate(${p.x} ${p.y})`}
-                      >
-                        <title>{node.title}</title>
-                        <circle className="mem-node-hit" r={Math.max(r, 13)} />
-                        <circle className="mem-node-dot" r={r} />
-                        {node.superseded && (
-                          <line className="mem-supersede" x1={-r * 0.72} y1={r * 0.72} x2={r * 0.72} y2={-r * 0.72} />
-                        )}
-                        <text
-                          className="mem-node-title"
-                          y={r + 15 / (view.k * graphScale)}
-                          textAnchor="middle"
-                          style={{
-                            visibility: labelIds.has(node.findingId) ? 'visible' : 'hidden',
-                            fontSize: 12 / (view.k * graphScale),
-                          }}
-                        >
-                          {node.title.length > 24 ? `${node.title.slice(0, 22)}…` : node.title}
-                        </text>
-                      </g>
-                    );
-                  })}
-                </g>
-              </svg>
-              {!visibleNodes.length && (
-                <p className="mem-empty" role="status">
-                  {windowSel !== 'all'
-                    ? 'No findings in this window — display filter only; records are unchanged.'
-                    : 'All finding kinds are filtered out.'}
-                </p>
-              )}
-            </div>
-            {!!compareIds.size && (
-              <div className="memory-tray" role="group" aria-label="Selected findings">
-                <span className="muted">{compareIds.size} selected</span>
-                {[...compareIds].map(id => {
-                  const node = graph?.nodes.find(n => n.findingId === id);
-                  if (!node) return null;
-                  return (
-                    <button
-                      key={id}
-                      type="button"
-                      className="memory-tray-item"
-                      onClick={() => focusNode(id)}
-                      title={node.title}
-                    >
-                      <span className={`mem-legend-dot kind-${node.kind.toLowerCase()}`} aria-hidden="true" />
-                      <span className="memory-tray-title">{node.title}</span>
-                      <small className="muted">{node.superseded ? 'Superseded' : 'Recorded'}</small>
-                    </button>
-                  );
-                })}
-                {canSupersede && (
-                  <button type="button" className="secondary" onClick={supersedeSelected}>
-                    Supersede…
-                  </button>
-                )}
-                {!!settleTargets.length && !bulkAsk && (
-                  <>
-                    <button
-                      type="button"
-                      className="secondary"
-                      disabled={!!busy}
-                      onClick={() => setBulkAsk('CONFIRMED')}
-                    >
-                      Confirm {settleTargets.length} proposed
-                    </button>
-                    <button type="button" className="secondary" disabled={!!busy} onClick={() => setBulkAsk('REFUTED')}>
-                      Refute {settleTargets.length} proposed
-                    </button>
-                  </>
-                )}
-                {bulkAsk && !!settleTargets.length && (
-                  <span
-                    className="memory-bulk-ask"
-                    role="alertdialog"
-                    aria-label={`${bulkAsk === 'CONFIRMED' ? 'Confirm' : 'Refute'} proposed links`}
+                        {w.label}
+                      </button>
+                    ))}
+                  </div>
+                  <Toggle on={showRefuted} onChange={setShowRefuted}>
+                    Show refuted links
+                  </Toggle>
+                  <Toggle on={orphans} onChange={setOrphans}>
+                    Show unlinked findings
+                  </Toggle>
+                  <Slider
+                    name="Local graph depth"
+                    value={localDepth}
+                    min={1}
+                    max={3}
+                    step={1}
+                    onChange={setLocalDepth}
+                  />
+                </details>
+                <details open>
+                  <summary>Display</summary>
+                  <Toggle on={names} onChange={setNames}>
+                    Show names
+                  </Toggle>
+                  <Toggle on={arrows} onChange={setArrows}>
+                    Show arrows
+                  </Toggle>
+                  <Slider
+                    name="Text fade threshold"
+                    value={textFade}
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    onChange={setTextFade}
+                  />
+                  <Slider name="Node size" value={nodeScale} min={0.6} max={2.2} step={0.1} onChange={setNodeScale} />
+                  <Slider
+                    name="Link thickness"
+                    value={linkWidth}
+                    min={0.5}
+                    max={3}
+                    step={0.25}
+                    onChange={setLinkWidth}
+                  />
+                </details>
+                <details>
+                  <summary>Forces</summary>
+                  <Slider name="Center force" value={center} min={0} max={1} step={0.05} onChange={setCenter} />
+                  <Slider name="Repel force" value={repel} min={0} max={1} step={0.05} onChange={setRepel} />
+                  <Slider
+                    name="Link force"
+                    value={linkStrength}
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    onChange={setLinkStrength}
+                  />
+                  <Slider
+                    name="Link distance"
+                    value={linkDistance}
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    onChange={setLinkDistance}
+                  />
+                  <button
+                    type="button"
+                    className="text-button"
+                    onClick={() => {
+                      setCenter(DEFAULT_FORCES.center);
+                      setRepel(DEFAULT_FORCES.repel);
+                      setLinkStrength(DEFAULT_FORCES.linkStrength);
+                      setLinkDistance(DEFAULT_FORCES.linkDistance);
+                    }}
                   >
-                    {bulkAsk === 'CONFIRMED' ? 'Confirm' : 'Refute'} {settleTargets.length} proposed link
-                    {settleTargets.length === 1 ? '' : 's'} touching the selection? Each records its own settlement —
-                    nothing is edited or deleted.
-                    <button
-                      type="button"
-                      className="primary"
-                      disabled={!!busy}
-                      onClick={() => void bulkSettle(bulkAsk)}
-                    >
-                      {bulkAsk === 'CONFIRMED' ? 'Yes, confirm' : 'Yes, refute'}
-                    </button>
-                    <button type="button" className="secondary" disabled={!!busy} onClick={() => setBulkAsk('')}>
-                      Cancel
-                    </button>
-                  </span>
-                )}
-                <button
-                  type="button"
-                  className="text-button"
-                  onClick={() => {
-                    setCompareIds(new Set());
-                    setBulkAsk('');
-                  }}
-                >
-                  Clear
-                </button>
+                    Reset forces
+                  </button>
+                </details>
               </div>
             )}
-            <p className="muted memory-hint">
-              Drag to pan · scroll to zoom · drag a node to pin it · dot size = link count, color = finding kind ·
-              arrows follow the recorded link direction
-              {(graph?.nodes.length ?? 0) > 100 || visibleEdges.length > 200
-                ? ' · Bounded view: at most 100 nodes / 200 links'
+            <div className="brain-legend" aria-hidden="true">
+              <span className="mem-legend-item">
+                <svg viewBox="0 0 26 10" width="26" height="10">
+                  <line className="legend-line confirmed" x1="1" y1="5" x2="25" y2="5" />
+                </svg>
+                confirmed
+              </span>
+              <span className="mem-legend-item">
+                <svg viewBox="0 0 26 10" width="26" height="10">
+                  <line className="legend-line proposed" x1="1" y1="5" x2="25" y2="5" />
+                </svg>
+                proposed
+              </span>
+              <span className="mem-legend-item">
+                <svg viewBox="0 0 26 10" width="26" height="10">
+                  <line className="legend-line refuted" x1="1" y1="5" x2="25" y2="5" />
+                </svg>
+                refuted
+              </span>
+              <span className="mem-legend-item">
+                <svg className="legend-mark" viewBox="0 0 12 12" width="12" height="12">
+                  <circle className="legend-dot superseded" cx="6" cy="6" r="4" />
+                </svg>
+                superseded
+              </span>
+            </div>
+            <p className="brain-hint">
+              {brainNodes.length} finding{brainNodes.length === 1 ? '' : 's'} · {brainEdges.length} link
+              {brainEdges.length === 1 ? '' : 's'} · drag to pan · scroll to zoom · drag a finding to pin it ·
+              double-click a pinned one to release it
+              {eligible.length > MEMORY_NODE_LIMIT || eligibleEdges.length > MEMORY_EDGE_LIMIT
+                ? ` · Bounded view: at most ${MEMORY_NODE_LIMIT} findings / ${MEMORY_EDGE_LIMIT} links`
                 : ''}
               {refutedCount
-                ? ` · ${refutedCount} refuted link${refutedCount === 1 ? '' : 's'} ${showRefuted ? 'shown struck-through' : 'hidden'}`
+                ? ` · ${refutedCount} refuted link${refutedCount === 1 ? '' : 's'} ${showRefuted ? 'shown' : 'hidden'}`
                 : ''}
               {graph && graph.nodes.length > 1 && !graph.edges.length
                 ? ' · No links yet: lines appear only for links agents report or you add (select a finding, then Link to…)'
                 : ''}
             </p>
-          </div>
-          <aside className="memory-detail">
-            {selNode && (
-              <div className="memory-detail-card">
-                <div className="card-heading">
-                  <h3>{selNode.title}</h3>
-                  <span>
-                    <span className="quiet-badge small">{label(selNode.kind)}</span>
-                    {selNode.superseded && <span className="quiet-badge small superseded-badge">superseded</span>}
-                  </span>
-                </div>
-                {selFinding ? (
-                  <>
-                    <p className="memory-body">{selFinding.body}</p>
-                    <p className="muted">
-                      {authorLine(selFinding.createdBy)} · {stamp(selFinding.createdAt)}
-                    </p>
-                    {!!selFinding.evidenceRefs.length && (
-                      <ul className="evidence-list">
-                        {selFinding.evidenceRefs.map(ref => (
-                          <li key={ref.kind + ref.id}>{refLabel(ref)}</li>
-                        ))}
-                      </ul>
-                    )}
-                    {selFinding.supersededById && (
-                      <p className="muted">
-                        Superseded by{' '}
-                        <button className="text-button" onClick={() => setSelectedNode(selFinding.supersededById!)}>
-                          {projectFindings.find(f => f.id === selFinding.supersededById)?.title ?? 'a later finding'}
-                        </button>
-                      </p>
-                    )}
-                  </>
-                ) : (
-                  <p className="muted">The finding record is not in the current workspace state.</p>
-                )}
-                <div className="memory-connections">
-                  <h4>Links &amp; backlinks</h4>
-                  {(graph?.edges ?? [])
-                    .filter(e => e.from === selectedNode || e.to === selectedNode)
-                    .map(e => (
-                      <button
-                        className="memory-list-row"
-                        key={e.relationshipId}
-                        onClick={() => {
-                          setSelectedEdge(e.relationshipId);
-                          setSelectedNode('');
-                        }}
-                      >
-                        <strong>
-                          {e.to === selectedNode ? '←' : '→'} {titleOf(e.to === selectedNode ? e.from : e.to)}
-                        </strong>
-                        <small>
-                          {label(e.kind)} · {label(e.status)}
-                        </small>
-                      </button>
-                    ))}
-                  {!(graph?.edges ?? []).some(e => e.from === selectedNode || e.to === selectedNode) && (
-                    <p className="muted">No recorded links yet.</p>
-                  )}
-                </div>
-                <details className="memory-link">
-                  <summary>Link to…</summary>
-                  <label className="field">
-                    Target
-                    <select value={linkTarget} onChange={e => setLinkTarget(e.target.value)}>
-                      <option value="">Pick a finding…</option>
-                      {projectFindings
-                        .filter(item => item.id !== selectedNode)
-                        .map(item => (
-                          <option key={item.id} value={item.id}>
-                            {item.title}
-                            {item.supersededById ? ' (superseded)' : ''}
-                          </option>
-                        ))}
-                    </select>
-                  </label>
-                  <label className="field">
-                    Kind
-                    <select value={linkKind} onChange={e => setLinkKind(e.target.value as RelationshipKind)}>
-                      {REL_KINDS.map(kind => (
-                        <option key={kind} value={kind}>
-                          {label(kind)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="field">
-                    Note (optional)
-                    <input
-                      value={linkNote}
-                      onChange={e => setLinkNote(e.target.value)}
-                      maxLength={1000}
-                      placeholder="Why these relate"
-                    />
-                  </label>
-                  <button type="button" className="primary" disabled={!!busy || !linkTarget} onClick={proposeLink}>
-                    Propose link
-                  </button>
-                </details>
-              </div>
+            {!brainNodes.length && (
+              <p className="mem-empty" role="status">
+                {windowSel !== 'all'
+                  ? 'No findings in this window — display filter only; records are unchanged.'
+                  : 'All finding kinds are filtered out.'}
+              </p>
             )}
-            {selEdge && (
-              <div className="memory-detail-card">
-                <div className="card-heading">
-                  <h3>
-                    {titleOf(selEdge.from)} → {titleOf(selEdge.to)}
-                  </h3>
-                  <span>
-                    <span className="quiet-badge small">{label(selEdge.kind)}</span>
-                    <span className="quiet-badge small">{label(selEdge.status)}</span>
-                  </span>
-                </div>
-                {selRel ? (
-                  <>
-                    {selRel.note && <p className="memory-body">{selRel.note}</p>}
-                    <p className="muted">
-                      {authorLine(selRel.createdBy)} · {stamp(selRel.createdAt)}
-                      {selRel.decidedAt ? ` · settled ${stamp(selRel.decidedAt)}` : ''}
-                    </p>
-                  </>
-                ) : (
-                  <p className="muted">The link record is not in the current workspace state.</p>
-                )}
-                {selEdge.status === 'PROPOSED' && (
-                  <>
-                    <p className="muted">A proposed link is unconfirmed — settle it to record the user's call.</p>
-                    <div className="button-row">
-                      <button
-                        className="primary"
-                        disabled={!!busy}
-                        onClick={() => settle(selEdge.relationshipId, 'CONFIRMED')}
-                      >
-                        Confirm link
-                      </button>
-                      <button
-                        className="cancel-request"
-                        disabled={!!busy}
-                        onClick={() => settle(selEdge.relationshipId, 'REFUTED')}
-                      >
-                        Refute link
-                      </button>
+            {hasDetail && (
+              <aside className="memory-detail" aria-label="Finding details">
+                <button
+                  type="button"
+                  className="brain-close"
+                  aria-label="Close details"
+                  title="Close details"
+                  onClick={() => {
+                    setSelectedNode('');
+                    setSelectedEdge('');
+                  }}
+                >
+                  <X size={14} />
+                </button>
+                {selNode && (
+                  <div className="memory-detail-card">
+                    <div className="card-heading">
+                      <h3>{selNode.title}</h3>
+                      <span>
+                        <span className="quiet-badge small">{label(selNode.kind)}</span>
+                        {selNode.superseded && <span className="quiet-badge small superseded-badge">superseded</span>}
+                      </span>
                     </div>
-                  </>
+                    {selFinding ? (
+                      <>
+                        <p className="memory-body">{selFinding.body}</p>
+                        <p className="muted">
+                          {authorLine(selFinding.createdBy)} · {stamp(selFinding.createdAt)}
+                        </p>
+                        {!!selFinding.evidenceRefs.length && (
+                          <ul className="evidence-list">
+                            {selFinding.evidenceRefs.map(ref => (
+                              <li key={ref.kind + ref.id}>{refLabel(ref)}</li>
+                            ))}
+                          </ul>
+                        )}
+                        {selFinding.supersededById && (
+                          <p className="muted">
+                            Superseded by{' '}
+                            <button className="text-button" onClick={() => focusNode(selFinding.supersededById!)}>
+                              {projectFindings.find(f => f.id === selFinding.supersededById)?.title ??
+                                'a later finding'}
+                            </button>
+                          </p>
+                        )}
+                      </>
+                    ) : (
+                      <p className="muted">The finding record is not in the current workspace state.</p>
+                    )}
+                    <div className="memory-connections">
+                      <h4>Links &amp; backlinks</h4>
+                      {(graph?.edges ?? [])
+                        .filter(e => e.from === selectedNode || e.to === selectedNode)
+                        .map(e => (
+                          <button
+                            className="memory-list-row"
+                            key={e.relationshipId}
+                            onClick={() => {
+                              setSelectedEdge(e.relationshipId);
+                              setSelectedNode('');
+                            }}
+                          >
+                            <strong>
+                              {e.to === selectedNode ? '←' : '→'} {titleOf(e.to === selectedNode ? e.from : e.to)}
+                            </strong>
+                            <small>
+                              {label(e.kind)} · {label(e.status)}
+                            </small>
+                          </button>
+                        ))}
+                      {!(graph?.edges ?? []).some(e => e.from === selectedNode || e.to === selectedNode) && (
+                        <p className="muted">No recorded links yet.</p>
+                      )}
+                    </div>
+                    <details className="memory-link">
+                      <summary>Link to…</summary>
+                      <label className="field">
+                        Target
+                        <select value={linkTarget} onChange={e => setLinkTarget(e.target.value)}>
+                          <option value="">Pick a finding…</option>
+                          {projectFindings
+                            .filter(item => item.id !== selectedNode)
+                            .map(item => (
+                              <option key={item.id} value={item.id}>
+                                {item.title}
+                                {item.supersededById ? ' (superseded)' : ''}
+                              </option>
+                            ))}
+                        </select>
+                      </label>
+                      <label className="field">
+                        Kind
+                        <select value={linkKind} onChange={e => setLinkKind(e.target.value as RelationshipKind)}>
+                          {REL_KINDS.map(kind => (
+                            <option key={kind} value={kind}>
+                              {label(kind)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="field">
+                        Note (optional)
+                        <input
+                          value={linkNote}
+                          onChange={e => setLinkNote(e.target.value)}
+                          maxLength={1000}
+                          placeholder="Why these relate"
+                        />
+                      </label>
+                      <button type="button" className="primary" disabled={!!busy || !linkTarget} onClick={proposeLink}>
+                        Propose link
+                      </button>
+                    </details>
+                  </div>
                 )}
-              </div>
+                {selEdge && (
+                  <div className="memory-detail-card">
+                    <div className="card-heading">
+                      <h3>
+                        {titleOf(selEdge.from)} → {titleOf(selEdge.to)}
+                      </h3>
+                      <span>
+                        <span className="quiet-badge small">{label(selEdge.kind)}</span>
+                        <span className="quiet-badge small">{label(selEdge.status)}</span>
+                      </span>
+                    </div>
+                    {selRel ? (
+                      <>
+                        {selRel.note && <p className="memory-body">{selRel.note}</p>}
+                        <p className="muted">
+                          {authorLine(selRel.createdBy)} · {stamp(selRel.createdAt)}
+                          {selRel.decidedAt ? ` · settled ${stamp(selRel.decidedAt)}` : ''}
+                        </p>
+                      </>
+                    ) : (
+                      <p className="muted">The link record is not in the current workspace state.</p>
+                    )}
+                    {selEdge.status === 'PROPOSED' && (
+                      <>
+                        <p className="muted">A proposed link is unconfirmed — settle it to record the user's call.</p>
+                        <div className="button-row">
+                          <button
+                            className="primary"
+                            disabled={!!busy}
+                            onClick={() => settle(selEdge.relationshipId, 'CONFIRMED')}
+                          >
+                            Confirm link
+                          </button>
+                          <button
+                            className="cancel-request"
+                            disabled={!!busy}
+                            onClick={() => settle(selEdge.relationshipId, 'REFUTED')}
+                          >
+                            Refute link
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+              </aside>
             )}
-            {!selNode && !selEdge && (
-              <div className="memory-detail-card memory-detail-empty">
-                <p className="muted">
-                  Select a node for its finding record, or an edge for the link record. Dashed links are proposed, not
-                  established.
-                </p>
-              </div>
-            )}
-          </aside>
+          </div>
+        </div>
+      )}
+      {!!compareIds.size && (
+        <div className="memory-tray" role="group" aria-label="Selected findings">
+          <span className="muted">{compareIds.size} selected</span>
+          {[...compareIds].map(id => {
+            const node = graph?.nodes.find(n => n.findingId === id);
+            if (!node) return null;
+            return (
+              <button
+                key={id}
+                type="button"
+                className="memory-tray-item"
+                onClick={() => focusNode(id)}
+                title={node.title}
+              >
+                <span className={`mem-legend-dot kind-${node.kind.toLowerCase()}`} aria-hidden="true" />
+                <span className="memory-tray-title">{node.title}</span>
+                <small className="muted">{node.superseded ? 'Superseded' : 'Recorded'}</small>
+              </button>
+            );
+          })}
+          {canSupersede && (
+            <button type="button" className="secondary" onClick={supersedeSelected}>
+              Supersede…
+            </button>
+          )}
+          {!!settleTargets.length && !bulkAsk && (
+            <>
+              <button type="button" className="secondary" disabled={!!busy} onClick={() => setBulkAsk('CONFIRMED')}>
+                Confirm {settleTargets.length} proposed
+              </button>
+              <button type="button" className="secondary" disabled={!!busy} onClick={() => setBulkAsk('REFUTED')}>
+                Refute {settleTargets.length} proposed
+              </button>
+            </>
+          )}
+          {bulkAsk && !!settleTargets.length && (
+            <span
+              className="memory-bulk-ask"
+              role="alertdialog"
+              aria-label={`${bulkAsk === 'CONFIRMED' ? 'Confirm' : 'Refute'} proposed links`}
+            >
+              {bulkAsk === 'CONFIRMED' ? 'Confirm' : 'Refute'} {settleTargets.length} proposed link
+              {settleTargets.length === 1 ? '' : 's'} touching the selection? Each records its own settlement — nothing
+              is edited or deleted.
+              <button type="button" className="primary" disabled={!!busy} onClick={() => void bulkSettle(bulkAsk)}>
+                {bulkAsk === 'CONFIRMED' ? 'Yes, confirm' : 'Yes, refute'}
+              </button>
+              <button type="button" className="secondary" disabled={!!busy} onClick={() => setBulkAsk('')}>
+                Cancel
+              </button>
+            </span>
+          )}
+          <button
+            type="button"
+            className="text-button"
+            onClick={() => {
+              setCompareIds(new Set());
+              setBulkAsk('');
+            }}
+          >
+            Clear
+          </button>
         </div>
       )}
       <details

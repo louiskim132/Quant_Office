@@ -245,25 +245,6 @@
 .evidence-list i {
   opacity: 0.7;
 }
-.connection-row details summary {
-  cursor: pointer;
-  font-size: 12px;
-  margin: 4px 0;
-}
-.connection-actions {
-  display: grid;
-  gap: 8px;
-  justify-items: start;
-  align-self: flex-start;
-}
-.api-key-entry {
-  max-width: 320px;
-}
-.api-key-entry input {
-  width: 100%;
-  box-sizing: border-box;
-  margin: 4px 0 8px;
-}
 .profile-tabs {
   display: grid;
   gap: 10px;
@@ -344,25 +325,6 @@
 }
 .tab-panel .evidence-list {
   gap: 6px;
-}
-.badge-groups {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 10px 24px;
-  margin: 10px 0;
-}
-.badge-group {
-  min-width: 0;
-}
-.badge-group .mini-label {
-  display: block;
-  margin-bottom: 5px;
-}
-.badge-group .readiness-list {
-  margin: 0;
-}
-.connection-row .evidence-list {
-  margin-top: 8px;
 }
 
 .setup-stepper {

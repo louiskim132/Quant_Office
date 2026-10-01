@@ -89,6 +89,11 @@ try {
   const errors: string[] = [];
   page.on('pageerror', e => errors.push(e.message));
   await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1440, 1050));
+  // On the 3D floor the chat opens over the stage from the CHAT button; the flat floor always shows it.
+  await page.getByRole('heading', { name: 'The office', exact: true }).waitFor();
+  await page.locator('.stage-chat, .sky-office').first().waitFor();
+  if (await page.getByRole('button', { name: 'Show office chat', exact: true }).count())
+    await page.getByRole('button', { name: 'Show office chat', exact: true }).click();
   const chat = page.getByRole('region', { name: 'Office group chat' });
   await chat.getByText(/The handoff is ready/).waitFor();
   assert.equal(await chat.locator('.office-chat-message').count(), 50);
@@ -104,10 +109,16 @@ try {
   assert.equal(await chat.locator('img').count(), 0, 'agent text is not rendered as HTML');
   assert.ok(await chat.getByText('view only', { exact: false }).isVisible());
   const bounds = await page.evaluate(() => ({
-    scene: document.querySelector('.sky-office')!.getBoundingClientRect().toJSON(),
+    scene: document.querySelector('.office3d, .sky-office')!.getBoundingClientRect().toJSON(),
     chat: document.querySelector('.office-chat')!.getBoundingClientRect().toJSON(),
   }));
-  assert.ok(bounds.chat.x >= bounds.scene.right, 'chat sits next to the agents at desktop width');
+  const onStage = (await page.locator('.office3d').count()) > 0;
+  if (onStage)
+    assert.ok(
+      bounds.chat.x >= bounds.scene.x && bounds.chat.right <= bounds.scene.right + 1,
+      'chat opens over the 3D stage',
+    );
+  else assert.ok(bounds.chat.x >= bounds.scene.right, 'chat sits next to the agents at desktop width');
   await page.screenshot({ path: 'test-output/office-group-chat.png', fullPage: true });
   await chat.getByRole('button', { name: 'Load earlier updates' }).click();
   await page.waitForFunction(() => document.querySelectorAll('.office-chat-message').length === 65);
@@ -126,7 +137,7 @@ try {
     ),
   );
   await chat.getByLabel('Chat project').selectOption(empty.id);
-  await chat.getByText('No recorded updates match these filters.').waitFor();
+  await chat.getByText('No recorded updates match these filters', { exact: true }).waitFor();
   assert.equal(await chat.locator('.office-chat-message').count(), 0);
   await chat.getByLabel('Chat participant').selectOption('');
   await chat.getByLabel('Chat project').selectOption(project.id);
@@ -141,11 +152,12 @@ try {
     /cursor/i,
   );
   await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1000, 800));
-  await page.waitForFunction(
-    () =>
-      document.querySelector('.office-chat')!.getBoundingClientRect().top >=
-      document.querySelector('.sky-office')!.getBoundingClientRect().bottom,
-  );
+  if (!onStage)
+    await page.waitForFunction(
+      () =>
+        document.querySelector('.office-chat')!.getBoundingClientRect().top >=
+        document.querySelector('.office3d, .sky-office')!.getBoundingClientRect().bottom,
+    );
   assert.equal(await page.evaluate(() => document.body.scrollWidth <= innerWidth), true);
   assert.deepEqual(errors, []);
   await writeFile(

@@ -17,7 +17,8 @@
     "start": "electron .",
     "package": "node scripts/package.mjs",
     "test:desktop": "tsx tests/desktop.e2e.ts",
-    "test:revision-desktop": "tsx tests/revision.desktop.ts"
+    "test:revision-desktop": "tsx tests/revision.desktop.ts",
+    "test:office3d-desktop": "tsx tests/office3d.desktop.ts"
   },
   "dependencies": {
     "fflate": "0.8.3",
@@ -25,6 +26,7 @@
     "node-pty": "1.1.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
+    "three": "0.186.1",
     "zod": "4.5.4"
   },
   "devDependencies": {
@@ -33,6 +35,7 @@
     "@types/node": "24.13.3",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.7",
+    "@types/three": "0.186.0",
     "electron": "44.2.0",
     "esbuild": "0.28.2",
     "playwright": "1.63.0",

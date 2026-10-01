@@ -402,3 +402,69 @@
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+/* Segmented control: a radio group drawn as one pill. */
+.segmented {
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--input);
+}
+.segmented button {
+  padding: 6px 14px;
+  border-radius: 7px;
+  font-size: var(--fs-2);
+  font-weight: 600;
+  color: var(--muted);
+}
+.segmented button:hover:not(:disabled) {
+  color: var(--text);
+}
+.segmented button.on {
+  background: var(--panel-2);
+  color: var(--text);
+  box-shadow: 0 0 0 1px var(--border);
+}
+.segmented button:focus-visible {
+  outline-offset: 1px;
+}
+
+/* Status dot: tone only, always beside a word. */
+.dot {
+  display: inline-block;
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--st-idle);
+}
+.dot[data-tone='ok'] {
+  background: var(--st-done);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--st-done) 22%, transparent);
+}
+.dot[data-tone='warn'] {
+  background: var(--st-needs);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--st-needs) 22%, transparent);
+}
+.dot[data-tone='bad'] {
+  background: var(--st-failed);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--st-failed) 22%, transparent);
+}
+.dot[data-tone='off'] {
+  background: transparent;
+  border: 1.5px solid var(--st-idle);
+}
+.dot[data-tone='busy'] {
+  background: var(--st-meeting);
+  animation: dot-pulse 1.2s ease-in-out infinite;
+}
+@keyframes dot-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+html[data-motion='reduced'] .dot[data-tone='busy'] {
+  animation: none;
+}

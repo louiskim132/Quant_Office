@@ -1,4 +1,4 @@
-/* memory.css — interactive memory graph surface. */
+/* memory.css — the memory brain: a full-bleed, Obsidian-style graph with floating controls. */
 .memory-page {
   display: grid;
   gap: 18px;
@@ -37,79 +37,214 @@
   border-style: dashed;
 }
 
-/* Graph layout: pan/zoom canvas beside the detail column. */
+/* The stage: findings list · brain · detail. The list and detail columns open and close. */
 .memory-layout {
+  --stage-h: clamp(560px, 78vh, 900px);
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 300px;
-  gap: 16px;
-  align-items: start;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+  align-items: stretch;
+  height: var(--stage-h);
 }
-.memory-graph {
+.memory-layout.with-list {
+  grid-template-columns: 240px minmax(0, 1fr);
+}
+.memory-list {
+  min-height: 0;
+  overflow: auto;
+}
+.memory-list {
   border: 1px solid var(--border);
-  border-radius: 9px;
   background: var(--panel);
-  overflow: hidden;
+  border-radius: 14px;
+  padding: 12px;
+}
+.memory-list h3 {
+  margin: 2px 4px 10px;
+}
+.memory-list .search-field {
+  min-width: 0;
+  width: 100%;
+  margin-bottom: 6px;
+}
+.memory-list-row {
+  display: grid;
+  gap: 6px;
+  text-align: left;
+  width: 100%;
+  background: transparent;
+  color: var(--text);
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  padding: 11px 6px;
+  font: inherit;
+  cursor: pointer;
+}
+.memory-list-row:hover {
+  background: var(--panel-2);
+}
+.memory-list-row.selected {
+  background: var(--accent-soft, var(--accent-bg));
+}
+.memory-list-row strong {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.memory-list-row .memory-kind {
+  width: fit-content;
+}
+.memory-list-row small {
+  color: var(--muted);
 }
 
-/* Kind filter chips: toggled-off kinds strike out and hide their nodes plus incident edges. */
-.memory-kindrow {
+/* The brain frame: the canvas fills it; every control floats on a glass plate. */
+.brain-frame {
+  --brain-bg: #19140f;
+  --brain-bg-edge: #0f0c09;
+  --brain-edge: #8d8678;
+  --brain-confirmed: #cbc3b2;
+  --brain-proposed: #8d8678;
+  --brain-refuted: #ef7a6a;
+  --brain-accent: #f0c27a;
+  --brain-text: #efe9de;
+  --brain-halo: #17120e;
+  --brain-observation: #52a8e0;
+  --brain-hypothesis: #b48ae6;
+  --brain-result: #46c99b;
+  --brain-defect: #ef7a6a;
+  --brain-decision: #eeb948;
+  --brain-note: #8996a6;
+  --glass: #1a1511d9;
+  --glass-edge: #ffffff17;
+  --glass-text: #f1eadc;
+  --glass-muted: #aea28f;
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+  isolation: isolate;
+  background: radial-gradient(110% 100% at 50% 45%, var(--brain-bg) 0%, var(--brain-bg-edge) 100%);
+  color: var(--glass-text);
+}
+:root[data-theme='light'] .brain-frame {
+  --brain-bg: #fbf7ee;
+  --brain-bg-edge: #ece3d2;
+  --brain-edge: #8a8070;
+  --brain-confirmed: #4d463b;
+  --brain-proposed: #7b7364;
+  --brain-refuted: #c04a3a;
+  --brain-accent: #a1631a;
+  --brain-text: #2b2419;
+  --brain-halo: #fbf7ee;
+  --brain-observation: #1f78b4;
+  --brain-hypothesis: #7b4fc1;
+  --brain-result: #168a63;
+  --brain-defect: #cf4a39;
+  --brain-decision: #c58a12;
+  --brain-note: #6a7685;
+  --glass: #fbf6ecdb;
+  --glass-edge: #3a2a1a24;
+  --glass-text: #2b2218;
+  --glass-muted: #6f6150;
+}
+.brain-canvas {
+  position: absolute;
+  inset: 0;
+  outline-offset: -3px;
+  touch-action: none;
+  cursor: grab;
+  user-select: none;
+}
+.brain-canvas:active {
+  cursor: grabbing;
+}
+.brain-canvas:focus-visible {
+  outline: 2px solid var(--accent);
+}
+.brain-tip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 3;
+  max-width: 280px;
+  padding: 5px 10px;
+  border: 1px solid var(--glass-edge);
+  border-radius: 8px;
+  background: var(--glass);
+  color: var(--glass-text);
+  font-size: 12px;
+  font-weight: 600;
+  pointer-events: none;
+  backdrop-filter: blur(6px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.brain-tip[data-kind='observation'] {
+  border-left: 3px solid var(--brain-observation);
+}
+.brain-tip[data-kind='hypothesis'] {
+  border-left: 3px solid var(--brain-hypothesis);
+}
+.brain-tip[data-kind='result'] {
+  border-left: 3px solid var(--brain-result);
+}
+.brain-tip[data-kind='defect'] {
+  border-left: 3px solid var(--brain-defect);
+}
+.brain-tip[data-kind='decision'] {
+  border-left: 3px solid var(--brain-decision);
+}
+.brain-tip[data-kind='note'] {
+  border-left: 3px solid var(--brain-note);
+}
+
+.brain-kinds,
+.brain-toolbar,
+.brain-legend,
+.brain-hint,
+.brain-panel,
+.brain-frame .mem-empty {
+  position: absolute;
+  z-index: 4;
+}
+.brain-kinds {
+  top: 12px;
+  left: 12px;
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  align-items: center;
-  padding: 9px 14px;
-  border-bottom: 1px solid var(--border);
+  max-width: calc(100% - 420px);
 }
-.memory-kind {
-  font: inherit;
-  font-size: 10px;
-  text-transform: lowercase;
-  letter-spacing: 0.04em;
-  padding: 3px 9px;
-  border-radius: 999px;
-  border: 1px solid var(--subtle);
-  background: transparent;
-  color: var(--text);
-  cursor: pointer;
-}
-.memory-kind.off {
-  opacity: 0.4;
-  text-decoration: line-through;
-}
-.memory-kind.kind-observation {
-  border-color: #7fa8c9;
-}
-.memory-kind.kind-hypothesis {
-  border-color: #b58fc9;
-}
-.memory-kind.kind-result {
-  border-color: var(--teal);
-}
-.memory-kind.kind-defect {
-  border-color: #c97f7f;
-}
-.memory-kind.kind-decision {
-  border-color: var(--accent);
-}
-.memory-kind.kind-note {
-  border-color: var(--muted);
-}
-.memory-refuted {
-  margin-left: auto;
+.brain-frame .memory-kind {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  font-size: 10px;
-  color: var(--subtle);
+  gap: 2px;
+  padding: 4px 10px;
+  border: 1px solid var(--glass-edge);
+  border-radius: 999px;
+  background: var(--glass);
+  color: var(--glass-text);
+  font-size: 11px;
+  font-weight: 600;
   text-transform: lowercase;
-  cursor: pointer;
+  letter-spacing: 0.02em;
+  backdrop-filter: blur(6px);
 }
-
-/* Graph legend: the kind chips carry a dot swatch; edge/status glyphs sit beside them.
-   The same .mem-legend-dot + kind-* classes also mark rows in the compare tray. */
+.brain-frame .memory-kind small {
+  margin-left: 6px;
+  color: var(--glass-muted);
+  font-weight: 500;
+}
+.brain-frame .memory-kind.off {
+  opacity: 0.45;
+  text-decoration: line-through;
+}
 .mem-legend-dot {
-  width: 7px;
-  height: 7px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   display: inline-block;
   margin-right: 5px;
@@ -119,124 +254,249 @@
 }
 .mem-legend-dot.kind-observation,
 .memory-kind.kind-observation .mem-legend-dot {
-  background: #7fa8c9;
+  background: var(--brain-observation, #52a8e0);
 }
 .mem-legend-dot.kind-hypothesis,
 .memory-kind.kind-hypothesis .mem-legend-dot {
-  background: #b58fc9;
+  background: var(--brain-hypothesis, #b48ae6);
 }
 .mem-legend-dot.kind-result,
 .memory-kind.kind-result .mem-legend-dot {
-  background: var(--teal);
+  background: var(--brain-result, #46c99b);
 }
 .mem-legend-dot.kind-defect,
 .memory-kind.kind-defect .mem-legend-dot {
-  background: #c97f7f;
+  background: var(--brain-defect, #ef7a6a);
 }
 .mem-legend-dot.kind-decision,
 .memory-kind.kind-decision .mem-legend-dot {
-  background: var(--accent);
+  background: var(--brain-decision, #eeb948);
 }
 .mem-legend-dot.kind-note,
 .memory-kind.kind-note .mem-legend-dot {
-  background: var(--muted);
+  background: var(--brain-note, #8996a6);
 }
-.mem-legend {
+/* In the findings list the kind chip is a plain label, not a floating control. */
+.memory-list .memory-kind {
   display: inline-flex;
   align-items: center;
-  gap: 14px;
   font-size: 10px;
-  color: var(--subtle);
   text-transform: lowercase;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text);
+  background: transparent;
+}
+
+.brain-toolbar {
+  top: 12px;
+  right: 12px;
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--glass-edge);
+  border-radius: 12px;
+  background: var(--glass);
+  backdrop-filter: blur(6px);
+}
+.brain-tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: 8px;
+  color: var(--glass-muted);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.brain-tool:hover:not(:disabled) {
+  background: #ffffff14;
+  color: var(--glass-text);
+}
+.brain-tool.on,
+.brain-tool[aria-pressed='true']:not(.off) {
+  color: var(--brain-accent);
+  background: #ffffff10;
+}
+
+.brain-panel {
+  top: 58px;
+  right: 12px;
+  width: 292px;
+  max-height: calc(100% - 140px);
+  overflow-y: auto;
+  padding: 6px 14px 10px;
+  border: 1px solid var(--glass-edge);
+  border-radius: 12px;
+  background: var(--glass);
+  backdrop-filter: blur(10px);
+  font-size: 12px;
+}
+.brain-panel details {
+  border-bottom: 1px solid var(--glass-edge);
+  padding: 8px 0;
+}
+.brain-panel details:last-child {
+  border-bottom: 0;
+}
+.brain-panel summary {
+  cursor: pointer;
+  padding: 2px 0 6px;
+  font:
+    600 11px/1.4 ui-monospace,
+    'Cascadia Mono',
+    Consolas,
+    monospace;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--brain-accent);
+}
+.brain-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 30px;
+  color: var(--glass-text);
+}
+.brain-row > span {
+  flex: 1 1 auto;
+}
+.brain-slider input[type='range'] {
+  flex: 0 0 120px;
+  width: 120px;
+  padding: 0;
+  border: 0;
+  background: none;
+  accent-color: var(--brain-accent);
+}
+.brain-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.brain-chips .muted {
+  flex-basis: 100%;
+  font-size: 11px;
+}
+.brain-panel .muted {
+  color: var(--glass-muted);
+}
+.brain-panel .text-button {
+  margin-top: 6px;
+  color: var(--brain-accent);
+}
+.memory-window-chip {
+  font: inherit;
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--glass-edge);
+  background: transparent;
+  color: var(--glass-muted);
+  cursor: pointer;
+}
+.memory-window-chip.on {
+  border-color: var(--brain-accent);
+  color: var(--glass-text);
+  background: #ffffff10;
+}
+
+.brain-legend {
+  left: 14px;
+  bottom: 40px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 11px;
+  color: var(--glass-muted);
+  text-transform: lowercase;
+  pointer-events: none;
 }
 .mem-legend-item {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
 }
-/* Two classes deep so the .memory-graph svg width:100% rule (which ties this selector on
-   specificity but is declared later) cannot inflate legend marks inside the graph area. */
-.mem-legend .mem-legend-item svg {
+.mem-legend-item svg {
   flex: 0 0 auto;
   width: 26px;
   height: 10px;
   overflow: visible;
 }
-.mem-legend .mem-legend-item svg.legend-mark {
+.mem-legend-item svg.legend-mark {
   width: 12px;
   height: 12px;
 }
-.mem-legend .legend-line {
-  stroke: var(--subtle);
+.legend-line {
+  stroke: var(--brain-proposed);
   stroke-width: 1.6;
 }
-.mem-legend .legend-line.confirmed {
-  stroke: var(--teal);
+.legend-line.confirmed {
+  stroke: var(--brain-confirmed);
 }
-.mem-legend .legend-arrow.confirmed {
-  fill: var(--teal);
-}
-.mem-legend .legend-line.proposed {
+.legend-line.proposed {
   stroke-dasharray: 5 3;
 }
-.mem-legend .legend-arrow.proposed {
-  fill: var(--subtle);
-}
-.mem-legend .legend-line.refuted {
+.legend-line.refuted {
+  stroke: var(--brain-refuted);
   stroke-dasharray: 2.5 3;
-  opacity: 0.6;
 }
-.mem-legend .legend-dot.superseded {
-  fill: var(--panel);
-  stroke: var(--subtle);
+.legend-dot.superseded {
+  fill: none;
+  stroke: var(--brain-proposed);
   stroke-width: 1.4;
   stroke-dasharray: 2 1.8;
 }
-.mem-legend .legend-strike {
-  stroke: var(--text);
-  stroke-width: 1.4;
+.brain-hint {
+  left: 14px;
+  right: 14px;
+  bottom: 12px;
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--glass-muted);
+  pointer-events: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-
-/* Timeline window: a display filter over the loaded graph — records never change. */
-.memory-window {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin-right: auto;
-}
-.memory-window-label {
-  font-size: 10px;
-  margin-right: 2px;
-  text-transform: lowercase;
-}
-.memory-window-chip {
-  font: inherit;
-  font-size: 10px;
-  padding: 3px 9px;
-  border-radius: 999px;
-  border: 1px solid var(--subtle);
-  background: transparent;
-  color: var(--subtle);
-  cursor: pointer;
-}
-.memory-window-chip.on {
-  border-color: var(--accent);
-  color: var(--text);
-  background: var(--accent-soft);
-}
-.memory-canvas {
-  position: relative;
-}
-.mem-empty {
-  position: absolute;
+.brain-frame .mem-empty {
   top: 44%;
   left: 0;
   right: 0;
   margin: 0;
   text-align: center;
-  font-size: 11px;
-  color: var(--subtle);
+  font-size: 12px;
+  color: var(--glass-muted);
   pointer-events: none;
+}
+
+@container (max-width: 760px) {
+  .brain-kinds {
+    max-width: calc(100% - 24px);
+    top: 56px;
+  }
+}
+@media (max-width: 1180px) {
+  .memory-layout.with-list {
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+  }
+  .memory-layout .brain-frame {
+    height: var(--stage-h);
+  }
+  .memory-list {
+    max-height: 260px;
+  }
 }
 
 /* Compare tray: ctrl/cmd-clicked findings, compact and dismissible. */
@@ -245,9 +505,11 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  padding: 8px 14px;
-  border-top: 1px solid var(--border);
-  font-size: 10px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+  font-size: 11px;
 }
 .memory-tray > .muted {
   margin-right: 2px;
@@ -269,9 +531,6 @@
 }
 .memory-tray-item:hover {
   border-color: var(--accent);
-}
-.memory-tray-item .mem-legend-dot {
-  margin-right: 2px;
 }
 .memory-tray-title {
   overflow: hidden;
@@ -303,176 +562,51 @@
   color: var(--subtle);
   line-height: 1.5;
 }
-.memory-graph svg {
-  display: block;
-  width: 100%;
-  height: auto;
-  touch-action: none;
-  cursor: grab;
-  user-select: none;
-}
-.memory-graph svg:active {
-  cursor: grabbing;
-}
-.memory-hint {
-  padding: 9px 14px;
-  border-top: 1px solid var(--border);
-}
 
-/* Edges: thin directed lines — CONFIRMED solid, PROPOSED dashed — a proposed link is never drawn as established. */
-.mem-edge-line {
-  stroke: var(--subtle);
-  stroke-width: 1.4;
-  fill: none;
+/* Detail: a card over the right edge of the graph that mirrors the record, never an endorsement.
+   It overlays rather than takes a column, so selecting a finding never moves the picture. */
+.memory-detail {
+  position: absolute;
+  z-index: 5;
+  top: 58px;
+  right: 12px;
+  bottom: 40px;
+  width: min(330px, calc(100% - 24px));
+  overflow-y: auto;
+  border-radius: 14px;
+  box-shadow: var(--shadow-pop);
 }
-.mem-edge-arrow {
-  fill: var(--subtle);
+.memory-detail .memory-detail-card {
+  min-height: 100%;
 }
-.mem-edge-hit {
-  stroke: transparent;
-  stroke-width: 14;
-  fill: none;
-  pointer-events: stroke;
+.brain-close {
+  position: sticky;
+  top: 0;
+  float: right;
+  z-index: 2;
+  margin: 8px 8px -30px 0;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  color: var(--muted);
+  background: var(--panel-2);
 }
-.mem-edge.status-proposed .mem-edge-line {
-  stroke-dasharray: 7 5;
-  stroke: var(--subtle);
-  opacity: 0.75;
+.brain-close:hover {
+  color: var(--text);
 }
-.mem-edge.status-proposed .mem-edge-arrow {
-  fill: var(--subtle);
-  opacity: 0.75;
+.brain-frame:has(.memory-detail) .brain-panel {
+  right: 354px;
 }
-.mem-edge.status-confirmed .mem-edge-line {
-  stroke: var(--teal);
-  stroke-width: 1.8;
-}
-.mem-edge.status-confirmed .mem-edge-arrow {
-  fill: var(--teal);
-}
-.mem-edge.selected .mem-edge-line {
-  stroke: var(--accent);
-  stroke-width: 2.4;
-}
-.mem-edge.selected .mem-edge-arrow {
-  fill: var(--accent);
-}
-.mem-edge.status-refuted .mem-edge-line {
-  stroke-dasharray: 3 4;
-  opacity: 0.5;
-}
-.mem-edge.status-refuted .mem-edge-arrow {
-  opacity: 0.5;
-}
-/* Hovering a node dims unrelated edges and slightly emphasizes its incident ones. */
-.mem-edge.dim .mem-edge-line,
-.mem-edge.dim .mem-edge-arrow {
-  opacity: 0.12;
-}
-.mem-edge.near .mem-edge-line {
-  stroke-width: 2.4;
-}
-.mem-edge.status-refuted .mem-edge-label {
-  text-decoration: line-through;
-  opacity: 0.65;
-}
-.mem-edge-label {
-  fill: var(--subtle);
-  font-size: 9px;
-  text-transform: lowercase;
-  pointer-events: none;
-}
-.mem-edge.selected .mem-edge-label {
-  fill: var(--accent);
-}
-
-/* Nodes: Obsidian-style filled dots — one hue per finding kind, size set per node by
-   recorded link count (see memoryRadius); superseded nodes hollow out and carry a strike. */
-.mem-node {
-  cursor: move;
-}
-.mem-node .mem-node-hit {
-  fill: #000;
-  fill-opacity: 0;
-  stroke: none;
-  pointer-events: all;
-}
-.mem-node .mem-node-dot {
-  fill: var(--muted);
-  stroke: var(--panel);
-  stroke-width: 1.5;
-}
-.mem-node.kind-observation .mem-node-dot {
-  fill: #7fa8c9;
-}
-.mem-node.kind-hypothesis .mem-node-dot {
-  fill: #b58fc9;
-}
-.mem-node.kind-result .mem-node-dot {
-  fill: var(--teal);
-}
-.mem-node.kind-defect .mem-node-dot {
-  fill: #c97f7f;
-}
-.mem-node.kind-decision .mem-node-dot {
-  fill: var(--accent);
-}
-.mem-node.kind-note .mem-node-dot {
-  fill: var(--muted);
-}
-.mem-node.selected .mem-node-dot {
-  stroke: var(--accent);
-  stroke-width: 3;
-}
-@media (prefers-reduced-motion: no-preference) {
-  .mem-node.selected .mem-node-dot {
-    animation: mem-pulse 1.8s ease-out 3;
-  }
-}
-@keyframes mem-pulse {
-  0% {
-    stroke-width: 3;
-  }
-  50% {
-    stroke-width: 6.5;
-  }
-  100% {
-    stroke-width: 3;
-  }
-}
-.mem-node.superseded {
-  opacity: 0.6;
-}
-.mem-node.superseded .mem-node-dot {
-  fill: var(--panel);
-  stroke: var(--subtle);
-  stroke-dasharray: 2.5 2.2;
-}
-.mem-node .mem-supersede {
-  stroke: var(--text);
-  stroke-width: 1.8;
-  pointer-events: none;
-}
-.mem-node-title {
-  fill: var(--text);
-  font-size: 10px;
-  pointer-events: none;
-  paint-order: stroke;
-  stroke: var(--panel);
-  stroke-width: 3;
-  stroke-linejoin: round;
-}
-.mem-node.superseded .mem-node-title {
-  text-decoration: line-through;
-}
-
-/* Detail column: a fixed card that mirrors the record, never an endorsement. */
 .memory-detail-card {
+  color: var(--muted);
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: 14px;
   background: var(--panel);
   padding: 16px 18px;
   display: grid;
+  align-content: start;
   gap: 11px;
 }
 .memory-detail-card > * {
@@ -481,6 +615,7 @@
 .memory-detail-card h3 {
   font-size: 13px;
   margin: 0;
+  color: var(--text);
 }
 .memory-detail-card .card-heading {
   align-items: flex-start;
@@ -495,16 +630,17 @@
   line-height: 1.65;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  color: var(--text);
 }
 .memory-detail-card .button-row {
   justify-content: flex-start;
 }
-.memory-detail-empty {
-  border-style: dashed;
-}
 .memory-detail-card .text-button {
   padding: 0;
   display: inline;
+}
+.memory-connections {
+  margin: 4px 0;
 }
 
 /* Link proposal: compact disclosure inside the selected-node card. */
@@ -530,7 +666,7 @@
 /* Composer: bounded fields on the frozen command contract. */
 .memory-composer {
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: 14px;
   background: var(--panel);
   padding: 14px 18px;
 }
@@ -553,81 +689,4 @@
 }
 .memory-composer button {
   justify-self: start;
-}
-
-@media (max-width: 1150px) {
-  .memory-layout {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
-.memory-layout {
-  grid-template-columns: 200px minmax(0, 1fr) 280px;
-}
-.memory-list {
-  border: 1px solid var(--border);
-  background: var(--panel);
-  border-radius: 9px;
-  padding: 12px;
-  max-height: 660px;
-  overflow: auto;
-}
-.memory-list .search-field {
-  min-width: 0;
-  width: 100%;
-}
-.memory-list-row {
-  display: grid;
-  gap: 6px;
-  text-align: left;
-  width: 100%;
-  background: transparent;
-  color: var(--text);
-  border: 0;
-  border-bottom: 1px solid var(--border);
-  padding: 12px 6px;
-  font: inherit;
-  cursor: pointer;
-}
-.memory-list-row.selected {
-  background: var(--accent-soft);
-}
-.memory-list-row strong {
-  font-size: 12px;
-  overflow-wrap: anywhere;
-}
-.memory-list-row .memory-kind {
-  width: fit-content;
-}
-.memory-list-row small {
-  color: var(--muted);
-}
-.memory-tools {
-  padding: 10px;
-  flex-wrap: wrap;
-}
-.mem-node:focus-visible .mem-node-dot {
-  stroke: var(--accent);
-  stroke-width: 4px;
-}
-.memory-connections {
-  margin: 16px 0;
-}
-@media (max-width: 1200px) {
-  .memory-layout {
-    grid-template-columns: minmax(0, 1fr) 270px;
-  }
-  .memory-list {
-    grid-column: 1 / -1;
-    max-height: 190px;
-  }
-}
-@media (max-width: 800px) {
-  .memory-layout {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
-html[data-motion='reduced'] .mem-node.selected .mem-node-dot {
-  animation: none;
 }

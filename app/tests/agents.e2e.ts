@@ -36,9 +36,9 @@ try {
     state.agents.every(a => a.execution === 'HOSTED_SETUP_REQUIRED'),
     true,
   );
-  assert.equal(await page.locator('.office-person').count(), 2);
+  assert.equal(await page.locator('[data-office-agent]').count(), 2);
   await page.screenshot({ path: path.join(root, 'test-output', 'agents-office.png') });
-  await page.locator('.office-person').first().click();
+  await page.locator('[data-office-agent]').first().click();
   await page.getByRole('button', { name: 'Full profile & logs', exact: true }).click();
   const detail = page.getByRole('dialog', { name: 'Test Director 1', exact: true });
   await detail.waitFor();
@@ -151,12 +151,12 @@ try {
   await page.getByLabel('Membership').selectOption('archived');
   await page.getByRole('button', { name: 'Restore agent', exact: true }).waitFor();
   await page.getByRole('button', { name: 'Office', exact: true }).click();
-  assert.equal(await page.locator('.office-person').count(), 1);
+  assert.equal(await page.locator('[data-office-agent]').count(), 1);
   await page.getByRole('button', { name: 'Agents', exact: true }).click();
   await page.getByLabel('Membership').selectOption('archived');
   await page.getByRole('button', { name: 'Restore agent', exact: true }).click();
   await page.getByRole('button', { name: 'Office', exact: true }).click();
-  assert.equal(await page.locator('.office-person').count(), 2);
+  assert.equal(await page.locator('[data-office-agent]').count(), 2);
   console.log('Agent confirmation, removal/restoration and real Codex usage checks passed. No research calls.');
 } finally {
   await app.close();

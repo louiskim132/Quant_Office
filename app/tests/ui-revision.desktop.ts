@@ -90,33 +90,58 @@ try {
         if ((await page.getByLabel('Current project', { exact: true }).inputValue()) !== project.id)
           await page.getByLabel('Current project', { exact: true }).selectOption(project.id);
         if (destination === 'Memory') {
-          await page.locator('.mem-node').first().waitFor();
-          assert.equal(await page.locator('.mem-node').count(), 24);
+          // The brain is a canvas: the host reports what it draws, and the findings list is its text twin.
+          const brain = page.locator('.brain-canvas');
+          await brain.waitFor();
+          await page.waitForFunction(
+            () => document.querySelector('.brain-canvas')?.getAttribute('data-nodes') === '24',
+          );
+          if (!(await page.locator('.memory-list').count()))
+            await page.getByRole('button', { name: 'Findings list', exact: true }).click();
           await page.locator('.memory-list-row').first().click();
           await page.getByRole('heading', { name: 'Links & backlinks' }).waitFor();
           await page.getByRole('button', { name: 'Local graph', exact: true }).click();
-          assert.ok((await page.locator('.mem-node').count()) <= 3);
+          await page.waitForFunction(
+            () => Number(document.querySelector('.brain-canvas')?.getAttribute('data-nodes')) <= 3,
+          );
           await page.getByRole('button', { name: 'Local graph', exact: true }).click();
-          await page.locator('.mem-node').nth(2).focus();
-          await page.keyboard.press('Enter');
-          const svg = page.getByRole('img', { name: 'Memory graph' });
-          const box = await svg.boundingBox();
+          await page.waitForFunction(
+            () => document.querySelector('.brain-canvas')?.getAttribute('data-nodes') === '24',
+          );
+          // Names switch: hide and show the names on the graph without touching any record.
+          await page.getByRole('button', { name: 'Names', exact: true }).click();
+          assert.equal(await brain.getAttribute('data-names'), 'off');
+          await page.getByRole('button', { name: 'Names', exact: true }).click();
+          assert.equal(await brain.getAttribute('data-names'), 'on');
+          // Keyboard: arrows step through the findings.
+          await brain.focus();
+          const before = await brain.getAttribute('data-selected');
+          await page.keyboard.press('ArrowRight');
+          await page.waitForFunction(
+            before => document.querySelector('.brain-canvas')?.getAttribute('data-selected') !== before,
+            before,
+          );
+          const box = await brain.boundingBox();
           assert.ok(box);
           await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-          const before = await svg.locator('g').first().getAttribute('transform');
-          await page.mouse.wheel(0, -120);
+          const zoom = await brain.getAttribute('data-zoom');
+          await page.mouse.wheel(0, -240);
           await page.waitForFunction(
-            before =>
-              document.querySelector('svg[aria-label="Memory graph"] > g')?.getAttribute('transform') !== before,
-            before,
+            zoom => document.querySelector('.brain-canvas')?.getAttribute('data-zoom') !== zoom,
+            zoom,
           );
           await page.getByRole('button', { name: 'Fit graph', exact: true }).click();
         }
         if (destination === 'Settings') {
-          await page.getByRole('button', { name: 'Appearance', exact: true }).click();
-          await page.getByLabel('Theme', { exact: true }).waitFor();
+          const rail = page.getByRole('navigation', { name: 'Settings sections' });
+          await rail.getByRole('button', { name: 'Appearance', exact: true }).click();
+          await page.getByRole('radiogroup', { name: 'Theme', exact: true }).waitFor();
           assert.equal(await page.getByRole('button', { name: 'Create backup', exact: true }).isVisible(), false);
-          await page.getByRole('button', { name: 'All settings', exact: true }).click();
+          await rail.getByRole('button', { name: /^Agent isolation/ }).click();
+          await page.getByText('Not set up', { exact: true }).first().waitFor();
+          await rail.getByRole('button', { name: 'Data & recovery', exact: true }).click();
+          await page.getByRole('button', { name: 'Create backup', exact: true }).waitFor();
+          await rail.getByRole('button', { name: /^Connections/ }).click();
         }
         assert.equal(
           await page.evaluate(() => document.body.scrollWidth <= innerWidth),
@@ -155,12 +180,18 @@ try {
   );
   await page.getByRole('button', { name: 'Office', exact: true }).first().click();
   await page.evaluate(async () => {
+    // A walk is either a Web Animation on a flat-floor person or the 3D floor marking a person as
+    // walking; neither may start when nobody's location changed.
     const original = Element.prototype.animate;
     (window as any).uiWalks = 0;
     Element.prototype.animate = function (...args: Parameters<Element['animate']>) {
-      if (this.classList.contains('office-person')) (window as any).uiWalks++;
+      if (this.hasAttribute('data-office-agent')) (window as any).uiWalks++;
       return original.apply(this, args);
     };
+    new MutationObserver(records => {
+      for (const r of records)
+        if ((r.target as HTMLElement).getAttribute('data-motion') === 'walking') (window as any).uiWalks++;
+    }).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['data-motion'] });
     document.querySelector('main')?.scrollTo(0, 350);
     const state = await window.office.getState();
     await window.office.command({
@@ -176,14 +207,14 @@ try {
     'scroll plus state update never walks agents whose room did not change',
   );
   checks.push('Scroll plus state change does not animate unchanged agent locations');
-  await page.locator('.office-person').first().click();
+  await page.locator('[data-office-agent]').first().click();
   const drawer = page.getByRole('complementary', { name: 'Test dir 1 details' });
   await drawer.waitFor();
   await page.keyboard.press('Escape');
   await drawer.waitFor({ state: 'hidden' });
   assert.equal(
     await page
-      .locator('.office-person')
+      .locator('[data-office-agent]')
       .first()
       .evaluate(e => e === document.activeElement),
     true,

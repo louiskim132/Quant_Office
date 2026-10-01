@@ -57,27 +57,29 @@ try {
       w.webContents.setZoomFactor(scale);
     }, scale);
     await page.waitForFunction(() => document.fonts.status === 'loaded');
-    const labels = await page.locator('.station-label').evaluateAll(labels =>
-      labels.map(label => {
-        const name = label.querySelector('strong')!.getBoundingClientRect(),
-          status = label.querySelector('span')!.getBoundingClientRect();
-        return { nameBottom: name.bottom, statusTop: status.top };
+    // The office is the 3D floor (or the classic flat floor when WebGL is unavailable): either way each
+    // person carries one name tag whose name never runs into the status line beneath it.
+    await page.locator('[data-office-agent]').first().waitFor();
+    const labels = await page.locator('[data-office-agent]').evaluateAll(tags =>
+      tags.map(tag => {
+        const name = (tag.querySelector('.tag-row, .person-name') as HTMLElement).getBoundingClientRect(),
+          below = tag.querySelector('.tag-bubble') as HTMLElement | null;
+        return { nameBottom: name.bottom, statusTop: below ? below.getBoundingClientRect().top : Infinity };
       }),
     );
     assert.equal(await page.evaluate(() => document.body.scrollWidth <= window.innerWidth), true);
     assert.equal(labels.length, 2);
     assert.ok(labels.every(l => l.nameBottom <= l.statusTop));
-    assert.equal(await page.locator('.office-person').count(), 2);
-    await page.locator('.station-label').first().scrollIntoViewIfNeeded();
-    await page.locator('.office-person').first().focus();
+    assert.equal(await page.locator('[data-office-agent]').count(), 2);
+    await page.locator('.office3d, .station-label').first().scrollIntoViewIfNeeded();
+    await page.locator('[data-office-agent]').first().focus();
     assert.equal(
       await page
-        .locator('.office-person')
+        .locator('[data-office-agent]')
         .first()
         .evaluate(e => document.activeElement === e),
       true,
     );
-    await page.locator('.station-label').first().scrollIntoViewIfNeeded();
     const capture = await application.evaluate(async ({ BrowserWindow }) =>
       (await BrowserWindow.getAllWindows()[0].webContents.capturePage()).toPNG().toString('base64'),
     );
@@ -120,7 +122,9 @@ try {
     .waitFor();
   assert.equal(await page.locator('.queue-row').count(), 1);
   await page.getByRole('button', { name: 'Cancel request', exact: true }).click();
-  assert.equal(await page.locator('.queue-row[data-bucket=canceled]').count(), 1);
+  // The cancel round-trips through the main process; wait for the recorded state to reach the row.
+  await page.locator('.queue-row[data-bucket=settled]').first().waitFor();
+  assert.equal(await page.locator('.queue-row[data-bucket=settled]').count(), 1);
   assert.equal(await page.locator('.task-card').count(), 1);
   state = await page.evaluate(() => window.office.getState());
   assert.equal(state.requests![0].status, 'CANCELED');

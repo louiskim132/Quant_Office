@@ -80,7 +80,7 @@ fieldset {
   display: grid;
   grid-template-columns:
     minmax(150px, 1.3fr) minmax(130px, 1fr) minmax(180px, 1.2fr) minmax(150px, 1fr) minmax(170px, 1.1fr)
-    auto;
+    250px;
   column-gap: 18px;
   align-items: center;
   padding: 8px 16px;
@@ -94,7 +94,7 @@ fieldset {
 .agent-actions .cancel-request {
   min-height: 30px;
   padding: 5px 10px;
-  font-size: 10px;
+  font-size: 12px;
 }
 .profile-fields .field {
   margin: 0;
@@ -106,7 +106,7 @@ fieldset {
   min-height: 0;
   padding-top: 9px;
   padding-bottom: 9px;
-  font-size: 9px;
+  font-size: 10px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--subtle);
@@ -124,13 +124,16 @@ fieldset {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
 }
 .agent-cell.agent-name {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   color: var(--text);
-  font-weight: 500;
-  font-size: 12px;
+  font-weight: 600;
+  font-size: 13px;
 }
 .agent-actions {
   justify-content: flex-end;

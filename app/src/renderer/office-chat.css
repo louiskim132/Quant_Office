@@ -78,7 +78,7 @@
   display: flex;
   align-items: center;
   gap: 11px;
-  padding: 19px 18px;
+  padding: 14px 16px;
   background: var(--panel);
   color: var(--text);
   border-bottom: 1px solid var(--border);
@@ -95,7 +95,7 @@
   letter-spacing: -0.2px;
 }
 .office-chat-heading p {
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.5;
   margin: 0;
   color: var(--muted);
@@ -108,8 +108,8 @@
   color: var(--accent);
   border: 1px solid var(--border);
   border-radius: 50%;
-  height: 39px;
-  width: 39px;
+  height: 34px;
+  width: 34px;
   flex-shrink: 0;
 }
 .office-chat-refresh {
@@ -127,8 +127,8 @@
 .office-chat-filters {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px;
-  padding: 12px 15px;
+  gap: 8px 10px;
+  padding: 10px 15px;
   background: var(--panel);
   border-bottom: 1px solid var(--border);
 }
@@ -138,15 +138,25 @@
   flex-direction: column;
   gap: 5px;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.02em;
+}
+/* The second filter row carries three controls: thread, search, update type. */
+.office-chat-filters:has(> label:nth-child(3)) {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.office-chat-filters input {
+  min-width: 0;
+  width: 100%;
+  font-size: 12px;
+  padding: 7px 8px;
 }
 .office-chat-filters select {
   min-width: 0;
   width: 100%;
   font: inherit;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 400;
   letter-spacing: 0;
   color: var(--text);

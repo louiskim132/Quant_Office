@@ -27,7 +27,7 @@ async function launch() {
 }
 try {
   let page = await launch();
-  assert.equal(await page.locator('.office-person').count(), 0);
+  assert.equal(await page.locator('[data-office-agent]').count(), 0);
   assert.equal((await page.evaluate(() => window.office.getState())).agents.length, 0);
   // The Tasks and Research destinations are merged into Office and Projects.
   assert.equal(await page.getByRole('button', { name: 'Tasks', exact: true }).count(), 0);
@@ -141,11 +141,14 @@ try {
   await page.getByRole('button', { name: 'Usage', exact: true }).click();
   await page.getByText('Not checked yet', { exact: true }).first().waitFor();
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  await page.getByLabel('Theme', { exact: true }).selectOption('light');
+  const settingsRail = page.getByRole('navigation', { name: 'Settings sections' });
+  await settingsRail.getByRole('button', { name: /^Appearance/ }).click();
+  await page.getByRole('radiogroup', { name: 'Theme', exact: true }).getByRole('radio', { name: 'Light' }).click();
   await page.waitForFunction(() => document.documentElement.dataset.theme === 'light');
   await page.screenshot({ path: path.join(output, 'settings-light.png'), fullPage: true });
-  await page.getByLabel('Theme', { exact: true }).selectOption('dark');
+  await page.getByRole('radiogroup', { name: 'Theme', exact: true }).getByRole('radio', { name: 'Warm dark' }).click();
   await page.waitForFunction(() => document.documentElement.dataset.theme === 'dark');
+  await settingsRail.getByRole('button', { name: /^Connections/ }).click();
   await page.getByRole('button', { name: 'Office', exact: true }).click();
   await page.screenshot({ path: path.join(output, 'office-ready.png'), fullPage: true });
   const forbidden = await page.evaluate(async () => {
@@ -412,7 +415,7 @@ try {
   page = await launch();
   await page.getByText('Idle · no open provider work', { exact: true }).first().waitFor();
   // Profile dialog: the model/effort editor sits under the profile fields and above the connection section.
-  await page.locator('.office-person').first().click();
+  await page.locator('[data-office-agent]').first().click();
   await page.getByRole('button', { name: 'Full profile & logs', exact: true }).click();
   const agentDialog = page.getByRole('dialog', { name: 'Idle fixture' });
   await agentDialog.locator('.effort-control').waitFor();

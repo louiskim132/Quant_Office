@@ -306,7 +306,7 @@ export function OfficeScene({
 }
 
 /** The textual twin of the floor: one line per agent, most urgent first. */
-function NowPanel({
+export function NowPanel({
   team,
   views,
   onAgent,
