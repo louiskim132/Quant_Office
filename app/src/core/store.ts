@@ -7809,6 +7809,22 @@ export class OfficeStore {
       .filter(item => item.projectId === input.projectId)
       .slice(offset, offset + limit);
   }
+  /** Workspace-wide session feed for the usage history surface — office records, newest first. */
+  localSessionFeed(input: { projectId?: string; limit?: number; offset?: number } = {}): {
+    entries: LocalSessionRecord[];
+    total: number;
+  } {
+    if (input.projectId) id.parse(input.projectId);
+    const limit = Math.min(Math.max(input.limit ?? 50, 1), 200),
+      offset = Math.max(input.offset ?? 0, 0);
+    const sessions = (this.readProjection().localSessions ?? []).filter(
+      item => !input.projectId || item.projectId === input.projectId,
+    );
+    return {
+      entries: sessions.slice(offset, offset + limit),
+      total: sessions.length,
+    };
+  }
   /**
    * Appends lifecycle journal steps. Journals are append-only evidence: durable intent first,
    * observed outcome second. A journal row is never rewritten — reconciliation adds a new phase.

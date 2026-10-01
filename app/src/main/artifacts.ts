@@ -313,6 +313,77 @@ export class ArtifactService {
       await handle.close();
     }
   }
+  /**
+   * Bounded byte-content search over a project's stored text artifacts. Honest limits are part of
+   * the result: binary artifacts are skipped, files are read only to SEARCH_BYTES_PER_FILE, and
+   * the counts let the caller say exactly what was and was not searched.
+   */
+  async searchContent(
+    projectId: string,
+    query: string,
+  ): Promise<{
+    matches: { artifactId: string; name: string; line: number; snippet: string }[];
+    scanned: number;
+    skippedBinary: number;
+    truncated: number;
+  }> {
+    const SEARCH_BYTES_PER_FILE = 1024 * 1024,
+      MAX_FILES = 200,
+      MAX_PER_FILE = 5,
+      MAX_TOTAL_MATCHES = 100;
+    const textTypes = ['text/plain', 'text/csv', 'text/markdown', 'application/json'];
+    const needle = query.toLowerCase();
+    const artifacts = this.store
+      .snapshot({ history: false })
+      .artifacts.filter(a => a.projectId === projectId)
+      .slice(0, MAX_FILES);
+    const matches: { artifactId: string; name: string; line: number; snippet: string }[] = [];
+    let scanned = 0,
+      skippedBinary = 0,
+      truncated = 0;
+    for (const a of artifacts) {
+      if (matches.length >= MAX_TOTAL_MATCHES) break;
+      if (!textTypes.includes(a.mediaType)) {
+        skippedBinary++;
+        continue;
+      }
+      const file = this.objectPath(a.sha256);
+      let text: string;
+      try {
+        if ((await fileHash(file)) !== a.sha256) {
+          skippedBinary++;
+          continue;
+        }
+        const handle = await open(file, 'r');
+        try {
+          const buffer = Buffer.alloc(Math.min(a.size, SEARCH_BYTES_PER_FILE));
+          const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+          text = buffer.subarray(0, bytesRead).toString('utf8');
+          if (a.size > bytesRead) truncated++;
+        } finally {
+          await handle.close();
+        }
+      } catch {
+        skippedBinary++;
+        continue;
+      }
+      scanned++;
+      const lines = text.split('\n');
+      let found = 0;
+      for (let i = 0; i < lines.length && found < MAX_PER_FILE && matches.length < MAX_TOTAL_MATCHES; i++) {
+        if (!lines[i].toLowerCase().includes(needle)) continue;
+        found++;
+        const snippet = lines[i].trim();
+        matches.push({
+          artifactId: a.id,
+          name: a.name,
+          line: i + 1,
+          snippet: snippet.length > 200 ? `${snippet.slice(0, 199)}…` : snippet,
+        });
+      }
+    }
+    return { matches, scanned, skippedBinary, truncated };
+  }
   async exportProject(projectId: string, destination: string): Promise<void> {
     const state = this.store.snapshot({ history: false }),
       project = state.projects.find(p => p.id === projectId);

@@ -72,6 +72,9 @@ const api: OfficeAPI = {
   retryPipelineHop: input => request('office:pipeline-retry-hop', input),
   setAttentionCount: count => request('office:attention', count),
   setDesktopNotifications: enabled => request('office:desktop-notifications', enabled),
+  setProgress: progress => request('office:progress', progress),
+  artifactSearch: input => request('office:artifact-search', input),
+  localSessions: input => request('office:local-sessions', input),
   livePresence: () => request('office:presence'),
   onPresence(callback) {
     const handler = (_event: unknown, presence: Parameters<typeof callback>[0]) => callback(presence);
