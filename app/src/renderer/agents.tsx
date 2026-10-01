@@ -11,13 +11,15 @@ import type {
   Effort,
   ToolProfile,
 } from '../shared/types';
+import type { LocalSessionRecord } from '../shared/local-session';
 import { suggestedEfforts, PROVIDER_MODEL_SUGGESTIONS, effortIsIndependentAxis } from '../shared/effort';
 import { providerReadiness, currentConnection } from '../shared/readiness';
 import { LocalConsumption } from './activity';
 import { TRANSPORT_PROBE_CONTAINMENT } from '../shared/transport';
 import './agents.css';
-import { formatDateTime } from './format';
-import { Checkbox } from './components';
+import { formatDateTime, formatNumber, plural } from './format';
+import { Checkbox, Empty, label } from './components';
+import { History } from 'lucide-react';
 const roleNames: Record<Role, string> = {
   DIRECTOR: 'Director',
   PM_A: 'PM · Implementation',
@@ -572,7 +574,176 @@ export function SubscriptionUsage({ state }: { state: AppState }) {
         );
       })}
       <LocalConsumption />
+      <SessionHistory />
     </>
+  );
+}
+
+const SESSION_HISTORY_PAGE = 25;
+/** The provenance line every session-history row carries — these are the office's own ledger records. */
+const SESSION_PROVENANCE_TITLE = "Office-recorded — a row from the office's own session ledger, not a provider report.";
+
+/**
+ * Sessions newest-first by the record's creation time; the id breaks ties so pagination stays
+ * stable. The store returns collection order — sorting here is a view concern, never a rewrite.
+ */
+export function sessionHistoryRows(entries: LocalSessionRecord[]): LocalSessionRecord[] {
+  return [...entries].sort((a, b) => b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id));
+}
+
+/** The displayed packet-hash chip: the first eight hex characters, or '—' when none is recorded. */
+export function shortPacketHash(hash: string | null): string {
+  return hash ? hash.slice(0, 8) : '—';
+}
+
+/** Recorded lifecycle words ('reconcile required'), matching the app's lowercase status voice. */
+export function sessionLifecycleLabel(lifecycle: LocalSessionRecord['lifecycle']): string {
+  return lifecycle.replaceAll('_', ' ').toLowerCase();
+}
+
+export interface SessionHistoryCells {
+  recorded: string;
+  provider: string;
+  lifecycle: string;
+  surface: string;
+  layout: string;
+  packetHash: string;
+  providerSessionId: string;
+  provenance: 'office-observed';
+}
+/**
+ * The table cells for one recorded session. Every value comes straight from the record — no token
+ * totals (LocalSessionRecord carries none) and no provider-usage claims; '—' marks absent fields.
+ */
+export function sessionRowCells(record: LocalSessionRecord): SessionHistoryCells {
+  return {
+    recorded: formatDateTime(record.createdAt),
+    provider: record.provider,
+    lifecycle: sessionLifecycleLabel(record.lifecycle),
+    surface: label(record.surface),
+    layout: label(record.layout),
+    packetHash: shortPacketHash(record.packetHash),
+    providerSessionId: record.providerSessionId ?? '—',
+    provenance: 'office-observed',
+  };
+}
+
+/**
+ * Office-recorded local sessions, paged through office:local-sessions. These rows are the office's
+ * own ledger — they say nothing about provider-side usage, tokens, or remaining allowance.
+ */
+function SessionHistory() {
+  const [entries, setEntries] = useState<LocalSessionRecord[]>([]),
+    [total, setTotal] = useState(0),
+    [loaded, setLoaded] = useState(false),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState('');
+  async function load(offset: number) {
+    setBusy(true);
+    setError('');
+    try {
+      const page = await window.office.localSessions({ limit: SESSION_HISTORY_PAGE, offset });
+      setEntries(prev => (offset === 0 ? page.entries : [...prev, ...page.entries]));
+      setTotal(page.total);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+      setLoaded(true);
+    }
+  }
+  useEffect(() => void load(0), []);
+  const rows = sessionHistoryRows(entries);
+  return (
+    <section className="settings-card session-history">
+      <div className="section-title">
+        <div>
+          <h2>Session history</h2>
+          <p>Recorded office sessions — provider-reported usage is shown separately above.</p>
+        </div>
+      </div>
+      {error && (
+        <p role="alert" className="form-error">
+          {error}
+        </p>
+      )}
+      {!loaded && !error ? (
+        <p className="muted">Reading recorded sessions…</p>
+      ) : rows.length === 0 && !error ? (
+        <Empty
+          icon={History}
+          title="No sessions recorded yet"
+          description="The office writes a record here each time it prepares a local session packet; none exist on this machine."
+        />
+      ) : (
+        <>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Recorded</th>
+                  <th>Provider</th>
+                  <th>Lifecycle</th>
+                  <th>Surface</th>
+                  <th>Layout</th>
+                  <th>Packet hash</th>
+                  <th>Provider session</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(record => {
+                  const cells = sessionRowCells(record);
+                  return (
+                    <tr key={record.id}>
+                      <td>
+                        <time dateTime={record.createdAt}>{cells.recorded}</time>
+                      </td>
+                      <td>{cells.provider}</td>
+                      <td>
+                        {cells.lifecycle}{' '}
+                        <small className="prov-chip" data-evidence={cells.provenance} title={SESSION_PROVENANCE_TITLE}>
+                          {cells.provenance}
+                        </small>
+                      </td>
+                      <td>{cells.surface}</td>
+                      <td>{cells.layout}</td>
+                      <td>
+                        {record.packetHash ? (
+                          <code className="session-hash" title={record.packetHash}>
+                            {cells.packetHash}
+                          </code>
+                        ) : (
+                          <span className="muted" title="No packet hash recorded">
+                            —
+                          </span>
+                        )}
+                      </td>
+                      <td>
+                        {record.providerSessionId ? (
+                          <code title={record.providerSessionId}>{cells.providerSessionId}</code>
+                        ) : (
+                          <span className="muted">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div className="section-toolbar">
+            <span className="muted">
+              {formatNumber(rows.length)} of {plural(total, 'session')} recorded
+            </span>
+            {entries.length < total && (
+              <button className="secondary" disabled={busy} onClick={() => void load(entries.length)}>
+                {busy ? 'Loading…' : 'Load more'}
+              </button>
+            )}
+          </div>
+        </>
+      )}
+    </section>
   );
 }
 
