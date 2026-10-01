@@ -113,3 +113,9 @@ Screens inspected with eyes (evidence folder): office dark/light at 1440 and 100
 - Evidence: `ui-3d-redesign-2026-10-01/` — `before/` (09-29 build), `after/` (this build), `tools/` (read-only preview harness and README).
 - In the branch: `records/reviews/ui-3d-redesign-2026-10-01.md` (copy of this log) and a roadmap §17 entry.
 - Revert: delete the branch/worktree; nothing outside `Worktrees\ui-3d-office-20261001` and `Docs\Reviews` changed.
+
+## 8. Corrections (2026-10-01, integration)
+
+- **Status line and §7 "Revert" were wrong about `App\`.** The work was committed as `c25f1ab`, and the packaged **test** build `9756CE1B…` (inspector fuse on) was mirrored into `Quant Office\App\`; the previous App is in `Archive\App-before-3d-office-20261001` (asar `7E7C7FE4…`). The integration replaces it with a release build; see the roadmap's newest §17 entry.
+- **Decision 5 is superseded.** "Subscription sign-in … needs saved API keys" described LR-16 v1. LR-16b (`e4494fe`) removed that requirement, so the hard-coded blocked step was false. In `070c297` the step is derived from isolated-host checks, the card has per-provider Sign in / Check buttons in its existing styles, and the setup confirmation no longer mentions API keys. No graphics changed.
+- **§6 hand-off is done:** `codex/revision-20261001` was committed and merged into this branch (`070c297`).
