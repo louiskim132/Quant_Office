@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ChevronRight, ListTodo, Search } from 'lucide-react';
+import { ChevronRight, ListTodo, Pencil, Search, X } from 'lucide-react';
 import type { AppState, Experiment, Command, JobEvidence, Request } from '../shared/types';
 import { isTerminalJob, latestJobFor } from '../core/jobs';
 import { queueScope, type QueueEntry, type QueueFilter } from '../shared/queue';
@@ -173,6 +173,113 @@ function writeSeenStore(store: SeenStore) {
   }
 }
 
+/**
+ * Saved queue views — the page's own filter set (group chip, project, agent, team, search) kept under
+ * a name. Renderer-local only: stored as a JSON array in localStorage under `qro.queue-views`;
+ * applying one is a display action and changes no recorded state.
+ */
+export interface QueueViewFilters {
+  projectId: string;
+  agentId: string;
+  teamId: string;
+  search: string;
+  group: AttentionGroup | '';
+}
+export interface QueueView {
+  id: string;
+  name: string;
+  filters: QueueViewFilters;
+}
+export const QUEUE_VIEWS_KEY = 'qro.queue-views';
+export const QUEUE_DENSITY_KEY = 'qro.queue-density';
+export const MAX_QUEUE_VIEWS = 24;
+
+const ATTENTION_KEYS = new Set<string>(ATTENTION_GROUPS.map(g => g.key));
+const clean = (v: unknown) => (typeof v === 'string' ? v : '');
+
+/** Parse the stored view array; missing, malformed or half-corrupt entries degrade to what's valid. */
+export function parseQueueViews(raw: string | null): QueueView[] {
+  if (!raw) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  const views: QueueView[] = [];
+  for (const item of parsed) {
+    if (!item || typeof item !== 'object') continue;
+    const v = item as Partial<QueueView> & { filters?: Record<string, unknown> };
+    if (typeof v.id !== 'string' || !v.id || typeof v.name !== 'string' || !v.name.trim()) continue;
+    const f = (v.filters ?? {}) as Record<string, unknown>;
+    const group = ATTENTION_KEYS.has(f.group as string) ? (f.group as AttentionGroup) : '';
+    views.push({
+      id: v.id,
+      name: v.name.trim().slice(0, 80),
+      filters: {
+        projectId: clean(f.projectId),
+        agentId: clean(f.agentId),
+        teamId: clean(f.teamId),
+        search: clean(f.search),
+        group,
+      },
+    });
+    if (views.length >= MAX_QUEUE_VIEWS) break;
+  }
+  return views;
+}
+
+/** The five filters the queue page exposes, snapshotted so a view can restore exactly them. */
+export function snapshotQueueFilters(fields: {
+  scopeProject: string;
+  scopeAgent: string;
+  scopeTeam: string;
+  search: string;
+  only: AttentionGroup | '';
+}): QueueViewFilters {
+  return {
+    projectId: fields.scopeProject,
+    agentId: fields.scopeAgent,
+    teamId: fields.scopeTeam,
+    search: fields.search,
+    group: fields.only,
+  };
+}
+
+export function sameQueueFilters(a: QueueViewFilters, b: QueueViewFilters): boolean {
+  return (
+    a.projectId === b.projectId &&
+    a.agentId === b.agentId &&
+    a.teamId === b.teamId &&
+    a.search === b.search &&
+    a.group === b.group
+  );
+}
+
+/** 'compact' is the only meaningful stored value; anything else — including corruption — is default. */
+export function parseQueueDensity(raw: string | null): 'comfortable' | 'compact' {
+  return raw === 'compact' ? 'compact' : 'comfortable';
+}
+
+const EMPTY_FILTERS: QueueViewFilters = { projectId: '', agentId: '', teamId: '', search: '', group: '' };
+
+/** localStorage can be disabled or corrupt; reads and writes degrade quietly to defaults. */
+function readStored(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+function writeStored(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /* a failed write only means the preference is not remembered */
+  }
+}
+
 export function WorkQueue({
   state,
   busy,
@@ -204,6 +311,13 @@ export function WorkQueue({
   const [search, setSearch] = useState('');
   const [only, setOnly] = useState<AttentionGroup | ''>('');
   const [showAllDone, setShowAllDone] = useState(false);
+  // Named views and row density are renderer-local preferences — display only, no recorded state.
+  const [views, setViews] = useState<QueueView[]>(() => parseQueueViews(readStored(QUEUE_VIEWS_KEY)));
+  const [density, setDensity] = useState<'comfortable' | 'compact'>(() =>
+    parseQueueDensity(readStored(QUEUE_DENSITY_KEY)),
+  );
+  /** Inline name form: `id` null = saving the current filters, an id = renaming that view. */
+  const [viewEdit, setViewEdit] = useState<{ id: string | null; name: string } | null>(null);
   // Last-look baseline: the previous visit's timestamp, plus per-request opens recorded this session.
   const [store] = useState(loadSeenStore);
   const [seen, setSeen] = useState(store.seen);
@@ -239,13 +353,43 @@ export function WorkQueue({
     ]),
   ) as Record<'needs' | 'running' | 'done', number>;
   const isNew = (row: QueueRowData) => row.summary.lastAt > (seen[row.entry.id] ?? lastView);
+  const currentFilters = snapshotQueueFilters({ scopeProject, scopeAgent, scopeTeam, search, only });
+  // A view reads as active while its stored filters match exactly — editing any filter releases it.
+  const activeView = views.find(v => sameQueueFilters(v.filters, currentFilters));
+  const persistViews = (next: QueueView[]) => {
+    setViews(next);
+    writeStored(QUEUE_VIEWS_KEY, JSON.stringify(next));
+  };
+  const applyFilters = (f: QueueViewFilters) => {
+    // A saved view can outlive what it points at — only apply ids that still resolve.
+    setScopeProject(state.projects.some(p => p.id === f.projectId) ? f.projectId : '');
+    setScopeAgent(state.agents.some(a => a.id === f.agentId && !a.removedAt) ? f.agentId : '');
+    setScopeTeam((state.teams ?? []).some(t => t.id === f.teamId) ? f.teamId : '');
+    setSearch(f.search);
+    setOnly(f.group);
+  };
+  const saveView = (name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    const next: QueueView = { id: crypto.randomUUID(), name: trimmed.slice(0, 80), filters: currentFilters };
+    persistViews([...views.filter(v => v.name !== trimmed), next].slice(-MAX_QUEUE_VIEWS));
+  };
+  const renameView = (id: string, name: string) => {
+    const trimmed = name.trim();
+    if (trimmed) persistViews(views.map(v => (v.id === id ? { ...v, name: trimmed.slice(0, 80) } : v)));
+  };
+  const deleteView = (id: string) => persistViews(views.filter(v => v.id !== id));
+  const setDensityMode = (d: 'comfortable' | 'compact') => {
+    setDensity(d);
+    writeStored(QUEUE_DENSITY_KEY, d);
+  };
   const open = openRequestId ? rows.find(r => r.entry.id === openRequestId) : undefined;
   // A request that no longer exists must not leave a stale panel behind.
   useEffect(() => {
     if (openRequestId && !(state.requests ?? []).some(r => r.id === openRequestId)) onOpenRequest(null);
   }, [openRequestId, state.requests]);
   return (
-    <section className="work-queue">
+    <section className={`work-queue${density === 'compact' ? ' compact' : ''}`}>
       <div className="section-toolbar">
         <div>
           <h2>Requests</h2>
@@ -312,6 +456,85 @@ export function WorkQueue({
             </button>
           ))}
         </div>
+        {activeView && (
+          <span className="chip view-active">
+            View: {activeView.name}
+            <button aria-label="Clear saved view" title="Clear filters" onClick={() => applyFilters(EMPTY_FILTERS)}>
+              <X size={12} />
+            </button>
+          </span>
+        )}
+        <div className="queue-density" role="group" aria-label="Row density">
+          <button
+            className={density === 'comfortable' ? 'on' : ''}
+            aria-pressed={density === 'comfortable'}
+            onClick={() => setDensityMode('comfortable')}
+          >
+            Comfortable
+          </button>
+          <button
+            className={density === 'compact' ? 'on' : ''}
+            aria-pressed={density === 'compact'}
+            onClick={() => setDensityMode('compact')}
+          >
+            Compact
+          </button>
+        </div>
+      </div>
+      <div className="queue-views">
+        <span className="muted">Views</span>
+        {views.map(v => (
+          <span key={v.id} className={`view-chip${activeView?.id === v.id ? ' on' : ''}`}>
+            <button className="view-apply" title="Apply this view's filters" onClick={() => applyFilters(v.filters)}>
+              {v.name}
+            </button>
+            <button
+              className="view-op"
+              aria-label={`Rename view ${v.name}`}
+              title="Rename"
+              onClick={() => setViewEdit({ id: v.id, name: v.name })}
+            >
+              <Pencil size={12} />
+            </button>
+            <button
+              className="view-op"
+              aria-label={`Delete view ${v.name}`}
+              title="Delete view"
+              onClick={() => deleteView(v.id)}
+            >
+              <X size={12} />
+            </button>
+          </span>
+        ))}
+        <button className="text-button" onClick={() => setViewEdit({ id: null, name: '' })}>
+          Save current filters
+        </button>
+        {viewEdit && (
+          <form
+            className="view-edit"
+            onSubmit={e => {
+              e.preventDefault();
+              if (viewEdit.id) renameView(viewEdit.id, viewEdit.name);
+              else saveView(viewEdit.name);
+              setViewEdit(null);
+            }}
+          >
+            <input
+              aria-label={viewEdit.id ? 'Rename view' : 'Name this view'}
+              placeholder="Name this view"
+              value={viewEdit.name}
+              maxLength={80}
+              autoFocus
+              onChange={e => setViewEdit({ ...viewEdit, name: e.target.value })}
+            />
+            <button className="secondary" type="submit" disabled={!viewEdit.name.trim()}>
+              {viewEdit.id ? 'Rename' : 'Save view'}
+            </button>
+            <button type="button" className="text-button" onClick={() => setViewEdit(null)}>
+              Cancel
+            </button>
+          </form>
+        )}
       </div>
       {!rows.length && (
         <Empty

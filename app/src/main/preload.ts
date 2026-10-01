@@ -71,6 +71,7 @@ const api: OfficeAPI = {
   jobOutputPreview: input => request('office:job-output-preview', input),
   retryPipelineHop: input => request('office:pipeline-retry-hop', input),
   setAttentionCount: count => request('office:attention', count),
+  setDesktopNotifications: enabled => request('office:desktop-notifications', enabled),
   livePresence: () => request('office:presence'),
   onPresence(callback) {
     const handler = (_event: unknown, presence: Parameters<typeof callback>[0]) => callback(presence);

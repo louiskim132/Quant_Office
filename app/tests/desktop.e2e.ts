@@ -288,6 +288,7 @@ try {
       'livePresence',
       'onPresence',
       'setAttentionCount',
+      'setDesktopNotifications',
       'previewArtifact',
       'describeObject',
       'readObject',

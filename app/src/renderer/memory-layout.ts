@@ -118,6 +118,40 @@ export function fitMemory(points: Record<string, Point>, width = 820, height = 5
   return { k, x: width / 2 - ((minX + maxX) / 2) * k, y: height / 2 - ((minY + maxY) / 2) * k };
 }
 
+/** Display-filter windows for the graph — a view cut, never a record change. */
+export const MEMORY_WINDOWS = [
+  { id: 'all', label: 'All', ms: null },
+  { id: '24h', label: '24h', ms: 24 * 3600_000 },
+  { id: '7d', label: '7d', ms: 7 * 24 * 3600_000 },
+  { id: '30d', label: '30d', ms: 30 * 24 * 3600_000 },
+] as const;
+
+/**
+ * Pure display filter: the ids whose finding creation time falls inside the window.
+ * 'all' and unknown ids admit everything (a bad filter value must fail open — hiding
+ * records silently is worse than showing too much). A node with no parseable createdAt
+ * is admitted only by 'all': we never guess an age. `now` is injectable for tests.
+ */
+export function memoryInWindow<N extends { findingId: string }>(
+  nodes: readonly N[],
+  createdAtOf: (findingId: string) => string | undefined,
+  windowId: string,
+  now = Date.now(),
+) {
+  const win = MEMORY_WINDOWS.find(w => w.id === windowId);
+  const visible = new Set<string>();
+  for (const node of nodes) {
+    if (!win || win.ms === null) {
+      visible.add(node.findingId);
+      continue;
+    }
+    const stamp = createdAtOf(node.findingId);
+    const t = stamp ? Date.parse(stamp) : NaN;
+    if (Number.isFinite(t) && now - t <= win.ms) visible.add(node.findingId);
+  }
+  return visible;
+}
+
 /** Greedy label collision in graph coordinates; priority labels (selection/hover) win. */
 export function memoryLabels(
   nodes: readonly { findingId: string; title: string }[],

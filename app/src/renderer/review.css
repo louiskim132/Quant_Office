@@ -1,0 +1,62 @@
+/*
+ * Positions — a request's recorded review work laid into per-function lanes so opposing verdicts
+ * sit side by side. Lane and chip chrome is neutral: the color on a verdict chip is the record's
+ * own polarity, not an office judgment.
+ */
+.position-lanes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 12px;
+  margin: 12px 0 4px;
+}
+.position-lane {
+  border: 1px solid var(--border);
+  border-radius: var(--r-2);
+  padding: 12px;
+}
+.position-fn {
+  margin: 0 0 6px;
+  font-size: var(--fs-2);
+  color: var(--muted);
+}
+.position-hop {
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+  margin-top: 10px;
+}
+.position-hop:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+  margin-top: 0;
+}
+.position-verdicts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0;
+}
+.verdict-chip {
+  display: inline-block;
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: var(--fs-1);
+  letter-spacing: 0.03em;
+  color: var(--muted);
+}
+.verdict-chip[data-tone='supports'] {
+  border-color: var(--st-done);
+  color: var(--st-done);
+}
+.verdict-chip[data-tone='opposes'] {
+  border-color: var(--st-failed);
+  color: var(--st-failed);
+}
+.verdict-chip[data-tone='changes'] {
+  border-color: var(--st-stalled);
+  color: var(--st-stalled);
+}
+.verdict-chip[data-tone='sealed'] {
+  border-style: dashed;
+  color: var(--subtle);
+}

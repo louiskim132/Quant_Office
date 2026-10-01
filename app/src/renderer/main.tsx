@@ -213,6 +213,38 @@ export function projectLiveCounts(
   return counts;
 }
 
+/**
+ * The notification sound: a short, quiet two-note WebAudio cue — no asset file, no network.
+ * One context is reused; a blocked or missing audio stack just stays silent.
+ */
+let cueContext: AudioContext | null = null;
+function attentionCue() {
+  try {
+    cueContext ??= new AudioContext();
+    const ctx = cueContext;
+    void ctx.resume().catch(() => {});
+    for (const [freq, delay] of [
+      [784, 0],
+      [1046.5, 0.12],
+    ] as const) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      const t = ctx.currentTime + delay;
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(0.04, t + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(t);
+      osc.stop(t + 0.4);
+    }
+  } catch {
+    cueContext = null;
+  }
+}
+
 function App() {
   const [state, setState] = useState<AppState | null>(null);
   const [info, setInfo] = useState<AppInfo | null>(null);
@@ -223,6 +255,22 @@ function App() {
       return localStorage.getItem('qro.taskbar-attention') !== 'off';
     } catch {
       return true;
+    }
+  });
+  /** The OS-popup pref reported to main on mount and on change; absent localStorage key means off. */
+  const [desktopPopups, setDesktopPopups] = useState(() => {
+    try {
+      return localStorage.getItem('qro.desktop-notifications') === 'on';
+    } catch {
+      return false;
+    }
+  });
+  /** The quiet cue riding the same needs-you edge as the taskbar flash; absent key means off. */
+  const [notifSound, setNotifSound] = useState(() => {
+    try {
+      return localStorage.getItem('qro.notification-sound') === 'on';
+    } catch {
+      return false;
     }
   });
   const [palette, setPalette] = useState(false),
@@ -325,9 +373,20 @@ function App() {
       document.documentElement.dataset.motion = state.settings.reducedMotion ? 'reduced' : 'full';
     }
   }, [state?.settings]);
+  /** The last count reported to main — the flash and the cue share its growth edge. */
+  const lastAttentionCount = useRef(0);
   useEffect(() => {
-    void window.office?.setAttentionCount?.(taskbarAttention ? needsYou : 0).catch(() => {});
-  }, [needsYou, taskbarAttention]);
+    const reported = taskbarAttention ? needsYou : 0;
+    void window.office?.setAttentionCount?.(reported).catch(() => {});
+    // The cue rides the flash edge exactly — the reported count grows while unfocused.
+    // A hidden window can never hold focus, so hasFocus covers document.hidden too.
+    if (notifSound && reported > lastAttentionCount.current && !document.hasFocus()) attentionCue();
+    lastAttentionCount.current = reported;
+  }, [needsYou, taskbarAttention, notifSound]);
+  useEffect(() => {
+    // Main owns the popup itself; the renderer only reports the pref, once on mount then per change.
+    void window.office?.setDesktopNotifications?.(desktopPopups).catch(() => {});
+  }, [desktopPopups]);
   useEffect(() => {
     setDrawerAgentId(null);
     document.querySelector('main')?.scrollTo(0, 0);
@@ -863,8 +922,32 @@ function App() {
                 >
                   Taskbar badge and attention flash when the office needs you
                 </Checkbox>
+                <Checkbox
+                  checked={desktopPopups}
+                  onChange={enabled => {
+                    setDesktopPopups(enabled);
+                    try {
+                      localStorage.setItem('qro.desktop-notifications', enabled ? 'on' : 'off');
+                    } catch {}
+                  }}
+                >
+                  Desktop popups
+                </Checkbox>
+                <Checkbox
+                  checked={notifSound}
+                  onChange={enabled => {
+                    setNotifSound(enabled);
+                    try {
+                      localStorage.setItem('qro.notification-sound', enabled ? 'on' : 'off');
+                    } catch {}
+                  }}
+                >
+                  Notification sound
+                </Checkbox>
                 <p className="muted">
-                  The in-app inbox stays available. Desktop popups and sounds are off in this revision.
+                  Popups fire only when the needs-you count grows while the window is unfocused. They carry a count only
+                  — no request content leaves the app — and clicking one focuses the window. The sound is a short, quiet
+                  cue on the same edge. The in-app inbox stays available.
                 </p>
               </div>
               <div className="settings-card" hidden={!['all', 'appearance'].includes(settingsSection)}>

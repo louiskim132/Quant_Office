@@ -2,7 +2,40 @@ import { useEffect, useState } from 'react';
 import type { Agent, AgentLog, AppState, Connection, Effort, LocalUsage, TokenTotals } from '../shared/types';
 import { suggestedEfforts, PROVIDER_MODEL_SUGGESTIONS, effortIsIndependentAxis } from '../shared/effort';
 import { formatDateTime, formatNumber, plural } from './format';
+import {
+  ACTIVITY_VIEWS_KEY,
+  currentViewName,
+  deleteView,
+  loadViews,
+  renameView,
+  storeViews,
+  upsertView,
+} from './history';
 const number = (n: number) => formatNumber(n);
+
+/** The filters Activity owns today: agent, other participant, conversation, record kind and search text. */
+export type ActivityFilters = {
+  agentId: string;
+  peer: string;
+  conversation: string;
+  kind: string;
+  search: string;
+};
+const ACTIVITY_KINDS = ['all', 'messages', 'work', 'between'];
+
+/** Validate a stored filter set; missing or wrong-typed fields coerce to the page defaults. */
+export function sanitizeActivityFilters(raw: unknown): ActivityFilters | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const f = raw as Record<string, unknown>;
+  const text = (value: unknown) => (typeof value === 'string' ? value : '');
+  return {
+    agentId: text(f.agentId),
+    peer: text(f.peer),
+    conversation: text(f.conversation),
+    kind: ACTIVITY_KINDS.includes(f.kind as string) ? (f.kind as string) : 'all',
+    search: text(f.search),
+  };
+}
 function TokenTable({ items }: { items: { label: string; totals: TokenTotals }[] }) {
   return (
     <div className="log-table-wrap">
@@ -142,6 +175,38 @@ export function ActivityView({ state, fixedAgent }: { state: AppState; fixedAgen
   useEffect(() => {
     setLimit(50);
   }, [agentId, peer, conversation, kind, search]);
+  const [savedViews, setSavedViews] = useState(() => loadViews(ACTIVITY_VIEWS_KEY, sanitizeActivityFilters));
+  const [naming, setNaming] = useState<'' | 'save' | 'rename'>('');
+  const [draft, setDraft] = useState('');
+  useEffect(() => storeViews(ACTIVITY_VIEWS_KEY, savedViews), [savedViews]);
+  const current: ActivityFilters = { agentId, peer, conversation, kind, search };
+  const activeView = currentViewName(savedViews, current);
+  const applyView = (name: string) => {
+    const saved = savedViews.find(v => v.name === name);
+    if (!saved) return;
+    const f = saved.filters;
+    if (!fixedAgent) setAgentId(f.agentId);
+    setPeer(f.peer);
+    setConversation(f.conversation);
+    setKind(f.kind);
+    setSearch(f.search);
+  };
+  const clearFilters = () => {
+    setAgentId(fixedAgent ?? '');
+    setPeer('');
+    setConversation('');
+    setKind('all');
+    setSearch('');
+  };
+  const commitName = () => {
+    const label = draft.trim();
+    if (!label) return;
+    setSavedViews(
+      naming === 'rename' ? renameView(savedViews, activeView, label) : upsertView(savedViews, label, current),
+    );
+    setNaming('');
+    setDraft('');
+  };
   const name = (id: string) =>
     state.agents.find(a => a.id === id)?.name ?? { USER: 'You', SYSTEM: 'Office', TOOL: 'Tool' }[id] ?? id;
   const isAgent = (id: string) => state.agents.some(a => a.id === id);
@@ -187,6 +252,82 @@ export function ActivityView({ state, fixedAgent }: { state: AppState; fixedAgen
         Office events are recorded automatically. Imported transcripts are labeled external evidence. No live agent
         research is running.
       </p>
+      <div className="saved-views">
+        <label className="field">
+          Saved views
+          <select aria-label="Saved view" value={activeView} onChange={e => applyView(e.target.value)}>
+            <option value="">Unsaved filters</option>
+            {savedViews.map(v => (
+              <option key={v.name} value={v.name}>
+                {v.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        {naming ? (
+          <>
+            <label className="field">
+              {naming === 'rename' ? 'Rename view' : 'Name this view'}
+              <input
+                aria-label="Saved view name"
+                autoFocus
+                value={draft}
+                onChange={e => setDraft(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') commitName();
+                  if (e.key === 'Escape') {
+                    setNaming('');
+                    setDraft('');
+                  }
+                }}
+              />
+            </label>
+            <button className="secondary" disabled={!draft.trim()} onClick={commitName}>
+              {naming === 'rename' ? 'Rename' : 'Save'}
+            </button>
+            <button
+              className="secondary"
+              onClick={() => {
+                setNaming('');
+                setDraft('');
+              }}
+            >
+              Cancel
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              className="secondary"
+              onClick={() => {
+                setNaming('save');
+                setDraft('');
+              }}
+            >
+              Save view…
+            </button>
+            {activeView && (
+              <>
+                <button
+                  className="secondary"
+                  onClick={() => {
+                    setNaming('rename');
+                    setDraft(activeView);
+                  }}
+                >
+                  Rename
+                </button>
+                <button className="secondary" onClick={() => setSavedViews(deleteView(savedViews, activeView))}>
+                  Delete
+                </button>
+              </>
+            )}
+            <button className="secondary" onClick={clearFilters}>
+              Clear filters
+            </button>
+          </>
+        )}
+      </div>
       <div className="log-filters">
         {!fixedAgent && (
           <label className="field">

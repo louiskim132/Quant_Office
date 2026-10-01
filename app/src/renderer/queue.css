@@ -454,6 +454,121 @@ div.command-preview {
   gap: 8px;
   margin: 16px 0;
 }
+
+/* Saved views: chips apply a stored filter set; the matching one reads as active. */
+.queue-views {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: -6px 0 12px;
+}
+.queue-views > .muted {
+  font-size: var(--fs-1);
+}
+.view-chip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+  overflow: hidden;
+}
+.view-chip.on {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+.view-chip button {
+  font-size: var(--fs-1);
+  color: var(--muted);
+  background: none;
+  padding: 4px 8px;
+  display: inline-flex;
+  align-items: center;
+}
+.view-chip .view-apply {
+  color: var(--text);
+  padding-left: 10px;
+}
+.view-chip.on .view-apply,
+.view-chip.on .view-op,
+.view-chip .view-op:hover {
+  color: var(--accent);
+}
+.view-chip .view-op {
+  padding: 4px 4px;
+}
+.view-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.view-edit input {
+  width: 170px;
+  font-size: var(--fs-2);
+  padding: 5px 9px;
+}
+.view-edit .secondary {
+  padding: 5px 10px;
+  font-size: var(--fs-1);
+}
+/* The applied-view indicator inside the filter row. */
+.view-active {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+.view-active button {
+  display: inline-flex;
+  align-items: center;
+  color: var(--accent);
+  background: none;
+  padding: 0 2px;
+}
+/* Density toggle sits at the end of the filter row, styled like the group chips. */
+.queue-density {
+  display: flex;
+  gap: 4px;
+  margin-left: 10px;
+}
+.queue-density button {
+  font-size: var(--fs-1);
+  padding: 5px 9px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  background: var(--panel);
+}
+.queue-density button.on {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+/* Compact density: every row element stays visible and readable — spacing shrinks, text doesn't. */
+.work-queue.compact .queue-tools {
+  margin-bottom: 10px;
+}
+.work-queue.compact .queue-group {
+  margin-bottom: 8px;
+}
+.work-queue.compact .queue-group > summary {
+  padding: 3px 2px;
+}
+.work-queue.compact .queue-row {
+  padding: 6px 12px;
+  column-gap: 10px;
+  row-gap: 0;
+}
+.work-queue.compact .queue-sub {
+  line-height: 1.3;
+}
+.work-queue.compact .stepper i {
+  width: 6px;
+  height: 6px;
+}
 @media (max-width: 1100px) {
   .queue-row {
     grid-template-columns: minmax(150px, 2fr) minmax(130px, 1.4fr) 112px 16px;
