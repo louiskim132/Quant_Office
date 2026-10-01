@@ -32,6 +32,14 @@ const legacyPosKey = (projectId: string) => `qro.memory.pos.${projectId}`;
 const W = 820,
   H = 540;
 
+/** Proposed relationships with at least one endpoint in the selection — the bulk-settle target set. */
+export function memorySettleTargets(
+  edges: readonly { relationshipId: string; from: string; to: string; status: string }[],
+  selected: ReadonlySet<string>,
+) {
+  return edges.filter(e => e.status === 'PROPOSED' && (selected.has(e.from) || selected.has(e.to)));
+}
+
 const shortHash = (s: string) => `${s.slice(0, 12)}…`;
 const stamp = (iso: string) => formatDateTime(iso);
 const authorLine = (a: MemoryAuthor) =>
@@ -56,6 +64,8 @@ export function MemoryView({ state, projectId }: { state: AppState; projectId: s
   const [showRefuted, setShowRefuted] = useState(false);
   const [windowSel, setWindowSel] = useState('all');
   const [compareIds, setCompareIds] = useState<Set<string>>(new Set());
+  const [bulkAsk, setBulkAsk] = useState<'' | 'CONFIRMED' | 'REFUTED'>('');
+  const [composerOpen, setComposerOpen] = useState(false);
   const [linkTarget, setLinkTarget] = useState('');
   const [linkKind, setLinkKind] = useState<RelationshipKind>('RELATES');
   const [linkNote, setLinkNote] = useState('');
@@ -69,6 +79,7 @@ export function MemoryView({ state, projectId }: { state: AppState; projectId: s
   const gRef = useRef<SVGGElement>(null);
   const posRef = useRef<Record<string, { x: number; y: number }>>({});
   const draggedRef = useRef<Set<string>>(new Set());
+  const composerRef = useRef<HTMLDetailsElement>(null);
   const dragRef = useRef<{ kind: 'pan' | 'node' | 'edge'; id?: string; x: number; y: number; moved: boolean } | null>(
     null,
   );
@@ -263,6 +274,41 @@ export function MemoryView({ state, projectId }: { state: AppState; projectId: s
         }),
       `Link ${status.toLowerCase()}.`,
     );
+  // Bulk settle loops the existing per-link command — append-only, no batch record exists.
+  const bulkSettle = async (status: 'CONFIRMED' | 'REFUTED') => {
+    const targets = memorySettleTargets(graph?.edges ?? [], compareIds);
+    setBulkAsk('');
+    setBusy('bulk');
+    setError('');
+    setNotice('');
+    let done = 0,
+      failed = 0;
+    for (const edge of targets) {
+      try {
+        await window.office.command({
+          type: 'memory.relationship.settle',
+          idempotencyKey: crypto.randomUUID(),
+          relationshipId: edge.relationshipId,
+          status,
+        });
+        done++;
+      } catch {
+        failed++;
+      }
+    }
+    setBusy('');
+    const verb = status === 'CONFIRMED' ? 'confirmed' : 'refuted';
+    if (failed && done) setNotice(`${done} ${verb} · ${failed} failed — see History`);
+    else if (failed) setError(`${failed} proposed link${failed === 1 ? '' : 's'} could not be ${verb} — see History`);
+    else setNotice(`${done} proposed link${done === 1 ? '' : 's'} ${verb}.`);
+  };
+  const supersedeSelected = () => {
+    const id = [...compareIds][0];
+    if (!id) return;
+    setCSupersedes(id);
+    setComposerOpen(true);
+    setTimeout(() => composerRef.current?.scrollIntoView({ block: 'start' }), 0);
+  };
   const proposeLink = () =>
     void run(async () => {
       await window.office.command({
@@ -384,6 +430,10 @@ export function MemoryView({ state, projectId }: { state: AppState; projectId: s
   const selFinding = projectFindings.find(f => f.id === selectedNode);
   const selEdge = graph?.edges.find(e => e.relationshipId === selectedEdge);
   const selRel = relationships.find(r => r.id === selectedEdge);
+  // Proposed links touching the selection drive the bulk-settle affordances in the tray.
+  const settleTargets = memorySettleTargets(graph?.edges ?? [], compareIds);
+  const onlySelected = compareIds.size === 1 ? graph?.nodes.find(n => n.findingId === [...compareIds][0]) : undefined;
+  const canSupersede = !!onlySelected && !onlySelected.superseded;
   const refOptions = [
     ...projectRequests.map(item => ({ value: `REQUEST|${item.id}`, text: `Request · ${item.name}` })),
     ...(state.assignments ?? [])
@@ -681,8 +731,8 @@ export function MemoryView({ state, projectId }: { state: AppState; projectId: s
               )}
             </div>
             {!!compareIds.size && (
-              <div className="memory-tray" role="group" aria-label="Compare tray">
-                <span className="muted">Comparing {compareIds.size}</span>
+              <div className="memory-tray" role="group" aria-label="Selected findings">
+                <span className="muted">{compareIds.size} selected</span>
                 {[...compareIds].map(id => {
                   const node = graph?.nodes.find(n => n.findingId === id);
                   if (!node) return null;
@@ -700,7 +750,56 @@ export function MemoryView({ state, projectId }: { state: AppState; projectId: s
                     </button>
                   );
                 })}
-                <button type="button" className="text-button" onClick={() => setCompareIds(new Set())}>
+                {canSupersede && (
+                  <button type="button" className="secondary" onClick={supersedeSelected}>
+                    Supersede…
+                  </button>
+                )}
+                {!!settleTargets.length && !bulkAsk && (
+                  <>
+                    <button
+                      type="button"
+                      className="secondary"
+                      disabled={!!busy}
+                      onClick={() => setBulkAsk('CONFIRMED')}
+                    >
+                      Confirm {settleTargets.length} proposed
+                    </button>
+                    <button type="button" className="secondary" disabled={!!busy} onClick={() => setBulkAsk('REFUTED')}>
+                      Refute {settleTargets.length} proposed
+                    </button>
+                  </>
+                )}
+                {bulkAsk && !!settleTargets.length && (
+                  <span
+                    className="memory-bulk-ask"
+                    role="alertdialog"
+                    aria-label={`${bulkAsk === 'CONFIRMED' ? 'Confirm' : 'Refute'} proposed links`}
+                  >
+                    {bulkAsk === 'CONFIRMED' ? 'Confirm' : 'Refute'} {settleTargets.length} proposed link
+                    {settleTargets.length === 1 ? '' : 's'} touching the selection? Each records its own settlement —
+                    nothing is edited or deleted.
+                    <button
+                      type="button"
+                      className="primary"
+                      disabled={!!busy}
+                      onClick={() => void bulkSettle(bulkAsk)}
+                    >
+                      {bulkAsk === 'CONFIRMED' ? 'Yes, confirm' : 'Yes, refute'}
+                    </button>
+                    <button type="button" className="secondary" disabled={!!busy} onClick={() => setBulkAsk('')}>
+                      Cancel
+                    </button>
+                  </span>
+                )}
+                <button
+                  type="button"
+                  className="text-button"
+                  onClick={() => {
+                    setCompareIds(new Set());
+                    setBulkAsk('');
+                  }}
+                >
                   Clear
                 </button>
               </div>
@@ -876,7 +975,12 @@ export function MemoryView({ state, projectId }: { state: AppState; projectId: s
           </aside>
         </div>
       )}
-      <details className="memory-composer">
+      <details
+        ref={composerRef}
+        className="memory-composer"
+        open={composerOpen}
+        onToggle={e => setComposerOpen(e.currentTarget.open)}
+      >
         <summary>New finding</summary>
         <form
           onSubmit={e => {
@@ -884,6 +988,13 @@ export function MemoryView({ state, projectId }: { state: AppState; projectId: s
             post();
           }}
         >
+          {cSupersedes && (
+            <p className="muted memory-supersede-note">
+              Recording a correction for “
+              {projectFindings.find(f => f.id === cSupersedes)?.title ?? 'the selected finding'}”. Findings cannot be
+              edited or deleted — the original stays on record and this new finding supersedes it.
+            </p>
+          )}
           <label className="field">
             Kind
             <select value={cKind} onChange={e => setCKind(e.target.value as FindingKind)}>

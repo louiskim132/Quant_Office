@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { register } from 'node:module';
 import {
   layoutMemory,
   memoryDegrees,
@@ -8,6 +9,12 @@ import {
   memoryInWindow,
   MEMORY_WINDOWS,
 } from '../src/renderer/memory-layout';
+
+// memory.tsx imports .css as a side effect; stub them so node can reach its exported pure helpers.
+register(
+  'data:text/javascript,export function load(u,o,n){if(u.endsWith(".css"))return{format:"module",source:"export default {}",shortCircuit:true};return n(u,o)}',
+);
+const { memorySettleTargets } = await import('../src/renderer/memory');
 
 test('memoryDegrees counts both endpoints of non-refuted links only', () => {
   const edges = [
@@ -87,4 +94,29 @@ test('memoryInWindow filters by createdAt, fails open on unknown ids and never g
   const edge = [{ findingId: 'x' }, { findingId: 'y' }];
   const edgeStamps: Record<string, string> = { x: '2026-09-23T12:00:00Z', y: '2026-10-01T00:00:00Z' };
   assert.deepEqual([...memoryInWindow(edge, id => edgeStamps[id], '7d', now)], ['x', 'y']);
+});
+
+test('memorySettleTargets enumerates proposed links touching the selection, once each', () => {
+  const edges = [
+    { relationshipId: 'r1', from: 'a', to: 'b', status: 'PROPOSED' },
+    { relationshipId: 'r2', from: 'c', to: 'a', status: 'PROPOSED' }, // selected node as `to`
+    { relationshipId: 'r3', from: 'b', to: 'c', status: 'CONFIRMED' }, // already settled
+    { relationshipId: 'r4', from: 'c', to: 'd', status: 'PROPOSED' }, // untouched
+    { relationshipId: 'r5', from: 'a', to: 'd', status: 'REFUTED' }, // already settled
+  ];
+  assert.deepEqual(
+    memorySettleTargets(edges, new Set(['a'])).map(e => e.relationshipId),
+    ['r1', 'r2'],
+  );
+  // Both endpoints selected — the relationship still appears exactly once.
+  const both = [
+    { relationshipId: 'r1', from: 'a', to: 'b', status: 'PROPOSED' },
+    { relationshipId: 'r2', from: 'b', to: 'a', status: 'PROPOSED' },
+  ];
+  assert.deepEqual(
+    memorySettleTargets(both, new Set(['a', 'b'])).map(e => e.relationshipId),
+    ['r1', 'r2'],
+  );
+  assert.deepEqual(memorySettleTargets(both, new Set()), []);
+  assert.deepEqual(memorySettleTargets([], new Set(['a'])), []);
 });
