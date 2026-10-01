@@ -1,14 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ShieldCheck } from 'lucide-react';
-import type { Agent, AppState, Experiment, ResearchStatus, WorkMode } from '../shared/types';
+import type { Agent, AppState, Assignment, Experiment, ProviderJob, ResearchStatus, WorkMode } from '../shared/types';
 import type { BranchLink, PipelineRecord } from '../shared/pipeline';
+import { latestJobFor } from '../core/jobs';
 import { Empty, label, Avatar, StatusPill } from './components';
 import { FilePreviewPane, type FilePreview } from './file-preview';
 import './explorer.css';
-import { pipelineReviewHops } from './job-outputs';
+import './review.css';
+import { pipelineReviewHops, type StoredJobOutputRow } from './job-outputs';
 
 /** Stage functions whose work is an independent review rather than production. */
 const REVIEW_FUNCTIONS = new Set<string>(['CORRECTNESS_REVIEWER', 'ADVOCATE', 'SKEPTIC']);
+/** Minted pipeline keys that carry review work rather than production (the comm-round's own vocabulary). */
+const REVIEW_KEY = /critique|falsif|response|verif/;
 
 type PreviewResult = { name: string; text: string; truncated: boolean; binary: boolean };
 
@@ -234,6 +238,246 @@ export function ResearchStageReviews({
   );
 }
 
+/** One recorded verdict chip on a position hop — the label exactly as the record carries it. */
+export interface PositionVerdict {
+  text: string;
+  /** Which recorded document the chip reports. */
+  source: 'review report' | 'review decision';
+  tone: 'supports' | 'opposes' | 'changes' | 'sealed';
+  title: string;
+}
+export interface PositionHop {
+  assignmentId: string;
+  pipelineKey: string | null;
+  agentId: string;
+  agentName: string;
+  /** Latest recorded job state; null when the hop was minted but no job is on record. */
+  jobId: string | null;
+  attempt: number | null;
+  state: ProviderJob['state'] | null;
+  verdicts: PositionVerdict[];
+  outputs: StoredJobOutputRow[];
+}
+export interface PositionLane {
+  /** The recorded function: the stage function on a research-bound hop, else the review family of its minted key. */
+  function: string;
+  hops: PositionHop[];
+}
+
+const laneFunction = (assignment: Assignment): string => {
+  if (assignment.research && REVIEW_FUNCTIONS.has(assignment.research.function)) return assignment.research.function;
+  const key = assignment.pipelineKey ?? '';
+  if (/critique/.test(key)) return 'CRITIQUE';
+  // 'analysis-response-falsify' is a response hop answering the falsify artifact — check the
+  // response prefix before the falsification family it names.
+  if (/response/.test(key)) return 'RESPONSE';
+  if (/falsif/.test(key)) return 'FALSIFICATION';
+  return 'VERIFICATION';
+};
+
+/**
+ * A request's recorded review work laid out as positions: one lane per function the round's records
+ * name — the minted critique/falsify/response/verify keys, or the stage function a research-bound
+ * assignment carries — each hop showing its latest recorded job state and every verdict a review
+ * report or review decision actually recorded against it. A sealed report shows 'sealed', never its
+ * undisclosed verdict. Lanes keep mint order; nothing about a hop's state or verdict is computed.
+ */
+export function requestReviewLanes(
+  state: Pick<AppState, 'assignments' | 'jobs' | 'agents' | 'decisions' | 'pipeline'>,
+  requestId: string,
+): PositionLane[] {
+  const lanes = new Map<string, PositionLane>();
+  for (const a of state.assignments ?? []) {
+    if (a.requestId !== requestId) continue;
+    const isReviewHop =
+      (a.pipelineKey && REVIEW_KEY.test(a.pipelineKey)) || (a.research && REVIEW_FUNCTIONS.has(a.research.function));
+    if (!isReviewHop) continue;
+    const job = latestJobFor(state.jobs, a.id);
+    const verdicts: PositionVerdict[] = [];
+    for (const r of state.pipeline ?? []) {
+      if (r.kind !== 'REVIEW_REPORT' || r.assignmentId !== a.id) continue;
+      verdicts.push({
+        text: r.opened ? r.verdict.toLowerCase() : 'sealed',
+        source: 'review report',
+        tone: r.opened ? (r.verdict === 'SUPPORTS' ? 'supports' : 'opposes') : 'sealed',
+        title: r.opened
+          ? `Recorded review report · ${label(r.independence)}`
+          : 'First report sealed — it opens when every first report of the round is immutable.',
+      });
+    }
+    for (const d of state.decisions ?? []) {
+      if (d.requestId !== requestId || d.reviewerAssignmentId !== a.id) continue;
+      verdicts.push({
+        text: `${d.phase === 'REBUTTAL' ? 'rebuttal · ' : ''}${label(d.verdict)}`,
+        source: 'review decision',
+        tone: d.verdict === 'APPROVED' ? 'supports' : d.verdict === 'REJECTED' ? 'opposes' : 'changes',
+        title: `Recorded ${label(d.phase)} review decision`,
+      });
+    }
+    const fn = laneFunction(a);
+    const lane = lanes.get(fn) ?? { function: fn, hops: [] };
+    lanes.set(fn, lane);
+    lane.hops.push({
+      assignmentId: a.id,
+      pipelineKey: a.pipelineKey ?? null,
+      agentId: a.agentId,
+      agentName: state.agents?.find(x => x.id === a.agentId)?.name ?? `profile ${a.agentId.slice(0, 8)}`,
+      jobId: job?.id ?? null,
+      attempt: job ? (job.attempt ?? 1) : null,
+      state: job?.state ?? null,
+      verdicts,
+      outputs: (job?.outputs ?? [])
+        .filter(o => o.stored)
+        .map(o => ({
+          jobId: job!.id,
+          assignmentId: a.id,
+          path: o.path,
+          bytes: o.bytes,
+          sha256: o.sha256,
+          attempt: job!.attempt ?? 1,
+          superseded: false,
+        })),
+    });
+  }
+  return [...lanes.values()];
+}
+
+/**
+ * The per-request argument map: one card per request that carries a round, its recorded review hops
+ * laid into per-function lanes so opposing verdicts sit side by side. Every chip is a stored review
+ * decision or review report's own label — the section never computes a verdict the records do not
+ * carry. A request with no review records says so rather than vanishing.
+ */
+export function RequestPositions({
+  state,
+  projectId,
+  experiment,
+  busy,
+  setPreview,
+  onError,
+}: {
+  state: AppState;
+  projectId: string;
+  experiment?: Experiment;
+  busy: boolean;
+  setPreview: (preview: PreviewResult) => void;
+  onError: (e: unknown) => void;
+}) {
+  const [selectedPreview, setSelectedPreview] = useState<FilePreview | null>(null);
+  const [previewBusy, setPreviewBusy] = useState(false);
+  const previewTicket = useRef(0);
+  useEffect(() => {
+    previewTicket.current++;
+    setSelectedPreview(null);
+    setPreviewBusy(false);
+    return () => {
+      previewTicket.current++;
+    };
+  }, [projectId, experiment?.id]);
+  const preview = async (jobId: string, path: string) => {
+    const ticket = ++previewTicket.current;
+    setPreviewBusy(true);
+    setSelectedPreview(null);
+    try {
+      const r = await window.office.jobOutputPreview({ jobId, path });
+      if (ticket === previewTicket.current)
+        setSelectedPreview({ name: path, text: r.text, truncated: r.truncated, binary: false });
+    } catch (e) {
+      if (ticket === previewTicket.current) onError(e);
+    } finally {
+      if (ticket === previewTicket.current) setPreviewBusy(false);
+    }
+  };
+  const requests = (state.requests ?? [])
+    .filter(r => r.projectId === projectId && (!experiment || r.experimentId === experiment.id))
+    .map(request => ({ request, lanes: requestReviewLanes(state, request.id) }))
+    .filter(({ request, lanes }) => request.pipeline || lanes.length > 0)
+    .sort((a, b) => a.request.createdAt.localeCompare(b.request.createdAt) || a.request.id.localeCompare(b.request.id));
+  return (
+    <section>
+      <h2>Positions</h2>
+      <p className="muted">
+        Each lane groups one function's recorded review hops; a chip repeats the verdict a review decision or report
+        actually recorded. The office reports these records — it never computes a verdict of its own.
+      </p>
+      {!requests.length ? (
+        <p className="muted">No recorded review work for this request.</p>
+      ) : (
+        requests.map(({ request, lanes }) => (
+          <article key={request.id} className="task-card">
+            <div className="card-heading">
+              <h3>{request.name}</h3>
+            </div>
+            {!lanes.length ? (
+              <p className="muted">No recorded review work for this request.</p>
+            ) : (
+              <div className="position-lanes">
+                {lanes.map(lane => (
+                  <section className="position-lane" key={lane.function}>
+                    <h4 className="position-fn">{label(lane.function)}</h4>
+                    {lane.hops.map(hop => (
+                      <div className="position-hop" key={hop.assignmentId}>
+                        <div className="card-heading">
+                          <Avatar id={hop.agentId} name={hop.agentName} />
+                          <strong>{hop.agentName}</strong>
+                          <StatusPill
+                            status={
+                              hop.state === 'FAILED'
+                                ? 'failed'
+                                : hop.state === 'COMPLETED'
+                                  ? 'done'
+                                  : hop.state === 'RUNNING'
+                                    ? 'working'
+                                    : 'unknown'
+                            }
+                            label={hop.state ? label(hop.state) : 'Not dispatched'}
+                          />
+                        </div>
+                        <small className="muted">
+                          {hop.pipelineKey ? label(hop.pipelineKey.replaceAll('-', ' ')) : 'stage hop'}
+                          {hop.attempt != null ? ` · attempt ${hop.attempt}` : ''}
+                        </small>
+                        <div className="position-verdicts">
+                          {hop.verdicts.map((verdict, i) => (
+                            <span key={i} className="verdict-chip" data-tone={verdict.tone} title={verdict.title}>
+                              {verdict.text}
+                            </span>
+                          ))}
+                          {!hop.verdicts.length && <small className="muted">No verdict on record</small>}
+                        </div>
+                        {!!hop.outputs.length && (
+                          <div className="button-row">
+                            {hop.outputs.map(output => (
+                              <button
+                                key={output.path + output.sha256}
+                                className="secondary"
+                                disabled={busy}
+                                onClick={() => void preview(output.jobId, output.path)}
+                                title={output.path}
+                              >
+                                Preview {output.path.split('/').pop()}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </section>
+                ))}
+              </div>
+            )}
+          </article>
+        ))
+      )}
+      <FilePreviewPane
+        preview={selectedPreview}
+        loading={previewBusy}
+        onOpen={() => selectedPreview && setPreview(selectedPreview)}
+      />
+    </section>
+  );
+}
+
 /**
  * The Reviews page body: pipeline review work first, then the research-stage sequence — kept in
  * separate sections so 'pending' on one is never read as the other never happening.
@@ -256,6 +500,14 @@ export function ReviewsView({
   return (
     <>
       <PipelineReviews
+        state={state}
+        projectId={projectId}
+        experiment={experiment}
+        busy={busy}
+        setPreview={setPreview}
+        onError={onError}
+      />
+      <RequestPositions
         state={state}
         projectId={projectId}
         experiment={experiment}
