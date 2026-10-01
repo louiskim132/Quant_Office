@@ -261,6 +261,10 @@
   font-size: 9px;
   color: var(--subtle);
 }
+/* The provenance chip is the footer's leftmost item; drop the inline offset the shared chip carries. */
+.office-chat-bubble footer .prov-chip {
+  margin-left: 0;
+}
 .office-chat-system {
   max-width: 92%;
   width: fit-content;

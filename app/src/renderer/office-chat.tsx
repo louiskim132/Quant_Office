@@ -4,7 +4,7 @@ import type { AppState } from '../shared/types';
 import type { OfficeChatEntry, OfficeChatPage } from '../shared/office-chat';
 import './office-chat.css';
 import { formatDateTime, plural, UI_LOCALE } from './format';
-import { Avatar, Empty } from './components';
+import { Avatar, Empty, ProvChip } from './components';
 import { useOfficeActivity } from './use-activity';
 
 /** Chat timestamps use the fixed UI locale, not the host locale, so copy and dates never mix languages. */
@@ -177,8 +177,8 @@ export function OfficeChat({ state, initialAgentId = '' }: { state: AppState; in
           <h2>Office chat</h2>
           <p>
             {participants.length
-              ? `${plural(participants.length, 'participant')} · ${projectId ? (state.projects.find(p => p.id === projectId)?.name ?? 'Project') : 'All projects'}`
-              : 'Your team’s work, in one conversation'}
+              ? `${plural(participants.length, 'participant')} · ${projectId ? (state.projects.find(p => p.id === projectId)?.name ?? 'Project') : 'All projects'} · office records`
+              : 'The office channel — every update is a recorded entry, labeled by its source'}
           </p>
         </div>
         <button
@@ -375,13 +375,7 @@ export function OfficeChat({ state, initialAgentId = '' }: { state: AppState; in
                       </details>
                     )}
                     <footer>
-                      <span>
-                        {entry.evidence === 'USER_REPORTED'
-                          ? 'User reported'
-                          : entry.evidence === 'OFFICE_LOCAL'
-                            ? 'Office record'
-                            : 'Provider reported'}
-                      </span>
+                      <ProvChip evidence={entry.evidence} />
                       <time dateTime={entry.timestamp} title={formatDateTime(entry.timestamp)}>
                         {chatTime(entry.timestamp)}
                       </time>
