@@ -1695,9 +1695,10 @@ function buildController(): AssignmentController {
   agentHost = undefined;
   // LR-16: durable isolation intent keeps agent CLIs on the QRO-Agent host route even if DPAPI
   // cannot read the credential. The host then fails closed instead of falling back to self.
-  // `QRO_AGENT_ISOLATION=off` is the documented dev/test/CI
-  // escape hatch; without isolation intent the adapter self-spawns and records runAs 'self'.
-  if (secrets.isolationRequired() && process.env.QRO_AGENT_ISOLATION !== 'off')
+  // The environment escape hatch is for unpackaged developer runs only. Shipped apps require the
+  // explicit Settings disable action to change persisted intent, so inherited test env cannot
+  // silently undo configured isolation. Without intent the adapter records runAs 'self'.
+  if (secrets.isolationRequired() && (app.isPackaged || process.env.QRO_AGENT_ISOLATION !== 'off'))
     agentHost = qroAgentSpawn({
       secrets,
       agentsRoot: path.join(workspace(), 'local-sessions'),
