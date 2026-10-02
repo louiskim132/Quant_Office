@@ -1,16 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  MessageSquare,
-  Maximize2,
-  Minimize2,
-  LocateFixed,
-  RotateCcw,
-  RotateCw,
-  Tag,
-  Users,
-  ZoomIn,
-  ZoomOut,
-} from 'lucide-react';
+import { MessageSquare, LocateFixed, Search, Tag, Users, ZoomIn, ZoomOut } from 'lucide-react';
 import type { AccountConnection, Agent, AppState } from '../shared/types';
 import type { OfficeActivity } from '../shared/activity';
 import './office3d.css';
@@ -150,7 +139,9 @@ export function Office3D({
   const pickRef = useRef(onAgent);
   pickRef.current = onAgent;
   const [names, setNames] = useBoolPref('office-names', true);
-  const [fullscreen, setFullscreen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const menu = useRef<HTMLDivElement | null>(null);
 
   // Stable join order: a person keeps their desk while others come and go.
   for (const agent of team) if (!slots.current.includes(agent.id)) slots.current.push(agent.id);
@@ -273,11 +264,8 @@ export function Office3D({
       created.setReducedMotion(rootReduced());
     });
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'data-motion'] });
-    const onFullscreen = () => setFullscreen(document.fullscreenElement === stage.current);
-    document.addEventListener('fullscreenchange', onFullscreen);
     return () => {
       observer.disconnect();
-      document.removeEventListener('fullscreenchange', onFullscreen);
       created.dispose();
       engine.current = null;
     };
@@ -319,12 +307,26 @@ export function Office3D({
     if (a?.kind === 'MEETING') return `room:${a.meetingId ?? 'meeting'}`;
     return loungeSlots.includes(agent.id) ? 'rest' : 'seat';
   };
-  const toggleFullscreen = () => {
-    const el = stage.current;
-    if (!el) return;
-    if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
-    else void el.requestFullscreen?.().catch(() => {});
-  };
+  // The agents menu closes on Escape, on a click anywhere else, and once an agent is chosen.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const away = (e: PointerEvent) => {
+      if (!menu.current?.contains(e.target as Node)) setMenuOpen(false);
+    };
+    const escape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenuOpen(false);
+    };
+    document.addEventListener('pointerdown', away);
+    document.addEventListener('keydown', escape);
+    return () => {
+      document.removeEventListener('pointerdown', away);
+      document.removeEventListener('keydown', escape);
+    };
+  }, [menuOpen]);
+  const needle = query.trim().toLowerCase();
+  const listed = needle
+    ? ordered.filter(a => `${a.name} ${a.role} ${STATUS[views.get(a.id)!.status].label}`.toLowerCase().includes(needle))
+    : ordered;
   const meetingCount = summary.meeting;
 
   return (
@@ -416,33 +418,6 @@ export function Office3D({
           {summary.working ? `${summary.working} working now` : 'Nobody working right now'}
         </span>
       </header>
-      {!!ordered.length && (
-        <nav className="stage-chips" aria-label="Focus the camera on an agent">
-          {ordered.map(agent => {
-            const view = views.get(agent.id)!;
-            const look = avatarLook(agent.id, agent.name);
-            return (
-              <button
-                key={agent.id}
-                type="button"
-                className="stage-chip"
-                data-status={view.status}
-                data-selected={selectedId === agent.id ? 'true' : 'false'}
-                style={{ '--shirt': look.shirt } as React.CSSProperties}
-                title={`${agent.name} — ${view.line}`}
-                onClick={() => {
-                  engine.current?.focus(agent.id);
-                  onAgent(agent.id);
-                }}
-              >
-                <i className="chip-swatch" aria-hidden="true" />
-                <span>{agent.name}</span>
-                <i className="tag-dot" aria-hidden="true" />
-              </button>
-            );
-          })}
-        </nav>
-      )}
       {meetingCount > 0 && (
         <aside className="stage-banner" aria-live="polite">
           <Users size={14} aria-hidden="true" />
@@ -452,53 +427,118 @@ export function Office3D({
         </aside>
       )}
       <div className="stage-tools" role="toolbar" aria-label="Office view controls">
-        <button type="button" aria-label="Zoom in" title="Zoom in" onClick={() => engine.current?.zoomBy(1.3)}>
-          <ZoomIn size={16} />
-        </button>
-        <button type="button" aria-label="Zoom out" title="Zoom out" onClick={() => engine.current?.zoomBy(1 / 1.3)}>
-          <ZoomOut size={16} />
-        </button>
+        <div className="tool-slot" ref={menu}>
+          <button
+            type="button"
+            className="tool"
+            aria-label="Agents"
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            data-open={menuOpen ? 'true' : 'false'}
+            onClick={() => setMenuOpen(open => !open)}
+          >
+            <span className="tool-icon">
+              <Users size={16} />
+            </span>
+            <span className="tool-label" aria-hidden="true">
+              Agents · {ordered.length}
+            </span>
+          </button>
+          {menuOpen && (
+            <div className="agent-menu" role="menu" aria-label="Agents">
+              {ordered.length > 8 && (
+                <label className="agent-search">
+                  <Search size={14} aria-hidden="true" />
+                  <input
+                    autoFocus
+                    value={query}
+                    onChange={e => setQuery(e.target.value)}
+                    placeholder="Find an agent"
+                    aria-label="Find an agent"
+                  />
+                </label>
+              )}
+              <div className="agent-list">
+                {listed.map(agent => {
+                  const view = views.get(agent.id)!;
+                  const look = avatarLook(agent.id, agent.name);
+                  return (
+                    <button
+                      key={agent.id}
+                      type="button"
+                      role="menuitem"
+                      className="agent-item"
+                      data-status={view.status}
+                      data-selected={selectedId === agent.id ? 'true' : 'false'}
+                      style={{ '--shirt': look.shirt } as React.CSSProperties}
+                      onClick={() => {
+                        setMenuOpen(false);
+                        engine.current?.focus(agent.id);
+                        onAgent(agent.id);
+                      }}
+                    >
+                      <i className="chip-swatch" aria-hidden="true" />
+                      <span className="agent-name">{agent.name}</span>
+                      <span className="agent-state">
+                        {STATUS[view.status].label}
+                        <i className="tag-dot" aria-hidden="true" />
+                      </span>
+                    </button>
+                  );
+                })}
+                {!listed.length && <p className="agent-none">No agent matches.</p>}
+              </div>
+            </div>
+          )}
+        </div>
+        <span className="tool-rule" aria-hidden="true" />
+        {(
+          [
+            ['Zoom in', <ZoomIn size={16} key="zi" />, () => engine.current?.zoomBy(1.3)],
+            ['Zoom out', <ZoomOut size={16} key="zo" />, () => engine.current?.zoomBy(1 / 1.3)],
+            ['Reset view', <LocateFixed size={16} key="rv" />, () => engine.current?.resetView()],
+          ] as const
+        ).map(([label, icon, run]) => (
+          <button key={label} type="button" className="tool" aria-label={label} onClick={run}>
+            <span className="tool-icon">{icon}</span>
+            <span className="tool-label" aria-hidden="true">
+              {label}
+            </span>
+          </button>
+        ))}
         <button
           type="button"
-          aria-label="Rotate left"
-          title="Rotate left"
-          onClick={() => engine.current?.rotate(-Math.PI / 4)}
-        >
-          <RotateCcw size={16} />
-        </button>
-        <button
-          type="button"
-          aria-label="Rotate right"
-          title="Rotate right"
-          onClick={() => engine.current?.rotate(Math.PI / 4)}
-        >
-          <RotateCw size={16} />
-        </button>
-        <button type="button" aria-label="Reset view" title="Reset view" onClick={() => engine.current?.resetView()}>
-          <LocateFixed size={16} />
-        </button>
-        <button
-          type="button"
+          className="tool"
           aria-label="Show names"
           aria-pressed={names}
-          title={names ? 'Hide names' : 'Show names'}
           onClick={() => setNames(!names)}
         >
-          <Tag size={16} />
-        </button>
-        <button
-          type="button"
-          aria-label={fullscreen ? 'Exit full screen' : 'Full screen'}
-          title={fullscreen ? 'Exit full screen' : 'Full screen'}
-          onClick={toggleFullscreen}
-        >
-          {fullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+          <span className="tool-icon">
+            <Tag size={16} />
+          </span>
+          <span className="tool-label" aria-hidden="true">
+            {names ? 'Hide names' : 'Show names'}
+          </span>
         </button>
       </div>
       <div className="stage-status" role="status">
         <b className="stage-pulse" data-live={summary.working ? 'on' : 'off'} aria-hidden="true" />
         <span>{stageLine(summary)}</span>
-        <small>drag rotate · scroll zoom · space + drag pan · double-click focus</small>
+        <i className="stage-sep" aria-hidden="true" />
+        <small>
+          <span>
+            <b>drag:</b> rotate
+          </span>
+          <span>
+            <b>scroll:</b> zoom
+          </span>
+          <span>
+            <b>space + drag:</b> pan
+          </span>
+          <span>
+            <b>double-click:</b> focus
+          </span>
+        </small>
       </div>
       {chat && <div className="stage-chat-panel">{chat}</div>}
       <button

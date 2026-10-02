@@ -138,3 +138,11 @@ Rest rule, so it stays honest: it uses only recorded sign-in observations (`stat
 Also: the camera now frames the office in the band between the chip row and the status line, which fixed a desk hiding under a chip (caught by `ui-revision.desktop`).
 
 Verification: format and typecheck clean; unit suite 1,060 tests (1,059 pass, 0 fail, 1 existing skip) including new layout, routing, rest-order and allowance tests; dev-build desktop suites `office3d`, `ui-revision`, `desktop.e2e`, `office-chat`, `revision` pass on empty scratch data dirs. The rest area itself was inspected in the preview harness with a synthetic 3% allowance (there is no way to seed a real low allowance without a provider call). Evidence: `ui-3d-redesign-2026-10-01/after/office-glass-*.png`. Not run: packaged-build suites for this revision, screen reader, weak-GPU frame rates.
+
+## 10. Stage controls revision (2026-10-01, user feedback)
+
+- Tool rail moved to the left. Each tool grows to the right on hover or keyboard focus and shows its name inside the same pill (no native tooltip).
+- New **Agents** tool opens a scrolling menu of every agent with its status (search box once there are more than eight); choosing one focuses the camera and opens its details. It replaces the top chip row, which could not hold an unbounded team.
+- Removed Rotate left/right (drag and arrow keys remain) and the full-screen button, which did not work.
+- Status line: a vertical rule between the counts and the hints, and the hints read `drag: rotate`, `scroll: zoom`, `space + drag: pan`, `double-click: focus`.
+- The meeting banner moved to the top right so it no longer overlaps the rail. Tests updated (`office3d.desktop` now drags to rotate and picks agents from the menu). Dev-build `office3d`, `ui-revision` and `desktop.e2e` pass. Evidence: `after/office-tools-*.png`.

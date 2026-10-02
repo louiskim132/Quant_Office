@@ -90,7 +90,15 @@ try {
       zoom: Number(await canvas.getAttribute('data-zoom')),
     });
     const start = await read();
-    await stage.getByRole('button', { name: 'Rotate right', exact: true }).click();
+    // The rail has no rotate or full-screen buttons: dragging and the arrow keys turn the view.
+    assert.equal(await stage.getByRole('button', { name: /^Rotate/ }).count(), 0);
+    assert.equal(await stage.getByRole('button', { name: /full screen/i }).count(), 0);
+    const shot = await canvas.boundingBox();
+    assert.ok(shot);
+    await page.mouse.move(shot.x + shot.width / 2, shot.y + shot.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(shot.x + shot.width / 2 + 160, shot.y + shot.height / 2, { steps: 8 });
+    await page.mouse.up();
     await page.waitForFunction(
       az => Number(document.querySelector('.office3d canvas')?.getAttribute('data-azimuth')) !== az,
       start.az,
@@ -128,7 +136,9 @@ try {
 
     // A person's chip locks the camera on them and opens their drawer; Escape closes it and returns focus.
     const zoomBefore = (await read()).zoom;
-    await stage.locator('.stage-chip', { hasText: 'Test PM B' }).click();
+    assert.equal(await stage.locator('.stage-chip').count(), 0, 'the top chip row is gone');
+    await stage.getByRole('button', { name: 'Agents', exact: true }).click();
+    await stage.getByRole('menuitem', { name: /Test PM B/ }).click();
     await page.getByRole('complementary', { name: 'Test PM B details' }).waitFor();
     await page.waitForFunction(
       zoom => Number(document.querySelector('.office3d canvas')?.getAttribute('data-zoom')) > zoom,
