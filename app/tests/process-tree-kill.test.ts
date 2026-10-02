@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { spawnTreeKillable } from '../src/main/local-cli-exec.js';
+import { removeTreeSync } from '../src/main/fsx.js';
 
 const alive = (pid: number): boolean => {
   try {
@@ -39,7 +40,7 @@ test(
     const grandchildPid = Number(readFileSync(pidFile, 'utf8'));
     t.after(() => {
       if (alive(grandchildPid)) process.kill(grandchildPid);
-      rmSync(dir, { recursive: true, force: true });
+      removeTreeSync(dir);
     });
     assert.ok(alive(grandchildPid), 'the tool process runs before the kill');
     const exited = new Promise(resolve => child.on('exit', resolve));
