@@ -2,7 +2,7 @@
 
 # UI redesign — execution log (2026-10-01)
 
-Status: **IMPLEMENTED LOCALLY AND VERIFIED — not pushed, no PR, not mirrored into `App\`.** See "Verification actually performed" for exactly what ran and what did not.
+Status (latest, 2026-10-01 evening): **the campus revision (section 11) is pushed to `origin/main` and installed in `App\` as a release build.** Sections 1–10 describe the earlier steps as they stood at the time; section 11.6 corrects what they left unrecorded. Status of the first delivery: implemented locally and verified, not pushed.
 
 Worktree: `Quant Office\Worktrees\ui-3d-office-20261001` · branch `feat/ui-3d-office-20261001` · base `80cf088` (tip of `codex/revision-20261001`, itself on `origin/main` `beab1ce`).
 The sibling worktree `Worktrees\revision-20261001` was **not touched**: it carries another session's uncommitted LR-16b isolation edits (see "Hand-off to the isolation session").
@@ -146,3 +146,65 @@ Verification: format and typecheck clean; unit suite 1,060 tests (1,059 pass, 0 
 - Removed Rotate left/right (drag and arrow keys remain) and the full-screen button, which did not work.
 - Status line: a vertical rule between the counts and the hints, and the hints read `drag: rotate`, `scroll: zoom`, `space + drag: pan`, `double-click: focus`.
 - The meeting banner moved to the top right so it no longer overlaps the rail. Tests updated (`office3d.desktop` now drags to rotate and picks agents from the menu). Dev-build `office3d`, `ui-revision` and `desktop.e2e` pass. Evidence: `after/office-tools-*.png`.
+
+## 11. Campus revision: a 64 Degrees-style pavilion (2026-10-01, user feedback)
+
+The request: the 3D office looked unrealistic and unnatural. Use UC San Diego's Revelle College **64 Degrees** café and its surroundings (the user's dusk photograph) as the general approach, with the office standing where 64 Degrees stands; research natural office design; make the office **twice as large** because everything was packed; move the idle/working dashboard from the entrance to **beside the director's desk**; and when the pointer is on the left tool rail, show **the names of all icons**, not only the one under the pointer. Then push `main` and `origin`, update the taskbar App, the roadmap and this log, and clean up old files and sessions.
+
+| # | Request | Delivered |
+|---|---|---|
+| 1 | 64 Degrees as the model, office in its place | A single-storey glass pavilion with a deep roof edge, round concrete columns and a faceted dark-metal entrance canopy with brass "QRO" letters standing on it (the office's own name in place of the 64° sign), set in a campus courtyard: umbrella dining, a yellow court with Adirondack chairs, drought-tolerant beds, lawns, bike racks, light poles, pines, eucalyptus and concrete campus buildings. Day and blue-hour dusk. |
+| 2 | Research natural office design | See 11.1; applied as planting, materials, light, views, prospect and refuge. |
+| 3 | Twice as large | Default team (1 director, 4 PMs, 1 worker): **35.0 × 19.9 m = 697 m²**, was 26.2 × 13.7 m = 359 m² (1.94×). Street 3 m (was 2.4 m), 2.7 m between a chair back and the next desk, 2.4 m lanes between meeting rooms, larger rooms and a 17 × 11 m café lounge. Unit-tested. |
+| 4 | Dashboard beside the director | The status board left the entrance. It now stands in the director's row, in the slot right of the last director desk, turned 45° to face the default camera, at 3.3 × 1.65 m (was 2.4 × 0.9 m). The placement is computed in `layout.ts` and unit-tested for 1, 3 and 5 directors: in the row, beside the desk, clear of every desk and of the aisle. |
+| 5 | Rail shows every name on hover | Pointing anywhere on the rail, or reaching it from the keyboard, widens **every** tool and shows all the names at once; the tool under the pointer is highlighted. While the agents menu is open the rail stays narrow so the menu does not jump. Checked in `office3d.desktop`. |
+
+### 11.1 Research
+
+| Source | What it showed | What was taken |
+|---|---|---|
+| 64 Degrees: [Studio E Architects](https://www.studioearchitects.com/work/ucsd-64degrees/), [FE&S project profile](https://fesmag.com/topics/project-profiles/facility-design-project-of-the-month/12314-64-degrees-in-revelle-college-at-the-university-of-california,-san-diego), the user's photograph | A. Quincy Jones's 1966 Revelle dining commons, reopened in 2014: dividing walls removed, skylights and natural light, the kitchen brought to the front, reclaimed-wood community tables, booths and counter seating, a double-sided fireplace, mesh curtains defining "neighbourhoods", expansive outdoor dining. The photograph: floor-to-ceiling glass under a thick flat roof edge, round columns, a faceted canopy under brass letters, blue umbrellas, a yellow court with yellow umbrellas and dark Adirondack chairs, agaves, grasses, pale boulders, a river-rock swale, lawn, bikes, slim poles, pines and eucalyptus, mid-rise concrete buildings with fins, louvres and an open stair, and warm interior light at blue hour | The building, canopy and sign treatment, the patio and court, the planting palette, the campus buildings and the dusk palette; inside, the café lounge (counter with stools, fireplace, seating groups) and neighbourhoods divided by planting |
+| [Terrapin Bright Green, *14 Patterns of Biophilic Design*](https://www.terrapinbrightgreen.com/reports/14-patterns/) (2014) | Nature in the space (visual connection, water, dynamic and diffuse light), natural analogues (natural materials, biomorphic forms, complexity and order), nature of the space (prospect, refuge, mystery) | Planter dividers, indoor trees along the street, a living wall behind the director, a water rill on the patio, oak, walnut, stone, linen and wool, views out through glass from every desk, a long sightline down the street (prospect), and the sofa and fireside groups and the director's studio as refuges |
+| Open-plan planning standards ([Arcedior clearances 2025](https://arcedior.com/blog/open-office-layout-standards-clearances-2025), [OfficeSpace density 2026](https://www.officespacesoftware.com/blog/recommended-office-space-per-employee/)) | Main circulation 1.5–2.4 m, row aisles 0.9–1.2 m, 0.9–1.05 m behind chairs, 12–19 m² per person in open plan | A 3 m street, 2.7 m behind every chair and 2.4 m lanes. The larger floor is generous by these numbers on purpose, because the user found the previous plan packed. |
+
+### 11.2 What changed (`app/src/renderer/office3d/`, `office-stage.tsx`, `office3d.css`)
+
+- **Floor plan (`layout.ts`).** New dimensions (pods 3.4 × 4.2 m, first desk at 4.4/3.6 m, zone gap 1.6 m, street 3 m, rooms 2.55 m half-depth, lounge 11 m deep), the board slot, planter `dividers`, `streetPlants` placed only where no aisle, lane or door crosses the street, an `EAST_WALK` of 1.4 m inside the meeting wing's east glass, and a re-laid lounge: counter and stools at the back, ping-pong, a sofa that faces the room with an armchair at each end of a low table, and a fireside group of four armchairs. Every lounge exit has explicit waypoints that avoid the furniture.
+- **The roof-edge strip.** The building is drawn without a roof so the inside stays visible; the roof is suggested by a 0.36 m fascia with a 0.5 m overhang. Seen from the default camera (34° above the horizon, 45° to each wall), that edge hides a head-height strip roughly 1–2 m inside the two near walls, so no seat sits there: lounge seats keep 2.4 m from the front glass and meeting chairs 2.4 m from the east glass (unit-tested). The first lounge draft put the sofa in that strip and it vanished behind the roof edge, which is why the lounge was turned round.
+- **Interior (`world.ts`).** A polished-concrete floor with oak planks in the work neighbourhoods; oak desks on white legs with monitor arms, lamps, plants, notebooks and mugs; task chairs with five-star bases; a walnut director's desk and credenza on a wool rug; the status board on an oak stand; oak planter boxes with grasses, ferns and snake plants between neighbourhoods, and wooden zone plaques; a living wall across the back of the work area; bookshelves along the west wall; potted trees along the street and the east walkway; glass meeting rooms with oak tables, upholstered chairs, a linear pendant, a wall screen and a credenza; the café lounge with a reclaimed-oak counter, an espresso machine, stools, a linen sofa, armchairs, rugs, a stone fireplace with a fire, and planters along the front glass. Rounded edges throughout (`Batch.rbox`).
+- **People (`avatar.ts`).** Rounded figures (capsule limbs and torso, a sphere head, a hair cap, ears, nose and eyes) instead of voxel boxes, with trouser and shoe colours and three hair styles varied per person. The rig, the poses and the honest-state rules are unchanged.
+- **Courtyard (`environment.ts`).** Replaces the road, cars, bus, canal and glass towers. Tall things keep at least their height ÷ 0.67 from the building (the camera's slope), so orbiting to the back or a side still shows the whole office; the first draft's pines and buildings hid the office from behind and were moved out. Contact shadows under trees and umbrellas; at dusk, lamp and bollard light pools and lit windows.
+- **Rendering (`engine.ts`).** Neutral tone mapping; a `RoomEnvironment` for ambient light and glass reflections; soft PCF shadows (radius 3) with a 4096² map over the larger floor; haze toward the sky colour; a front-left sun by day, and a cool blue-hour light with warm interior lamps at dusk. Maximum zoom is now 12× the fit and agent focus 3.2×. The stage backdrop is a sky gradient.
+- **Rail (`office-stage.tsx`, `office3d.css`).** Hover-names-all as above. The rail's agents button and its menu are now named **"Agents on the floor"**: since `f5f953f` they shared the name "Agents" with the sidebar's Agents page, which is ambiguous for screen readers and made `revision.desktop` fail (a strict-mode match on two buttons).
+
+### 11.3 Decisions
+
+1. **No new dependencies.** `RoundedBoxGeometry`, `RoomEnvironment` and `BufferGeometryUtils.mergeVertices` are add-ons inside the already pinned `three@0.186.1`.
+2. **Still one draw call** for the static office, plus small glass, frost, glow, shade and light-pool batches. The cost of the realism is the 4096² shadow map and, at dusk only, up to 15 unshadowed interior lights (8 for the default team).
+3. **Honesty rules unchanged.** Monitors, typing, walking, meetings and resting still come only from the derived activity; `visuals.ts` is untouched; routes stay on aisles and lanes (unit-tested for every desk against room and lounge seats).
+4. **No copied branding.** The pavilion, canopy, courtyard and buildings are original geometry modelled on the photograph's arrangement. The sign reads "QRO", not "64°", and no UC San Diego mark is used.
+
+### 11.4 Verification
+
+| Check | Result |
+|---|---|
+| `prettier --check`, `tsc --noEmit` | clean |
+| Unit suite | **1,065 tests — 1,064 pass, 0 fail, 1 existing skip** (+5 floor-plan tests: area, board placement, clear walking lines, no seat in the hidden strip, lounge exits) |
+| Dev-build desktop suites, scratch `QRO_USER_DATA_DIR` | `office3d` (webgl=true, with the new rail check), `ui-revision`, `desktop.e2e`, `office-chat`, `revision`, `pipeline-request`, `pipeline`: all pass |
+| Packaged **test** build of `7192eb2` (asar SHA-256 `BC1C83385BC5430B27E546A77727CB0E1FA3D7C1CD7A4354E1DABE6C41F18B41`) | `office3d` (webgl=true, packaged=true), `desktop.e2e`, `ui-revision`, `revision`: all pass |
+| Packaged **release** build of `7192eb2` | The same asar `BC1C8338…8B41`, 95 files; the RunAsNode and NodeCliInspect fuses disabled |
+| Installed `App\` | The App was not running. The previous App was copied to `Archive\App-before-campus-office-20261001` (asar `A1AD4D94…`, the release build of `f5f953f`); the release was mirrored with `robocopy /MIR`, 95 of 95 files hash-identical. Started on an empty scratch data folder: the "Quant Research Office" window opened, a fresh workspace was created and the log was clean. Only the processes started by the check were closed. |
+| Eyes | Harness screenshots `after/office-campus-01…09` (day, dusk, director and board close-up, café lounge, meeting room, rail with all names, back view, 14 agents, empty floor); `00` is the glass office before this revision |
+
+Not run: `agents.e2e.ts` and `three-agent.live.ts` (live providers), CI (no PR, and pushes to `main` trigger none), a screen-reader pass, frame rates on a weak or integrated GPU.
+
+### 11.5 Risks and limits
+
+- The 4096² shadow map takes about 64 MB of GPU memory. If a weak GPU struggles, it is the first thing to lower.
+- At the default zoom the board's numbers are about 14 px tall; zoom in for its labels.
+- People face their screens, so faces show mainly in the lounge and the meeting rooms. From behind, the brass letters read mirrored, as real letters would.
+- The courtyard is generated from fixed seeds; it does not depict the real Revelle site.
+
+### 11.6 Record corrections
+
+- Sections 9 and 10 said nothing was pushed and that the glass build was not installed. In fact `origin/main` was pushed directly, with no PR or CI run: `beab1ce` → `c25f1ab` at 2026-10-01 18:42 UTC and `c25f1ab` → `f5f953f` at 2026-10-02 02:30 UTC (GitHub's activity log). The release build of `f5f953f` (asar `A1AD4D94…`, fuses off, containing the section 10 rail) was installed in `App\`, with `Archive\App-before-glass-office-20261001` (the `070c297` release, `2F1BD1DF…`) as its rollback. The roadmap had no entry for either; its new section 17 entry records them.
