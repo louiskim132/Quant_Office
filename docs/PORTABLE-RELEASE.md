@@ -42,9 +42,11 @@ that the downloaded bytes match that digest.
    `%LOCALAPPDATA%\QuantResearchOffice\versions\<commit>`, using Windows Explorer or
    `Expand-Archive -LiteralPath '<download.zip>' -DestinationPath '<new-folder>'`.
 3. From a trusted copy of the repository, run
-   `powershell -NoProfile -File app/scripts/verify-portable.ps1 -PackageDirectory '<new-folder>'`.
+   `powershell -NoProfile -ExecutionPolicy Bypass -File app/scripts/verify-portable.ps1 -PackageDirectory '<new-folder>'`.
    This requires no Node installation. The verifier rejects changed, missing and additional
    files, including obsolete files that a privacy scan might allow.
+   `-ExecutionPolicy Bypass` applies only to that PowerShell process; review the trusted
+   verifier first. It changes no machine-wide or user-wide execution policy.
 4. Open `Quant Research Office.exe`. Windows may show an unsigned publisher warning.
    Review the source and provenance before deciding whether to run it; the release does
    not claim a trusted publisher. Provider CLIs and their official sign-ins remain separate
@@ -88,7 +90,7 @@ tools, and run the hardened startup check from `app`:
 
 ```powershell
 node scripts/portable-release.mjs verify '<fresh-extracted-folder>'
-powershell -NoProfile -File scripts/verify-portable.ps1 -PackageDirectory '<fresh-extracted-folder>'
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-portable.ps1 -PackageDirectory '<fresh-extracted-folder>'
 pnpm exec tsx tests/installed-smoke.desktop.ts '<fresh-extracted-folder>/Quant Research Office.exe'
 ```
 
