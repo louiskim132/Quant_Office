@@ -238,11 +238,6 @@ async function start() {
     includeHistoryInResults: false,
   });
   mark('store');
-  // Keep the loading window responsive, but admit no services, reconciliation or IPC until the
-  // complete historical chain and receipts have passed. Tail-only startup is not execution authority.
-  await store.verifyInBackground();
-  store.assertHealthy();
-  mark('integrity');
   rememberTheme(store.snapshot({ history: false }).settings.theme);
   // The page is built in the workspace's theme, so its first paint matches before the page has a
   // theme of its own stored.
@@ -258,6 +253,12 @@ async function start() {
       shown = Math.round(performance.now() - began);
       win?.show();
     });
+  // Keep the themed loading window visible and responsive, but admit no services, reconciliation
+  // or IPC until the full historical chain and receipts pass. Tail-only open is not launch authority.
+  await loading;
+  await store.verifyInBackground();
+  store.assertHealthy();
+  mark('integrity');
   artifacts = new ArtifactService(store, workspace);
   evidence = new EvidenceService(store, workspace);
   // secrets.dat lives at the userData root — a sibling of workspace/, never inside it.
