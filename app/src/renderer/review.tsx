@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ShieldCheck } from 'lucide-react';
+import { ChevronRight, ShieldCheck } from 'lucide-react';
 import type { Agent, AppState, Assignment, Experiment, ProviderJob, ResearchStatus, WorkMode } from '../shared/types';
 import type { BranchLink, PipelineRecord } from '../shared/pipeline';
 import { latestJobFor } from '../core/jobs';
@@ -7,7 +7,7 @@ import { Empty, label, Avatar, StatusPill } from './components';
 import { FilePreviewPane, type FilePreview } from './file-preview';
 import './explorer.css';
 import './review.css';
-import { pipelineReviewHops, type StoredJobOutputRow } from './job-outputs';
+import { pipelineReviewHops, type PipelineReviewHop, type StoredJobOutputRow } from './job-outputs';
 
 /** Stage functions whose work is an independent review rather than production. */
 const REVIEW_FUNCTIONS = new Set<string>(['CORRECTNESS_REVIEWER', 'ADVOCATE', 'SKEPTIC']);
@@ -37,111 +37,152 @@ export function PipelineReviews({
   setPreview: (preview: PreviewResult) => void;
   onError: (e: unknown) => void;
 }) {
-  const [selectedPreview, setSelectedPreview] = useState<FilePreview | null>(null);
-  const [previewBusy, setPreviewBusy] = useState(false);
-  const previewTicket = useRef(0);
-  useEffect(() => {
-    previewTicket.current++;
-    setSelectedPreview(null);
-    setPreviewBusy(false);
-    return () => {
-      previewTicket.current++;
-    };
-  }, [projectId, experiment?.id]);
   const experimentOf = (requestId: string) => state.requests?.find(r => r.id === requestId)?.experimentId;
-  const groups = pipelineReviewHops(state, projectId).filter(
+  const groups = pipelineReviewHops(state, projectId, true).filter(
     g => !experiment || experimentOf(g.requestId) === experiment.id,
   );
-  const preview = async (jobId: string, path: string) => {
-    const ticket = ++previewTicket.current;
-    setPreviewBusy(true);
-    setSelectedPreview(null);
-    try {
-      const r = await window.office.jobOutputPreview({ jobId, path });
-      if (ticket === previewTicket.current)
-        setSelectedPreview({ name: path, text: r.text, truncated: r.truncated, binary: false });
-    } catch (e) {
-      if (ticket === previewTicket.current) onError(e);
-    } finally {
-      if (ticket === previewTicket.current) setPreviewBusy(false);
-    }
-  };
   return (
-    <section>
+    <section className="pipeline-reviews">
       <h2>Pipeline reviews</h2>
-      <p className="muted">
-        Each hop shows its latest attempt only — an earlier attempt's stored bytes stay listed under Artifacts, marked
-        superseded.
-      </p>
       {!groups.length ? (
         <Empty
           icon={ShieldCheck}
           title="No pipeline reviews on record for this scope"
-          description="A request's critique, falsification, response and verification hops appear here once a launched pipeline mints them."
-          hint="Pipeline critiques are a separate record from the research-stage reviews below."
+          description="No pipeline steps have been recorded."
         />
       ) : (
         groups.map(group => (
-          <article key={group.requestId} className="task-card">
-            <div className="card-heading">
-              <h3>{group.requestName}</h3>
-            </div>
-            <div className="review-columns">
-              {group.hops.map(hop => (
-                <section className="review-hop" key={hop.assignmentId}>
-                  <div className="card-heading">
-                    <Avatar id={hop.agentId} name={hop.agentName} />
-                    <strong>{hop.agentName}</strong>
-                    <StatusPill
-                      status={
-                        hop.state === 'FAILED'
-                          ? 'failed'
-                          : hop.state === 'COMPLETED'
-                            ? 'done'
-                            : hop.state === 'RUNNING'
-                              ? 'working'
-                              : 'unknown'
-                      }
-                      label={hop.state ? label(hop.state) : 'Not dispatched'}
-                    />
-                  </div>
-                  <h3>{label(hop.pipelineKey.replaceAll('-', ' '))}</h3>
-                  <p className="muted">Verdict: unverified · attempt {hop.attempt ?? '—'}</p>
-                  <p>{hop.detail.split('\n')[0].slice(0, 220)}</p>
-                  <details>
-                    <summary>Recorded details</summary>
-                    <p>{hop.detail}</p>
-                    <p>
-                      Completion records execution state. Read the report for claims and concerns; no review verdict is
-                      inferred from completion.
-                    </p>
-                  </details>
-                  <div className="button-row">
-                    {hop.outputs.map(output => (
-                      <button
-                        key={output.path + output.sha256}
-                        className="secondary"
-                        disabled={busy}
-                        onClick={() => void preview(output.jobId, output.path)}
-                        title={output.path}
-                      >
-                        Preview {output.path.split('/').pop()}
-                      </button>
-                    ))}
-                  </div>
-                  {!hop.outputs.length && <p className="muted">No stored report yet.</p>}
-                </section>
+          <details key={group.requestId} className="review-task">
+            <summary>
+              <strong>{group.requestName}</strong>
+              <span className="muted">{group.hops.length} steps</span>
+            </summary>
+            <div className="review-sequence">
+              {group.hops.map((hop, index) => (
+                <ReviewHop
+                  key={hop.assignmentId + ':' + hop.jobId}
+                  hop={hop}
+                  index={index}
+                  busy={busy}
+                  setPreview={setPreview}
+                  onError={onError}
+                />
               ))}
             </div>
-          </article>
+          </details>
         ))
       )}
-      <FilePreviewPane
-        preview={selectedPreview}
-        loading={previewBusy}
-        onOpen={() => selectedPreview && setPreview(selectedPreview)}
-      />
     </section>
+  );
+}
+
+function ReviewHop({
+  hop,
+  index,
+  busy,
+  setPreview,
+  onError,
+}: {
+  hop: PipelineReviewHop;
+  index: number;
+  busy: boolean;
+  setPreview: (preview: PreviewResult) => void;
+  onError: (e: unknown) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [selected, setSelected] = useState<FilePreview | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const ticket = useRef(0);
+  const primary =
+    hop.outputs.find(o => /(^|[/\\\\])report\.md$/i.test(o.path)) ?? hop.outputs.find(o => /\.(md|txt)$/i.test(o.path));
+  const preview = useCallback(
+    async (output: StoredJobOutputRow) => {
+      const current = ++ticket.current;
+      setLoading(true);
+      setError('');
+      setSelected(null);
+      try {
+        const result = await window.office.jobOutputPreview({ jobId: output.jobId, path: output.path });
+        if (ticket.current === current)
+          setSelected({ name: output.path, text: result.text, truncated: result.truncated, binary: false });
+      } catch (e) {
+        if (ticket.current === current) {
+          setError((e as Error).message);
+          onError(e);
+        }
+      } finally {
+        if (ticket.current === current) setLoading(false);
+      }
+    },
+    [onError],
+  );
+  useEffect(() => {
+    return () => {
+      ticket.current++;
+    };
+  }, []);
+  useEffect(() => {
+    if (open && primary && !selected && !loading && !error) void preview(primary);
+  }, [open, primary?.jobId, primary?.path, primary?.sha256, selected, loading, error, preview]);
+  return (
+    <details className="review-step" onToggle={e => setOpen(e.currentTarget.open)}>
+      <summary>
+        <ChevronRight className="review-chevron" size={14} aria-hidden="true" />
+        <span className="review-number">{index + 1}</span>
+        <Avatar id={hop.agentId} name={hop.agentName} />
+        <span className="review-step-name">
+          <strong>{hop.agentName}</strong>
+          <small>{label(hop.pipelineKey.replaceAll('-', ' '))}</small>
+        </span>
+        <StatusPill
+          status={
+            hop.state === 'FAILED'
+              ? 'failed'
+              : hop.state === 'COMPLETED'
+                ? 'done'
+                : hop.state === 'RUNNING'
+                  ? 'working'
+                  : 'unknown'
+          }
+          label={hop.state ? label(hop.state) : 'Not dispatched'}
+        />
+      </summary>
+      <div className="review-content">
+        {error && (
+          <p role="alert" className="notice error">
+            {error}
+          </p>
+        )}
+        {selected || loading ? (
+          <FilePreviewPane preview={selected} loading={loading} onOpen={() => selected && setPreview(selected)} />
+        ) : (
+          <p className="review-detail">{hop.detail || 'No stored report yet.'}</p>
+        )}
+        {hop.outputs.length > 0 && (
+          <div className="button-row review-files">
+            {hop.outputs.map(output => (
+              <button
+                key={output.path + output.sha256}
+                className="secondary"
+                disabled={busy || loading}
+                onClick={() => void preview(output)}
+                title={output.path}
+              >
+                Preview {output.path.split(/[/\\\\]/).pop()}
+              </button>
+            ))}
+          </div>
+        )}
+        <details className="review-recorded">
+          <summary>Recorded details</summary>
+          <p className="review-detail">{hop.detail}</p>
+          <p className="muted">Attempt {hop.attempt ?? 'Not dispatched'} · Verdict: unverified</p>
+          {hop.jobId && <p className="muted">Job: {hop.jobId}</p>}
+          <p className="muted">Completion records execution state, not an independently verified review verdict.</p>
+        </details>
+      </div>
+    </details>
   );
 }
 
@@ -507,15 +548,21 @@ export function ReviewsView({
         setPreview={setPreview}
         onError={onError}
       />
-      <RequestPositions
-        state={state}
-        projectId={projectId}
-        experiment={experiment}
-        busy={busy}
-        setPreview={setPreview}
-        onError={onError}
-      />
-      <ResearchStageReviews state={state} projectId={projectId} experiment={experiment} />
+      <details className="review-task">
+        <summary>Request positions</summary>
+        <RequestPositions
+          state={state}
+          projectId={projectId}
+          experiment={experiment}
+          busy={busy}
+          setPreview={setPreview}
+          onError={onError}
+        />
+      </details>
+      <details className="review-task">
+        <summary>Research-stage reviews</summary>
+        <ResearchStageReviews state={state} projectId={projectId} experiment={experiment} />
+      </details>
     </>
   );
 }

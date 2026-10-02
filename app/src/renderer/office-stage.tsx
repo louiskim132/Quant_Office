@@ -9,7 +9,9 @@ import { STATUS } from './status';
 import { StatusPill } from './components';
 import { OfficeScene, NowPanel, seatZones } from './office-scene';
 import { OfficeChat } from './office-chat';
-import { useBoolPref, usePref } from './prefs';
+import { readPref, useBoolPref, usePref } from './prefs';
+import { parseBindings } from './office3d/bindings';
+import { modelLabel } from './model-label';
 import { OfficeEngine, type AgentVisual } from './office3d/engine';
 import { buildLayout, tableSeatDemand } from './office3d/layout';
 import {
@@ -130,6 +132,7 @@ export function Office3D({
   const pickRef = useRef(onAgent);
   pickRef.current = onAgent;
   const [names, setNames] = useBoolPref('office-names', true);
+  const [bindingsRaw] = usePref('office-controls', '');
   const [menuOpen, setMenuOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [ready, setReady] = useState(false);
@@ -280,6 +283,7 @@ export function Office3D({
       engineNow.setBusyRooms(now.busyTables);
       engineNow.setSelected(now.selectedId);
       engineNow.setNames(now.names);
+      engineNow.setBindings(parseBindings(readPref('office-controls', '')));
       engine.current = engineNow;
       observer = new MutationObserver(() => {
         engineNow.setTheme(rootTheme());
@@ -327,6 +331,9 @@ export function Office3D({
     engine.current?.setNames(names);
   }, [names]);
   useEffect(() => {
+    engine.current?.setBindings(parseBindings(bindingsRaw));
+  }, [bindingsRaw]);
+  useEffect(() => {
     engine.current?.setTheme(theme);
   }, [theme]);
   useEffect(() => {
@@ -371,13 +378,7 @@ export function Office3D({
       aria-label="Office floor"
       aria-busy={!ready}
     >
-      <div
-        ref={host}
-        className="office3d-host"
-        tabIndex={0}
-        role="group"
-        aria-label="3D office view. Arrow keys rotate, plus and minus zoom, zero resets the view."
-      />
+      <div ref={host} className="office3d-host" tabIndex={0} role="group" aria-label="3D office view" />
       <div className="office3d-labels">
         {ordered.map(agent => {
           const view = views.get(agent.id)!;
@@ -412,8 +413,7 @@ export function Office3D({
               <span className="tag-card" aria-hidden="true">
                 <strong>{agent.name}</strong>
                 <span className="tag-role">
-                  {agent.role.replaceAll('_', ' ')} · {agent.provider} {agent.model}
-                  {agent.effort && agent.effort !== 'default' ? ` · ${agent.effort}` : ''}
+                  {agent.role.replaceAll('_', ' ')} · {modelLabel(agent)}
                 </span>
                 <StatusPill status={view.status} />
                 {view.requestName && <span>{view.requestName}</span>}

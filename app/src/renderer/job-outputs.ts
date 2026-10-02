@@ -143,17 +143,31 @@ export interface PipelineReviewGroup {
  * that can be previewed. A minted hop with no job appears as recorded-but-undispatched; nothing
  * about its state is invented.
  */
-export function pipelineReviewHops(state: JobOutputState, projectId: string): PipelineReviewGroup[] {
+export function pipelineReviewHops(
+  state: JobOutputState,
+  projectId: string,
+  fullSequence = false,
+): PipelineReviewGroup[] {
   const requests = new Map((state.requests ?? []).map(r => [r.id, r]));
   const groups = new Map<string, PipelineReviewGroup>();
   const assignments = (state.assignments ?? []).filter(
     a =>
       a.projectId === projectId &&
       a.pipelineKey &&
-      REVIEW_HOP.test(a.pipelineKey) &&
+      (fullSequence || REVIEW_HOP.test(a.pipelineKey)) &&
       requests.get(a.requestId)?.pipeline,
   );
-  for (const assignment of assignments) {
+  // Dependency order survives shuffled snapshots and repeated visits to the same agent.
+  const remaining = new Map(assignments.map(a => [a.id, a]));
+  const ordered: typeof assignments = [];
+  while (remaining.size) {
+    const next =
+      [...remaining.values()].find(a => !(a.dependsOn ?? []).some(id => remaining.has(id))) ??
+      remaining.values().next().value!;
+    ordered.push(next);
+    remaining.delete(next.id);
+  }
+  for (const assignment of ordered) {
     const job = latestJobFor(state.jobs, assignment.id);
     const group = groups.get(assignment.requestId) ?? {
       requestId: assignment.requestId,

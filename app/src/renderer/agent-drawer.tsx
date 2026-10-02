@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { modelLabel } from './model-label';
 import { X } from 'lucide-react';
 import type { OfficeActivity } from '../shared/activity';
 import type { Agent, AppState } from '../shared/types';
@@ -110,9 +111,7 @@ export function AgentDrawer({
             <dt>Evidence</dt>
             <dd>{view.evidence}</dd>
             <dt>Model</dt>
-            <dd>
-              {agent.provider} · {agent.model} · {agent.effort ?? 'default'} effort
-            </dd>
+            <dd>{modelLabel(agent)}</dd>
           </dl>
           {error && (
             <p className="notice error" role="alert">

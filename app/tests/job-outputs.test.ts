@@ -194,6 +194,18 @@ test('a job in another project is excluded, and a removed request still groups h
   assert.equal(orphaned[0].requestName, 'Removed request');
 });
 
+test('full review sequence retains worker and director steps and repeated reviewers in dependency order', () => {
+  const assignments = ['worker', 'pm-a', 'pm-b', 'pm-a', 'director'].map((agent, i) => ({
+    ...assignment(`step-${i}`, 'r1', 'p1', agent, i === 0 ? 'produce' : i === 4 ? 'decide' : `review-${i}`),
+    dependsOn: i ? [`step-${i - 1}`] : [],
+  }));
+  const state = fixture([], [...assignments].reverse(), [request('r1', 'p1', 'Task', true)]);
+  assert.deepEqual(
+    pipelineReviewHops(state, 'p1', true)[0].hops.map(h => h.agentId),
+    ['worker', 'pm-a', 'pm-b', 'pm-a', 'director'],
+  );
+});
+
 test('pipelineReviewHops lists critique/falsify/response/verify hops with state and stored outputs only', () => {
   const requests = [request('r1', 'p1', 'Planning round', true), request('r2', 'p1', 'Not a pipeline')];
   const assignments = [

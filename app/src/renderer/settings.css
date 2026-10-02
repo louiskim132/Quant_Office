@@ -425,3 +425,56 @@
     grid-template-columns: 1fr;
   }
 }
+.settings-check-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 0 0 16px;
+  width: 100%;
+}
+.settings-check-row > button {
+  flex-shrink: 0;
+}
+.settings-check-row p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.iso-actions {
+  flex-direction: column;
+  align-items: stretch;
+}
+.iso-providers {
+  width: 100%;
+  table-layout: fixed;
+}
+.iso-providers th:first-child {
+  width: 25%;
+}
+.iso-provider-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  overflow-wrap: anywhere;
+}
+.iso-provider-status small {
+  display: block;
+  color: var(--muted);
+}
+.shortcut-input {
+  width: 160px;
+  text-align: center;
+  cursor: pointer;
+}
+.settings-group + .settings-group {
+  margin-top: 16px;
+}
+.iso-providers th,
+.iso-providers td {
+  font-size: var(--fs-2);
+}
+@media (max-width: 640px) {
+  .settings-check-row {
+    flex-wrap: wrap;
+  }
+}

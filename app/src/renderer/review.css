@@ -60,3 +60,84 @@
   border-style: dashed;
   color: var(--subtle);
 }
+.review-task {
+  border-bottom: 1px solid var(--border);
+}
+.review-task > summary {
+  padding: 16px 8px;
+  cursor: pointer;
+}
+.review-task > summary strong {
+  margin-right: 16px;
+  overflow-wrap: anywhere;
+}
+.review-sequence {
+  padding-left: 20px;
+}
+.review-step {
+  border-top: 1px solid var(--border);
+}
+.review-step > summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 8px;
+  cursor: pointer;
+}
+.review-chevron {
+  flex-shrink: 0;
+}
+.review-step[open] > summary .review-chevron {
+  transform: rotate(90deg);
+}
+.review-number {
+  width: 24px;
+  flex-shrink: 0;
+  color: var(--muted);
+}
+.review-step-name {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.review-step-name small {
+  display: block;
+  color: var(--muted);
+}
+.review-content {
+  padding: 4px 16px 20px 60px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.review-content .file-preview {
+  border: 0;
+  background: none;
+  padding: 0;
+}
+.review-detail {
+  white-space: pre-wrap;
+}
+.review-files {
+  flex-wrap: wrap;
+  margin: 16px 0;
+}
+.review-files button {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.review-recorded {
+  margin-top: 16px;
+}
+@media (max-width: 640px) {
+  .review-sequence {
+    padding-left: 8px;
+  }
+  .review-content {
+    padding-left: 16px;
+  }
+  .review-step > summary {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+}

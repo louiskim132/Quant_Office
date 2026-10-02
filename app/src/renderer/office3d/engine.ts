@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { DEFAULT_BINDINGS, shortcutKey, type ViewBindings, type ControlAction } from './bindings';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { Avatar, AvatarShared, type AvatarColors } from './avatar';
@@ -24,6 +25,7 @@ export interface AgentVisual {
   resting: boolean;
 }
 export interface EngineOptions {
+  bindings?: ViewBindings;
   host: HTMLElement;
   labels: Map<string, HTMLElement>;
   tags: Map<number, HTMLElement>;
@@ -200,7 +202,7 @@ export class OfficeEngine {
     this.controls.zoomToCursor = true;
     this.controls.rotateSpeed = 0.7;
     this.controls.zoomSpeed = 1.1;
-    this.controls.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE };
+    this.setBindings(opts.bindings ?? DEFAULT_BINDINGS);
     this.controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
     this.controls.addEventListener('start', () => {
       this.userMoved = true;
@@ -688,19 +690,60 @@ export class OfficeEngine {
     }
   }
 
+  setBindings(bindings: ViewBindings) {
+    this.opts.bindings = bindings;
+    const actions = { pan: THREE.MOUSE.PAN, rotate: THREE.MOUSE.ROTATE, zoom: THREE.MOUSE.DOLLY };
+    this.controls.mouseButtons = {
+      LEFT: actions[bindings.mouse[0]],
+      MIDDLE: actions[bindings.mouse[1]],
+      RIGHT: actions[bindings.mouse[2]],
+    };
+  }
+
+  private panBy(x: number, y: number) {
+    const delta = new THREE.Vector3().setFromMatrixColumn(this.camera.matrix, 0).multiplyScalar(x);
+    delta.addScaledVector(new THREE.Vector3().setFromMatrixColumn(this.camera.matrix, 1), y);
+    delta.multiplyScalar(60 / this.camera.zoom);
+    this.userMoved = true;
+    this.tween = null;
+    this.camera.position.add(delta);
+    this.controls.target.add(delta);
+    this.clampTarget();
+    this.controls.update();
+    this.dirty = true;
+    this.wake();
+  }
+
   private onKey(e: KeyboardEvent, down: boolean) {
     if (e.target !== this.opts.host && e.target !== this.canvas) return;
-    if (e.key === ' ') {
-      if (down) e.preventDefault();
-      return;
-    }
+    // Space would scroll the page under the focused view, bound or not.
+    if (e.key === ' ') e.preventDefault();
     if (!down) return;
-    const handled = () => e.preventDefault();
-    if (e.key === 'ArrowLeft') (this.rotate(-Math.PI / 12), handled());
-    else if (e.key === 'ArrowRight') (this.rotate(Math.PI / 12), handled());
-    else if (e.key === '+' || e.key === '=') (this.zoomBy(1.3), handled());
-    else if (e.key === '-' || e.key === '_') (this.zoomBy(1 / 1.3), handled());
-    else if (e.key === '0' || e.key === 'Home') (this.resetView(), handled());
+    const keys = (this.opts.bindings ?? DEFAULT_BINDINGS).keys;
+    const key = shortcutKey(e);
+    const alias =
+      key === '0' && keys.reset === 'Home'
+        ? 'reset'
+        : key === '+' && keys.zoomIn === '='
+          ? 'zoomIn'
+          : key === '_' && keys.zoomOut === '-'
+            ? 'zoomOut'
+            : undefined;
+    const action = (Object.keys(keys) as ControlAction[]).find(k => keys[k] === key) ?? alias;
+    if (!action) return;
+    e.preventDefault();
+    const actions: Record<ControlAction, () => void> = {
+      panLeft: () => this.panBy(-1, 0),
+      panRight: () => this.panBy(1, 0),
+      panUp: () => this.panBy(0, 1),
+      panDown: () => this.panBy(0, -1),
+      rotateLeft: () => this.rotate(-Math.PI / 12),
+      rotateRight: () => this.rotate(Math.PI / 12),
+      zoomIn: () => this.zoomBy(1.3),
+      zoomOut: () => this.zoomBy(1 / 1.3),
+      reset: () => this.resetView(),
+    };
+    actions[action]();
   }
 
   private pointerRay(e: PointerEvent | MouseEvent) {

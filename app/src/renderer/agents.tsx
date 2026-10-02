@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { modelLabel } from './model-label';
 import type {
   AgentDraft,
   AgentTicket,
@@ -16,7 +17,7 @@ import { LocalConsumption } from './activity';
 import './agents.css';
 import { formatDateTime, formatNumber, plural } from './format';
 import { Checkbox, Empty, label } from './components';
-import { History } from 'lucide-react';
+import { History, RefreshCw } from 'lucide-react';
 const roleNames: Record<Role, string> = {
   DIRECTOR: 'Director',
   PM_A: 'PM · Implementation',
@@ -409,7 +410,7 @@ export function AgentSetup({ onAdded }: { onAdded: (state: AppState, execution?:
           <div className="connection-confirm" role="status">
             <h3>Account connected · ready to confirm</h3>
             <p>
-              {ticket.connection.account} · {ticket.draft.model} · effort {ticket.draft.effort ?? 'default'}
+              {ticket.connection.account} · {modelLabel(ticket.draft)}
             </p>
             <p>
               {ticket.draft.team} / {roleNames[ticket.draft.role]}
@@ -634,26 +635,38 @@ export function sessionRowCells(record: LocalSessionRecord): SessionHistoryCells
  * own ledger — they say nothing about provider-side usage, tokens, or remaining allowance.
  */
 function SessionHistory() {
+  const request = useRef(0);
   const [entries, setEntries] = useState<LocalSessionRecord[]>([]),
     [total, setTotal] = useState(0),
     [loaded, setLoaded] = useState(false),
     [busy, setBusy] = useState(false),
     [error, setError] = useState('');
   async function load(offset: number) {
+    const ticket = ++request.current;
     setBusy(true);
     setError('');
     try {
       const page = await window.office.localSessions({ limit: SESSION_HISTORY_PAGE, offset });
-      setEntries(prev => (offset === 0 ? page.entries : [...prev, ...page.entries]));
+      if (ticket !== request.current) return;
+      setEntries(prev =>
+        offset === 0 ? page.entries : [...new Map([...prev, ...page.entries].map(row => [row.id, row])).values()],
+      );
       setTotal(page.total);
     } catch (e) {
-      setError((e as Error).message);
+      if (ticket === request.current) setError((e as Error).message);
     } finally {
-      setBusy(false);
-      setLoaded(true);
+      if (ticket === request.current) {
+        setBusy(false);
+        setLoaded(true);
+      }
     }
   }
-  useEffect(() => void load(0), []);
+  useEffect(() => {
+    void load(0);
+    return () => {
+      request.current++;
+    };
+  }, []);
   const rows = sessionHistoryRows(entries);
   return (
     <section className="settings-card session-history">
@@ -662,6 +675,15 @@ function SessionHistory() {
           <h2>Session history</h2>
           <p>Recorded office sessions — provider-reported usage is shown separately above.</p>
         </div>
+        <button
+          className="icon-button"
+          title="Refresh session history"
+          aria-label="Refresh session history"
+          disabled={busy}
+          onClick={() => void load(0)}
+        >
+          <RefreshCw size={16} />
+        </button>
       </div>
       {error && (
         <p role="alert" className="form-error">

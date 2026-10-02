@@ -6,6 +6,7 @@ import {
   Check,
   Database,
   Info,
+  Keyboard,
   Minus,
   Palette,
   Plug,
@@ -18,10 +19,21 @@ import { TRANSPORT_PROBE_CONTAINMENT } from '../shared/transport';
 import { Dot, Segmented, Switch, type Tone } from './components';
 import { formatDateTime } from './format';
 import { usePref } from './prefs';
+import {
+  CONTROL_ACTIONS,
+  DEFAULT_BINDINGS,
+  bindKey,
+  bindMouse,
+  parseBindings,
+  shortcutKey,
+  type ControlAction,
+  type DragAction,
+} from './office3d/bindings';
 import './settings.css';
 
 type CommandInput = Command extends infer C ? (C extends Command ? Omit<C, 'idempotencyKey'> : never) : never;
-export type SettingsSection = 'connections' | 'isolation' | 'notifications' | 'appearance' | 'data' | 'about';
+export type SettingsSection =
+  'connections' | 'isolation' | 'notifications' | 'appearance' | 'controls' | 'data' | 'about';
 
 const PROVIDERS: Provider[] = ['claude', 'openai', 'devin'];
 const providerCopy: Record<Provider, { name: string; plan: string; glyph: string }> = {
@@ -137,6 +149,7 @@ export function SettingsPage({
     { id: 'isolation', label: 'Agent isolation', icon: ShieldCheck, status: isoTone },
     { id: 'notifications', label: 'Notifications', icon: Bell },
     { id: 'appearance', label: 'Appearance', icon: Palette },
+    { id: 'controls', label: 'Controls', icon: Keyboard },
     { id: 'data', label: 'Data & recovery', icon: Database },
     { id: 'about', label: 'About', icon: Info },
   ];
@@ -165,6 +178,7 @@ export function SettingsPage({
       <div className="settings-pane">
         {section === 'connections' && <ProviderConnections state={state} />}
         {section === 'isolation' && <AgentIsolation isolation={isolation} />}
+        {section === 'controls' && <ViewControls />}
         {section === 'notifications' && (
           <Pane title="Notifications" lead="How the office gets your attention when it needs you.">
             <div className="settings-group">
@@ -379,6 +393,64 @@ function Row({
   );
 }
 
+// ---- controls ---------------------------------------------------------------------------------
+
+/** The office view's mouse and key bindings, kept in this window's preferences (not the workspace). */
+export function ViewControls() {
+  const [raw, save] = usePref('office-controls', '');
+  const bindings = parseBindings(raw);
+  return (
+    <Pane title="Controls" lead="Office view">
+      <div className="settings-group">
+        {['Left drag', 'Middle drag', 'Right drag'].map((name, button) => (
+          <Row
+            key={name}
+            title={name}
+            control={
+              <select
+                aria-label={name}
+                value={bindings.mouse[button]}
+                onChange={e => save(JSON.stringify(bindMouse(bindings, button, e.target.value as DragAction)))}
+              >
+                <option value="pan">Move</option>
+                <option value="rotate">Rotate</option>
+                <option value="zoom">Zoom</option>
+              </select>
+            }
+          />
+        ))}
+      </div>
+      <div className="settings-group">
+        {(Object.keys(CONTROL_ACTIONS) as ControlAction[]).map(action => (
+          <Row
+            key={action}
+            title={CONTROL_ACTIONS[action]}
+            control={
+              <input
+                className="shortcut-input"
+                aria-label={`${CONTROL_ACTIONS[action]} key`}
+                readOnly
+                value={bindings.keys[action] === ' ' ? 'Space' : bindings.keys[action]}
+                onKeyDown={e => {
+                  const key = shortcutKey(e);
+                  if (key) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    save(JSON.stringify(bindKey(bindings, action, key)));
+                  }
+                }}
+              />
+            }
+          />
+        ))}
+      </div>
+      <button className="secondary" onClick={() => save(JSON.stringify(DEFAULT_BINDINGS))}>
+        Reset controls
+      </button>
+    </Pane>
+  );
+}
+
 // ---- connections ------------------------------------------------------------------------------
 
 /**
@@ -466,6 +538,15 @@ export function ProviderConnections({ state }: { state: AppState }) {
       title="Connections"
       lead="Sign in to each provider's official CLI. Only checks the office actually ran count as verified."
     >
+      <div className="settings-check-row">
+        <button
+          className="secondary"
+          disabled={Object.values(busy).some(Boolean)}
+          onClick={() => void Promise.all(PROVIDERS.map(check))}
+        >
+          {Object.values(busy).includes('check') ? 'Checking…' : 'Check account'}
+        </button>
+      </div>
       <div className="conn-list">
         {PROVIDERS.map(provider => {
           const copy = providerCopy[provider];
@@ -539,9 +620,6 @@ export function ProviderConnections({ state }: { state: AppState }) {
                 </p>
               )}
               <div className="conn-actions">
-                <button className="secondary" disabled={!!busy[provider]} onClick={() => void check(provider)}>
-                  {busy[provider] === 'check' ? 'Checking…' : 'Check account'}
-                </button>
                 {!readiness.signedIn && busy[provider] !== 'signin' && (
                   <button className="secondary" disabled={!!busy[provider]} onClick={() => void signIn(provider)}>
                     Sign in
@@ -859,22 +937,24 @@ export function AgentIsolation({ isolation }: { isolation: ReturnType<typeof use
             <span>{head.line}</span>
           </div>
         </header>
-        <ol className="iso-steps">
-          {steps.map(step => {
-            const Icon = STEP_ICON[step.state];
-            return (
-              <li key={step.name} data-state={step.state}>
-                <span className="iso-mark" aria-hidden="true">
-                  <Icon size={12} strokeWidth={3} />
-                </span>
-                <div>
-                  <b>{step.name}</b>
-                  <span>{step.detail}</span>
-                </div>
-              </li>
-            );
-          })}
-        </ol>
+        {!configured && (
+          <ol className="iso-steps">
+            {steps.map(step => {
+              const Icon = STEP_ICON[step.state];
+              return (
+                <li key={step.name} data-state={step.state}>
+                  <span className="iso-mark" aria-hidden="true">
+                    <Icon size={12} strokeWidth={3} />
+                  </span>
+                  <div>
+                    <b>{step.name}</b>
+                    <span>{step.detail}</span>
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
+        )}
         {last && !last.passed && (
           <ul className="iso-failures" aria-label="Failed checks">
             {checks
@@ -914,35 +994,75 @@ export function AgentIsolation({ isolation }: { isolation: ReturnType<typeof use
           )}
           {configured === true && (
             <>
-              <button
-                className="primary"
-                disabled={!!busy}
-                aria-label="Check agent isolation"
-                aria-busy={busy === 'verify'}
-                onClick={() => void verify()}
-              >
-                {busy === 'verify' ? 'Checking…' : 'Check isolation'}
-              </button>
-              {SIGNIN_PROVIDERS.map(provider => (
-                <span key={provider} className="button-row">
-                  <button
-                    className="secondary"
-                    disabled={!!busy}
-                    aria-label={`Sign in ${provider} for agent account`}
-                    onClick={() => void agentSubscription(provider, true)}
-                  >
-                    Sign in {providerCopy[provider].name}
-                  </button>
-                  <button
-                    className="text-button"
-                    disabled={!!busy}
-                    aria-label={`Check ${provider} agent subscription`}
-                    onClick={() => void agentSubscription(provider, false)}
-                  >
-                    Check
-                  </button>
-                </span>
-              ))}
+              <div className="settings-check-row">
+                <button
+                  className="primary"
+                  disabled={!!busy}
+                  aria-label="Check agent isolation"
+                  aria-busy={busy === 'verify'}
+                  onClick={() => void verify()}
+                >
+                  {busy === 'verify' ? 'Checking…' : 'Check isolation'}
+                </button>
+                <p role="status">
+                  {notice || 'Agent isolation is set up. New agent launches now run as the QRO-Agent account.'}
+                </p>
+              </div>
+              <div className="button-row iso-signins">
+                {SIGNIN_PROVIDERS.map(provider => (
+                  <span key={provider} className="button-row">
+                    <button
+                      className="secondary"
+                      disabled={!!busy}
+                      aria-label={`Sign in ${provider} for agent account`}
+                      onClick={() => void agentSubscription(provider, true)}
+                    >
+                      Sign in {providerCopy[provider].name}
+                    </button>
+                  </span>
+                ))}
+              </div>
+              <table className="iso-providers">
+                <thead>
+                  <tr>
+                    <th>Provider</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {SIGNIN_PROVIDERS.map(provider => (
+                    <tr key={provider}>
+                      <td>{providerCopy[provider].name}</td>
+                      <td>
+                        <div className="iso-provider-status">
+                          <span>
+                            {signins[provider]?.account
+                              ? `Signed in as ${signins[provider]!.account}`
+                              : signins[provider]
+                                ? 'Not signed in'
+                                : 'Not checked'}
+                            {signins[provider] && <small>Checked {formatDateTime(signins[provider]!.at)}</small>}
+                          </span>
+                          <button
+                            className="text-button"
+                            disabled={!!busy}
+                            aria-label={`Check ${provider} agent subscription`}
+                            onClick={() => void agentSubscription(provider, false)}
+                          >
+                            Check
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {last && (
+                <p className="muted">
+                  Isolation: {last.passed ? 'Passed' : 'Failed'} {formatDateTime(last.at)} ·{' '}
+                  {checks.filter(([, ok]) => ok).length} of {checks.length} checks
+                </p>
+              )}
               {confirming !== 'remove' ? (
                 <button
                   className="text-button danger"
@@ -976,7 +1096,7 @@ export function AgentIsolation({ isolation }: { isolation: ReturnType<typeof use
             {error}
           </p>
         )}
-        {notice && (
+        {notice && !configured && (
           <p className="notice success" role="status">
             {notice}
           </p>

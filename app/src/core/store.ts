@@ -7878,9 +7878,9 @@ export class OfficeStore {
     if (input.projectId) id.parse(input.projectId);
     const limit = Math.min(Math.max(input.limit ?? 50, 1), 200),
       offset = Math.max(input.offset ?? 0, 0);
-    const sessions = (this.readProjection().localSessions ?? []).filter(
-      item => !input.projectId || item.projectId === input.projectId,
-    );
+    const sessions = (this.readProjection().localSessions ?? [])
+      .filter(item => !input.projectId || item.projectId === input.projectId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id));
     return {
       entries: sessions.slice(offset, offset + limit),
       total: sessions.length,

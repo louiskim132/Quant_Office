@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { modelLabel } from './model-label';
 import type { Agent, AppState, Role } from '../shared/types';
 import type { OfficeActivity } from '../shared/activity';
 import { agentBinding, currentConnection, providerReadiness } from '../shared/readiness';
@@ -193,9 +194,7 @@ export function AgentRoster({
                 <span className="agent-cell">
                   {a.team} · {a.role.replaceAll('_', ' ')}
                 </span>
-                <span className="agent-cell">
-                  {a.provider} · {a.model} · {a.effort ?? 'default'} effort
-                </span>
+                <span className="agent-cell">{modelLabel(a)}</span>
                 <span className="agent-cell">
                   <details>
                     <summary>{a.execution === 'LOCAL' ? 'Local CLI' : 'Hosted setup'}</summary>
