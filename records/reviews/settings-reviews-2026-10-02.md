@@ -5,7 +5,7 @@ Two user requests from the Codex session "Fix agent activity and building view",
 - **A.** Six settings and reviews changes, with a revision log.
 - **B.** "See if you can revise them", about the caveats in the 2026-10-02 office round's report: the first launch after an update could open light for a moment over a dark workspace, the first launch is slower because nothing is cached, there is a `startup …` timing line in `main.log`, and a backup race was fixed.
 
-Codex (GPT-6) implemented A, tested it, and started B. It then hit its usage limit before committing, rebuilding the App or writing this log. Claude (Opus 5.5) reviewed the uncommitted work, fixed what is listed under "Review fixes", finished B, verified both and committed them. Nothing is pushed, and `App\` is not rebuilt; the handoff at the end lists those steps.
+Codex (GPT-6) implemented A, tested it, and started B. It then hit its usage limit before committing, rebuilding the App or writing this log. Claude (Opus 5.5) reviewed the uncommitted work, fixed what is listed under "Review fixes", finished B, verified both and committed them. Both rounds were then pushed to `main` and the release installed by Claude (Sonnet 5.5).
 
 ## A. Requested changes
 
@@ -59,7 +59,7 @@ Not run: `agents.e2e` and `three-agent.live` (live providers), `isolation-acp.de
 - Branch `codex/settings-reviews-20261002`, worktree `Worktrees\settings-reviews-20261002`, on top of `c117b5a` (office behavior), which is on top of `f4af109` (= `origin/main`).
 - Commits: `66d35ff` (A, Codex's work with the review fixes), `99df397` (B), then this log.
 - No dependency, store schema, shared type, IPC bridge or CI change. The session-history sort is in a read query, not the schema.
-- `App\` still holds the office-behavior release (`c117b5a`, asar `6618F0CC…C500`); it does not have A or B yet.
+- Installed: App\ holds the release build of `99df397` (asar `5F011906E12A5E25F92D594731B63E6E787617A2366230C512B8A788D447128B`, 95 files; RunAsNode, NodeOptions and NodeCliInspect fuses disabled), smoke-tested with `tests/installed-smoke.desktop.ts`. Rollback: `Archive\App-before-settings-reviews-20261002` (the `c117b5a` release, `6618F0CC…C500`).
 
 ## Proposed roadmap entry
 

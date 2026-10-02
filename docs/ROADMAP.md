@@ -863,7 +863,7 @@ Rules that apply to every C12 packet:
 | UI revision, plan rounds A–C | `feat/ui-revision-20260929` · `5302ae3`, review fixes `9b25d1a` | MERGED #51 `133e751`; packaged desktop suites pass | Office presence (monitors lit only while the office watches the agent's process), scene-relative walking, theme-aware office, request queue grouped by what needs the user with a request drawer, step map and timeline, Needs-you bell, agent strip, toasts, taskbar badge, Memory graph (in-house layout, local graph, search, backlinks), Artifacts explorer with inline preview, History activity view, Reviews cards, Chat filters, Projects overview, Settings sections, usage bars, first-run checklist. Review fixes 2026-09-30: a local hop is recorded UNKNOWN for its whole run, so the queue no longer calls a running local step "failed", and it asks the user only when no process and no receipt account for it; Retry is hidden while the step's process is alive (it would start a second agent). Decisions taken: flat SVG office, presence only (no stream-json or Devin ACP), no new dependencies, global navigation with drawers, badge and flash on by default and switchable, uniform memory nodes, project health not rated. |
 | UI revision integration with PR #47 | `feat/ui-revision-20260929` · `023e6a0` | MERGED #51 `133e751` | PR #47's head merged in and its conflicts (named `LocalCliExecAdapter` options, imports, removed unused locals) resolved, so the UI PR is ready for the merge wave. |
 | UI Round D depth backlog | PRs #55–#57; local `af1127b` | PARTIALLY_VERIFIED_LOCAL | Waves 1–3 merged on 2026-09-30 local time. Local Codex structured command/MCP/web events now reach TOOL events during runs. OF-3 remains open for Claude/Devin stream normalization and a complete Devin ACP session lifecycle; initialize-only evidence does not establish submit/retrieve/cancel. [Routes and ACP record](../records/reviews/hosted-routes-2026-10-01.md). |
-| 3D office (UI redesign → campus office) | `feat/ui-3d-office-20261001` · `c25f1ab`, `988378d`, `f5f953f`, `7192eb2`, `084a823` | VERIFIED_LOCAL; through `7192eb2` on `main` by direct push; `084a823` on the branch only (not pushed), installed in `App\` | WebGL office with honest presence (monitors, typing, walking and resting only from derived activity), Obsidian-style memory brain, status-first Settings. Latest: a single-storey glass pavilion in a planted campus courtyard after 64 Degrees at UC San Diego's Revelle College, about twice the floor of the glass building (697 m² for the default team), natural materials and biophilic planting, and a tool rail that names every tool on hover. 2026-10-02: the status board behind and left of the director (screen-space tested), text that repaints at the zoom's resolution, the full building name, a faster open (store replay in place, cached shape templates, shaders compiled before the first frame, the page painted before the 3D) and a theme-coloured "Loading…" panel; a backup race fixed on the way. Packaged test build passes `office3d`, `desktop.e2e`, `ui-revision` and `revision`; release build installed. The `three` dependency reached `main` on the user's push instruction; the organizer sign-off AGENTS.md asks for was not separately obtained. [Log](../records/reviews/ui-3d-redesign-2026-10-01.md) |
+| 3D office (UI redesign → campus office) | `feat/ui-3d-office-20261001` · `c25f1ab`, `988378d`, `f5f953f`, `7192eb2`, `084a823`, `c117b5a`, `66d35ff`, `99df397` | VERIFIED_LOCAL; on `main` by direct push through `99df397` and its records; installed in `App\` | WebGL office with honest presence (monitors, typing, walking and resting only from derived activity), Obsidian-style memory brain, status-first Settings. Latest: a single-storey glass pavilion in a planted campus courtyard after 64 Degrees at UC San Diego's Revelle College, about twice the floor of the glass building (697 m² for the default team), natural materials and biophilic planting, and a tool rail that names every tool on hover. 2026-10-02: the status board behind and left of the director (screen-space tested), text that repaints at the zoom's resolution, the full building name, a faster open (store replay in place, cached shape templates, shaders compiled before the first frame, the page painted before the 3D) and a theme-coloured "Loading…" panel; a backup race fixed on the way. Later on 2026-10-02: agents rest by default and attend their desks while a related project runs (5% or less allowance always rests), white roofs, left-drag moves the view; then configurable view controls, one-click account check, the isolation table, nested in-order reviews, cross-provider session history, Devin effort labels and a first launch that opens in the workspace's theme. Packaged test build passes `office3d`, `desktop.e2e`, `ui-revision` and `revision`; release build installed. The `three` dependency reached `main` on the user's push instruction; the organizer sign-off AGENTS.md asks for was not separately obtained. [Log](../records/reviews/ui-3d-redesign-2026-10-01.md) · [Office behavior](../records/reviews/office-behavior-2026-10-02.md) · [Settings and reviews](../records/reviews/settings-reviews-2026-10-02.md) |
 | Merge wave | PRs #45–#57 | VERIFIED_LOCAL | Original C12 wave and UI waves merged through `beab1ce`; exact merge/head/check metadata is in section 17. The installed `App\` state is recorded in the newest section 17 entry (it no longer mirrors `81714c7`). The 2026-10-01 revision, UI redesign, LR-16b, glass building, stage controls and campus office reached `main` by direct pushes, with no PR or CI run (section 17). |
 | S2 LR-16b: isolated agents on the user's subscription | implemented locally (`e4494fe`) | IN_PROGRESS — acceptance open | Host-derived QRO-Agent profile, official sign-in in a QRO-Agent console (Codex device code, Devin manual token, Claude code relay), isolated status checks under `<cli>@qro-agent`, fresh-identity dispatch gate, office data-root ACL tightening; in-app isolation check 5/5 on a scratch profile. No provider sign-in or isolated subscription dispatch accepted yet; L1 question (c) unanswered, so isolation stays off in the real workspace under D-6. [Design](../records/reviews/lr16b-design-2026-10-01.md). |
 | S3 cloud routes with their billing basis (refresh of R5) | dated routes record | VERIFIED_LOCAL documentation | Submit/observe/retrieve/follow-up/cancel/model/effort/billing table completed against installed help and official sources. No provider has a complete eligible route; automated hosted dispatch and R5 remain BLOCKED_EXTERNAL. No new cloud session or paid fallback used. [Record](../records/reviews/hosted-routes-2026-10-01.md). |
@@ -1489,3 +1489,75 @@ user-owned. `App\` currently mirrors `abbe9a1` (asar `A498E677…`).
 - **Installed App:** release build of `084a823` (same asar `31695F62…7DEA`, 95 files; the RunAsNode, NodeOptions and NodeCliInspect fuses disabled). The App was not running. The previous App (release of `7192eb2`, `BC1C8338…8B41`) was copied to `Quant Office/Archive/App-before-office-speed-20261002` (95 of 95 files hash-identical). The release was mirrored with `robocopy /MIR` (95 of 95 identical) and started cleanly on an empty scratch data folder (`startup window=211ms store=227ms services=234ms reconcile=235ms page=377ms`). No schema change, so the live workspace needs no migration.
 - **Git:** committed on the branch only. Not pushed; `main` and `origin` are unchanged until the user says so.
 - **Open:** the remaining ~1 s between page and office is GPU-bound on the integrated GPU (log 12.1); the unchanged external gates (LR-16b acceptance, L1 (c), D-3 under U8, OF-3 streaming, Devin ACP).
+
+### 2026-10-02 — Office: agents rest by default, white roofs, left-drag moves the view
+
+- **Scope and source:** user request in the Codex session "Fix agent activity and building view":
+  - agents stay in the rest area by default and go to their desks while a related project runs, whether or not it is their own job;
+  - an agent with 5% or less allowance left stays in the rest area regardless;
+  - the building tops flickered blue and white, and every roof should be white;
+  - left-drag should move the view and right-drag rotate it.
+
+  Commit `c117b5a` (Codex). Log: [office-behavior-2026-10-02.md](../records/reviews/office-behavior-2026-10-02.md).
+- **Delivered:**
+  - **Rest by default:** agents start in the rest area.
+  - **Project attendance:** while a related project has observed WORKING or MEETING activity, its request participants, leads, assigned agents and current project and team members attend their desks. Each agent's own status and typing still follow its own recorded activity, and meetings still use the meeting room.
+  - **Low allowance:** a fresh allowance window at 5% or less overrides attendance and meetings. Unknown allowance is not shown as 0%.
+  - **Project finished:** the related agents return to rest.
+  - **Roofs:** roof slabs, parapets and roof edges are white. The glazing now stops below the slab, so there are no overlapping blue and white top faces.
+  - **Mouse:** left-drag moves the view and right-drag rotates it. Right-click no longer selects an agent.
+- **Fixed on the way:**
+  - The lounge had 17 fixed spots; it now grows with the roster.
+  - A queued walk could follow an old destination; it now follows the latest.
+  - Lounge name tags could cover a neighbour's clickable dot; they no longer do.
+- **Verification:**
+  - Unit suite 1,076 tests: 1,075 pass, 1 existing skip.
+  - `office3d-revision.desktop` (synthetic records) passes.
+  - 192 downward ray samples hit white roof geometry in both themes.
+  - The packaged `office3d.desktop` passes (webgl=true).
+- **Installed App:** the release of `c117b5a` (asar `6618F0CC…C500`) was installed by Codex and is superseded by the entry below. Rollback: `Archive\App-before-office-behavior-20261002`.
+
+### 2026-10-02 — Settings controls, one-click account check, isolation table, nested reviews; a first launch in the workspace's theme
+
+- **Scope and source:** two user requests in the same Codex session:
+  - **Settings and reviews:**
+    - configurable view keys and mouse buttons;
+    - one Check account under Connections' lead;
+    - in Agent isolation: Check isolation first, then the sign-ins, then a Provider/Status table;
+    - a Reviews page organised like the Agents tab, with tasks expanding to their numbered reviews and each review expanding to its content, with Recorded details at the bottom;
+    - session history showing every provider;
+    - the Devin "swe-2-max · default effort" label fixed.
+  - **Startup follow-up:** "See if you can revise them", about the previous entry's first-launch caveats.
+
+  Codex implemented the first part and started the second, then hit its usage limit. Claude reviewed both, fixed them, finished and verified them. Commits `66d35ff`, `99df397`, records `58ad129`. Log: [settings-reviews-2026-10-02.md](../records/reviews/settings-reviews-2026-10-02.md).
+- **Delivered:**
+  - **Settings → Controls:**
+    - pick an action for each mouse drag and a key for each view command;
+    - a key or drag action already in use swaps with the old one;
+    - Reset restores the defaults: left moves, middle zooms, right rotates, W A S D move, the arrow keys rotate, `=` and `-` zoom, Home resets.
+    - The bindings are a window preference, not a workspace record.
+  - **Check account:** one button checks all three providers, each through its official CLI.
+  - **Agent isolation:** Check isolation with its status line beside it, then the sign-in buttons, then the Provider/Status table.
+  - **Pipeline reviews:**
+    - one row per task, expanding in place to its steps in dependency order (worker → reviewers → director; a repeated reviewer is listed again);
+    - each step expands to its stored report, with Recorded details at the bottom.
+  - **Session history:** sorted across providers before it pages (the first page used to be the 25 oldest sessions, all Claude), with a refresh.
+  - **Devin label:** `swe-2-max` reads "devin · swe-2 · max effort"; stored ids are unchanged.
+  - **First launch:**
+    - With no remembered theme, the window waits for the workspace and appears at the loading page in its colours. Later launches show at once, as before.
+    - The page is built as `index.html` and `index-dark.html`, and the main process loads the one that matches the workspace.
+    - `window-theme` is written for light workspaces too.
+  - **Startup log:** `main.log`'s `startup` line gives each step's own time plus `total`, `process`, `theme` and `shown`.
+  - **Unchanged:** no dependency, schema, shared-type, IPC-bridge or CI change.
+- **Verification:**
+  - Format, typecheck and `git diff --check` clean.
+  - Unit suite 1,082 tests: 1,081 pass, 0 fail, 1 existing skip.
+  - `settings-reviews.browser` passes.
+  - Dev-build desktop suites pass: `office3d-revision`, `desktop.e2e`, `office3d`, `ui-revision`, `revision`, `office-chat`, `pipeline-request`, `pipeline` and `startup-theme`.
+  - Packaged test build passes: `settings-reviews.desktop`, `office3d`, `desktop.e2e`, `ui-revision`, `revision` and `startup-theme`.
+  - Release build: `installed-smoke.desktop` passes.
+  - All runs used empty scratch data folders and synthetic agents; no provider call.
+  - Not run: `agents.e2e`, `three-agent.live`, `isolation-acp.desktop`, CI, a screen-reader pass, other GPUs.
+- **Installed App:** release build of `99df397` (asar `5F011906E12A5E25F92D594731B63E6E787617A2366230C512B8A788D447128B`, 95 files; the RunAsNode, NodeOptions and NodeCliInspect fuses disabled). Rollback: `Archive\App-before-settings-reviews-20261002` (the `c117b5a` release, `6618F0CC…C500`). Smoke-tested with `tests/installed-smoke.desktop.ts` on an empty scratch folder.
+- **Git:** `c117b5a` through `99df397`, their logs and this records commit pushed to `main` by direct push on the user's instruction (no PR, no CI run).
+- **Open:** the unchanged external gates (LR-16b acceptance, L1 (c), D-3 under U8, OF-3 streaming, Devin ACP).
