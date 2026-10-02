@@ -89,10 +89,10 @@ let agentHost: QroAgentSpawn | undefined;
 let pipeline: PipelineService;
 let custody: HoldoutCustody;
 let dispatchBusy = false;
-const html = path.join(__dirname, '../renderer/index.html');
+let html = path.join(__dirname, '../renderer/index.html');
 const loadingHtml = (theme: Theme) =>
   path.join(__dirname, theme === 'light' ? '../renderer/loading-light.html' : '../renderer/loading.html');
-const expectedURL = pathToFileURL(html).href;
+let expectedURL = pathToFileURL(html).href;
 type Theme = 'dark' | 'light';
 /** The page background of each theme, so the window never shows a colour the page does not use. */
 const WINDOW_BACKGROUND: Record<Theme, string> = { dark: '#171614', light: '#f1f0e9' };
@@ -102,17 +102,23 @@ const WINDOW_BACKGROUND: Record<Theme, string> = { dark: '#171614', light: '#f1f
  */
 const themeFile = () => path.join(app.getPath('userData'), 'window-theme');
 let windowTheme: Theme = 'light';
-function readWindowTheme(): Theme {
+/** What the theme file holds, or null when it has none yet (the first launch of this build). */
+let storedTheme: Theme | null = null;
+function readWindowTheme(): Theme | null {
   try {
-    return readFileSync(themeFile(), 'utf8').trim() === 'dark' ? 'dark' : 'light';
+    const value = readFileSync(themeFile(), 'utf8').trim();
+    return value === 'dark' || value === 'light' ? value : null;
   } catch {
-    return 'light';
+    return null;
   }
 }
 function rememberTheme(theme: Theme) {
-  if (theme === windowTheme) return;
-  windowTheme = theme;
-  win?.setBackgroundColor(WINDOW_BACKGROUND[theme]);
+  if (theme !== windowTheme) {
+    windowTheme = theme;
+    win?.setBackgroundColor(WINDOW_BACKGROUND[theme]);
+  }
+  if (theme === storedTheme) return;
+  storedTheme = theme;
   void writeFile(themeFile(), theme).catch(() => undefined);
 }
 const id = z.string().uuid();
@@ -183,12 +189,19 @@ async function start() {
   writeLog(logDir(), 'INFO', `start version=${app.getVersion()} packaged=${app.isPackaged}`);
   // Startup timings land in the log, so a slow open can be traced to the step that took the time.
   const began = performance.now();
+  let previous = began;
   const marks: string[] = [];
-  const mark = (step: string) => marks.push(`${step}=${Math.round(performance.now() - began)}ms`);
+  const mark = (step: string) => {
+    const now = performance.now();
+    marks.push(`${step}=${Math.round(now - previous)}ms`);
+    previous = now;
+  };
   // The .ico keeps window and taskbar pinned to the same artwork the packager embeds in the exe;
   // the .png remains for platforms without multi-size ico support.
   const appIcon = path.join(__dirname, process.platform === 'win32' ? '../assets/icon.ico' : '../assets/icon.png');
-  windowTheme = readWindowTheme();
+  storedTheme = readWindowTheme();
+  const guess = storedTheme;
+  windowTheme = guess ?? 'light';
   win = new BrowserWindow({
     width: 1440,
     height: 1000,
@@ -196,7 +209,9 @@ async function start() {
     minHeight: 720,
     title: 'Quant Research Office',
     backgroundColor: WINDOW_BACKGROUND[windowTheme],
-    show: true,
+    // With a remembered theme the window shows at once. Without one it waits for the workspace's,
+    // so it never opens in the wrong colours.
+    show: guess !== null,
     autoHideMenuBar: true,
     icon: appIcon,
     webPreferences: {
@@ -209,13 +224,16 @@ async function start() {
       devTools: !app.isPackaged,
     },
   });
-  await win.loadFile(loadingHtml(windowTheme)).catch(() => undefined);
+  // The themed loading page loads while the workspace opens.
+  let loading = guess ? win.loadFile(loadingHtml(windowTheme)).catch(() => undefined) : undefined;
+  let shown = guess ? 0 : -1;
+  mark('window');
   const root = app.getPath('userData');
   await mkdir(root, { recursive: true });
   await recoverInterruptedRestore(root);
   const workspace = workspaceDirectory(root);
   await mkdir(workspace, { recursive: true });
-  mark('window');
+  mark('recovery');
   store = new OfficeStore(path.join(workspace, 'workspace.sqlite'), {
     includeHistoryInResults: false,
     // The full-history check runs once the window is up; the open itself replays only the tail.
@@ -230,6 +248,20 @@ async function start() {
   });
   mark('store');
   rememberTheme(store.snapshot({ history: false }).settings.theme);
+  // The page is built in the workspace's theme, so its first paint matches before the page has a
+  // theme of its own stored.
+  html = path.join(__dirname, windowTheme === 'dark' ? '../renderer/index-dark.html' : '../renderer/index.html');
+  expectedURL = pathToFileURL(html).href;
+  // No remembered theme, or a wrong one: the loading page follows the workspace. Services and
+  // reconciliation run while it loads.
+  if (windowTheme !== guess) loading = win.loadFile(loadingHtml(windowTheme)).catch(() => undefined);
+  // The first launch shows the window once that page has loaded. ('ready-to-show' is no use here:
+  // it fires for the window's blank first document, before the workspace's theme is known.)
+  if (!guess)
+    loading = loading?.then(() => {
+      shown = Math.round(performance.now() - began);
+      win?.show();
+    });
   artifacts = new ArtifactService(store, workspace);
   evidence = new EvidenceService(store, workspace);
   // secrets.dat lives at the userData root — a sibling of workspace/, never inside it.
@@ -343,9 +375,16 @@ async function start() {
   }
   mark('reconcile');
   register();
+  await loading;
   await loadWindowWithRetry(win, html);
   mark('page');
-  writeLog(logDir(), 'INFO', `startup ${marks.join(' ')}`);
+  if (!win.isVisible()) win.show();
+  // Each step's own time, then the total since start() and since the process began.
+  writeLog(
+    logDir(),
+    'INFO',
+    `startup ${marks.join(' ')} total=${Math.round(performance.now() - began)}ms process=${Math.round(process.uptime() * 1000)}ms theme=${windowTheme} shown=${shown < 0 ? 'page' : `${shown}ms`}`,
+  );
   // The office opens on re-observed accounts, not on however stale the recorded check is.
   // Each provider is re-observed once, off the load path; a failed observation leaves the
   // last recorded state standing with its real timestamp — never a refreshed-looking lie.

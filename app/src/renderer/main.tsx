@@ -1440,6 +1440,7 @@ function Dialog({
 // The bootstrap is DOM-only — tests import this module for requestCreatePayload without a document.
 if (typeof document !== 'undefined') {
   const last = savedId(THEME_KEY);
+  // The page's own last theme wins; the theme the HTML was built with covers a window that has none yet.
   if (last === 'dark' || last === 'light') document.documentElement.dataset.theme = last;
   createRoot(document.getElementById('root')!).render(
     <React.StrictMode>
