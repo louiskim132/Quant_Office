@@ -176,7 +176,7 @@ export class Secrets {
   }
   // Returns plaintext — callers may hand it to process env only; never log, persist, serialize or send it.
   providerKey(provider: Provider): string | null {
-    return this.read().providers[provider]?.key ?? null;
+    return this.read(true).providers[provider]?.key ?? null;
   }
   saveProviderKey(provider: Provider, key: string): void {
     if (!key) throw new Error('An empty key was not saved.');
@@ -191,7 +191,8 @@ export class Secrets {
     this.write({ ...current, providers });
   }
   providerKeyState(provider: Provider): { saved: boolean; savedAt?: string } {
-    const entry = this.read().providers[provider];
+    // This also chooses the subscription observation mode; unreadability must never mean absent.
+    const entry = this.read(true).providers[provider];
     return entry ? { saved: true, savedAt: entry.savedAt } : { saved: false };
   }
   /** Credential availability only. Dispatch must consult isolationRequired instead. */

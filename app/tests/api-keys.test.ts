@@ -80,14 +80,47 @@ test('a corrupt secrets.dat is preserved and credential mutations refuse to over
   writeFileSync(file, '%%% not the encrypted payload %%%', 'utf8');
   const lines: string[] = [];
   const secrets = new Secrets(root, stubBox().box, line => lines.push(line));
-  assert.equal(secrets.providerKey('claude'), null);
-  assert.deepEqual(secrets.providerKeyState('claude'), { saved: false });
+  assert.throws(() => secrets.providerKey('claude'), /could not be read/);
+  assert.throws(() => secrets.providerKeyState('claude'), /could not be read/);
   assert.equal(readFileSync(file, 'utf8'), '%%% not the encrypted payload %%%');
   assert.throws(() => secrets.saveProviderKey('claude', KEY), /could not be read/);
   assert.throws(() => secrets.removeProviderKey('claude'), /could not be read/);
   const broken = readdirSync(root).filter(name => /^secrets\.broken-.+\.dat$/.test(name));
   assert.equal(broken.length, 0, 'credentials remain at their original recovery path');
   assert.equal(lines.length, 1, 'the caller logged exactly one line');
+});
+
+test('unreadable saved API keys refuse execution and observation without subscription fallback', async () => {
+  for (const failure of ['unavailable', 'decrypt'] as const) {
+    const root = dir();
+    const primitive = stubBox();
+    new Secrets(root, primitive.box).saveProviderKey('claude', KEY);
+    const bytes = readFileSync(path.join(root, 'secrets.dat'));
+    if (failure === 'unavailable') primitive.setAvailable(false);
+    else
+      primitive.box.decrypt = () => {
+        throw new Error('synthetic decrypt failure');
+      };
+    const secrets = new Secrets(root, primitive.box);
+    const service = new Subscriptions(root, async () => {}, undefined, secrets);
+    let contacted = 0;
+    service.status = async () => {
+      contacted++;
+      throw new Error('subscription status must not run');
+    };
+    service.version = async () => {
+      contacted++;
+      throw new Error('subscription version must not run');
+    };
+    try {
+      assert.throws(() => agentEnvironment('claude', secrets), /unavailable|could not be read/);
+      await assert.rejects(service.observe('claude'), /unavailable|could not be read/);
+      assert.equal(contacted, 0);
+      assert.deepEqual(readFileSync(path.join(root, 'secrets.dat')), bytes);
+    } finally {
+      service.close();
+    }
+  }
 });
 
 test('agentEnvironment injects exactly the provider key var over the subscription scrub', () => {
