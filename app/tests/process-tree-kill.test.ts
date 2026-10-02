@@ -44,8 +44,10 @@ test(
     });
     assert.ok(alive(grandchildPid), 'the tool process runs before the kill');
     const exited = new Promise(resolve => child.on('exit', resolve));
+    const closed = new Promise(resolve => child.on('close', resolve));
     assert.equal(child.kill(), true);
     await exited;
+    await closed;
     const deadline = Date.now() + 5000;
     while (alive(grandchildPid) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 100));
     assert.equal(alive(grandchildPid), false, 'the tool process does not outlive the CLI kill');
