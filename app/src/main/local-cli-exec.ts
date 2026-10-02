@@ -1,4 +1,4 @@
-import { execFile, spawn } from 'node:child_process';
+import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, realpathSync, watch, type FSWatcher } from 'node:fs';
 import path from 'node:path';
@@ -172,7 +172,7 @@ const TASKKILL = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 
  * the run limit, because TerminateProcess stops only the direct child. The isolated host
  * (agent-host.cjs) kills trees the same way. Elsewhere kill() is the plain signal.
  */
-export function spawnTreeKillable(command: string, args: string[], options: CliSpawnOptions): CliChild {
+export function spawnTreeKillable(command: string, args: string[], options: CliSpawnOptions): ChildProcess {
   const child = spawn(command, args, {
     cwd: options.cwd,
     env: options.env,
