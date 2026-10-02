@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import * as THREE from 'three';
 import {
   buildLayout,
   clampTableSeats,
@@ -115,19 +116,78 @@ test('the default team gets about twice the floor of the 2026-10-01 plan (26 x 1
   assert.ok(layout.corridorWidth >= 3, 'the street is at least 3 m wide');
 });
 
-test('the status board stands beside the director, faces the default camera and blocks no aisle', () => {
-  for (const director of [1, 3, 5]) {
+test('the status board stands behind and left of the director, faces the default camera and blocks no aisle', () => {
+  for (const director of [1, 3, 4, 5]) {
     const layout = layoutOf(director, 4, 2);
     const dirs = layout.desks.filter(d => d.zone === 'director');
-    const firstRow = dirs.filter(d => d.z === dirs[0].z);
-    const last = firstRow.at(-1)!;
+    const first = dirs[0];
     const { board } = layout;
-    assert.ok(Math.abs(board.z - last.z) < 0.5, 'in the director row');
-    assert.ok(board.x > last.x + 1.6 && board.x - last.x < 3.6, 'right beside the last director desk');
+    assert.ok(board.z < first.z - 1.2, 'behind the director row, toward the planted wall');
+    assert.ok(board.x < first.x - 2.4, 'to the left of the first director desk');
     assert.ok(Math.abs(board.yaw - Math.PI / 4) < 1e-9, 'turned toward the default camera');
-    assert.ok(board.x + 1.4 < layout.workX1, 'inside the work area');
-    for (const d of layout.desks) assert.ok(Math.hypot(d.x - board.x, d.z - board.z) > 1.6, 'clear of every desk');
-    assert.ok(board.z + 1.2 < last.aisleZ, 'clear of the row aisle');
+    // Its ends swing ±1.17 m in x and z at 45°: keep them off the wall's planter trough (to z 0.62).
+    assert.ok(board.z - 1.17 > 0.7, 'clear of the planted wall');
+    assert.ok(board.x - 1.3 > 0.9, 'clear of the west bookshelves');
+    for (const d of layout.desks) assert.ok(Math.hypot(d.x - board.x, d.z - board.z) > 2.4, 'clear of every desk');
+    assert.ok(board.z + 1.3 < first.aisleZ, 'clear of the row aisle');
+  }
+});
+
+/** Bounds on screen (view-space metres) of world points, seen from the default camera. */
+function screenBox(points: [number, number, number][]) {
+  const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, -400, 600);
+  camera.position.setFromSpherical(new THREE.Spherical(120, THREE.MathUtils.degToRad(56), Math.PI / 4));
+  camera.lookAt(0, 0, 0);
+  camera.updateMatrixWorld();
+  const v = new THREE.Vector3();
+  let x0 = Infinity,
+    x1 = -Infinity,
+    y0 = Infinity,
+    y1 = -Infinity;
+  for (const [x, y, z] of points) {
+    v.set(x, y, z).applyMatrix4(camera.matrixWorldInverse);
+    x0 = Math.min(x0, v.x);
+    x1 = Math.max(x1, v.x);
+    y0 = Math.min(y0, v.y);
+    y1 = Math.max(y1, v.y);
+  }
+  return { x0, x1, y0, y1 };
+}
+const corners = (x: number, z: number, w: number, d: number, y0: number, y1: number, yaw = 0) => {
+  const out: [number, number, number][] = [];
+  for (const sx of [-1, 1])
+    for (const sz of [-1, 1])
+      for (const y of [y0, y1]) {
+        const lx = (sx * w) / 2,
+          lz = (sz * d) / 2;
+        out.push([x + lx * Math.cos(yaw) + lz * Math.sin(yaw), y, z - lx * Math.sin(yaw) + lz * Math.cos(yaw)]);
+      }
+  return out;
+};
+const apart = (a: ReturnType<typeof screenBox>, b: ReturnType<typeof screenBox>) =>
+  a.x1 <= b.x0 || b.x1 <= a.x0 || a.y1 <= b.y0 || b.y1 <= a.y0;
+
+test('from the default camera the board overlaps neither the director, their name tag nor the zone sign', () => {
+  // A name tag is about 28 x 100 CSS px; at the default fit (about 20 px per metre) that is 1.4 x 5 m.
+  const tag = { h: 1.4, halfW: 2.5 };
+  for (const director of [1, 3, 4, 5]) {
+    const layout = layoutOf(director, 4, 2);
+    const { board } = layout;
+    const panel = screenBox(corners(board.x, board.z, 3.3, 0.08, 1.2, 2.85, board.yaw));
+    for (const d of layout.desks.filter(x => x.zone === 'director')) {
+      const desk = screenBox([
+        ...corners(d.x, d.z, 1.8, 0.8, 0, 1.32),
+        ...corners(d.x, d.z - 1.45, 1.8, 0.45, 0, 0.9),
+        ...corners(d.seat.x, d.seat.z, 0.7, 0.7, 0, 1.45),
+      ]);
+      assert.ok(apart(panel, desk), `${director} director(s): the board clears desk ${d.index}`);
+      const anchor = screenBox([[d.seat.x, 1.78, d.seat.z]]);
+      const label = { x0: anchor.x0 - tag.halfW, x1: anchor.x1 + tag.halfW, y0: anchor.y0, y1: anchor.y1 + tag.h };
+      assert.ok(apart(panel, label), `${director} director(s): the board clears the name tag of desk ${d.index}`);
+    }
+    const sign = layout.signs.find(s => s.key === 'director')!;
+    const plaque = screenBox(corners(sign.x, sign.z, 1.96, 0.05, 0.89, 1.41, Math.PI / 4));
+    assert.ok(apart(panel, plaque), 'the board clears the DIRECTOR sign');
   }
 });
 

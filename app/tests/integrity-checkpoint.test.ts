@@ -226,3 +226,36 @@ test('a tampered event on a later page is reported at its own sequence', async t
   holder.store = new OfficeStore(file);
   await assert.rejects(holder.store.verifyInBackground(), /hash chain integrity failure at sequence 40/);
 });
+
+test('an event that lands mid-scan no longer leaves the checkpoint behind: the pass reads it and finishes', async t => {
+  // Opening the office records account checks while the background verification runs. A pass that
+  // gave up on a moved tip left the checkpoint behind on every launch, so each open replayed more.
+  const { file, holder } = fixture(t);
+  holder.store = new OfficeStore(file);
+  for (let i = 0; i < 60; i++) holder.store.recordAccountObservation(observation(i));
+  holder.store.close();
+  holder.store = new OfficeStore(file);
+  // The pass reads its first page synchronously and then yields; the new event lands in that yield.
+  const pass = holder.store.verifyInBackground();
+  holder.store.recordAccountObservation(observation(60));
+  await pass;
+  assert.equal(tip(file)!.sequence, 61);
+  assert.equal(checkpoint(file)!.sequence, 61);
+  // The next open replays nothing past the checkpoint.
+  holder.store.close();
+  holder.store = new OfficeStore(file);
+  assert.equal(checkpoint(file)!.sequence, 61);
+});
+
+test('a delayed background verification starts later and still advances the checkpoint', async t => {
+  const { file, holder } = fixture(t);
+  holder.store = new OfficeStore(file);
+  for (let i = 0; i < 3; i++) holder.store.recordAccountObservation(observation(i));
+  holder.store.close();
+  const before = checkpoint(file)!.sequence;
+  holder.store = new OfficeStore(file, { backgroundVerifyDelayMs: 150 });
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(checkpoint(file)!.sequence, before, 'nothing has run yet');
+  await new Promise(resolve => setTimeout(resolve, 400));
+  assert.equal(checkpoint(file)!.sequence, 3);
+});

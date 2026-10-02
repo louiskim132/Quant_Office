@@ -447,6 +447,26 @@ test('workspace backup verifies every object and reopens the exact recorded stat
   assert.deepEqual(await readdir(path.join(root, 'staging')), []);
 });
 
+test('an event recorded while the backup reads its files does not break the backup', async t => {
+  const { directory, store, service, project } = fixture(t);
+  // Startup account checks and other office writes can land between the database copy and the
+  // manifest. The manifest must name the copy's last event, or the round-trip check refuses it.
+  const copy = store.backup.bind(store);
+  store.backup = async (destination: string) => {
+    const tip = await copy(destination);
+    store.recordTransfer('PROJECT_EXPORTED', project.id, 'Written while the backup was in progress.');
+    return tip;
+  };
+  const destination = path.join(directory, 'backup-during-writes.zip');
+  await service.backup(destination);
+  const files = unzipSync(await readFile(destination));
+  const manifest = JSON.parse(strFromU8(files['backup.json']));
+  const events = store.snapshot().events;
+  assert.equal(events.at(-1)?.kind, 'WORKSPACE_BACKED_UP');
+  assert.equal(events.at(-2)?.kind, 'PROJECT_EXPORTED');
+  assert.equal(manifest.lastEvent, events.at(-3)?.hash);
+});
+
 test('failed export writes no transfer receipt and cleans temporary output', async t => {
   const { directory, store, service, project } = fixture(t);
   const before = store.snapshot();

@@ -92,8 +92,8 @@ export function buildEnvironment(layout: OfficeLayout, kit: Kit, theme: Theme): 
   const door = layout.entrance.x;
   const b = new Batch();
   const glow = new Batch();
-  const shade = new Batch();
-  const pools = new Batch();
+  const shade = new Batch({ uv: true });
+  const pools = new Batch({ uv: true });
   const g0 = -0.3;
 
   // ---- ground and hardscape -------------------------------------------------------------------
@@ -290,6 +290,8 @@ export function buildEnvironment(layout: OfficeLayout, kit: Kit, theme: Theme): 
           transparent: true,
           opacity: dusk ? 0.35 : 0.28,
           depthWrite: false,
+          // Black spots need no tone mapping; sharing the light pools' shader saves a compile.
+          toneMapped: false,
         }),
       ),
       { cast: false, receive: false },

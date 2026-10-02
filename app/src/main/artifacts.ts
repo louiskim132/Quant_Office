@@ -549,7 +549,12 @@ export class ArtifactService {
    * Every entry is hashed as it is written, and the archive is extracted and verified again before the
    * destination is announced, so a backup is never reported without having been read back.
    */
-  private async backupStreamed(destination: string, tempDir: string, db: string): Promise<void> {
+  private async backupStreamed(
+    destination: string,
+    tempDir: string,
+    db: string,
+    lastEvent: string | null,
+  ): Promise<void> {
     const seen = new Set<string>();
     const sources = [
       { path: 'workspace.sqlite', file: db },
@@ -571,7 +576,7 @@ export class ArtifactService {
       kind: 'WORKSPACE_BACKUP',
       format: 'STREAMED',
       createdAt: new Date().toISOString(),
-      lastEvent: this.store.lineageTip().hash,
+      lastEvent,
       files: measured.map(({ path, size, sha256 }) => ({ path, size, sha256 })),
     };
     const staged = path.join(tempDir, 'backup.zip');
@@ -703,7 +708,8 @@ export class ArtifactService {
     await mkdir(tempDir, { recursive: true });
     try {
       const db = path.join(tempDir, 'workspace.sqlite');
-      await this.store.backup(db);
+      // The manifest names the copy's last event: events can land while the files below are read.
+      const lastEvent = await this.store.backup(db);
       // Small workspaces keep the original in-memory format; larger ones use the streamed format.
       let objectBytes = 0;
       const objects = this.backedUpObjects();
@@ -714,7 +720,7 @@ export class ArtifactService {
         databaseBytes + objectBytes > this.format.maxTotalBytes ||
         databaseBytes > this.format.maxFileBytes
       )
-        return await this.backupStreamed(destination, tempDir, db);
+        return await this.backupStreamed(destination, tempDir, db, lastEvent);
       const files: Record<string, Uint8Array> = { 'workspace.sqlite': await readFile(db) };
       for (const hash of objects) {
         const bytes = await readFile(this.objectPath(hash));
@@ -728,7 +734,7 @@ export class ArtifactService {
             schemaVersion: 1,
             kind: 'WORKSPACE_BACKUP',
             createdAt: new Date().toISOString(),
-            lastEvent: this.store.lineageTip().hash,
+            lastEvent,
             files: Object.entries(files).map(([p, b]) => ({
               path: p,
               size: b.length,

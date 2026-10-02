@@ -49,7 +49,7 @@ import { localArchiveResultSchema, type LocalSessionRecord } from '../shared/loc
 import { PtyCloudAdapter, transportModuleStatus } from './pty.js';
 import { probeCloudTransport } from './probe.js';
 import { assertTransportProbeAllowed } from '../shared/transport.js';
-import { realpathSync, existsSync, statSync, mkdirSync, writeFileSync } from 'node:fs';
+import { realpathSync, existsSync, statSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { calibration, compareMethods, lineageAncestry } from '../core/monitoring';
 /** One place decides what a usable project root is, so dialogs and saved allowlists agree. */
 function resolveSelectionRoot(root: string): string {
@@ -90,8 +90,31 @@ let pipeline: PipelineService;
 let custody: HoldoutCustody;
 let dispatchBusy = false;
 const html = path.join(__dirname, '../renderer/index.html');
-const loadingHtml = path.join(__dirname, '../renderer/loading.html');
+const loadingHtml = (theme: Theme) =>
+  path.join(__dirname, theme === 'light' ? '../renderer/loading-light.html' : '../renderer/loading.html');
 const expectedURL = pathToFileURL(html).href;
+type Theme = 'dark' | 'light';
+/** The page background of each theme, so the window never shows a colour the page does not use. */
+const WINDOW_BACKGROUND: Record<Theme, string> = { dark: '#171614', light: '#f1f0e9' };
+/**
+ * The workspace's last theme, remembered outside the workspace so the window and its loading page
+ * open in it before the store is read. A new workspace starts light, as the store does.
+ */
+const themeFile = () => path.join(app.getPath('userData'), 'window-theme');
+let windowTheme: Theme = 'light';
+function readWindowTheme(): Theme {
+  try {
+    return readFileSync(themeFile(), 'utf8').trim() === 'dark' ? 'dark' : 'light';
+  } catch {
+    return 'light';
+  }
+}
+function rememberTheme(theme: Theme) {
+  if (theme === windowTheme) return;
+  windowTheme = theme;
+  win?.setBackgroundColor(WINDOW_BACKGROUND[theme]);
+  void writeFile(themeFile(), theme).catch(() => undefined);
+}
 const id = z.string().uuid();
 const importSchema = z
   .object({ projectId: id, experimentId: id.nullable(), kind: z.enum(['REFERENCE', 'RESULT']) })
@@ -158,16 +181,21 @@ else {
 }
 async function start() {
   writeLog(logDir(), 'INFO', `start version=${app.getVersion()} packaged=${app.isPackaged}`);
+  // Startup timings land in the log, so a slow open can be traced to the step that took the time.
+  const began = performance.now();
+  const marks: string[] = [];
+  const mark = (step: string) => marks.push(`${step}=${Math.round(performance.now() - began)}ms`);
   // The .ico keeps window and taskbar pinned to the same artwork the packager embeds in the exe;
   // the .png remains for platforms without multi-size ico support.
   const appIcon = path.join(__dirname, process.platform === 'win32' ? '../assets/icon.ico' : '../assets/icon.png');
+  windowTheme = readWindowTheme();
   win = new BrowserWindow({
     width: 1440,
     height: 1000,
     minWidth: 1050,
     minHeight: 720,
     title: 'Quant Research Office',
-    backgroundColor: '#101414',
+    backgroundColor: WINDOW_BACKGROUND[windowTheme],
     show: true,
     autoHideMenuBar: true,
     icon: appIcon,
@@ -181,14 +209,17 @@ async function start() {
       devTools: !app.isPackaged,
     },
   });
-  await win.loadFile(loadingHtml).catch(() => undefined);
+  await win.loadFile(loadingHtml(windowTheme)).catch(() => undefined);
   const root = app.getPath('userData');
   await mkdir(root, { recursive: true });
   await recoverInterruptedRestore(root);
   const workspace = workspaceDirectory(root);
   await mkdir(workspace, { recursive: true });
+  mark('window');
   store = new OfficeStore(path.join(workspace, 'workspace.sqlite'), {
     includeHistoryInResults: false,
+    // The full-history check runs once the window is up; the open itself replays only the tail.
+    backgroundVerifyDelayMs: 4000,
     onBackgroundVerifyError: error => {
       writeLog(logDir(), 'ERROR', `integrity ${describeError(error)}`);
       dialog.showErrorBox(
@@ -197,6 +228,8 @@ async function start() {
       );
     },
   });
+  mark('store');
+  rememberTheme(store.snapshot({ history: false }).settings.theme);
   artifacts = new ArtifactService(store, workspace);
   evidence = new EvidenceService(store, workspace);
   // secrets.dat lives at the userData root — a sibling of workspace/, never inside it.
@@ -295,6 +328,7 @@ async function start() {
   // Interrupted work is reconciled while the window is already visible but before the renderer
   // loads; a crash never resubmits or invents an outcome, and no page exists to serve IPC yet.
   // A failed pass never blocks the window; it is logged, and the next trigger retries.
+  mark('services');
   try {
     await controller.reconcile();
   } catch (error) {
@@ -307,8 +341,11 @@ async function start() {
   } catch (error) {
     writeLog(logDir(), 'WARN', `startup chain reconcile failed ${describeError(error)}`);
   }
+  mark('reconcile');
   register();
   await loadWindowWithRetry(win, html);
+  mark('page');
+  writeLog(logDir(), 'INFO', `startup ${marks.join(' ')}`);
   // The office opens on re-observed accounts, not on however stale the recorded check is.
   // Each provider is re-observed once, off the load path; a failed observation leaves the
   // last recorded state standing with its real timestamp — never a refreshed-looking lie.
@@ -342,6 +379,10 @@ function register() {
           admitted = true;
         }
         const result = await fn(value);
+        // A state on its way to the page carries the current theme, and the window follows it.
+        type Themed = { settings?: { theme?: unknown }; state?: { settings?: { theme?: unknown } } } | null;
+        const theme = ((result as Themed)?.settings ?? (result as Themed)?.state?.settings)?.theme;
+        if (theme === 'dark' || theme === 'light') rememberTheme(theme);
         const publicResult =
           result && typeof result === 'object' && 'schemaVersion' in result && 'projects' in result
             ? OfficeStore.publicState(result as import('../shared/types').AppState)

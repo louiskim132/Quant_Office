@@ -29,21 +29,6 @@ const rootReduced = () =>
   window.matchMedia('(prefers-reduced-motion: reduce)').matches ||
   document.documentElement.dataset.motion === 'reduced';
 
-/** WebGL available at all? A blocked GPU falls back to the classic floor instead of a blank box. */
-let webgl: boolean | undefined;
-export function webglAvailable(): boolean {
-  if (webgl === undefined)
-    try {
-      const canvas = document.createElement('canvas');
-      const gl = canvas.getContext('webgl2') ?? canvas.getContext('webgl');
-      webgl = !!gl;
-      (gl?.getExtension('WEBGL_lose_context') as { loseContext(): void } | null)?.loseContext();
-    } catch {
-      webgl = false;
-    }
-  return webgl;
-}
-
 /**
  * The Office page's live area: the 3D stage (or the classic flat floor when the viewer prefers it
  * or WebGL is unavailable), the textual "Now" list and the office chat the stage's CHAT button
@@ -65,7 +50,9 @@ export function OfficeLive({
   const [view] = usePref('office-view', '3d');
   const [broken, setBroken] = useState(false);
   const [chatOpen, setChatOpen] = useBoolPref('office-chat', false);
-  const flat = view === '2d' || broken || !webglAvailable();
+  // A GPU that refuses WebGL makes the engine throw, and onFail hands the page to the classic floor.
+  // (A separate probe context cost a tenth of a second on every open.)
+  const flat = view === '2d' || broken;
   if (flat)
     return (
       <div className="office-live-layout">
@@ -141,6 +128,7 @@ export function Office3D({
   const [names, setNames] = useBoolPref('office-names', true);
   const [menuOpen, setMenuOpen] = useState(false);
   const [query, setQuery] = useState('');
+  const [ready, setReady] = useState(false);
   const menu = useRef<HTMLDivElement | null>(null);
 
   // Stable join order: a person keeps their desk while others come and go.
@@ -239,34 +227,68 @@ export function Office3D({
   ]);
   const roomName = (id: string) => (requests ?? []).find(r => r.id === id)?.name ?? 'Conversation in progress';
 
-  // Create the engine once; a GPU that refuses hands the page back to the flat floor.
+  // What the engine is handed when it starts, which can be after the first render.
+  const latest = useRef({ layout, visualsKey, summaryKey, busyTables, selectedId, names, theme, reducedMotion });
+  latest.current = { layout, visualsKey, summaryKey, busyTables, selectedId, names, theme, reducedMotion };
+
+  // Create the engine once, after the page has painted: building the floor takes a few hundred
+  // milliseconds, and the rest of the page should not wait for it. Starting the GPU and laying out
+  // the floor run as two tasks, so the page stays responsive in between. A GPU that refuses hands the
+  // page back to the flat floor.
   useEffect(() => {
     const el = host.current;
     if (!el) return;
-    let created: OfficeEngine;
-    try {
-      created = new OfficeEngine({
-        host: el,
-        labels: labels.current,
-        tags: tags.current,
-        theme,
-        reducedMotion: reducedMotion || rootReduced(),
-        onPick: id => pickRef.current(id),
-        onHover: () => {},
+    let created: OfficeEngine | null = null;
+    let observer: MutationObserver | null = null;
+    let started = false;
+    let task = 0;
+    const start = () => {
+      if (started) return;
+      started = true;
+      const now = latest.current;
+      try {
+        created = new OfficeEngine({
+          host: el,
+          labels: labels.current,
+          tags: tags.current,
+          theme: now.theme,
+          reducedMotion: now.reducedMotion || rootReduced(),
+          onPick: id => pickRef.current(id),
+          onHover: () => {},
+          onReady: () => setReady(true),
+        });
+      } catch {
+        onFail();
+        return;
+      }
+      task = window.setTimeout(() => furnish(created!), 0);
+    };
+    const furnish = (engineNow: OfficeEngine) => {
+      const now = latest.current;
+      engineNow.setLayout(now.layout);
+      engineNow.setAgents(JSON.parse(now.visualsKey));
+      engineNow.setBoard(JSON.parse(now.summaryKey));
+      engineNow.setBusyRooms(now.busyTables);
+      engineNow.setSelected(now.selectedId);
+      engineNow.setNames(now.names);
+      engine.current = engineNow;
+      observer = new MutationObserver(() => {
+        engineNow.setTheme(rootTheme());
+        engineNow.setReducedMotion(rootReduced());
       });
-    } catch {
-      onFail();
-      return;
-    }
-    engine.current = created;
-    const observer = new MutationObserver(() => {
-      created.setTheme(rootTheme());
-      created.setReducedMotion(rootReduced());
+      observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'data-motion'] });
+    };
+    // After the next frame is painted; the fallback covers a window that paints no frames (hidden).
+    const frame = requestAnimationFrame(() => {
+      task = window.setTimeout(start, 0);
     });
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'data-motion'] });
+    const fallback = window.setTimeout(start, 250);
     return () => {
-      observer.disconnect();
-      created.dispose();
+      cancelAnimationFrame(frame);
+      clearTimeout(fallback);
+      clearTimeout(task);
+      observer?.disconnect();
+      (created as OfficeEngine | null)?.dispose();
       engine.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -335,7 +357,9 @@ export function Office3D({
       className="office3d"
       data-names={names ? 'on' : 'off'}
       data-chat={chatOpen ? 'open' : 'closed'}
+      data-ready={ready ? 'true' : 'false'}
       aria-label="Office floor"
+      aria-busy={!ready}
     >
       <div
         ref={host}
@@ -557,6 +581,10 @@ export function Office3D({
         <span>CHAT</span>
       </button>
       {!team.length && <p className="stage-empty">The floor is ready. Add an agent to seat the first person.</p>}
+      {/* Until the first frame: a plain panel in the page's colours, instead of an empty sky. */}
+      <p className="office3d-loading" aria-hidden={ready}>
+        Loading…
+      </p>
     </section>
   );
 }

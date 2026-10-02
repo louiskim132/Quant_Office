@@ -154,6 +154,9 @@ interface HistoryScan {
 const BACKGROUND_VERIFY_PAGE = 25;
 /** Longest stretch, in ms, the paged verification replays events before it yields inside a page. */
 const BACKGROUND_VERIFY_SLICE_MS = 40;
+/** A pass that ends on a moved tip reads the new events and checks again, this often and this far apart. */
+const BACKGROUND_VERIFY_RETRIES = 40;
+const BACKGROUND_VERIFY_RETRY_MS = 1500;
 const cents = z.number().int().min(0).max(MAX_BUDGET_CENTS);
 const id = z.string().uuid();
 const timestamp = z.string().datetime();
@@ -1420,9 +1423,18 @@ function emptyContract(): ResearchContract {
     limitations: '',
   };
 }
-function applyChanges(current: Projection, changes: Change[], options: { compactCatalogs?: boolean } = {}): Projection {
+/**
+ * The projection after `changes`. A commit gets a fresh copy, so a failed write leaves the live state
+ * untouched. A replay owns the projection it is rebuilding and passes `inPlace`: copying a 2.5 MB
+ * projection once per event made a 60-event tail take over a second to open.
+ */
+function applyChanges(
+  current: Projection,
+  changes: Change[],
+  options: { compactCatalogs?: boolean; inPlace?: boolean } = {},
+): Projection {
   const compactCatalogs = options.compactCatalogs ?? true;
-  const next = structuredClone(current);
+  const next = options.inPlace ? current : structuredClone(current);
   const indexes = new Map<string, Map<string, number>>();
   for (const change of changes) {
     if (change.collection === 'settings') next.settings = { ...change.value };
@@ -1563,29 +1575,30 @@ function applyChanges(current: Projection, changes: Change[], options: { compact
       }
     }
   }
-  for (const item of [
-    ...next.experiments,
-    ...next.tasks,
-    ...next.artifacts,
-    ...(next.requests ?? []),
-    ...(next.locations ?? []),
-    ...(next.snapshots ?? []),
-    ...(next.assignments ?? []),
-    ...(next.jobs ?? []),
-    ...(next.findings ?? []),
-    ...(next.relationships ?? []),
-  ]) {
-    if (!next.projects.some(project => project.id === item.projectId))
-      throw new Error('Broken project ownership in projection');
-    if (
-      'experimentId' in item &&
-      item.experimentId !== null &&
-      !next.experiments.some(
-        experiment => experiment.id === item.experimentId && experiment.projectId === item.projectId,
+  // Ownership checks, in the same order as before, against lookup sets rather than a scan per record.
+  const projectIds = new Set(next.projects.map(project => project.id));
+  const experimentKeys = new Set(next.experiments.map(experiment => `${experiment.id}|${experiment.projectId}`));
+  for (const list of [
+    next.experiments,
+    next.tasks,
+    next.artifacts,
+    next.requests ?? [],
+    next.locations ?? [],
+    next.snapshots ?? [],
+    next.assignments ?? [],
+    next.jobs ?? [],
+    next.findings ?? [],
+    next.relationships ?? [],
+  ])
+    for (const item of list) {
+      if (!projectIds.has(item.projectId)) throw new Error('Broken project ownership in projection');
+      if (
+        'experimentId' in item &&
+        item.experimentId !== null &&
+        !experimentKeys.has(`${item.experimentId}|${item.projectId}`)
       )
-    )
-      throw new Error('Broken experiment ownership in projection');
-  }
+        throw new Error('Broken experiment ownership in projection');
+    }
   const participants = new Set(['USER', 'TOOL', 'SYSTEM', ...(next.agents ?? []).map(a => a.id)]);
   for (const entry of next.workLogs ?? [])
     for (const participant of [entry.from, entry.to])
@@ -1704,6 +1717,11 @@ export class OfficeStore {
       researchTrust?: readonly ResearchTrustPin[];
       includeHistoryInResults?: boolean;
       onBackgroundVerifyError?: (error: unknown) => void;
+      /**
+       * Start the background verification this long after opening rather than on the next turn of
+       * the event loop, so it does not compete with the work of bringing the window up.
+       */
+      backgroundVerifyDelayMs?: number;
     } = {},
   ) {
     this.includeHistoryInResults = options.includeHistoryInResults ?? true;
@@ -1842,9 +1860,15 @@ export class OfficeStore {
         this.verifyIntegrity();
       }
       if (this.needsBackgroundVerify)
-        setImmediate(() => {
-          void this.verifyInBackground().catch(error => this.backgroundVerifyError?.(error));
-        });
+        if (options.backgroundVerifyDelayMs)
+          setTimeout(
+            () => void this.verifyInBackground().catch(error => this.backgroundVerifyError?.(error)),
+            options.backgroundVerifyDelayMs,
+          );
+        else
+          setImmediate(() => {
+            void this.verifyInBackground().catch(error => this.backgroundVerifyError?.(error));
+          });
     } catch (error) {
       this.db.close();
       this.closed = true;
@@ -2023,7 +2047,7 @@ export class OfficeStore {
       .iterate(checkpoint.sequence)) {
       const event = this.parseEventRow(row);
       this.checkEventChain(event, expectedSequence, previous, receiptIds);
-      rebuilt = applyChanges(rebuilt, event.payload.changes);
+      rebuilt = applyChanges(rebuilt, event.payload.changes, { inPlace: true });
       previous = event.hash;
       expectedSequence = event.sequence + 1;
     }
@@ -2037,7 +2061,7 @@ export class OfficeStore {
     const receiptIds = new Set<string>();
     for (const [index, event] of events.entries()) {
       this.checkEventChain(event, index + 1, previous, receiptIds);
-      rebuilt = applyChanges(rebuilt, event.payload.changes);
+      rebuilt = applyChanges(rebuilt, event.payload.changes, { inPlace: true });
       previous = event.hash;
     }
     if (Number(this.db.prepare('SELECT COUNT(*) AS count FROM commands').get()!.count) !== receiptIds.size)
@@ -2061,20 +2085,23 @@ export class OfficeStore {
    * a yield: SQLite refuses VACUUM (backup) while any statement is mid-step on the connection. Events
    * are append-only, so paging by sequence reads exactly what a cursor would have.
    */
-  private async scanHistoryInPages(): Promise<HistoryScan | null> {
+  private async scanHistoryInPages(resume?: HistoryScan): Promise<HistoryScan | null> {
     if (this.closed) return null;
-    this.checkStorageIntegrity();
+    if (!resume) this.checkStorageIntegrity();
     const tip = Number((this.db.prepare('SELECT MAX(sequence) AS s FROM events').get() as { s: number | null }).s ?? 0);
     const page = this.db.prepare(
       'SELECT sequence,id,record FROM events WHERE sequence > ? AND sequence <= ? ORDER BY sequence LIMIT ?',
     );
-    const scan: HistoryScan = {
-      tip,
-      previous: ZERO_HASH,
-      expectedSequence: 1,
-      rebuilt: blank(),
-      receiptIds: new Set(),
-    };
+    // A resumed scan keeps everything it verified and reads on through the new tip.
+    const scan: HistoryScan = resume
+      ? Object.assign(resume, { tip })
+      : {
+          tip,
+          previous: ZERO_HASH,
+          expectedSequence: 1,
+          rebuilt: blank(),
+          receiptIds: new Set(),
+        };
     // The loop never reads through a statement that close() finalized: close() can only run during a
     // yield, and `closed` is re-checked right after each one. A page's rows are already read, so a
     // page of heavy events may also yield between two of them (a real 25-event page took 0.8 s).
@@ -2098,7 +2125,7 @@ export class OfficeStore {
   }
   private applyScannedEvent(scan: HistoryScan, event: StoredEvent): void {
     this.checkEventChain(event, scan.expectedSequence, scan.previous, scan.receiptIds);
-    scan.rebuilt = applyChanges(scan.rebuilt, event.payload.changes);
+    scan.rebuilt = applyChanges(scan.rebuilt, event.payload.changes, { inPlace: true });
     scan.previous = event.hash;
     scan.expectedSequence = event.sequence + 1;
   }
@@ -2134,17 +2161,26 @@ export class OfficeStore {
    * store is closed mid-run — closing during a background pass is normal.
    */
   async verifyInBackground(): Promise<void> {
-    const scan = await this.scanHistoryInPages();
-    if (!scan) return;
-    // The scan verified events through its tip, but the aggregate reads below see live tables. If a
-    // commit appended an event mid-scan, this pass is inconclusive — resolve without advancing the
-    // checkpoint and let the next open retry, rather than raise a false integrity failure on a
-    // healthy workspace. Everything after this check is synchronous, so nothing can interleave.
-    const currentTip = Number(
-      (this.db.prepare('SELECT MAX(sequence) AS s FROM events').get() as { s: number | null }).s ?? 0,
-    );
-    if (currentTip !== scan.tip) return;
-    this.finishHistoryScan(scan);
+    let scan = await this.scanHistoryInPages();
+    for (let attempt = 0; scan; attempt++) {
+      // The scan verified events through its tip, but the aggregate reads below see live tables. If a
+      // commit appended an event mid-scan, this pass is inconclusive and never finishes on a moved
+      // tip. Everything after this check is synchronous, so nothing can interleave.
+      const currentTip = Number(
+        (this.db.prepare('SELECT MAX(sequence) AS s FROM events').get() as { s: number | null }).s ?? 0,
+      );
+      if (currentTip === scan.tip) {
+        this.finishHistoryScan(scan);
+        return;
+      }
+      // Opening the office itself appends events (each provider's account check lands within seconds),
+      // so giving up here left the checkpoint behind on every launch and each open replayed a longer
+      // tail. Wait for writes to settle, read the new events too, and look again; after the last
+      // attempt the next open retries.
+      if (attempt >= BACKGROUND_VERIFY_RETRIES) return;
+      await new Promise(resolve => setTimeout(resolve, BACKGROUND_VERIFY_RETRY_MS));
+      scan = await this.scanHistoryInPages(scan);
+    }
   }
 
   snapshot(options: { history?: boolean } = {}): AppState {
@@ -8596,7 +8632,8 @@ export class OfficeStore {
       this.append(state, [], { kind: transferKind, projectId: scope, experimentId: null, reason: explanation }, null);
     });
   }
-  async backup(destination: string): Promise<void> {
+  /** Copies the verified workspace to `destination` and returns the copy's last event hash. */
+  async backup(destination: string): Promise<string | null> {
     this.assertOpen();
     const normalizedPath = (path: string) => {
       const absolute = existsSync(path) ? realpathSync(path) : resolve(path);
@@ -8617,6 +8654,9 @@ export class OfficeStore {
     // async backup() copied on a worker thread while this connection kept writing. SQLite refuses
     // VACUUM while a statement is mid-step, so nothing may hold a cursor across an await.
     this.db.prepare('VACUUM INTO ?').run(destination);
+    // The copy's own tip, read before anything can write again. A caller reading the tip after its
+    // next await could name an event the copy does not have, and the backup would fail its own check.
+    return this.lineageTip().hash;
   }
   close(): void {
     if (!this.closed) {

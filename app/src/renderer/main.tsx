@@ -92,6 +92,8 @@ const savedId = (key: string) => {
     return '';
   }
 };
+/** The last theme the workspace used, so the first paint matches it before the workspace is read. */
+const THEME_KEY = 'qro.theme';
 
 /**
  * The request.create command assembled from the New-request form, kept pure so the honesty rules
@@ -369,6 +371,11 @@ function App() {
   useEffect(() => {
     if (state) {
       document.documentElement.dataset.theme = state.settings.theme;
+      try {
+        localStorage.setItem(THEME_KEY, state.settings.theme);
+      } catch {
+        // Storage refused: the next launch paints in the default theme until the workspace is read.
+      }
       document.documentElement.dataset.motion = state.settings.reducedMotion ? 'reduced' : 'full';
     }
   }, [state?.settings]);
@@ -1431,9 +1438,12 @@ function Dialog({
 }
 
 // The bootstrap is DOM-only — tests import this module for requestCreatePayload without a document.
-if (typeof document !== 'undefined')
+if (typeof document !== 'undefined') {
+  const last = savedId(THEME_KEY);
+  if (last === 'dark' || last === 'light') document.documentElement.dataset.theme = last;
   createRoot(document.getElementById('root')!).render(
     <React.StrictMode>
       <App />
     </React.StrictMode>,
   );
+}

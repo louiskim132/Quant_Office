@@ -32,6 +32,8 @@ export interface EngineOptions {
   onPick(id: string): void;
   onHover(id: string | null): void;
   onViewChange?(): void;
+  /** Called once, when the first frame of the office has been drawn. */
+  onReady?(): void;
 }
 
 const WALK_SPEED = 2.3;
@@ -41,6 +43,9 @@ const POLAR = THREE.MathUtils.degToRad(56);
 const FIT_PAD = 1.6;
 /** Distance from the camera to its target; fog distances are measured from here. */
 const CAMERA_DISTANCE = 120;
+const SHADOW_MAP = 2048;
+/** After a zoom settles, lettering is repainted to the new size once this many ms have passed. */
+const SHARPEN_DELAY = 160;
 
 interface Walker {
   avatar: Avatar;
@@ -119,6 +124,14 @@ export class OfficeEngine {
   private busy = new Set<number>();
   private lastVisuals: readonly AgentVisual[] = [];
   private cleanups: (() => void)[] = [];
+  /** The whole-site shadow frame (configureLight) and the sun's offset from its centre. */
+  private shadowFull: { cx: number; cz: number; span: number; sun: THREE.Vector3 } | null = null;
+  private shadowKey = '';
+  private sharpZoom = 0;
+  private sharpTimer = 0;
+  /** False while a new world's shaders compile; nothing is drawn until they are ready. */
+  private ready = false;
+  private compiles = 0;
 
   constructor(private opts: EngineOptions) {
     this.theme = opts.theme;
@@ -141,21 +154,33 @@ export class OfficeEngine {
     this.canvas.setAttribute('aria-hidden', 'true');
     this.canvas.dataset.engine = 'webgl';
     opts.host.appendChild(this.canvas);
+    opts.host.dataset.ready = 'false';
     this.shared.own(this.kit);
 
     this.hemi = new THREE.HemisphereLight('#fff6e6', '#8a7b69', 1.15);
     this.light = new THREE.DirectionalLight('#fff0d4', 2.1);
     this.light.castShadow = true;
-    this.light.shadow.mapSize.set(4096, 4096);
+    // The shadow camera follows the view when it zooms in (fitShadow), so 2048 texels stay finer
+    // than the screen's pixels at every zoom; a fixed 4096 map over the whole site did not.
+    this.light.shadow.mapSize.set(SHADOW_MAP, SHADOW_MAP);
     this.light.shadow.bias = -0.0003;
     this.light.shadow.normalBias = 0.035;
     this.light.shadow.radius = 3;
     this.scene.add(this.hemi, this.light, this.light.target);
 
     this.haloGeometry = this.kit.own(new THREE.RingGeometry(0.46, 0.58, 40));
+    // Transparent two-sided things are drawn in one pass: a flat ring needs no back-then-front pair,
+    // and the pair costs a second shader program to compile on open.
     const ringMaterial = (color: string, opacity: number) =>
       this.kit.own(
-        new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false, side: THREE.DoubleSide }),
+        new THREE.MeshBasicMaterial({
+          color,
+          transparent: true,
+          opacity,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+          forceSinglePass: true,
+        }),
       );
     this.hoverRing = new THREE.Mesh(this.kit.own(new THREE.RingGeometry(0.66, 0.74, 48)), ringMaterial('#ffffff', 0.9));
     this.selectRing = new THREE.Mesh(this.kit.own(new THREE.RingGeometry(0.66, 0.78, 48)), ringMaterial('#f3c777', 1));
@@ -273,6 +298,20 @@ export class OfficeEngine {
     this.configureLight();
     this.teleport = true;
     this.fit(true);
+    this.sharpZoom = this.camera.zoom;
+    this.world.sharpen(this.camera.zoom * this.renderer.getPixelRatio());
+    // Compile every shader off the main thread (KHR_parallel_shader_compile) before the first draw:
+    // a synchronous first frame froze the page for half a second while programs linked. Until then
+    // the stage keeps its last frame (a rebuild) or its loading panel (the first open).
+    this.ready = false;
+    const compile = ++this.compiles;
+    const done = () => {
+      if (this.disposed || compile !== this.compiles) return;
+      this.ready = true;
+      this.dirty = true;
+      this.wake();
+    };
+    this.renderer.compileAsync(this.scene, this.camera).then(done, done);
     // A rebuild (a theme change, a new desk) clears the people: seat them again right away so the
     // floor is never empty, even when the caller has nothing new to say about them.
     if (this.lastVisuals.length) this.setAgents(this.lastVisuals);
@@ -430,6 +469,7 @@ export class OfficeEngine {
   dispose() {
     this.disposed = true;
     cancelAnimationFrame(this.raf);
+    clearTimeout(this.sharpTimer);
     this.observer.disconnect();
     this.intersect.disconnect();
     for (const undo of this.cleanups.splice(0)) undo();
@@ -439,6 +479,7 @@ export class OfficeEngine {
     this.renderer.dispose();
     this.renderer.forceContextLoss();
     this.canvas.remove();
+    delete this.opts.host.dataset.ready;
   }
 
   // ---- internals ---------------------------------------------------------------------------
@@ -454,6 +495,7 @@ export class OfficeEngine {
           opacity: statusVar === '--st-working' || statusVar === '--st-needs' ? 0.95 : 0.7,
           depthWrite: false,
           side: THREE.DoubleSide,
+          forceSinglePass: true,
         }),
       );
       this.haloMaterials.set(statusVar, m);
@@ -504,16 +546,13 @@ export class OfficeEngine {
     const day = this.theme === 'light';
     // Late-afternoon sun from the front left by day, so the faces the camera sees are lit; a high,
     // cool sky light at dusk, when the warm light comes from inside the glass instead.
-    this.light.position.set(cx - 16, 34, cz + (day ? 20 : 6));
-    this.light.target.position.set(cx, 0, cz);
+    const sun = new THREE.Vector3(-16, 34, day ? 20 : 6);
+    this.shadowFull = { cx, cz, span, sun };
+    this.shadowKey = '';
     const cam = this.light.shadow.camera;
-    cam.left = -span;
-    cam.right = span;
-    cam.top = span;
-    cam.bottom = -span;
     cam.near = 1;
     cam.far = 110;
-    cam.updateProjectionMatrix();
+    this.fitShadow();
     this.hemi.color.set(day ? '#f4f8ff' : '#7f93c4');
     this.hemi.groundColor.set(day ? '#cdbfa4' : '#3a3530');
     this.hemi.intensity = day ? 1.05 : 0.75;
@@ -823,7 +862,7 @@ export class OfficeEngine {
   }
 
   private draw() {
-    if (!this.world) return;
+    if (!this.world || !this.ready) return;
     const hovered = this.hovered ? this.walkers.get(this.hovered) : undefined;
     if (hovered) {
       this.hoverRing.position.set(hovered.avatar.root.position.x, 0.04, hovered.avatar.root.position.z);
@@ -837,13 +876,75 @@ export class OfficeEngine {
       w.halo.scale.setScalar(pulse ? 1 + Math.sin(t * 2.4) * 0.07 : 1);
     }
     this.moveBall();
+    this.fitShadow();
     this.renderer.render(this.scene, this.camera);
+    if (Math.abs(this.camera.zoom - this.sharpZoom) > 1e-3) this.queueSharpen();
     // What the camera shows, readable by assistive checks and acceptance tests (the canvas itself is opaque).
     const offset = this.camera.position.clone().sub(this.controls.target);
     this.canvas.dataset.zoom = this.camera.zoom.toFixed(1);
     this.canvas.dataset.azimuth = String(Math.round((Math.atan2(offset.x, offset.z) * 180) / Math.PI));
     this.canvas.dataset.people = String(this.walkers.size);
+    if (this.opts.host.dataset.ready !== 'true') {
+      this.opts.host.dataset.ready = 'true';
+      this.opts.onReady?.();
+    }
     this.placeLabels();
+  }
+
+  /**
+   * Shadows as sharp as the view: zoomed out, the shadow camera covers the whole site; zoomed in, it
+   * covers only what is on screen (plus a margin for shadows cast from just outside), so its texels
+   * shrink with the zoom. The frame's size moves in 25 % steps and its centre snaps to whole texels
+   * in the light's frame, so shadow edges hold still while the view pans.
+   */
+  private fitShadow() {
+    const full = this.shadowFull;
+    if (!full) return;
+    const offset = this.camera.position.clone().sub(this.controls.target);
+    const phi = new THREE.Spherical().setFromVector3(offset).phi;
+    const halfW = this.width / 2 / this.camera.zoom;
+    const halfH = this.height / 2 / this.camera.zoom / Math.max(0.25, Math.cos(phi));
+    let r = Math.pow(1.25, Math.ceil(Math.log(Math.hypot(halfW, halfH) + 5) / Math.log(1.25)));
+    const center = new THREE.Vector3(full.cx, 0, full.cz);
+    if (r >= full.span) r = full.span;
+    else {
+      center.set(this.controls.target.x, 0, this.controls.target.z);
+      const z = full.sun.clone().normalize();
+      const x = new THREE.Vector3(0, 1, 0).cross(z).normalize();
+      const y = z.clone().cross(x);
+      const texel = (2 * r) / SHADOW_MAP;
+      const u = center.dot(x);
+      const v = center.dot(y);
+      center
+        .addScaledVector(x, Math.round(u / texel) * texel - u)
+        .addScaledVector(y, Math.round(v / texel) * texel - v);
+    }
+    const key = `${r.toFixed(3)}:${center.x.toFixed(4)}:${center.y.toFixed(4)}:${center.z.toFixed(4)}`;
+    if (key === this.shadowKey) return;
+    this.shadowKey = key;
+    this.light.position.copy(center).add(full.sun);
+    this.light.target.position.copy(center);
+    const cam = this.light.shadow.camera;
+    cam.left = -r;
+    cam.right = r;
+    cam.top = r;
+    cam.bottom = -r;
+    cam.updateProjectionMatrix();
+    // The normal offset is measured in world units; keep it near one texel as the texels shrink.
+    this.light.shadow.normalBias = 0.035 * Math.max(0.2, r / full.span);
+  }
+
+  /** Repaint the lettering for the current zoom once the zoom has stopped changing. */
+  private queueSharpen() {
+    clearTimeout(this.sharpTimer);
+    this.sharpTimer = window.setTimeout(() => {
+      if (this.disposed || !this.world) return;
+      this.sharpZoom = this.camera.zoom;
+      if (this.world.sharpen(this.camera.zoom * this.renderer.getPixelRatio())) {
+        this.dirty = true;
+        this.wake();
+      }
+    }, SHARPEN_DELAY);
   }
 
   /** Both ping-pong players are at the table: a ball keeps moving between them. */

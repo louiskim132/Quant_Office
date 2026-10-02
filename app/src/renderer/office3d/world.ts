@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { buildEnvironment, type Theme } from './environment';
-import { Batch, Kit, mulberry32, textTexture } from './kit';
+import { Batch, Kit, mulberry32, textTexture, TextSurface } from './kit';
 import { ROOM_HEIGHT, WALL_HEIGHT, type Facing, type MeetingRoom, type OfficeLayout, type Vec2 } from './layout';
 
 export type { Theme } from './environment';
@@ -29,6 +29,11 @@ export interface World {
   roomFloors: THREE.Mesh[];
   floorMaterials: { idle: THREE.MeshStandardMaterial; busy: THREE.MeshStandardMaterial };
   pingPong: PingPong;
+  /**
+   * Repaint the lettering (board, signs, screens) for `pixelsPerMeter` device pixels per metre on
+   * screen. True when anything was repainted, so the caller draws again.
+   */
+  sharpen(pixelsPerMeter: number): boolean;
 }
 
 // Natural materials, after the 64 Degrees dining room and biophilic-office practice: pale oak and
@@ -99,28 +104,30 @@ function planks(kit: Kit): THREE.CanvasTexture {
 
 function concrete(kit: Kit): THREE.CanvasTexture {
   const rand = mulberry32(5);
-  const tex = textTexture(kit, 512, 512, (ctx, w, h) => {
+  // 1024 texels over 4 m, so the floor holds up when the view zooms in.
+  const tex = textTexture(kit, 1024, 1024, (ctx, w, h) => {
     ctx.fillStyle = '#d4d0c8';
     ctx.fillRect(0, 0, w, h);
-    // Soft clouding, then fine aggregate.
+    // Soft clouding (each gradient filled only inside its own circle), then fine aggregate.
     for (let i = 0; i < 40; i++) {
       const px = rand() * w;
       const py = rand() * h;
-      const g = ctx.createRadialGradient(px, py, 0, px, py, 60 + rand() * 140);
+      const r = 120 + rand() * 280;
+      const g = ctx.createRadialGradient(px, py, 0, px, py, r);
       const light = rand() < 0.5;
       g.addColorStop(0, light ? 'rgba(255,255,250,0.05)' : 'rgba(120,112,100,0.035)');
       g.addColorStop(1, 'rgba(0,0,0,0)');
       ctx.fillStyle = g;
-      ctx.fillRect(0, 0, w, h);
+      ctx.fillRect(px - r, py - r, r * 2, r * 2);
     }
-    for (let i = 0; i < 2600; i++) {
+    for (let i = 0; i < 10400; i++) {
       ctx.fillStyle = rand() < 0.5 ? 'rgba(90,85,78,0.1)' : 'rgba(255,255,255,0.16)';
-      ctx.fillRect(rand() * w, rand() * h, 1 + rand(), 1 + rand());
+      ctx.fillRect(rand() * w, rand() * h, 1.2 + rand() * 1.6, 1.2 + rand() * 1.6);
     }
     // Saw-cut joints on a 4 m grid (the texture spans 4 m).
     ctx.fillStyle = 'rgba(110,104,96,0.22)';
-    ctx.fillRect(0, 0, w, 1.5);
-    ctx.fillRect(0, 0, 1.5, h);
+    ctx.fillRect(0, 0, w, 2.5);
+    ctx.fillRect(0, 0, 2.5, h);
   });
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   tex.anisotropy = 8;
@@ -149,52 +156,58 @@ function foliage(kit: Kit, seed: number, w = 1024, h = 256): THREE.CanvasTexture
   });
 }
 
-function monitorTexture(kit: Kit, state: MonitorState): THREE.CanvasTexture {
-  return textTexture(kit, 160, 96, (ctx, w, h) => {
-    const bars = (color: string, rows: number, seed: number) => {
-      const rand = mulberry32(seed);
-      ctx.fillStyle = color;
-      for (let i = 0; i < rows; i++) {
-        const indent = Math.floor(rand() * 3) * 14;
-        ctx.fillRect(12 + indent, 12 + i * 11, 18 + rand() * (w - 60 - indent), 5);
-      }
-    };
-    const glyph = (text: string, color: string) => {
-      ctx.fillStyle = color;
-      ctx.font = 'bold 56px system-ui, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(text, w / 2, h / 2 + 3);
-    };
-    const bg = {
-      off: '#0b1013',
-      working: '#07302b',
-      stalled: '#2d2308',
-      unknown: '#1a2227',
-      away: '#101a2c',
-      done: '#0c2a17',
-      failed: '#301210',
-    }[state];
-    ctx.fillStyle = bg;
-    ctx.fillRect(0, 0, w, h);
-    if (state === 'working') bars('#6fe8cb', 7, 3);
-    else if (state === 'stalled') bars('#e2b95a', 3, 5);
-    else if (state === 'unknown') glyph('?', '#9fb0b6');
-    else if (state === 'done') glyph('✓', '#7bd09b');
-    else if (state === 'failed') glyph('✕', '#ee7c6a');
-    else if (state === 'away') {
-      ctx.fillStyle = '#4b6aa6';
-      ctx.beginPath();
-      ctx.arc(w / 2, h / 2, 6, 0, Math.PI * 2);
-      ctx.fill();
-    } else {
-      const g = ctx.createLinearGradient(0, 0, w, h);
-      g.addColorStop(0, 'rgba(255,255,255,0.08)');
-      g.addColorStop(0.5, 'rgba(255,255,255,0)');
-      ctx.fillStyle = g;
+function monitorSurface(kit: Kit, state: MonitorState): TextSurface {
+  return new TextSurface(
+    kit,
+    0.58,
+    { w: 160, h: 96 },
+    (ctx, w, h) => {
+      const bars = (color: string, rows: number, seed: number) => {
+        const rand = mulberry32(seed);
+        ctx.fillStyle = color;
+        for (let i = 0; i < rows; i++) {
+          const indent = Math.floor(rand() * 3) * 14;
+          ctx.fillRect(12 + indent, 12 + i * 11, 18 + rand() * (w - 60 - indent), 5);
+        }
+      };
+      const glyph = (text: string, color: string) => {
+        ctx.fillStyle = color;
+        ctx.font = 'bold 56px system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(text, w / 2, h / 2 + 3);
+      };
+      const bg = {
+        off: '#0b1013',
+        working: '#07302b',
+        stalled: '#2d2308',
+        unknown: '#1a2227',
+        away: '#101a2c',
+        done: '#0c2a17',
+        failed: '#301210',
+      }[state];
+      ctx.fillStyle = bg;
       ctx.fillRect(0, 0, w, h);
-    }
-  });
+      if (state === 'working') bars('#6fe8cb', 7, 3);
+      else if (state === 'stalled') bars('#e2b95a', 3, 5);
+      else if (state === 'unknown') glyph('?', '#9fb0b6');
+      else if (state === 'done') glyph('✓', '#7bd09b');
+      else if (state === 'failed') glyph('✕', '#ee7c6a');
+      else if (state === 'away') {
+        ctx.fillStyle = '#4b6aa6';
+        ctx.beginPath();
+        ctx.arc(w / 2, h / 2, 6, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        const g = ctx.createLinearGradient(0, 0, w, h);
+        g.addColorStop(0, 'rgba(255,255,255,0.08)');
+        g.addColorStop(0.5, 'rgba(255,255,255,0)');
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, w, h);
+      }
+    },
+    { min: 64, max: 512 },
+  );
 }
 
 // ---- planting --------------------------------------------------------------------------------
@@ -343,6 +356,8 @@ function wallRun(solid: Batch, glass: Batch, frost: Batch | null, r: Run) {
 
 export function buildWorld(layout: OfficeLayout, kit: Kit, theme: Theme): World {
   const root = new THREE.Group();
+  /** Every piece of lettering, repainted to the zoom by `sharpen`. */
+  const surfaces: TextSurface[] = [];
   const { minX, maxX, minZ, maxZ } = layout.bounds;
   const width = maxX - minX;
   const depth = maxZ - minZ;
@@ -399,14 +414,17 @@ export function buildWorld(layout: OfficeLayout, kit: Kit, theme: Theme): World 
     taskChair(b, d.seat.x, d.seat.z, director ? '#3b3430' : CHAIRS[i % CHAIRS.length]);
   });
 
-  // The director's studio: a wool rug, a credenza against the planted wall, and the status board.
+  // The director's studio: a wool rug, a credenza behind each desk, and the status board standing at
+  // the back of the studio, to the left of the desks so the two never overlap from the camera.
   const directors = layout.desks.filter(d => d.zone === 'director');
   if (directors.length) {
-    const x0 = Math.min(...directors.map(d => d.x)) - 1.6;
-    const x1 = Math.max(layout.board.x + 1.3, Math.max(...directors.map(d => d.x)) + 1.6);
-    const zc = directors[0].z + 0.3;
-    b.flat(x1 - x0, 3.6, '#bfb3a2', (x0 + x1) / 2, 0.009, zc);
-    b.flat(x1 - x0 - 0.3, 3.3, '#d3c8b8', (x0 + x1) / 2, 0.011, zc);
+    const x0 = Math.min(layout.board.x - 2.0, Math.min(...directors.map(d => d.x)) - 1.6);
+    const x1 = Math.max(...directors.map(d => d.x)) + 1.6;
+    const z0 = Math.max(0.8, layout.board.z - 1.3);
+    const z1 = directors[0].z + 1.75;
+    const zc = (z0 + z1) / 2;
+    b.flat(x1 - x0, z1 - z0, '#bfb3a2', (x0 + x1) / 2, 0.009, zc);
+    b.flat(x1 - x0 - 0.3, z1 - z0 - 0.3, '#d3c8b8', (x0 + x1) / 2, 0.011, zc);
     for (const d of directors) {
       b.rbox(1.8, 0.62, 0.45, 0.03, WALNUT, d.x, 0, d.z - 1.45);
       for (let k = 0; k < 6; k++)
@@ -414,13 +432,13 @@ export function buildWorld(layout: OfficeLayout, kit: Kit, theme: Theme): World 
       floorPlant(b, d.x + 0.55, d.z - 1.45, 0.5, POTS[1]);
       b.cylinder(0.08, 0.1, 0.02, '#d8c7a5', d.x + 0.05, 0.62, d.z - 1.45, 12);
     }
-    indoorTree(b, x0 - 0.2, directors[0].z - 1.6, 1.15, POTS[2]);
+    indoorTree(b, x1 + 0.3, 1.15, 1.15, POTS[2]);
   }
-  const setBoard = statusBoard(kit, root, b, layout.board);
+  const setBoard = statusBoard(kit, root, b, layout.board, surfaces);
 
   // Neighbourhoods: oak planter boxes between them, with a wooden plaque at the west end of each.
   for (const dv of layout.dividers) planter(b, dv.x0, dv.x1, dv.z);
-  for (const sign of layout.signs) plaque(kit, root, b, sign.text, sign.x, sign.z);
+  for (const sign of layout.signs) plaque(kit, root, b, surfaces, sign.text, sign.x, sign.z);
 
   // The perimeter: a living wall on the back wall of the work area, bookshelves along the west wall.
   greenWall(kit, root, b, 0.9, layout.workX1 - 0.9);
@@ -482,7 +500,7 @@ export function buildWorld(layout: OfficeLayout, kit: Kit, theme: Theme): World 
     gaps: [{ from: door - 1.15, to: door + 1.15, h: 2.45 }],
   });
   roofEdge(b, glow, layout, dusk);
-  entrance(kit, root, b, glass, glow, door, maxZ);
+  entrance(kit, root, b, glass, glow, surfaces, door, maxZ);
 
   const solid = kit.own(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.78, metalness: 0 }));
   root.add(b.build(kit, solid));
@@ -528,10 +546,11 @@ export function buildWorld(layout: OfficeLayout, kit: Kit, theme: Theme): World 
   // Screens: one shared material per state; each desk's plane just points at the right one.
   const states: MonitorState[] = ['off', 'working', 'stalled', 'unknown', 'away', 'done', 'failed'];
   const screenMaterials = Object.fromEntries(
-    states.map(state => [
-      state,
-      kit.own(new THREE.MeshBasicMaterial({ map: monitorTexture(kit, state), toneMapped: false })),
-    ]),
+    states.map(state => {
+      const surface = monitorSurface(kit, state);
+      surfaces.push(surface);
+      return [state, kit.own(new THREE.MeshBasicMaterial({ map: surface.texture, toneMapped: false }))];
+    }),
   ) as Record<MonitorState, THREE.MeshBasicMaterial>;
   const screenGeometry = kit.own(new THREE.PlaneGeometry(0.58, 0.33));
   const screens = screenSpots.map(spot => {
@@ -544,11 +563,12 @@ export function buildWorld(layout: OfficeLayout, kit: Kit, theme: Theme): World 
   // Room names, set into the carpet by each door.
   layout.rooms.forEach((room, i) => {
     const name = i === 0 ? 'COLLABORATION' : i === 1 ? 'REVIEW' : `ROOM ${i + 1}`;
-    floorText(kit, root, name, 3.6, 0.5, room.x, room.z1 - 0.38, 26, 4, 'rgba(60, 66, 72, 0.5)');
+    floorText(kit, root, surfaces, name, 3.6, 0.5, room.x, room.z1 - 0.38, 26, 4, 'rgba(60, 66, 72, 0.5)');
   });
   floorText(
     kit,
     root,
+    surfaces,
     'CAFÉ · LOUNGE',
     4.2,
     0.5,
@@ -562,7 +582,15 @@ export function buildWorld(layout: OfficeLayout, kit: Kit, theme: Theme): World 
   // Ping-pong ball: the engine moves it while both players are at the table.
   const ball = new THREE.Mesh(
     kit.own(new THREE.SphereGeometry(0.03, 10, 8)),
-    kit.own(new THREE.MeshBasicMaterial({ color: '#ff9a3c' })),
+    // Drawn like the selection rings, so it shares their shader.
+    kit.own(
+      new THREE.MeshBasicMaterial({
+        color: '#ff9a3c',
+        transparent: true,
+        side: THREE.DoubleSide,
+        forceSinglePass: true,
+      }),
+    ),
   );
   ball.visible = false;
   root.add(ball);
@@ -584,6 +612,11 @@ export function buildWorld(layout: OfficeLayout, kit: Kit, theme: Theme): World 
       if (screen) screen.material = screenMaterials[state];
     },
     setBoard,
+    sharpen(pixelsPerMeter) {
+      let any = false;
+      for (const surface of surfaces) any = surface.fit(pixelsPerMeter) || any;
+      return any;
+    },
   };
 }
 
@@ -644,23 +677,75 @@ function taskChair(b: Batch, x: number, z: number, fabric: string) {
   }
 }
 
-/** The live status board: a large screen on a slim stand, turned to face the default camera. */
-function statusBoard(kit: Kit, root: THREE.Group, b: Batch, at: Facing): (s: BoardSummary) => void {
-  const canvas = document.createElement('canvas');
-  canvas.width = 1024;
-  canvas.height = 512;
-  const ctx = canvas.getContext('2d')!;
-  const texture = kit.own(new THREE.CanvasTexture(canvas));
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.anisotropy = 4;
-  const mat = kit.own(new THREE.MeshBasicMaterial({ map: texture, toneMapped: false }));
+/**
+ * The live status board: a large screen on a tall stand at the back of the director's studio, turned
+ * to face the default camera. Few words in large type, so it reads from the default view and stays
+ * sharp when the view zooms in (the lettering is repainted to the zoom).
+ */
+function statusBoard(
+  kit: Kit,
+  root: THREE.Group,
+  b: Batch,
+  at: Facing,
+  surfaces: TextSurface[],
+): (s: BoardSummary) => void {
+  let shown: BoardSummary = { working: 0, idle: 0, attention: 0, meeting: 0, total: 0 };
+  const W = 3.3;
+  const H = 1.65;
+  const surface = new TextSurface(kit, W, { w: 1200, h: 600 }, (ctx, w, h) => {
+    const g = ctx.createLinearGradient(0, 0, 0, h);
+    g.addColorStop(0, '#15211f');
+    g.addColorStop(1, '#0d1514');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+    const spaced = (px: number) =>
+      ((ctx as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = `${px}px`);
+    ctx.textBaseline = 'alphabetic';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#e8bf82';
+    ctx.font = '700 60px system-ui, "Segoe UI", sans-serif';
+    spaced(6);
+    ctx.fillText('OFFICE STATUS', 60, 96);
+    spaced(0);
+    ctx.textAlign = 'right';
+    ctx.fillStyle = '#a9b8b6';
+    ctx.font = '600 52px system-ui, "Segoe UI", sans-serif';
+    ctx.fillText(`${shown.total} agent${shown.total === 1 ? '' : 's'}`, w - 60, 96);
+    const tile = (label: string, value: number, color: string, x0: number) => {
+      ctx.fillStyle = 'rgba(255,255,255,0.06)';
+      ctx.beginPath();
+      ctx.roundRect(x0, 130, 340, 320, 18);
+      ctx.fill();
+      ctx.textAlign = 'left';
+      ctx.fillStyle = color;
+      ctx.font = '800 220px system-ui, "Segoe UI", sans-serif';
+      ctx.fillText(String(value), x0 + 32, 360);
+      ctx.fillStyle = '#d3dddb';
+      ctx.font = '700 56px system-ui, "Segoe UI", sans-serif';
+      spaced(1);
+      ctx.fillText(label, x0 + 30, 426, 340 - 52);
+      spaced(0);
+    };
+    tile('WORKING', shown.working, '#5fd4b8', 60);
+    tile('IDLE', shown.idle, '#d6dfdd', 430);
+    tile('MEETING', shown.meeting, '#9db6f4', 800);
+    ctx.textAlign = 'left';
+    ctx.font = '700 58px system-ui, "Segoe UI", sans-serif';
+    ctx.fillStyle = shown.attention ? '#f0ad4e' : '#8fa19e';
+    ctx.fillText(
+      shown.attention ? `● ${shown.attention} need${shown.attention === 1 ? 's' : ''} you` : 'No alerts',
+      60,
+      548,
+    );
+  });
+  surfaces.push(surface);
+  const mat = kit.own(new THREE.MeshBasicMaterial({ map: surface.texture, toneMapped: false }));
   const group = new THREE.Group();
   group.position.set(at.x, 0, at.z);
   group.rotation.y = at.yaw;
   const frameMat = kit.own(new THREE.MeshStandardMaterial({ color: '#25282c', roughness: 0.5 }));
-  const W = 3.3;
-  const H = 1.65;
-  const y = 0.95 + H / 2;
+  const bottom = 1.2;
+  const y = bottom + H / 2;
   const frame = new THREE.Mesh(kit.own(new THREE.BoxGeometry(W + 0.08, H + 0.08, 0.07)), frameMat);
   frame.position.y = y;
   frame.castShadow = true;
@@ -677,43 +762,12 @@ function statusBoard(kit: Kit, root: THREE.Group, b: Batch, at: Facing): (s: Boa
   for (const dx of [-1.2, 1.2]) {
     const px = at.x + dx * c;
     const pz = at.z - dx * s;
-    b.box(0.08, 1.0, 0.08, OAK, px, 0, pz, at.yaw);
+    b.box(0.08, bottom + 0.1, 0.08, OAK, px, 0, pz, at.yaw);
     b.rbox(0.12, 0.05, 0.6, 0.02, GRAPHITE, px, 0, pz, at.yaw);
   }
   return summary => {
-    const g = ctx.createLinearGradient(0, 0, 0, 512);
-    g.addColorStop(0, '#13201f');
-    g.addColorStop(1, '#0d1514');
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, 1024, 512);
-    ctx.fillStyle = '#e4b97b';
-    ctx.font = '600 38px ui-monospace, Consolas, monospace';
-    (ctx as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = '8px';
-    ctx.fillText('OFFICE STATUS', 52, 82);
-    (ctx as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = '0px';
-    const tile = (label: string, value: number, color: string, x0: number) => {
-      ctx.fillStyle = '#ffffff0d';
-      ctx.fillRect(x0 - 16, 118, 290, 250);
-      ctx.fillStyle = color;
-      ctx.font = '700 150px ui-monospace, Consolas, monospace';
-      ctx.fillText(String(value), x0, 290);
-      ctx.fillStyle = '#9fb0ae';
-      ctx.font = '500 32px ui-monospace, Consolas, monospace';
-      ctx.fillText(label, x0, 345);
-    };
-    tile('WORKING', summary.working, '#5fd4b8', 68);
-    tile('IDLE', summary.idle, '#c4cfcd', 384);
-    tile('IN MEETING', summary.meeting, '#93aef0', 700);
-    ctx.fillStyle = summary.attention ? '#eaa84a' : '#7d8e8b';
-    ctx.font = '600 34px ui-monospace, Consolas, monospace';
-    ctx.fillText(
-      summary.attention
-        ? `● ${summary.attention} NEED${summary.attention === 1 ? 'S' : ''} YOU`
-        : `${summary.total} AGENT${summary.total === 1 ? '' : 'S'} · NO ALERTS`,
-      52,
-      446,
-    );
-    texture.needsUpdate = true;
+    shown = summary;
+    surface.redraw();
   };
 }
 
@@ -744,8 +798,8 @@ export function grass(b: Batch, x: number, y: number, z: number, h: number, seed
   }
 }
 
-function plaque(kit: Kit, root: THREE.Group, b: Batch, text: string, x: number, z: number) {
-  const tex = textTexture(kit, 512, 128, (ctx, w, h) => {
+function plaque(kit: Kit, root: THREE.Group, b: Batch, surfaces: TextSurface[], text: string, x: number, z: number) {
+  const surface = new TextSurface(kit, 1.9, { w: 512, h: 128 }, (ctx, w, h) => {
     ctx.fillStyle = '#d9bf98';
     ctx.fillRect(0, 0, w, h);
     ctx.fillStyle = 'rgba(120, 85, 45, 0.12)';
@@ -757,6 +811,8 @@ function plaque(kit: Kit, root: THREE.Group, b: Batch, text: string, x: number, 
     ctx.textBaseline = 'middle';
     ctx.fillText(text, w / 2, h / 2 + 2);
   });
+  surfaces.push(surface);
+  const tex = surface.texture;
   const mat = kit.own(new THREE.MeshStandardMaterial({ map: tex, roughness: 0.8 }));
   const geo = kit.own(new THREE.PlaneGeometry(1.9, 0.47));
   for (const flip of [0, Math.PI]) {
@@ -774,6 +830,7 @@ function plaque(kit: Kit, root: THREE.Group, b: Batch, text: string, x: number, 
 function floorText(
   kit: Kit,
   root: THREE.Group,
+  surfaces: TextSurface[],
   text: string,
   planeW: number,
   planeH: number,
@@ -784,7 +841,7 @@ function floorText(
   ink: string,
 ) {
   const px = 100;
-  const tex = textTexture(kit, Math.round(planeW * px), Math.round(planeH * px), (ctx, w, h) => {
+  const surface = new TextSurface(kit, planeW, { w: planeW * px, h: planeH * px }, (ctx, w, h) => {
     ctx.font = `600 ${font}px ui-monospace, Consolas, monospace`;
     ctx.fillStyle = ink;
     ctx.textBaseline = 'middle';
@@ -792,9 +849,21 @@ function floorText(
     (ctx as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = `${spacing}px`;
     ctx.fillText(text, w / 2, h / 2);
   });
+  surfaces.push(surface);
+  const tex = surface.texture;
   const plane = new THREE.Mesh(
     kit.own(new THREE.PlaneGeometry(planeW, planeH)),
-    kit.own(new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false })),
+    // The same shader as the building sign's letters (one fewer program to compile on open).
+    kit.own(
+      new THREE.MeshBasicMaterial({
+        map: tex,
+        transparent: true,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        forceSinglePass: true,
+        toneMapped: false,
+      }),
+    ),
   );
   plane.rotation.x = -Math.PI / 2;
   plane.position.set(x, 0.03, z);
@@ -1091,7 +1160,16 @@ function roofEdge(b: Batch, glow: Batch, layout: OfficeLayout, dusk: boolean) {
 }
 
 /** The entrance: sliding glass doors under a faceted metal canopy, with the office's name above it. */
-function entrance(kit: Kit, root: THREE.Group, b: Batch, glass: Batch, glow: Batch, door: number, z: number) {
+function entrance(
+  kit: Kit,
+  root: THREE.Group,
+  b: Batch,
+  glass: Batch,
+  glow: Batch,
+  surfaces: TextSurface[],
+  door: number,
+  z: number,
+) {
   for (const side of [-1, 1]) {
     const cx = door + side * 0.57;
     const f = '#30343a';
@@ -1145,36 +1223,37 @@ function entrance(kit: Kit, root: THREE.Group, b: Batch, glass: Batch, glow: Bat
   root.add(top);
   for (let x = door - cw / 2 + 0.6; x < door + cw / 2 - 0.4; x += 1.2)
     glow.disc(0.06, '#fff0cf', x, cy - 0.002, z + cd / 2, 10);
-  // The name in brass letters standing on the canopy, like the 64° sign.
-  const sign = textTexture(kit, 1024, 360, (ctx, w, h) => {
-    ctx.clearRect(0, 0, w, h);
-    ctx.fillStyle = '#c9a453';
-    ctx.font = '700 300px system-ui, sans-serif';
+  // The office's full name in brass letters standing on the canopy, like the 64° sign.
+  const signW = 7.0;
+  const signH = 0.62;
+  const sign = new TextSurface(kit, signW, { w: 2400, h: 2400 * (signH / signW) }, (ctx, w, h) => {
+    const text = 'QUANT RESEARCH OFFICE';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'alphabetic';
-    (ctx as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = '18px';
-    ctx.fillText('QRO', w / 2, h - 40);
+    (ctx as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = '14px';
+    ctx.font = '700 180px system-ui, "Segoe UI", sans-serif';
+    const fit = Math.min(1, (w * 0.96) / ctx.measureText(text).width);
+    ctx.font = `700 ${Math.floor(180 * fit)}px system-ui, "Segoe UI", sans-serif`;
+    // A darker edge under the brass gives the letters depth against the sky and the canopy.
+    ctx.fillStyle = '#5b4520';
+    ctx.fillText(text, w / 2 + 4, h - 26);
+    ctx.fillStyle = '#d2ad5c';
+    ctx.fillText(text, w / 2, h - 30);
   });
-  const letters = kit.own(new THREE.MeshBasicMaterial({ map: sign, transparent: true, side: THREE.DoubleSide }));
-  const plate = new THREE.Mesh(kit.own(new THREE.PlaneGeometry(2.9, 1.02)), letters);
-  plate.position.set(door, cy + 0.12 + 0.48, z + 1.1);
-  root.add(plate);
-  const name = textTexture(kit, 1024, 64, (ctx, w, h) => {
-    ctx.fillStyle = '#2b2f34';
-    ctx.fillRect(0, 0, w, h);
-    ctx.fillStyle = '#d8c08a';
-    ctx.font = '600 34px system-ui, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    (ctx as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = '12px';
-    ctx.fillText('QUANT RESEARCH OFFICE', w / 2, h / 2 + 2);
-  });
-  const fascia = new THREE.Mesh(
-    kit.own(new THREE.PlaneGeometry(cw, 0.2)),
-    kit.own(new THREE.MeshBasicMaterial({ map: name, toneMapped: false })),
+  surfaces.push(sign);
+  const letters = kit.own(
+    // One pass for both faces (a flat plate needs no back-then-front pair, which is a second program).
+    new THREE.MeshBasicMaterial({
+      map: sign.texture,
+      transparent: true,
+      side: THREE.DoubleSide,
+      forceSinglePass: true,
+      toneMapped: false,
+    }),
   );
-  fascia.position.set(door, cy + 0.05, z + cd + 0.027);
-  root.add(fascia);
+  const plate = new THREE.Mesh(kit.own(new THREE.PlaneGeometry(signW, signH)), letters);
+  plate.position.set(door, cy + 0.12 + signH / 2, z + 1.1);
+  root.add(plate);
 }
 
 /** Warm light from inside the glass at dusk, as in the photograph: a grid of soft lamps. */

@@ -116,7 +116,10 @@ export interface OfficeLayout {
   rest: RestArea;
   signs: ZoneSign[];
   dividers: Divider[];
-  /** The live status board: beside the director's desk, turned toward the default camera. */
+  /**
+   * The live status board: at the back of the director's studio, behind and to the left of the
+   * director's desk, turned toward the default camera so the two never overlap in that view.
+   */
   board: Facing;
   /** Potted trees along the street edges, clear of every aisle, lane and door. */
   streetPlants: Vec2[];
@@ -170,6 +173,9 @@ const REST_LANE_V = 4.6;
 export const EAST_WALK = 1.4;
 /** How far a street plant keeps from any line people cross the street on. */
 const STREET_CLEAR = 1.2;
+/** The status board's place in the first slot of the first row: a little left, and set back toward the wall. */
+const BOARD_DX = -0.2;
+const BOARD_BACK = 1.6;
 
 const ZONE_TEXT: Record<ZoneKey, string> = {
   director: 'DIRECTOR',
@@ -205,14 +211,17 @@ export function buildLayout(input: LayoutInput): OfficeLayout {
   let board: Facing = { x: 0, z: 0, yaw: Math.PI / 4 };
   const zoneSpans: { z0: number; z1: number }[] = [];
   zones.forEach((zone, zi) => {
-    // The first row keeps one slot free beside its last desk for the status board.
-    const cols = zi === 0 ? Math.min(zone.count, MAX_COLS - 1) : Math.min(zone.count, MAX_COLS);
-    widestCols = Math.max(widestCols, zi === 0 ? cols + 1 : cols);
+    // The first row gives its first slot to the status board, set back toward the planted wall; its
+    // desks start one slot to the right, so from the default camera the board stands clear above
+    // and to the left of the director instead of behind the desk.
+    const shift = zi === 0 ? 1 : 0;
+    const cols = Math.min(zone.count, MAX_COLS - shift);
+    widestCols = Math.max(widestCols, cols + shift);
     const rows = Math.ceil(zone.count / cols);
-    if (zi === 0) board = { x: FIRST_DESK_X + cols * POD.x - 0.3, z: z - 0.1, yaw: Math.PI / 4 };
+    if (zi === 0) board = { x: FIRST_DESK_X + BOARD_DX, z: z - BOARD_BACK, yaw: Math.PI / 4 };
     signs.push({ key: zone.key, text: ZONE_TEXT[zone.key], x: FIRST_DESK_X - 2.5, z, width: 2.2 });
     for (let order = 0; order < zone.count; order++) {
-      const col = order % cols;
+      const col = (order % cols) + shift;
       const row = Math.floor(order / cols);
       const x = FIRST_DESK_X + col * POD.x;
       const dz = z + row * POD.z;
