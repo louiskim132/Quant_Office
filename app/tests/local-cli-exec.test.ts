@@ -647,6 +647,36 @@ test('Claude tool use and result frames stream before a receipt without classify
   assert.equal((await f.adapter.observe(f.job(), bound)).events?.length ?? 0, 0, 'each frame drains only once');
 });
 
+test('workspace teardown waits for owned agents to exit and refuses a failed termination', async t => {
+  const f = fixture(t, { provider: 'openai' });
+  await submitted(f);
+  let stopped = false;
+  const shutdown = f.adapter.stopAll().then(() => {
+    stopped = true;
+  });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.calls[0].child.kills.length, 1);
+  assert.equal(stopped, false, 'sending kill is not confirmation that the process stopped');
+  f.calls[0].child.emitExit(null, 'SIGTERM');
+  await shutdown;
+  assert.equal(f.adapter.presence().length, 0);
+
+  const refused = fixture(t, { provider: 'openai' });
+  await submitted(refused);
+  refused.calls[0].child.kill = () => false;
+  await assert.rejects(refused.adapter.stopAll(), /could not be stopped/);
+  assert.equal(refused.adapter.presence().length, 1, 'failed stop retains the owned record');
+  assert.equal(refused.adapter.presence()[0].alive, true, 'a failed stop cannot claim termination');
+});
+
+test('office shutdown terminates owned active children instead of abandoning their bookkeeping', async t => {
+  const f = fixture(t, { provider: 'openai' });
+  await submitted(f);
+  f.adapter.disposeAll();
+  assert.equal(f.calls[0].child.kills.length, 1);
+  assert.equal(f.adapter.presence().length, 0);
+});
+
 test('failures before any child could spawn throw NotLaunchedError; a spawn throw stays ordinary', async t => {
   // A dirty packet destination — prepareLocalPacket refuses before anything could spawn.
   const dirty = fixture(t);

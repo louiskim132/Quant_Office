@@ -736,9 +736,61 @@ export class LocalCliExecAdapter implements ProviderAdapter {
     }
   }
 
-  /** Releases all spawn bookkeeping — the office calls this when it goes away. */
+  /** Stops owned execution before a restore replaces the filesystem the children use. */
+  async stopAll(): Promise<void> {
+    await Promise.all(
+      [...this.registry.values()]
+        .filter(record => !record.exit && !record.spawnError)
+        .map(
+          record =>
+            new Promise<void>((resolve, reject) => {
+              const timer = setTimeout(
+              () => {
+                record.officeKill = null;
+                reject(new Error('An active agent did not stop; workspace restoration was refused.'));
+              },
+                10000,
+              );
+              record.child.on('exit', () => {
+                clearTimeout(timer);
+                resolve();
+              });
+              record.child.on('error', error => {
+                clearTimeout(timer);
+              record.officeKill = null;
+                reject(error);
+              });
+              record.officeKill = 'workspace restore';
+              try {
+                if (!record.child.kill()) {
+                  clearTimeout(timer);
+                record.officeKill = null;
+                  reject(new Error('An active agent could not be stopped; workspace restoration was refused.'));
+                }
+              } catch (error) {
+                clearTimeout(timer);
+              record.officeKill = null;
+                reject(error);
+              }
+            }),
+        ),
+    );
+    this.disposeAll();
+  }
+
+  /** Terminates owned children and releases bookkeeping when the office or controller goes away. */
   disposeAll(): void {
-    for (const jobId of [...this.registry.keys()]) this.dispose(jobId);
+    for (const [jobId, record] of [...this.registry]) {
+      if (!record.exit && !record.spawnError && !record.officeKill) {
+        record.officeKill = 'office shutdown';
+        try {
+          record.child.kill();
+        } catch {
+          /* OS shutdown may already have removed the process. */
+        }
+      }
+      this.dispose(jobId);
+    }
   }
 
   /** Buffers one output chunk into lines; retained volume is capped, drops are counted honestly. */

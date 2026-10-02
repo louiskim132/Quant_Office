@@ -71,8 +71,8 @@ async function launch(label: string) {
   }
   const page = (await app.windows())[0];
   await page.waitForLoadState('domcontentloaded');
-  const firstTheme = await page.evaluate(() => document.documentElement.dataset.theme);
   await page.getByRole('heading', { name: 'The office', exact: true }).waitFor({ timeout: 60000 });
+  const firstTheme = await page.evaluate(() => document.documentElement.dataset.theme);
   await page.waitForFunction(() => document.querySelector('.office3d')?.getAttribute('data-ready') === 'true', null, {
     timeout: 60000,
   });

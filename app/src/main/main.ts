@@ -1626,8 +1626,8 @@ function register() {
         subscriptions.cancel();
         // Stop every old-workspace execution surface before its database is closed. Restored
         // verification may take time or fail; neither case may leave old agents running.
-        exec?.disposeAll();
-        acp?.disposeAll();
+        await exec?.stopAll();
+        await acp?.stopAll();
         agentHost?.shutdown();
         agentHost = undefined;
         store.close();
