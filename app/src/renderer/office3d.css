@@ -16,9 +16,10 @@
   --glass-edge: #ffffff17;
   --glass-text: #f3ece0;
   --glass-muted: #b4a998;
-  --stage-a: #2d221b;
-  --stage-b: #1b1511;
-  --stage-c: #110d0b;
+  /* Blue hour over the courtyard; the scene's haze fades into the same sky. */
+  --stage-a: #2a3f70;
+  --stage-b: #1b2a4c;
+  --stage-c: #0f1a33;
   position: relative;
   width: 100%;
   min-height: 460px;
@@ -43,9 +44,9 @@
   --glass-edge: #3a2a1a22;
   --glass-text: #2b2218;
   --glass-muted: #6f6150;
-  --stage-a: #fbf4e8;
-  --stage-b: #efe4d1;
-  --stage-c: #e2d4bc;
+  --stage-a: #f1f5f6;
+  --stage-b: #e3ecef;
+  --stage-c: #d3e0e6;
 }
 .office3d-host {
   position: absolute;
@@ -292,8 +293,9 @@
   background: var(--shirt);
 }
 
-/* The tool rail sits on the left. Each tool is an icon; on hover or focus it grows to the right
-   and shows its name inside the same pill, so there is no separate browser tooltip. */
+/* The tool rail sits on the left. Each tool is an icon; pointing anywhere at the rail (or reaching
+   it from the keyboard) opens every tool's name at once, inside its own pill, so the whole rail can
+   be read in one glance. While the agents menu is open the rail stays narrow so the menu holds still. */
 .office3d .stage-tools {
   top: 62px;
   left: 12px;
@@ -344,27 +346,25 @@
   opacity: 0;
   transition: opacity 0.12s ease;
 }
+.office3d .stage-tools[data-menu='closed']:is(:hover, :has(:focus-visible)) .tool {
+  width: 150px;
+  color: var(--glass-text);
+}
+.office3d .stage-tools[data-menu='closed']:is(:hover, :has(:focus-visible)) .tool-label {
+  opacity: 1;
+}
 .office3d .stage-tools .tool:hover,
 .office3d .stage-tools .tool:focus-visible {
-  z-index: 3;
-  width: 150px;
-  background: var(--glass);
+  background: #ffffff14;
   color: var(--glass-text);
-  box-shadow: 0 0 0 1px var(--glass-edge);
 }
-.office3d .stage-tools .tool:hover .tool-label,
-.office3d .stage-tools .tool:focus-visible .tool-label {
-  opacity: 1;
+:root[data-theme='light'] .office3d .stage-tools .tool:hover,
+:root[data-theme='light'] .office3d .stage-tools .tool:focus-visible {
+  background: #3a2a1a12;
 }
 .office3d .stage-tools .tool[aria-pressed='true'],
 .office3d .stage-tools .tool[data-open='true'] {
   color: var(--accent);
-}
-.office3d .stage-tools .tool[data-open='true']:hover {
-  width: 34px;
-}
-.office3d .stage-tools .tool[data-open='true']:hover .tool-label {
-  opacity: 0;
 }
 
 /* The agents menu: a scrolling list that stays usable with any number of agents. */

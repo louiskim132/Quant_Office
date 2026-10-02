@@ -84,6 +84,33 @@ try {
     assert.equal(await stage.getAttribute('data-names'), 'on');
     checks.push('Names switch hides and restores every name tag');
 
+    // The tool rail: pointing at any one tool names every tool at once; an open agents menu keeps it narrow.
+    const labels = () =>
+      page.evaluate(() =>
+        [...document.querySelectorAll<HTMLElement>('.office3d .stage-tools .tool')].map(tool => ({
+          label: tool.querySelector('.tool-label')?.textContent?.trim() ?? '',
+          shown: Number(getComputedStyle(tool.querySelector('.tool-label')!).opacity) > 0.9,
+          width: tool.getBoundingClientRect().width,
+        })),
+      );
+    await stage.getByRole('button', { name: 'Zoom out', exact: true }).hover();
+    await page.waitForTimeout(400);
+    const open = await labels();
+    assert.ok(open.length >= 5, 'agents, zoom in, zoom out, reset view and names');
+    for (const tool of open)
+      assert.ok(tool.shown && tool.width > 120, `"${tool.label}" is named while the rail is hovered`);
+    await page.mouse.move(5, 5);
+    await page.waitForTimeout(400);
+    for (const tool of await labels()) assert.ok(!tool.shown && tool.width < 40, `"${tool.label}" folds away again`);
+    await stage.getByRole('button', { name: 'Agents on the floor', exact: true }).click();
+    await stage.getByRole('menu', { name: 'Agents on the floor' }).waitFor();
+    await stage.getByRole('button', { name: 'Agents on the floor', exact: true }).hover();
+    await page.waitForTimeout(400);
+    for (const tool of await labels()) assert.ok(tool.width < 40, 'the rail holds still while the agents menu is open');
+    await page.keyboard.press('Escape');
+    await stage.getByRole('menu', { name: 'Agents on the floor' }).waitFor({ state: 'hidden' });
+    checks.push('Hovering the tool rail names every tool at once; the open agents menu keeps the rail narrow');
+
     // Camera: rotate, zoom, reset — read back from the canvas.
     const read = async () => ({
       az: Number(await canvas.getAttribute('data-azimuth')),
@@ -137,7 +164,7 @@ try {
     // A person's chip locks the camera on them and opens their drawer; Escape closes it and returns focus.
     const zoomBefore = (await read()).zoom;
     assert.equal(await stage.locator('.stage-chip').count(), 0, 'the top chip row is gone');
-    await stage.getByRole('button', { name: 'Agents', exact: true }).click();
+    await stage.getByRole('button', { name: 'Agents on the floor', exact: true }).click();
     await stage.getByRole('menuitem', { name: /Test PM B/ }).click();
     await page.getByRole('complementary', { name: 'Test PM B details' }).waitFor();
     await page.waitForFunction(

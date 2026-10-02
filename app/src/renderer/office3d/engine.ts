@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { Avatar, AvatarShared, type AvatarColors } from './avatar';
 import { Kit } from './kit';
 import { WALL_HEIGHT, placePose, routeBetween, samePlace, type OfficeLayout, type Place, type Vec2 } from './layout';
@@ -36,8 +37,10 @@ export interface EngineOptions {
 const WALK_SPEED = 2.3;
 const AZIMUTH = Math.PI / 4;
 const POLAR = THREE.MathUtils.degToRad(56);
-/** How much of the plaza and street is kept in frame around the building. */
-const FIT_PAD = 2.2;
+/** How much of the courtyard is kept in frame around the building. */
+const FIT_PAD = 1.6;
+/** Distance from the camera to its target; fog distances are measured from here. */
+const CAMERA_DISTANCE = 120;
 
 interface Walker {
   avatar: Avatar;
@@ -90,6 +93,7 @@ export class OfficeEngine {
   private haloMaterials = new Map<string, THREE.MeshBasicMaterial>();
   private light: THREE.DirectionalLight;
   private hemi: THREE.HemisphereLight;
+  private envMap: THREE.Texture;
   private observer: ResizeObserver;
   private intersect: IntersectionObserver;
   private width = 1;
@@ -123,6 +127,15 @@ export class OfficeEngine {
     this.renderer.setClearColor(0x000000, 0);
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    // Filmic response and a soft studio environment for ambient light and glass reflections.
+    this.renderer.toneMapping = THREE.NeutralToneMapping;
+    this.renderer.toneMappingExposure = 1.0;
+    const pmrem = new THREE.PMREMGenerator(this.renderer);
+    const room = new RoomEnvironment();
+    this.envMap = pmrem.fromScene(room, 0.04).texture;
+    room.dispose();
+    pmrem.dispose();
+    this.scene.environment = this.envMap;
     this.canvas = this.renderer.domElement;
     this.canvas.className = 'office3d-canvas';
     this.canvas.setAttribute('aria-hidden', 'true');
@@ -133,9 +146,10 @@ export class OfficeEngine {
     this.hemi = new THREE.HemisphereLight('#fff6e6', '#8a7b69', 1.15);
     this.light = new THREE.DirectionalLight('#fff0d4', 2.1);
     this.light.castShadow = true;
-    this.light.shadow.mapSize.set(2048, 2048);
-    this.light.shadow.bias = -0.0004;
-    this.light.shadow.normalBias = 0.03;
+    this.light.shadow.mapSize.set(4096, 4096);
+    this.light.shadow.bias = -0.0003;
+    this.light.shadow.normalBias = 0.035;
+    this.light.shadow.radius = 3;
     this.scene.add(this.hemi, this.light, this.light.target);
 
     this.haloGeometry = this.kit.own(new THREE.RingGeometry(0.46, 0.58, 40));
@@ -407,7 +421,7 @@ export class OfficeEngine {
     const sph = new THREE.Spherical().setFromVector3(this.camera.position.clone().sub(this.controls.target));
     this.glide(
       new THREE.Vector3(w.avatar.root.position.x, 0.9, w.avatar.root.position.z),
-      Math.max(this.camera.zoom, this.fitZoom * 2.4),
+      Math.max(this.camera.zoom, this.fitZoom * 3.2),
       sph.theta,
       sph.phi,
     );
@@ -421,6 +435,7 @@ export class OfficeEngine {
     for (const undo of this.cleanups.splice(0)) undo();
     this.controls.dispose();
     this.kit.dispose();
+    this.envMap.dispose();
     this.renderer.dispose();
     this.renderer.forceContextLoss();
     this.canvas.remove();
@@ -484,8 +499,12 @@ export class OfficeEngine {
     const { minX, maxX, minZ, maxZ } = this.layout.bounds;
     const cx = (minX + maxX) / 2;
     const cz = (minZ + maxZ) / 2;
-    const span = Math.hypot(maxX - minX, maxZ - minZ) / 2 + 3;
-    this.light.position.set(cx - 16, 30, cz - 12);
+    // The shadow camera covers the building and the patio just around it.
+    const span = Math.hypot(maxX - minX, maxZ - minZ) / 2 + 7;
+    const day = this.theme === 'light';
+    // Late-afternoon sun from the front left by day, so the faces the camera sees are lit; a high,
+    // cool sky light at dusk, when the warm light comes from inside the glass instead.
+    this.light.position.set(cx - 16, 34, cz + (day ? 20 : 6));
     this.light.target.position.set(cx, 0, cz);
     const cam = this.light.shadow.camera;
     cam.left = -span;
@@ -493,15 +512,21 @@ export class OfficeEngine {
     cam.top = span;
     cam.bottom = -span;
     cam.near = 1;
-    cam.far = 90;
+    cam.far = 110;
     cam.updateProjectionMatrix();
-    // The interior stays bright in both themes; only the sky outside shifts from day to dusk.
-    const day = this.theme === 'light';
-    this.hemi.color.set(day ? '#ffffff' : '#dbe4f5');
-    this.hemi.groundColor.set(day ? '#d9d6cf' : '#9aa0b4');
-    this.hemi.intensity = day ? 1.1 : 1.0;
-    this.light.color.set(day ? '#fff6e4' : '#ffe2b8');
-    this.light.intensity = day ? 1.7 : 1.5;
+    this.hemi.color.set(day ? '#f4f8ff' : '#7f93c4');
+    this.hemi.groundColor.set(day ? '#cdbfa4' : '#3a3530');
+    this.hemi.intensity = day ? 1.05 : 0.75;
+    this.light.color.set(day ? '#fff1dc' : '#b9c8ec');
+    this.light.intensity = day ? 2.3 : 0.55;
+    this.scene.environmentIntensity = day ? 0.45 : 0.22;
+    this.renderer.toneMappingExposure = day ? 1.0 : 1.08;
+    // Atmospheric haze: far ground and buildings fade toward the sky colour.
+    this.scene.fog = new THREE.Fog(
+      day ? '#e3ecef' : '#1b2a4c',
+      CAMERA_DISTANCE + (day ? 26 : 20),
+      CAMERA_DISTANCE + (day ? 150 : 120),
+    );
   }
 
   private resize() {
@@ -534,7 +559,7 @@ export class OfficeEngine {
     const cx = (minX + maxX) / 2;
     const cz = (minZ + maxZ) / 2;
     const probe = new THREE.OrthographicCamera(-1, 1, 1, -1, -400, 600);
-    const sph = new THREE.Spherical(120, polar ?? POLAR, azimuth ?? AZIMUTH);
+    const sph = new THREE.Spherical(CAMERA_DISTANCE, polar ?? POLAR, azimuth ?? AZIMUTH);
     const target = new THREE.Vector3(cx, 0, cz);
     probe.position.copy(new THREE.Vector3().setFromSpherical(sph).add(target));
     probe.lookAt(target);
@@ -575,13 +600,13 @@ export class OfficeEngine {
     if (!goal) return;
     this.fitZoom = goal.zoom;
     this.controls.minZoom = goal.zoom * 0.5;
-    this.controls.maxZoom = goal.zoom * 8;
+    this.controls.maxZoom = goal.zoom * 12;
     if (!snap) return;
     this.tween = null;
     this.controls.target.copy(goal.target);
     this.camera.zoom = goal.zoom;
     this.camera.position
-      .copy(new THREE.Vector3().setFromSpherical(new THREE.Spherical(120, POLAR, AZIMUTH)))
+      .copy(new THREE.Vector3().setFromSpherical(new THREE.Spherical(CAMERA_DISTANCE, POLAR, AZIMUTH)))
       .add(goal.target);
     this.camera.lookAt(goal.target);
     this.camera.updateProjectionMatrix();
@@ -610,8 +635,8 @@ export class OfficeEngine {
     if (!this.layout) return;
     const { minX, maxX, minZ, maxZ } = this.layout.bounds;
     const t = this.controls.target;
-    const x = THREE.MathUtils.clamp(t.x, minX - 6, maxX + 6);
-    const z = THREE.MathUtils.clamp(t.z, minZ - 6, maxZ + 6);
+    const x = THREE.MathUtils.clamp(t.x, minX - 10, maxX + 10);
+    const z = THREE.MathUtils.clamp(t.z, minZ - 10, maxZ + 14);
     const y = THREE.MathUtils.clamp(t.y, -1, 3);
     if (x !== t.x || y !== t.y || z !== t.z) {
       const delta = new THREE.Vector3(x - t.x, y - t.y, z - t.z);
@@ -721,7 +746,9 @@ export class OfficeEngine {
     const az = THREE.MathUtils.lerp(tw.fromAz, tw.toAz, k);
     const pol = THREE.MathUtils.lerp(tw.fromPolar, tw.toPolar, k);
     this.controls.target.copy(target);
-    this.camera.position.copy(new THREE.Vector3().setFromSpherical(new THREE.Spherical(120, pol, az))).add(target);
+    this.camera.position
+      .copy(new THREE.Vector3().setFromSpherical(new THREE.Spherical(CAMERA_DISTANCE, pol, az)))
+      .add(target);
     this.camera.zoom = THREE.MathUtils.lerp(tw.fromZoom, tw.toZoom, k);
     this.camera.lookAt(target);
     this.camera.updateProjectionMatrix();

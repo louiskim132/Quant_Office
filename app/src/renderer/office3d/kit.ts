@@ -1,9 +1,10 @@
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 
 /**
  * Owns every GPU resource the office creates so one call frees them all, and gives the world
- * builder a cheap way to draw hundreds of boxes: each is baked into one vertex-coloured geometry,
+ * builder a cheap way to draw thousands of shapes: each is baked into one vertex-coloured geometry,
  * so the whole static office is a single draw call (and a single shadow draw).
  */
 export class Kit {
@@ -29,6 +30,13 @@ export function mulberry32(seed: number) {
 
 const tmp = new THREE.Color();
 
+/** Rotation applied about the shape's own base point, in the order X, then Z, then Y (yaw last). */
+export interface Turn {
+  rx?: number;
+  ry?: number;
+  rz?: number;
+}
+
 /** Collects coloured primitives and bakes them into one mesh. Positions are the shape's bottom centre. */
 export class Batch {
   private parts: THREE.BufferGeometry[] = [];
@@ -44,18 +52,49 @@ export class Batch {
     geometry.setAttribute('color', new THREE.BufferAttribute(data, 3));
     return geometry;
   }
-  private place(geometry: THREE.BufferGeometry, x: number, y: number, z: number, rotY: number) {
-    if (rotY) geometry.rotateY(rotY);
+  private place(geometry: THREE.BufferGeometry, x: number, y: number, z: number, turn: Turn | number = 0) {
+    const t = typeof turn === 'number' ? { ry: turn } : turn;
+    if (t.rx) geometry.rotateX(t.rx);
+    if (t.rz) geometry.rotateZ(t.rz);
+    if (t.ry) geometry.rotateY(t.ry);
     geometry.translate(x, y, z);
     this.parts.push(geometry);
   }
   get size() {
     return this.parts.length;
   }
-  box(w: number, h: number, d: number, color: THREE.ColorRepresentation, x: number, y: number, z: number, rotY = 0) {
+  box(
+    w: number,
+    h: number,
+    d: number,
+    color: THREE.ColorRepresentation,
+    x: number,
+    y: number,
+    z: number,
+    turn: Turn | number = 0,
+  ) {
     const g = new THREE.BoxGeometry(w, h, d);
     g.translate(0, h / 2, 0);
-    this.place(this.paint(g, color), x, y, z, rotY);
+    this.place(this.paint(g, color), x, y, z, turn);
+  }
+  /** A box with softened edges: cushions, counters, tabletops — anything that should not look cut from foam. */
+  rbox(
+    w: number,
+    h: number,
+    d: number,
+    radius: number,
+    color: THREE.ColorRepresentation,
+    x: number,
+    y: number,
+    z: number,
+    turn: Turn | number = 0,
+  ) {
+    const rounded = new RoundedBoxGeometry(w, h, d, 2, Math.min(radius, w / 2, h / 2, d / 2));
+    // Merging needs every part indexed; the rounded box comes out flat, so weld it again.
+    const g = mergeVertices(rounded);
+    rounded.dispose();
+    g.translate(0, h / 2, 0);
+    this.place(this.paint(g, color), x, y, z, turn);
   }
   cylinder(
     rTop: number,
@@ -66,19 +105,92 @@ export class Batch {
     y: number,
     z: number,
     segments = 14,
+    turn: Turn | number = 0,
   ) {
     const g = new THREE.CylinderGeometry(rTop, rBottom, h, segments);
     g.translate(0, h / 2, 0);
-    this.place(this.paint(g, color), x, y, z, 0);
+    this.place(this.paint(g, color), x, y, z, turn);
   }
-  sphere(r: number, color: THREE.ColorRepresentation, x: number, y: number, z: number, squash = 1) {
-    const g = new THREE.SphereGeometry(r, 10, 8);
+  capsule(
+    r: number,
+    length: number,
+    color: THREE.ColorRepresentation,
+    x: number,
+    y: number,
+    z: number,
+    turn: Turn | number = 0,
+  ) {
+    const g = new THREE.CapsuleGeometry(r, length, 3, 10);
+    g.translate(0, length / 2 + r, 0);
+    this.place(this.paint(g, color), x, y, z, turn);
+  }
+  sphere(
+    r: number,
+    color: THREE.ColorRepresentation,
+    x: number,
+    y: number,
+    z: number,
+    squash = 1,
+    detail: [number, number] = [10, 8],
+    turn: Turn | number = 0,
+  ) {
+    const g = new THREE.SphereGeometry(r, detail[0], detail[1]);
     g.scale(1, squash, 1);
-    this.place(this.paint(g, color), x, y + r * squash, z, 0);
+    g.translate(0, r * squash, 0);
+    this.place(this.paint(g, color), x, y, z, turn);
   }
-  cone(r: number, h: number, color: THREE.ColorRepresentation, x: number, y: number, z: number, segments = 8) {
+  /** An ellipsoid: leaves, boulders, cushions seen from afar. */
+  blob(
+    rx: number,
+    ry: number,
+    rz: number,
+    color: THREE.ColorRepresentation,
+    x: number,
+    y: number,
+    z: number,
+    turn: Turn | number = 0,
+    detail: [number, number] = [9, 7],
+  ) {
+    const g = new THREE.SphereGeometry(1, detail[0], detail[1]);
+    g.scale(rx, ry, rz);
+    g.translate(0, ry, 0);
+    this.place(this.paint(g, color), x, y, z, turn);
+  }
+  cone(
+    r: number,
+    h: number,
+    color: THREE.ColorRepresentation,
+    x: number,
+    y: number,
+    z: number,
+    segments = 8,
+    turn: Turn | number = 0,
+  ) {
     const g = new THREE.ConeGeometry(r, h, segments);
     g.translate(0, h / 2, 0);
+    this.place(this.paint(g, color), x, y, z, turn);
+  }
+  torus(
+    r: number,
+    tube: number,
+    color: THREE.ColorRepresentation,
+    x: number,
+    y: number,
+    z: number,
+    turn: Turn | number = 0,
+  ) {
+    const g = new THREE.TorusGeometry(r, tube, 6, 18);
+    this.place(this.paint(g, color), x, y, z, turn);
+  }
+  /** A flat quad lying on the floor (y is its height): painted lines, rugs, light pools. */
+  flat(w: number, d: number, color: THREE.ColorRepresentation, x: number, y: number, z: number, yaw = 0) {
+    const g = new THREE.PlaneGeometry(w, d);
+    g.rotateX(-Math.PI / 2);
+    this.place(this.paint(g, color), x, y, z, yaw);
+  }
+  disc(r: number, color: THREE.ColorRepresentation, x: number, y: number, z: number, segments = 24) {
+    const g = new THREE.CircleGeometry(r, segments);
+    g.rotateX(-Math.PI / 2);
     this.place(this.paint(g, color), x, y, z, 0);
   }
   /** One mesh from everything collected. The caller owns the returned geometry through the Kit. */
@@ -99,7 +211,7 @@ export class Batch {
   }
 }
 
-/** Text drawn into a canvas texture (floor signs, the wall board). */
+/** Text or a pattern drawn into a canvas texture (signs, the status board, the planted wall). */
 export function textTexture(
   kit: Kit,
   width: number,
@@ -115,4 +227,16 @@ export function textTexture(
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = 4;
   return texture;
+}
+
+/** A soft round spot (white centre fading to clear), used for light pools and contact shadows. */
+export function softSpot(kit: Kit): THREE.CanvasTexture {
+  return textTexture(kit, 128, 128, (ctx, w, h) => {
+    const g = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w / 2);
+    g.addColorStop(0, 'rgba(255,255,255,1)');
+    g.addColorStop(0.45, 'rgba(255,255,255,0.55)');
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+  });
 }

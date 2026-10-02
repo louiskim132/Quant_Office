@@ -104,6 +104,96 @@ test('the rest area fills in a fixed order and its spots are all reachable and d
   assert.equal(rest.spots[0].kind, 'sofa', 'the first person to rest takes a sofa');
 });
 
+test('the default team gets about twice the floor of the 2026-10-01 plan (26 x 13.7 m)', () => {
+  const layout = layoutOf();
+  const { maxX, maxZ } = layout.bounds;
+  assert.ok(maxX * maxZ >= 2 * 26.2 * 13.7 * 0.95, `floor ${(maxX * maxZ).toFixed(0)} m2`);
+  const rows = [...new Set(layout.desks.map(d => d.z))].sort((a, b) => a - b);
+  // From the back of one row's chairs (desk centre + 1.1 m) to the next row's desk edge (centre - 0.4 m).
+  for (let i = 1; i < rows.length; i++)
+    assert.ok(rows[i] - 0.4 - (rows[i - 1] + 1.1) >= 2.4, 'at least 2.4 m behind every chair');
+  assert.ok(layout.corridorWidth >= 3, 'the street is at least 3 m wide');
+});
+
+test('the status board stands beside the director, faces the default camera and blocks no aisle', () => {
+  for (const director of [1, 3, 5]) {
+    const layout = layoutOf(director, 4, 2);
+    const dirs = layout.desks.filter(d => d.zone === 'director');
+    const firstRow = dirs.filter(d => d.z === dirs[0].z);
+    const last = firstRow.at(-1)!;
+    const { board } = layout;
+    assert.ok(Math.abs(board.z - last.z) < 0.5, 'in the director row');
+    assert.ok(board.x > last.x + 1.6 && board.x - last.x < 3.6, 'right beside the last director desk');
+    assert.ok(Math.abs(board.yaw - Math.PI / 4) < 1e-9, 'turned toward the default camera');
+    assert.ok(board.x + 1.4 < layout.workX1, 'inside the work area');
+    for (const d of layout.desks) assert.ok(Math.hypot(d.x - board.x, d.z - board.z) > 1.6, 'clear of every desk');
+    assert.ok(board.z + 1.2 < last.aisleZ, 'clear of the row aisle');
+  }
+});
+
+test('street plants and dividers keep off every line people walk', () => {
+  for (const layout of [layoutOf(), layoutOf(1, 4, 14, 4, 10)]) {
+    const crossings = [...layout.desks.map(d => d.aisleZ), ...layout.rooms.map(r => r.laneZ), layout.rest.doorZ];
+    assert.ok(layout.streetPlants.length >= 2);
+    for (const p of layout.streetPlants) {
+      assert.ok(Math.abs(p.x - layout.corridorX) > 0.8, 'off the street centre line');
+      for (const c of crossings) assert.ok(Math.abs(p.z - c) >= 1.2, 'not beside a crossing');
+    }
+    for (const dv of layout.dividers) {
+      assert.ok(dv.x1 < layout.corridorX - 1.5);
+      for (const d of layout.desks) assert.ok(Math.abs(dv.z - d.aisleZ) > 0.6 && Math.abs(dv.z - d.z) > 1.0);
+    }
+  }
+});
+
+test('no seat sits in the strip the roof edge hides from the default camera', () => {
+  for (const layout of [layoutOf(), layoutOf(1, 4, 9, 3, 12)]) {
+    const { maxX, maxZ } = layout.bounds;
+    for (const spot of layout.rest.spots)
+      assert.ok(spot.seat.z <= maxZ - 2.4, 'lounge seats keep back from the front glass');
+    for (const room of layout.rooms)
+      for (const s of room.seats) assert.ok(s.seat.x <= maxX - 2.4, 'meeting chairs keep back from the east glass');
+    for (const d of layout.desks) assert.ok(d.seat.z <= maxZ - 2.4);
+  }
+});
+
+test('leaving any lounge spot never walks through its furniture', () => {
+  const layout = layoutOf(1, 4, 6);
+  const { rest } = layout;
+  type Rect = { x0: number; x1: number; z0: number; z1: number; name: string };
+  const box = (x: number, z: number, hx: number, hz: number, name: string): Rect => ({
+    x0: x - hx,
+    x1: x + hx,
+    z0: z - hz,
+    z1: z + hz,
+    name,
+  });
+  const sofa = rest.sofas[1];
+  const furniture: Rect[] = [
+    box(sofa.x, sofa.z - 0.1, 1.6, 0.48, 'sofa'),
+    box(rest.coffee.x, rest.coffee.z, 0.7, 0.35, 'coffee table'),
+    box(rest.round.x, rest.round.z, 0.45, 0.45, 'round table'),
+    box(rest.table.x, rest.table.z, rest.table.length / 2, 0.76, 'ping-pong'),
+    { x0: rest.counter.x0, x1: rest.counter.x1, z0: rest.counter.z - 0.36, z1: rest.counter.z + 0.36, name: 'counter' },
+    ...rest.chairs.map((c, i) => box(c.x, c.z, 0.43, 0.43, `armchair ${i}`)),
+  ];
+  const hits = (a: { x: number; z: number }, b: { x: number; z: number }, r: Rect) => {
+    for (let i = 0; i <= 40; i++) {
+      const x = a.x + ((b.x - a.x) * i) / 40;
+      const z = a.z + ((b.z - a.z) * i) / 40;
+      if (x > r.x0 && x < r.x1 && z > r.z0 && z < r.z1) return true;
+    }
+    return false;
+  };
+  for (const spot of rest.spots)
+    for (let k = 1; k < spot.exit.length; k++)
+      for (const r of furniture)
+        assert.ok(
+          !hits(spot.exit[k - 1], spot.exit[k], r),
+          `spot ${spot.index} (${spot.kind}) leg ${k} crosses the ${r.name}`,
+        );
+});
+
 const desk = (layout: OfficeLayout, i: number): Place => ({ kind: 'desk', desk: layout.desks[i] });
 const chair = (layout: OfficeLayout, t: number, s: number): Place => ({
   kind: 'room',

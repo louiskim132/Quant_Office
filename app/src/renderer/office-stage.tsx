@@ -426,12 +426,17 @@ export function Office3D({
           </span>
         </aside>
       )}
-      <div className="stage-tools" role="toolbar" aria-label="Office view controls">
+      <div
+        className="stage-tools"
+        role="toolbar"
+        aria-label="Office view controls"
+        data-menu={menuOpen ? 'open' : 'closed'}
+      >
         <div className="tool-slot" ref={menu}>
           <button
             type="button"
             className="tool"
-            aria-label="Agents"
+            aria-label="Agents on the floor"
             aria-haspopup="menu"
             aria-expanded={menuOpen}
             data-open={menuOpen ? 'true' : 'false'}
@@ -445,7 +450,7 @@ export function Office3D({
             </span>
           </button>
           {menuOpen && (
-            <div className="agent-menu" role="menu" aria-label="Agents">
+            <div className="agent-menu" role="menu" aria-label="Agents on the floor">
               {ordered.length > 8 && (
                 <label className="agent-search">
                   <Search size={14} aria-hidden="true" />
