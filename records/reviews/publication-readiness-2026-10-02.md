@@ -52,3 +52,39 @@ Independent read-only reviews identified and drove the execution fixes above. Ta
 - **Provider-dependent features:** R5 hosted operation evidence and complete live Devin ACP lifecycle remain unverified and retain their existing limitations. Colab is excluded by the user's earlier instruction. These are scoped capability gaps, not facts local fixtures can prove.
 
 Technical defects found in this revision are repaired locally, but full official-publication readiness cannot be declared while the real-account and clean-OS gates remain unverified. Legal review is excluded from this assessment.
+
+## Bounded residual acceptance follow-up
+
+The declared local-agent scope supports Claude Code, Codex/OpenAI and Devin; all three need isolated acceptance unless the user explicitly narrows release claims. Existing office-user sign-ins do not establish QRO-Agent authentication. All three CLI executables are installed. The prior isolated profile contains historical signed-in observations, but fresh testing on 2026-10-02 could not start its host: **the saved Windows account password no longer matches QRO-Agent**. An actual hardened scratch run recorded boundary FAIL (0/5), provider status errors, and no agents/jobs. No password was reset or provider prompt submitted. A separate read-only DPAPI check of the current office profile found no readable agent credential; it was not copied or changed. Evidence: `app/test-output/residual-isolation-status.json`, `app/test-output/residual-current-agent-status.json`. Historical sign-ins may still exist in QRO-Agent's provider profile; after credential synchronization, check first and sign in only where needed.
+
+The host is **Windows 11 Home, build 26300**. Read-only `Win32_OptionalFeature` inventory exposes enabled `VirtualMachinePlatform`, but no Sandbox/Hyper-V feature; Sandbox/vmconnect executables, Hyper-V/VirtualBox/VMware services and installed VM tools were not found. DISM-backed `Get-WindowsOptionalFeature` queries require elevation and could not run in this session. VirtualMachinePlatform alone is not a clean Windows guest. No usable existing clean Windows environment was found, and no OS feature installation, upgrade or reboot was performed.
+
+A prepared instrumented scratch harness is retained at `app/test-output/isolation-publication-harness`. Only its inspector fuse is enabled for Playwright; it is explicitly **not a publication artifact**. Its app runtime matches the hardened candidate source; the release ZIP remains untouched. Fresh-harness startup/close was exercised without setup/sign-in/dispatch. This exposed and repaired a stale initial navigation: the harness now opens Settings → Agent isolation before finding setup controls. Targeted helper tests 3/3 and typecheck pass. The final independent medium-effort reviewer found no remaining concrete runtime teardown/transition defect.
+
+Minimal account acceptance steps, from the candidate `app` directory:
+
+```powershell
+$acceptanceRoot = (Resolve-Path 'test-output/isolation-publication-harness').Path
+node node_modules/tsx/dist/cli.mjs scripts/isolation-signin-ui.ts $acceptanceRoot
+```
+
+In its visible scratch window, confirm **Set up** and the Windows administrator prompt. This synchronizes the scratch credential with the existing global QRO-Agent account; it does not import office-user OAuth tokens. Check each provider first, then use its official QRO-Agent sign-in only if missing. Create/bind one standard local CLI test profile per provider through the UI (for example Test worker 1 for Claude, Test worker 2 for Codex, Test dir 1 for Devin), choosing models actually available to that account. No API key or hosted route is needed. Check that the provider's included subscription allowance permits these synthetic tests without additional charges.
+
+From a second PowerShell in the same `app` directory:
+
+```powershell
+$acceptanceRoot = (Resolve-Path 'test-output/isolation-publication-harness').Path
+'{"op":"check"}' | Set-Content -LiteralPath (Join-Path $acceptanceRoot 'action.json')
+Get-Content -LiteralPath (Join-Path $acceptanceRoot 'checks.json')
+# One operation at a time; wait for its report before sending the next.
+'{"op":"dispatch","provider":"claude"}' | Set-Content -LiteralPath (Join-Path $acceptanceRoot 'action.json')
+Get-Content -LiteralPath (Join-Path $acceptanceRoot 'dispatch-claude.json')
+# Repeat dispatch/check of report for provider "openai", then "devin".
+'{"op":"close"}' | Set-Content -LiteralPath (Join-Path $acceptanceRoot 'action.json')
+```
+
+Each dispatch report must have `accepted: true`; failure/NOT_RUN is not acceptance. Provider operations require a working account and nonpaid allowance, and cannot be completed by manufacturing receipts.
+
+For clean Windows acceptance, use an independently provisioned clean Windows machine/VM and the exact hardened ZIP plus trusted verifier. Compare the ZIP digest, extract to a new folder, run `verify-portable.ps1`, launch/restart, create a synthetic project, perform manual version-folder update/rollback, and delete only the binary folder while preserving the data. Record OS/build, standard-user behavior, exact artifact hashes and results; test readable per-machine runtime and QRO-Agent setup separately if that mode is claimed. [PORTABLE-RELEASE.md](../../docs/PORTABLE-RELEASE.md) provides commands and the required observations.
+
+**Policy distinction:** the existing C11 exit criterion calls for a **signed installer on a clean Windows machine**. The user's free-work authorization reopens technical preparation; it does not explicitly waive that criterion. This unsigned portable candidate is a prepared alternative, not completion of the signed-installer gate. Either satisfy that gate with a trusted identity/installer supplied through an eligible free resource, or obtain an explicit user decision changing the declared distribution scope. Never label the unsigned ZIP a signed release.

@@ -22,6 +22,10 @@ let app = await electron.launch({
 let page = await app.firstWindow();
 await page.getByRole('heading', { name: 'The office', exact: true }).waitFor();
 await page.getByRole('button', { name: 'Settings', exact: true }).click();
+await page
+  .getByRole('navigation', { name: 'Settings sections' })
+  .getByRole('button', { name: /^Agent isolation/ })
+  .click();
 await app.evaluate(({ BrowserWindow }) => {
   BrowserWindow.getAllWindows()[0].show();
   BrowserWindow.getAllWindows()[0].focus();
