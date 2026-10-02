@@ -658,14 +658,18 @@ function register() {
     noInput(value);
     await exec?.stopAll();
     await acp?.stopAll();
-    await setupAgentIsolation({
-      userData: app.getPath('userData'),
-      secrets,
-      toolPath: provider => subscriptions.toolPath(provider),
-      log: line => writeLog(logDir(), 'WARN', line),
-    });
-    // The credential just landed — rebuild so the exec adapter picks up the isolated spawn surface.
-    controller = buildController();
+    try {
+      await setupAgentIsolation({
+        userData: app.getPath('userData'),
+        secrets,
+        toolPath: provider => subscriptions.toolPath(provider),
+        log: line => writeLog(logDir(), 'WARN', line),
+      });
+    } finally {
+      // Cancelled elevation and failed credential writes must also replace the stopped adapters.
+      // Rebuild from actual persisted intent, never assume setup succeeded.
+      controller = buildController();
+    }
     changed();
     return { ok: true };
   });
@@ -673,10 +677,12 @@ function register() {
     noInput(value);
     await exec?.stopAll();
     await acp?.stopAll();
-    secrets.removeAgentUser();
-    // Rebuild drops the isolated spawn surface; the Windows account itself is left in place by
-    // design (removing it is the user's Windows admin action, never a silent office effect).
-    controller = buildController();
+    try {
+      secrets.removeAgentUser();
+    } finally {
+      // A failed disable keeps its persisted mode and receives fresh execution adapters too.
+      controller = buildController();
+    }
     changed();
     return { ok: true };
   });
