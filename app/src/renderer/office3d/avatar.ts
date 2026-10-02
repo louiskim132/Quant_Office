@@ -29,6 +29,10 @@ export class Avatar {
   /** Seated figures lean into the keyboard while working and sit still otherwise. */
   typing = false;
   talking = false;
+  /** A standing figure swings a paddle (ping-pong in the rest area). */
+  playing = false;
+  /** A seated figure on the sofa leans back, hands loose. */
+  resting = false;
 
   constructor(
     kit: Kit,
@@ -119,11 +123,21 @@ export class Avatar {
       this.head.rotation.x = 0;
       return;
     }
+    if (this.pose === 'standing' && this.playing && animate) {
+      this.armR.rotation.x = -1.15 + Math.sin(t * 7) * 0.4;
+      this.armL.rotation.x = -0.35;
+      this.body.position.y = 0.8 + Math.abs(Math.sin(t * 3.5)) * 0.02;
+      this.head.rotation.y = Math.sin(t * 3.5) * 0.25;
+      return;
+    }
     if (this.pose === 'seated' && animate) {
       if (this.typing) {
         this.armL.rotation.x = -1.05 + Math.sin(t * 11) * 0.05;
         this.armR.rotation.x = -1.05 + Math.sin(t * 9 + 1.7) * 0.05;
         this.head.rotation.x = 0.1 + Math.sin(t * 1.3) * 0.02;
+      } else if (this.resting) {
+        this.head.rotation.x = 0.12 + Math.sin(t * 0.7) * 0.03;
+        this.armL.rotation.x = this.armR.rotation.x = -0.6;
       } else if (this.talking) {
         this.head.rotation.x = Math.sin(t * 2.2) * 0.06;
         this.head.rotation.y = Math.sin(t * 0.9) * 0.25;

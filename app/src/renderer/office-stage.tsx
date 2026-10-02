@@ -11,7 +11,7 @@ import {
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
-import type { Agent, AppState } from '../shared/types';
+import type { AccountConnection, Agent, AppState } from '../shared/types';
 import type { OfficeActivity } from '../shared/activity';
 import './office3d.css';
 import { avatarLook } from './avatar';
@@ -23,7 +23,17 @@ import { OfficeChat } from './office-chat';
 import { useBoolPref, usePref } from './prefs';
 import { OfficeEngine, type AgentVisual } from './office3d/engine';
 import { buildLayout, tableSeatDemand } from './office3d/layout';
-import { assignDesks, assignRooms, locate, stageLine, stageSummary, STATUS_VAR, typesWhile } from './office3d/visuals';
+import {
+  assignDesks,
+  assignRooms,
+  locate,
+  remainingAllowance,
+  shouldRest,
+  stageLine,
+  stageSummary,
+  STATUS_VAR,
+  typesWhile,
+} from './office3d/visuals';
 
 const rootTheme = (): 'dark' | 'light' => (document.documentElement.dataset.theme === 'light' ? 'light' : 'dark');
 const rootReduced = () =>
@@ -81,6 +91,7 @@ export function OfficeLive({
         activity={activity}
         now={now}
         requests={state.requests}
+        connections={state.connections}
         onAgent={onAgent}
         selectedId={selectedId}
         theme={state.settings.theme === 'light' ? 'light' : 'dark'}
@@ -100,6 +111,7 @@ export function Office3D({
   activity,
   now,
   requests,
+  connections,
   onAgent,
   selectedId,
   theme,
@@ -113,6 +125,8 @@ export function Office3D({
   activity: OfficeActivity[];
   now: number;
   requests: AppState['requests'];
+  /** Recorded sign-in observations; an agent nearly out of allowance rests in the lounge. */
+  connections?: AccountConnection[];
   onAgent: (id: string) => void;
   selectedId: string | null;
   /** From the saved settings, so the first build already uses the right palette. */
@@ -132,6 +146,7 @@ export function Office3D({
   const tags = useRef(new Map<number, HTMLElement>());
   const slots = useRef<string[]>([]);
   const rooms = useRef<(string | null)[]>([]);
+  const lounge = useRef<(string | null)[]>([]);
   const pickRef = useRef(onAgent);
   pickRef.current = onAgent;
   const [names, setNames] = useBoolPref('office-names', true);
@@ -168,6 +183,19 @@ export function Office3D({
     const id = act.meetingId ?? 'meeting';
     meetingPeople.set(id, [...(meetingPeople.get(id) ?? []), a.id]);
   }
+  // Resting: nearly out of allowance and not mid-task or mid-meeting. Spots stay put while they rest.
+  const allowance = new Map(ordered.map(a => [a.id, remainingAllowance(a, connections, now)] as const));
+  const restingIds = ordered
+    .filter(a =>
+      shouldRest(
+        views.get(a.id)!.status,
+        allowance.get(a.id) ?? null,
+        activity.some(x => x.agentId === a.id && x.kind === 'MEETING'),
+      ),
+    )
+    .map(a => a.id);
+  lounge.current = assignRooms(lounge.current, restingIds);
+  const loungeSlots = lounge.current;
   const seatInMeeting = new Map<string, number>();
   for (const ids of meetingPeople.values()) ids.forEach((id, i) => seatInMeeting.set(id, i));
 
@@ -196,7 +224,7 @@ export function Office3D({
     const view = views.get(agent.id)!;
     const act = activity.find(x => x.agentId === agent.id);
     const look = avatarLook(agent.id, agent.name);
-    const location = locate(agent, desks, act, roomSlots, seatInMeeting);
+    const location = locate(agent, desks, act, roomSlots, seatInMeeting, loungeSlots);
     return {
       id: agent.id,
       colors: { shirt: look.shirt, hair: look.hair, skin: look.skin },
@@ -205,7 +233,8 @@ export function Office3D({
       home: desks.get(agent.id) ?? 0,
       location,
       typing: location.kind === 'desk' && typesWhile(view.status),
-      talking: location.kind === 'table',
+      talking: location.kind === 'room',
+      resting: location.kind === 'rest',
     };
   });
   const visualsKey = JSON.stringify(visuals);
@@ -215,7 +244,7 @@ export function Office3D({
   const busyKey = [...busyTables].join(',');
   const layoutKey = JSON.stringify([
     layout.desks.map(d => [d.zone, d.x, d.z]),
-    layout.tables.map(t => [t.x, t.z, t.seats.length]),
+    layout.rooms.map(t => [t.x, t.z, t.seats.length]),
   ]);
   const roomName = (id: string) => (requests ?? []).find(r => r.id === id)?.name ?? 'Conversation in progress';
 
@@ -258,7 +287,7 @@ export function Office3D({
     engine.current?.setLayout(layout);
     engine.current?.setAgents(JSON.parse(visualsKey));
     engine.current?.setBoard(JSON.parse(summaryKey));
-    engine.current?.setBusyTables(busyTables);
+    engine.current?.setBusyRooms(busyTables);
     engine.current?.setSelected(selectedId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [layoutKey]);
@@ -269,7 +298,7 @@ export function Office3D({
     engine.current?.setBoard(JSON.parse(summaryKey));
   }, [summaryKey]);
   useEffect(() => {
-    engine.current?.setBusyTables(busyTables);
+    engine.current?.setBusyRooms(busyTables);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [busyKey]);
   useEffect(() => {
@@ -287,7 +316,8 @@ export function Office3D({
 
   const locationOf = (agent: Agent) => {
     const a = activity.find(x => x.agentId === agent.id);
-    return a?.kind === 'MEETING' ? `room:${a.meetingId ?? 'meeting'}` : 'seat';
+    if (a?.kind === 'MEETING') return `room:${a.meetingId ?? 'meeting'}`;
+    return loungeSlots.includes(agent.id) ? 'rest' : 'seat';
   };
   const toggleFullscreen = () => {
     const el = stage.current;
@@ -353,6 +383,11 @@ export function Office3D({
                 {view.requestName && <span>{view.requestName}</span>}
                 {view.elapsed && <span>Elapsed {view.elapsed}</span>}
                 <span className="tag-evidence">{view.evidence}</span>
+                {loungeSlots.includes(agent.id) && (
+                  <span className="tag-evidence">
+                    Resting in the rest area — {Math.round(allowance.get(agent.id) ?? 0)}% of the allowance left
+                  </span>
+                )}
                 {act?.kind === 'UNKNOWN' && <span className="tag-evidence">{act.detail}</span>}
               </span>
             </button>

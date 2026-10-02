@@ -49,6 +49,9 @@ export class Batch {
     geometry.translate(x, y, z);
     this.parts.push(geometry);
   }
+  get size() {
+    return this.parts.length;
+  }
   box(w: number, h: number, d: number, color: THREE.ColorRepresentation, x: number, y: number, z: number, rotY = 0) {
     const g = new THREE.BoxGeometry(w, h, d);
     g.translate(0, h / 2, 0);
@@ -79,15 +82,19 @@ export class Batch {
     this.place(this.paint(g, color), x, y, z, 0);
   }
   /** One mesh from everything collected. The caller owns the returned geometry through the Kit. */
-  build(kit: Kit, material: THREE.Material): THREE.Mesh {
+  build(
+    kit: Kit,
+    material: THREE.Material,
+    shadows: { cast: boolean; receive: boolean } = { cast: true, receive: true },
+  ): THREE.Mesh {
     const merged = mergeGeometries(this.parts, false);
     for (const part of this.parts) part.dispose();
     this.parts = [];
     if (!merged) throw new Error('office3d: nothing to merge');
     kit.own(merged);
     const mesh = new THREE.Mesh(merged, material);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
+    mesh.castShadow = shadows.cast;
+    mesh.receiveShadow = shadows.receive;
     return mesh;
   }
 }

@@ -1,9 +1,10 @@
 import * as THREE from 'three';
+import { buildEnvironment, type Theme } from './environment';
 import { Batch, Kit, mulberry32, textTexture } from './kit';
-import type { OfficeLayout } from './layout';
+import { ROOM_HEIGHT, WALL_HEIGHT, type MeetingRoom, type OfficeLayout, type Vec2 } from './layout';
 
+export type { Theme } from './environment';
 export type MonitorState = 'off' | 'working' | 'stalled' | 'unknown' | 'away' | 'done' | 'failed';
-export type Theme = 'dark' | 'light';
 
 export interface BoardSummary {
   working: number;
@@ -12,33 +13,34 @@ export interface BoardSummary {
   meeting: number;
   total: number;
 }
-export interface WallHandle {
-  group: THREE.Group;
-  /** Horizontal outward normal (x, z): the wall is "near" when the camera sits on this side. */
-  outward: THREE.Vector2;
-  details: THREE.Object3D;
-  tall: number;
-  short: number;
-  /** Current eased height ratio, 1 = full height. */
-  amount: number;
+export interface PingPong {
+  ball: THREE.Mesh;
+  from: Vec2;
+  to: Vec2;
+  /** Table-top height. */
+  y: number;
 }
 export interface World {
   group: THREE.Group;
   screens: THREE.Mesh[];
-  walls: WallHandle[];
   setMonitor(deskIndex: number, state: MonitorState): void;
   setBoard(summary: BoardSummary): void;
-  /** Disc under each meeting table, so a busy room can be lit. */
-  tableDiscs: THREE.Mesh[];
-  discMaterials: { idle: THREE.MeshStandardMaterial; busy: THREE.MeshStandardMaterial };
+  /** The carpet of each meeting room, so a busy room can be lit. */
+  roomFloors: THREE.Mesh[];
+  floorMaterials: { idle: THREE.MeshStandardMaterial; busy: THREE.MeshStandardMaterial };
+  pingPong: PingPong;
 }
 
-const FLOOR_PLANKS = ['#ead9b6', '#e4d0a8', '#eedfbf', '#dfc99d', '#e8d6b0'];
-const CHAIR_COLORS = ['#6a6fb5', '#5a79b8', '#7b64a8', '#4f8a99', '#8a6aa8'];
-const WOOD = '#b98d5f';
-const WOOD_DARK = '#8f6a45';
-const WALL_FACE = '#9aa0ab';
-const WALL_CAP = '#d2d6dc';
+// An all-white interior: pale oak floor, white desks and walls, graphite and soft grey seating,
+// with a few saturated accents (armchairs, plants) so it reads as a lived-in office.
+const FLOOR_PLANKS = ['#e6d2ae', '#e0cba5', '#eadab9', '#dcc59c', '#e4d0ab'];
+const CHAIR_COLORS = ['#3a4250', '#434d63', '#3d5654', '#524a63', '#484d57'];
+const WHITE = '#f8f8f6';
+const LIGHT_GREY = '#e8eaed';
+const STEEL = '#c3c9d1';
+const GRAPHITE = '#2b3037';
+const FRAME_WHITE = '#f3f5f7';
+const INK = 'rgba(70, 78, 90, 0.62)';
 
 function parquet(kit: Kit): THREE.CanvasTexture {
   const rand = mulberry32(7);
@@ -51,7 +53,7 @@ function parquet(kit: Kit): THREE.CanvasTexture {
         const x = col * plankL - offset;
         ctx.fillStyle = FLOOR_PLANKS[Math.floor(rand() * FLOOR_PLANKS.length)];
         ctx.fillRect(x, row * plankW, plankL, plankW);
-        ctx.strokeStyle = 'rgba(120, 88, 48, 0.10)';
+        ctx.strokeStyle = 'rgba(150, 120, 80, 0.07)';
         ctx.lineWidth = 1;
         for (let g = 0; g < 3; g++) {
           const gy = row * plankW + 10 + rand() * (plankW - 20);
@@ -60,7 +62,7 @@ function parquet(kit: Kit): THREE.CanvasTexture {
           ctx.lineTo(x + plankL - rand() * 30, gy + (rand() - 0.5) * 3);
           ctx.stroke();
         }
-        ctx.strokeStyle = 'rgba(100, 72, 38, 0.34)';
+        ctx.strokeStyle = 'rgba(140, 110, 70, 0.2)';
         ctx.lineWidth = 2;
         ctx.strokeRect(x + 1, row * plankW + 1, plankL - 2, plankW - 2);
       }
@@ -119,45 +121,127 @@ function monitorTexture(kit: Kit, state: MonitorState): THREE.CanvasTexture {
   });
 }
 
+// ---- walls ------------------------------------------------------------------------------------
+
+type Axis = 'x' | 'z';
+interface Gap {
+  from: number;
+  to: number;
+  /** Clear height of the opening; glass continues above it. */
+  h: number;
+}
+interface Run {
+  axis: Axis;
+  /** The wall's constant coordinate (z for an x-run, x for a z-run). */
+  fixed: number;
+  from: number;
+  to: number;
+  h: number;
+  sill: number;
+  header: number;
+  step: number;
+  frame: string;
+  post: number;
+  thick: number;
+  gaps?: Gap[];
+  frostBand?: boolean;
+}
+
+function seg(
+  b: Batch,
+  axis: Axis,
+  fixed: number,
+  t0: number,
+  t1: number,
+  y0: number,
+  y1: number,
+  thick: number,
+  color: string,
+) {
+  if (t1 - t0 < 1e-4 || y1 - y0 < 1e-4) return;
+  if (axis === 'x') b.box(t1 - t0, y1 - y0, thick, color, (t0 + t1) / 2, y0, fixed);
+  else b.box(thick, y1 - y0, t1 - t0, color, fixed, y0, (t0 + t1) / 2);
+}
+
+/**
+ * A glass curtain wall: an opaque sill, a header band and slim posts, with transparent glass
+ * between them. Gaps leave an opening (a door) with glass kept above it. The wall never changes
+ * height, so the whole office stays visible from every side.
+ */
+function wallRun(solid: Batch, glass: Batch, frost: Batch | null, r: Run) {
+  const gaps = [...(r.gaps ?? [])].sort((a, c) => a.from - c.from);
+  const pieces: [number, number][] = [];
+  let cursor = r.from;
+  for (const g of gaps) {
+    if (g.from > cursor) pieces.push([cursor, g.from]);
+    cursor = g.to;
+  }
+  if (cursor < r.to) pieces.push([cursor, r.to]);
+  const top = r.h - r.header;
+  seg(solid, r.axis, r.fixed, r.from, r.to, top, r.h, r.thick, r.frame);
+  for (const [a, c] of pieces) {
+    if (r.sill > 0) seg(solid, r.axis, r.fixed, a, c, 0, r.sill, r.thick, r.frame);
+    seg(glass, r.axis, r.fixed, a, c, r.sill, top, 0.03, '#d9eefa');
+    if (r.frostBand && frost) seg(frost, r.axis, r.fixed, a, c, 0.95, 1.25, 0.045, '#ffffff');
+    const n = Math.max(1, Math.round((c - a) / r.step));
+    for (let i = 0; i <= n; i++) {
+      const p = a + ((c - a) * i) / n;
+      seg(solid, r.axis, r.fixed, p - r.post / 2, p + r.post / 2, r.sill, top, r.thick * 0.7, r.frame);
+    }
+  }
+  for (const g of gaps) {
+    seg(glass, r.axis, r.fixed, g.from, g.to, g.h, top, 0.03, '#d9eefa');
+    for (const p of [g.from, g.to])
+      seg(solid, r.axis, r.fixed, p - r.post / 2, p + r.post / 2, 0, top, r.thick * 0.7, r.frame);
+  }
+}
+
 export function buildWorld(layout: OfficeLayout, kit: Kit, theme: Theme): World {
   const root = new THREE.Group();
   const { minX, maxX, minZ, maxZ } = layout.bounds;
   const width = maxX - minX;
   const depth = maxZ - minZ;
+  const door = layout.entrance.x;
 
-  // Floor.
+  // The building's slab: a crisp rectangle, stepped above the plaza.
+  const b = new Batch();
+  const glass = new Batch();
+  const frost = new Batch();
+  b.box(width + 0.5, 0.3, depth + 0.5, '#f3f4f6', minX + width / 2, -0.31, minZ + depth / 2);
+
+  // Floor: pale oak everywhere, with a stone-tile corridor and a lobby mat.
   const floorTex = parquet(kit);
   floorTex.repeat.set(width / 8, depth / 8);
   const floor = new THREE.Mesh(
     kit.own(new THREE.PlaneGeometry(width, depth)),
-    kit.own(new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.92, metalness: 0 })),
+    kit.own(new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.9, metalness: 0 })),
   );
   floor.rotation.x = -Math.PI / 2;
   floor.position.set(minX + width / 2, 0, minZ + depth / 2);
   floor.receiveShadow = true;
   root.add(floor);
+  b.box(2.4, 0.012, depth, '#eceff2', layout.corridorX, 0, depth / 2);
+  for (const edge of [-1.2, 1.2]) b.box(0.05, 0.014, depth, '#d3d8de', layout.corridorX + edge, 0, depth / 2);
+  b.box(2.6, 0.02, 1.0, '#4b525c', door, 0, maxZ - 0.9);
 
-  const b = new Batch();
-
-  // Meeting-wing rug and the director's rug define their zones without walls.
+  // Director's rug.
   const director = layout.desks.filter(d => d.zone === 'director');
   if (director.length) {
     const cx = (Math.min(...director.map(d => d.x)) + Math.max(...director.map(d => d.x))) / 2;
     const rw = Math.max(...director.map(d => d.x)) - Math.min(...director.map(d => d.x)) + 3.6;
-    b.box(rw, 0.012, 3.5, '#55627a', cx, 0, director[0].z + 0.55);
-    b.box(rw - 0.3, 0.016, 3.2, '#66748e', cx, 0, director[0].z + 0.55);
+    b.box(rw, 0.012, 3.5, '#dfe4ea', cx, 0, director[0].z + 0.55);
+    b.box(rw - 0.3, 0.016, 3.2, '#e9edf2', cx, 0, director[0].z + 0.55);
   }
 
   // Desks, monitors and chairs.
   const screenSpots: { x: number; y: number; z: number }[] = [];
   layout.desks.forEach((d, i) => {
-    const wood = d.zone === 'director' ? '#a47647' : WOOD;
-    b.box(1.6, 0.05, 0.8, wood, d.x, 0.7, d.z);
-    b.box(0.05, 0.7, 0.74, WOOD_DARK, d.x - 0.76, 0, d.z);
-    b.box(0.05, 0.7, 0.74, WOOD_DARK, d.x + 0.76, 0, d.z);
-    b.box(1.5, 0.42, 0.03, WOOD_DARK, d.x, 0.28, d.z - 0.33);
-    b.box(0.42, 0.56, 0.68, '#a47e57', d.x + 0.52, 0.02, d.z);
-    // Monitor: foot, neck, frame. The lit screen is a separate plane so its state can change.
+    const top = d.zone === 'director' ? '#efe3cf' : WHITE;
+    b.box(1.6, 0.05, 0.8, top, d.x, 0.7, d.z);
+    b.box(0.05, 0.7, 0.74, STEEL, d.x - 0.76, 0, d.z);
+    b.box(0.05, 0.7, 0.74, STEEL, d.x + 0.76, 0, d.z);
+    b.box(1.5, 0.42, 0.03, LIGHT_GREY, d.x, 0.28, d.z - 0.33);
+    b.box(0.42, 0.56, 0.68, LIGHT_GREY, d.x + 0.52, 0.02, d.z);
     b.box(0.22, 0.015, 0.16, '#2a3038', d.x, 0.75, d.z - 0.2);
     b.box(0.045, 0.2, 0.045, '#2a3038', d.x, 0.765, d.z - 0.2);
     b.box(0.6, 0.36, 0.04, '#1c2128', d.x, 0.96, d.z - 0.2);
@@ -165,7 +249,6 @@ export function buildWorld(layout: OfficeLayout, kit: Kit, theme: Theme): World 
     b.box(0.38, 0.02, 0.13, '#cfd5da', d.x, 0.75, d.z + 0.12);
     b.box(0.06, 0.02, 0.09, '#cfd5da', d.x + 0.3, 0.75, d.z + 0.14);
     b.cylinder(0.04, 0.035, 0.09, i % 2 ? '#e8e2d4' : '#e9915b', d.x + 0.58, 0.75, d.z - 0.05, 10);
-    // Chair.
     const cc = CHAIR_COLORS[(d.zone === 'director' ? 4 : i) % CHAIR_COLORS.length];
     const sx = d.seat.x;
     const sz = d.seat.z;
@@ -176,41 +259,88 @@ export function buildWorld(layout: OfficeLayout, kit: Kit, theme: Theme): World 
     b.box(0.07, 0.03, 0.52, '#30363f', sx, 0.04, sz + 0.04);
   });
 
-  // Meeting tables with chairs and a carpet disc each.
-  const tableDiscs: THREE.Mesh[] = [];
-  const discMaterial = kit.own(new THREE.MeshStandardMaterial({ color: '#8798b8', roughness: 1 }));
-  const discBusy = kit.own(
-    new THREE.MeshStandardMaterial({ color: '#7fb2ee', roughness: 1, emissive: '#2a4f86', emissiveIntensity: 0.6 }),
+  // Meeting rooms: glass-walled, each with its own long table, chairs and a whiteboard.
+  const roomFloors: THREE.Mesh[] = [];
+  const idleFloor = kit.own(new THREE.MeshStandardMaterial({ color: '#dde1e7', roughness: 1 }));
+  const busyFloor = kit.own(
+    new THREE.MeshStandardMaterial({ color: '#cfe2f8', roughness: 1, emissive: '#5b8fd0', emissiveIntensity: 0.28 }),
   );
-  for (const t of layout.tables) {
-    const disc = new THREE.Mesh(
-      kit.own(new THREE.CylinderGeometry(t.radius + 1.15, t.radius + 1.15, 0.014, 40)),
-      discMaterial,
+  const pingPongSpec = layout.rest.table;
+  for (const room of layout.rooms) {
+    const carpet = new THREE.Mesh(
+      kit.own(new THREE.BoxGeometry(room.x1 - room.x0, 0.016, room.z1 - room.z0)),
+      idleFloor,
     );
-    disc.position.set(t.x, 0.007, t.z);
-    disc.receiveShadow = true;
-    root.add(disc);
-    tableDiscs.push(disc);
-    b.cylinder(0.12, 0.2, 0.7, '#4a3b2c', t.x, 0, t.z, 12);
-    b.cylinder(t.radius, t.radius, 0.06, '#c99c6a', t.x, 0.7, t.z, 36);
-    b.cylinder(t.radius - 0.04, t.radius - 0.04, 0.012, '#d9b080', t.x, 0.762, t.z, 36);
-    t.seats.forEach((s, i) => {
-      const cc = CHAIR_COLORS[(i + t.index) % CHAIR_COLORS.length];
-      b.box(0.46, 0.07, 0.46, cc, s.seat.x, 0.43, s.seat.z, s.yaw);
-      // Backrest behind the sitter (away from the table centre).
-      const bx = s.seat.x - Math.sin(s.yaw) * 0.22;
-      const bz = s.seat.z - Math.cos(s.yaw) * 0.22;
-      b.box(0.46, 0.36, 0.05, cc, bx, 0.5, bz, s.yaw);
-      b.cylinder(0.03, 0.03, 0.28, '#30363f', s.seat.x, 0.15, s.seat.z, 8);
-    });
+    carpet.position.set((room.x0 + room.x1) / 2, 0.008, (room.z0 + room.z1) / 2);
+    carpet.receiveShadow = true;
+    root.add(carpet);
+    roomFloors.push(carpet);
+    meetingRoom(b, glass, frost, room);
   }
 
-  // Wing: lounge, ping-pong, kitchenette, shelves, server closet.
-  amenities(b, layout);
-  plants(b, layout);
+  // The rest area.
+  restArea(b, glass, frost, layout);
 
-  const material = kit.own(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.88, metalness: 0.02 }));
-  root.add(b.build(kit, material));
+  // Outside walls: a continuous glass curtain wall on all four sides, with the entrance in front.
+  const wall = {
+    h: WALL_HEIGHT,
+    sill: 0.45,
+    header: 0.3,
+    step: 1.7,
+    frame: FRAME_WHITE,
+    post: 0.1,
+    thick: 0.2,
+  };
+  wallRun(b, glass, null, { ...wall, axis: 'x', fixed: minZ, from: minX, to: maxX });
+  wallRun(b, glass, null, { ...wall, axis: 'z', fixed: minX, from: minZ, to: maxZ });
+  wallRun(b, glass, null, { ...wall, axis: 'z', fixed: maxX, from: minZ, to: maxZ });
+  wallRun(b, glass, null, {
+    ...wall,
+    axis: 'x',
+    fixed: maxZ,
+    from: minX,
+    to: maxX,
+    gaps: [{ from: door - 1.1, to: door + 1.1, h: 2.4 }],
+  });
+  for (const x of [minX, maxX]) for (const z of [minZ, maxZ]) b.box(0.24, WALL_HEIGHT, 0.24, FRAME_WHITE, x, 0, z);
+  entrance(b, glass, door, maxZ);
+
+  // Lobby, plants and the free-standing status totem.
+  plants(b, layout);
+  b.box(1.9, 0.5, 0.5, '#e4e7ec', door - 4.6, 0, maxZ - 0.9);
+  b.box(1.9, 0.06, 0.52, '#f8f8f6', door - 4.6, 0.5, maxZ - 0.9);
+
+  const solid = kit.own(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.82, metalness: 0.02 }));
+  root.add(b.build(kit, solid));
+  const glassMaterial = kit.own(
+    new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.2,
+      roughness: 0.08,
+      metalness: 0.2,
+      depthWrite: false,
+    }),
+  );
+  const glassMesh = glass.build(kit, glassMaterial, { cast: false, receive: false });
+  glassMesh.renderOrder = 4;
+  root.add(glassMesh);
+  if (frost.size) {
+    const frostMaterial = kit.own(
+      new THREE.MeshStandardMaterial({
+        vertexColors: true,
+        transparent: true,
+        opacity: 0.55,
+        roughness: 0.6,
+        metalness: 0,
+        depthWrite: false,
+      }),
+    );
+    const frostMesh = frost.build(kit, frostMaterial, { cast: false, receive: false });
+    frostMesh.renderOrder = 4;
+    root.add(frostMesh);
+  }
+  root.add(buildEnvironment(layout, kit, theme));
 
   // Screens: one shared material per state; each desk's plane just points at the right one.
   const states: MonitorState[] = ['off', 'working', 'stalled', 'unknown', 'away', 'done', 'failed'];
@@ -229,51 +359,63 @@ export function buildWorld(layout: OfficeLayout, kit: Kit, theme: Theme): World 
   });
 
   // Signs painted on the floor.
-  for (const sign of layout.signs) {
-    const tex = textTexture(kit, 640, 96, (ctx, _w, h) => {
-      ctx.font = '600 44px ui-monospace, Consolas, monospace';
-      ctx.fillStyle = theme === 'dark' ? 'rgba(76, 54, 30, 0.62)' : 'rgba(80, 58, 32, 0.55)';
+  const floorText = (
+    text: string,
+    planeW: number,
+    planeH: number,
+    x: number,
+    z: number,
+    font: number,
+    spacing: number,
+    center = false,
+  ) => {
+    const px = 100;
+    const tex = textTexture(kit, Math.round(planeW * px), Math.round(planeH * px), (ctx, w, h) => {
+      ctx.font = `600 ${font}px ui-monospace, Consolas, monospace`;
+      ctx.fillStyle = INK;
       ctx.textBaseline = 'middle';
-      (ctx as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = '7px';
-      ctx.fillText(sign.text, 6, h / 2);
+      ctx.textAlign = center ? 'center' : 'left';
+      (ctx as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = `${spacing}px`;
+      ctx.fillText(text, center ? w / 2 : 6, h / 2);
     });
     const plane = new THREE.Mesh(
-      kit.own(new THREE.PlaneGeometry(6.4, 0.96)),
+      kit.own(new THREE.PlaneGeometry(planeW, planeH)),
       kit.own(new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false })),
     );
     plane.rotation.x = -Math.PI / 2;
-    plane.position.set(sign.x + 3.2, 0.02, sign.z);
+    plane.position.set(x, 0.03, z);
     root.add(plane);
-  }
-  layout.tables.forEach((t, i) => {
+  };
+  for (const sign of layout.signs) floorText(sign.text, 6.4, 0.96, sign.x + 3.2, sign.z, 44, 7);
+  layout.rooms.forEach((room, i) => {
     const name = i === 0 ? 'COLLABORATION' : i === 1 ? 'REVIEW' : `ROOM ${i + 1}`;
-    const tex = textTexture(kit, 512, 80, (ctx, w, h) => {
-      ctx.font = '600 38px ui-monospace, Consolas, monospace';
-      ctx.fillStyle = 'rgba(54, 66, 96, 0.7)';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      (ctx as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = '6px';
-      ctx.fillText(name, w / 2, h / 2);
-    });
-    const plane = new THREE.Mesh(
-      kit.own(new THREE.PlaneGeometry(4.2, 0.66)),
-      kit.own(new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false })),
-    );
-    plane.rotation.x = -Math.PI / 2;
-    plane.position.set(t.x, 0.03, t.z + t.radius + 1.0);
-    root.add(plane);
+    floorText(name, 3.6, 0.5, room.x, room.z1 - 0.34, 28, 4, true);
   });
+  floorText('REST AREA', 3.6, 0.5, layout.rest.x0 + 5.3, layout.rest.z0 + 5.15, 28, 5, true);
 
-  // Walls (cut away when the camera is outside them) and the live status board.
-  const walls = buildWalls(kit, layout, root);
-  const board = statusBoard(kit, layout, walls[0].details);
+  // Ping-pong ball: the engine moves it while both players are at the table.
+  const ball = new THREE.Mesh(
+    kit.own(new THREE.SphereGeometry(0.03, 10, 8)),
+    kit.own(new THREE.MeshBasicMaterial({ color: '#ff9a3c' })),
+  );
+  ball.visible = false;
+  root.add(ball);
+
+  // Entrance sign on the canopy fascia and the double-sided status totem.
+  entranceSign(kit, root, door, maxZ);
+  const board = statusTotem(kit, root, door - 3.2, maxZ - 1.9);
 
   return {
     group: root,
     screens,
-    walls,
-    tableDiscs,
-    discMaterials: { idle: discMaterial, busy: discBusy },
+    roomFloors,
+    floorMaterials: { idle: idleFloor, busy: busyFloor },
+    pingPong: {
+      ball,
+      from: { x: pingPongSpec.x - pingPongSpec.length / 2 + 0.25, z: pingPongSpec.z },
+      to: { x: pingPongSpec.x + pingPongSpec.length / 2 - 0.25, z: pingPongSpec.z },
+      y: 0.8,
+    },
     setMonitor(deskIndex, state) {
       const screen = screens[deskIndex];
       if (screen) screen.material = screenMaterials[state];
@@ -283,164 +425,190 @@ export function buildWorld(layout: OfficeLayout, kit: Kit, theme: Theme): World 
 }
 
 function plants(b: Batch, layout: OfficeLayout) {
-  const { maxX, maxZ } = layout.bounds;
+  const { maxZ } = layout.bounds;
+  const door = layout.entrance.x;
   const spots: [number, number][] = [
-    [0.7, 0.8],
-    [layout.corridorX - 0.95, 0.8],
-    [layout.corridorX - 0.95, maxZ - 1.0],
-    [0.7, maxZ - 1.0],
-    [maxX - 0.8, maxZ - 0.9],
-    [layout.wing.x0 + 0.2, maxZ - 0.9],
+    [0.8, 0.9],
+    [layout.corridorX - 1.7, 0.9],
+    [0.8, maxZ - 0.9],
+    [door - 1.9, maxZ - 0.8],
+    [door + 1.9, maxZ - 0.8],
+    [door - 6.1, maxZ - 0.9],
   ];
   const lastRow = Math.max(...layout.desks.map(d => d.z));
   for (const d of layout.desks) if (d.z === lastRow && d.order % 3 === 2) spots.push([d.x + 1.25, d.z - 0.2]);
-  for (const [x, z] of spots) {
-    b.cylinder(0.2, 0.15, 0.34, '#a8613f', x, 0, z, 10);
-    b.cylinder(0.025, 0.03, 0.4, '#5b4630', x, 0.34, z, 6);
-    b.sphere(0.3, '#4d9b6b', x, 0.62, z, 1.15);
-    b.sphere(0.2, '#63b07f', x + 0.12, 0.92, z - 0.05, 1.1);
-    b.cone(0.16, 0.5, '#3f8a5d', x - 0.1, 0.8, z + 0.06);
-  }
+  for (const [x, z] of spots) plant(b, x, z, 1);
 }
 
-function amenities(b: Batch, layout: OfficeLayout) {
-  const { maxX, maxZ } = layout.bounds;
-  const x0 = layout.wing.x0;
-  const lastTable = layout.tables.reduce((a, t) => Math.max(a, t.z + t.radius), 0);
-  const front = Math.max(lastTable + 2.4, maxZ - 5.0);
-  // Lounge rug.
-  b.box(7.4, 0.012, 3.6, '#6d5d8f', x0 + 5.9, 0, front + 2.0);
-  b.box(7.0, 0.016, 3.2, '#7b6aa0', x0 + 5.9, 0, front + 2.0);
-  // Sofa (purple) against the front, one (blue) facing it, coffee table between.
-  const sofa = (x: number, z: number, color: string, rot: number) => {
-    b.box(2.2, 0.42, 0.9, color, x, 0.0, z, rot);
-    b.box(2.2, 0.5, 0.24, color, x, 0.3, z + (rot ? 0 : 0.33), rot);
-    b.box(0.22, 0.32, 0.9, color, x - 1.0, 0.3, z, rot);
-    b.box(0.22, 0.32, 0.9, color, x + 1.0, 0.3, z, rot);
+function plant(b: Batch, x: number, z: number, scale: number) {
+  b.cylinder(0.2 * scale, 0.15 * scale, 0.34 * scale, '#f1f1ee', x, 0, z, 10);
+  b.cylinder(0.025, 0.03, 0.4 * scale, '#5b4630', x, 0.34 * scale, z, 6);
+  b.sphere(0.3 * scale, '#4d9b6b', x, 0.62 * scale, z, 1.15);
+  b.sphere(0.2 * scale, '#63b07f', x + 0.12 * scale, 0.92 * scale, z - 0.05, 1.1);
+  b.cone(0.16 * scale, 0.5 * scale, '#3f8a5d', x - 0.1 * scale, 0.8 * scale, z + 0.06);
+}
+
+function meetingRoom(b: Batch, glass: Batch, frost: Batch, room: MeetingRoom) {
+  const frame = {
+    h: ROOM_HEIGHT,
+    sill: 0,
+    header: 0.1,
+    step: 1.5,
+    frame: GRAPHITE,
+    post: 0.06,
+    thick: 0.08,
+    frostBand: true,
   };
-  sofa(x0 + 5.9, front + 3.4, '#5f6aa8', 0);
-  b.box(1.3, 0.04, 0.7, '#d7c4a6', x0 + 5.9, 0.33, front + 1.9);
-  b.box(0.1, 0.33, 0.1, '#6a5a44', x0 + 5.35, 0, front + 1.9);
-  b.box(0.1, 0.33, 0.1, '#6a5a44', x0 + 6.45, 0, front + 1.9);
-  b.box(2.2, 0.42, 0.9, '#8368b8', x0 + 5.9, 0, front + 0.55);
-  b.box(2.2, 0.5, 0.24, '#8368b8', x0 + 5.9, 0.3, front + 0.2);
-  // Armchairs.
-  const arm = (x: number, z: number, color: string) => {
-    b.box(0.9, 0.4, 0.9, color, x, 0, z);
-    b.box(0.9, 0.5, 0.2, color, x, 0.3, z + 0.35);
-    b.box(0.18, 0.3, 0.9, color, x - 0.4, 0.3, z);
-    b.box(0.18, 0.3, 0.9, color, x + 0.4, 0.3, z);
+  wallRun(b, glass, frost, { ...frame, axis: 'x', fixed: room.z0, from: room.x0, to: room.x1 });
+  wallRun(b, glass, frost, { ...frame, axis: 'z', fixed: room.x0, from: room.z0, to: room.z1 });
+  wallRun(b, glass, frost, { ...frame, axis: 'z', fixed: room.x1, from: room.z0, to: room.z1 });
+  wallRun(b, glass, frost, {
+    ...frame,
+    axis: 'x',
+    fixed: room.z1,
+    from: room.x0,
+    to: room.x1,
+    gaps: [{ from: room.doorX - 0.6, to: room.doorX + 0.6, h: 2.2 }],
+  });
+  // Table: white top on two steel pedestals, with a cable box.
+  b.box(room.length, 0.05, room.width, '#f7f7f4', room.x, 0.7, room.z);
+  b.box(0.1, 0.7, room.width * 0.7, STEEL, room.x - room.length / 2 + 0.4, 0, room.z);
+  b.box(0.1, 0.7, room.width * 0.7, STEEL, room.x + room.length / 2 - 0.4, 0, room.z);
+  b.box(0.24, 0.012, 0.16, GRAPHITE, room.x, 0.75, room.z);
+  // Chairs, every one facing the table.
+  room.seats.forEach(s => {
+    const back = (d: number) => ({ x: s.seat.x - Math.sin(s.yaw) * d, z: s.seat.z - Math.cos(s.yaw) * d });
+    b.box(0.46, 0.07, 0.46, '#d3d8df', s.seat.x, 0.43, s.seat.z, s.yaw);
+    const bk = back(0.22);
+    b.box(0.46, 0.36, 0.05, '#c1c7d0', bk.x, 0.5, bk.z, s.yaw);
+    b.cylinder(0.03, 0.03, 0.28, '#4a515c', s.seat.x, 0.15, s.seat.z, 8);
+    b.cylinder(0.22, 0.22, 0.03, '#4a515c', s.seat.x, 0.04, s.seat.z, 10);
+  });
+  // A rolling whiteboard in the far corner, and a plant in the other.
+  const wx = room.x0 + 0.65;
+  const wz = room.z0 + 0.4;
+  b.box(1.3, 0.9, 0.03, '#fdfdfd', wx, 0.8, wz);
+  b.box(1.36, 0.05, 0.05, GRAPHITE, wx, 0.77, wz);
+  b.box(1.36, 0.05, 0.05, GRAPHITE, wx, 1.7, wz);
+  b.box(0.05, 0.95, 0.05, GRAPHITE, wx - 0.66, 0.77, wz);
+  b.box(0.05, 0.95, 0.05, GRAPHITE, wx + 0.66, 0.77, wz);
+  b.box(0.05, 0.8, 0.05, STEEL, wx - 0.55, 0, wz);
+  b.box(0.05, 0.8, 0.05, STEEL, wx + 0.55, 0, wz);
+  plant(b, room.x0 + 0.5, room.z1 - 0.5, 0.75);
+}
+
+function restArea(b: Batch, glass: Batch, frost: Batch, layout: OfficeLayout) {
+  const rest = layout.rest;
+  const at = (u: number, v: number): Vec2 => ({ x: rest.x0 + u, z: rest.z0 + v });
+  const extra = rest.x1 - rest.x0 - 10.6;
+  const w = rest.x1 - rest.x0;
+  const d = rest.z1 - rest.z0;
+  // Floor: warm wood patch with a blue-grey lounge rug.
+  b.box(w, 0.012, d, '#efe3cd', rest.x0 + w / 2, 0, rest.z0 + d / 2);
+  b.box(w - 1.2, 0.016, 2.5, '#d4dfeb', rest.x0 + w / 2, 0, rest.z0 + 6.25);
+  b.box(w - 1.6, 0.018, 2.1, '#dfe8f2', rest.x0 + w / 2, 0, rest.z0 + 6.25);
+  // Glass walls: north and the west wall with its door. South and east are the building's own.
+  const frame = {
+    h: ROOM_HEIGHT,
+    sill: 0,
+    header: 0.1,
+    step: 1.5,
+    frame: GRAPHITE,
+    post: 0.06,
+    thick: 0.08,
+    frostBand: true,
   };
-  arm(x0 + 3.2, front + 1.2, '#e0663c');
-  arm(x0 + 8.9, front + 1.6, '#3d6fd6');
-  // Floor lamp.
-  b.cylinder(0.03, 0.03, 1.5, '#8a7a5a', x0 + 2.5, 0, front + 2.6, 6);
-  b.cylinder(0.2, 0.28, 0.3, '#f0dca6', x0 + 2.5, 1.45, front + 2.6, 12);
+  wallRun(b, glass, frost, { ...frame, axis: 'x', fixed: rest.z0, from: rest.x0, to: rest.x1 });
+  wallRun(b, glass, frost, {
+    ...frame,
+    axis: 'z',
+    fixed: rest.x0,
+    from: rest.z0,
+    to: rest.z1,
+    gaps: [{ from: rest.doorZ - 0.8, to: rest.doorZ + 0.8, h: 2.2 }],
+  });
+  // Kitchenette along the back wall: counter, appliances and a row of stools.
+  const c0 = at(0.4, 0.2);
+  b.box(5.4, 0.9, 0.7, '#f2f2ef', c0.x + 2.7, 0, c0.z + 0.35);
+  b.box(5.46, 0.05, 0.74, GRAPHITE, c0.x + 2.7, 0.9, c0.z + 0.35);
+  b.box(0.5, 0.22, 0.3, '#2f3439', c0.x + 0.9, 0.95, c0.z + 0.25);
+  b.box(0.7, 0.05, 0.45, STEEL, c0.x + 3.2, 0.95, c0.z + 0.35);
+  b.box(0.8, 1.85, 0.7, '#e7eaee', c0.x + 5.95, 0, c0.z + 0.35);
+  rest.stools.forEach((s, i) => {
+    b.cylinder(0.03, 0.03, 0.4, STEEL, s.x, 0, s.z, 6);
+    b.cylinder(0.22, 0.22, 0.07, ['#e89b6b', '#6fa8c9', '#f0d27a'][i % 3], s.x, 0.4, s.z, 12);
+  });
   // Ping-pong table.
-  const px = x0 + 1.9;
-  const pz = Math.max(lastTable + 0.4, front - 0.4);
-  b.box(2.6, 0.06, 1.45, '#3d9a82', px, 0.72, pz);
-  b.box(0.04, 0.18, 1.45, '#f2f2ee', px, 0.78, pz);
-  b.box(2.5, 0.062, 0.03, '#f4f4f0', px, 0.72, pz);
-  for (const [lx, lz] of [
-    [-1.2, -0.62],
-    [1.2, -0.62],
-    [-1.2, 0.62],
-    [1.2, 0.62],
-  ])
-    b.box(0.07, 0.72, 0.07, '#2c3a3a', px + lx, 0, pz + lz);
-  // Kitchenette along the back wall of the wing.
-  const kx = x0 + 0.4;
-  b.box(3.0, 0.9, 0.7, '#d9d3c4', kx + 1.6, 0, 0.5);
-  b.box(3.0, 0.05, 0.74, '#43484f', kx + 1.6, 0.9, 0.5);
-  b.box(0.8, 1.85, 0.7, '#e7eaee', kx + 3.5, 0, 0.5);
-  b.box(0.62, 1.7, 0.7, '#bf3b3b', kx + 4.5, 0, 0.5);
-  b.box(0.5, 0.2, 0.3, '#2f3439', kx + 1.0, 0.95, 0.4);
-  // Bookshelf.
-  const sx = maxX - 4.0;
-  b.box(1.6, 1.9, 0.4, '#7a5636', sx, 0, 0.3);
-  for (let r = 0; r < 4; r++) {
-    b.box(1.5, 0.04, 0.38, '#5d4128', sx, 0.35 + r * 0.45, 0.32);
-    for (let i = 0; i < 6; i++) {
-      const colors = ['#c0553d', '#4f78b5', '#d6b04a', '#4e9a78', '#8a62ac', '#e2e0d6'];
-      b.box(
-        0.17,
-        0.3 + ((i * 7 + r * 3) % 4) * 0.025,
-        0.28,
-        colors[(i + r * 2) % colors.length],
-        sx - 0.62 + i * 0.25,
-        0.39 + r * 0.45,
-        0.32,
-      );
-    }
-  }
-  // Server closet in the right back corner: three low partitions and two racks.
-  const cx = maxX - 1.6;
-  b.box(2.8, 1.3, 0.12, '#838995', cx, 0, 2.9);
-  b.box(0.12, 1.3, 2.7, '#838995', cx - 1.4, 0, 1.6);
-  for (const dx of [-0.55, 0.55]) {
-    b.box(0.8, 1.9, 0.8, '#1c2130', cx + dx, 0, 1.5);
-    for (let i = 0; i < 6; i++) b.box(0.62, 0.05, 0.02, '#38425a', cx + dx, 0.2 + i * 0.28, 1.91);
-    for (let i = 0; i < 6; i++)
-      b.box(0.05, 0.05, 0.02, i % 3 ? '#4cb98a' : '#d6a64a', cx + dx + 0.24, 0.24 + i * 0.28, 1.915);
-  }
+  const t = rest.table;
+  b.box(t.length, 0.06, 1.525, '#2f8f78', t.x, 0.72, t.z);
+  b.box(0.04, 0.18, 1.55, '#f4f4f0', t.x, 0.78, t.z);
+  b.box(t.length - 0.1, 0.062, 0.03, '#f4f4f0', t.x, 0.72, t.z);
+  for (const lx of [-1.2, 1.2]) for (const lz of [-0.66, 0.66]) b.box(0.07, 0.72, 0.07, STEEL, t.x + lx, 0, t.z + lz);
+  // Sofas and armchairs facing north, with a low table between them.
+  const sofaMid = rest.sofas[1];
+  b.box(3.1, 0.42, 0.95, '#8ea4c4', sofaMid.x, 0, sofaMid.z + 0.05);
+  b.box(3.1, 0.55, 0.24, '#7d94b6', sofaMid.x, 0.3, sofaMid.z + 0.4);
+  for (const dx of [-1.45, 1.45]) b.box(0.2, 0.34, 0.95, '#7d94b6', sofaMid.x + dx, 0.3, sofaMid.z + 0.05);
+  const armColors = ['#e8825a', '#4fa3a5', '#e9c24d', '#4a6fb0'];
+  rest.chairs.forEach((c, i) => {
+    b.box(0.95, 0.4, 0.9, armColors[i % 4], c.x, 0, c.z + 0.05);
+    b.box(0.95, 0.5, 0.2, armColors[i % 4], c.x, 0.3, c.z + 0.4);
+    for (const dx of [-0.42, 0.42]) b.box(0.14, 0.3, 0.9, armColors[i % 4], c.x + dx, 0.3, c.z + 0.05);
+  });
+  const coffee = at(4.85, 6.0);
+  b.cylinder(0.45, 0.45, 0.05, '#f7f7f4', coffee.x, 0.34, coffee.z, 20);
+  b.cylinder(0.05, 0.05, 0.34, STEEL, coffee.x, 0, coffee.z, 8);
+  // Floor lamp and plants.
+  const lampPos = at(0.5, 6.9);
+  b.cylinder(0.03, 0.03, 1.5, '#8a8f98', lampPos.x, 0, lampPos.z, 6);
+  b.cylinder(0.2, 0.28, 0.3, '#f6edd0', lampPos.x, 1.45, lampPos.z, 12);
+  plant(b, at(w - 0.6, 7.0).x, at(w - 0.6, 7.0).z, 1.1);
+  plant(b, at(w - 0.6, 0.7).x, at(w - 0.6, 0.7).z, 1.1);
+  plant(b, at(0.6, 3.3).x + 0.2, at(0.6, 3.3).z, 0.9);
+  void extra;
+  void d;
 }
 
-function buildWalls(kit: Kit, layout: OfficeLayout, root: THREE.Group): WallHandle[] {
-  const { minX, maxX, minZ, maxZ } = layout.bounds;
-  const tall = 2.4;
-  const short = 0.85;
-  const thick = 0.32;
-  const faceMat = kit.own(new THREE.MeshStandardMaterial({ color: WALL_FACE, roughness: 0.95 }));
-  const capMat = kit.own(new THREE.MeshStandardMaterial({ color: WALL_CAP, roughness: 0.9 }));
-  const wall = (cx: number, cz: number, w: number, d: number, outward: [number, number]): WallHandle => {
-    const group = new THREE.Group();
-    group.position.set(cx, 0, cz);
-    const body = new THREE.Mesh(kit.own(new THREE.BoxGeometry(w, tall, d)), faceMat);
-    body.position.y = tall / 2;
-    body.castShadow = true;
-    body.receiveShadow = true;
-    const cap = new THREE.Mesh(kit.own(new THREE.BoxGeometry(w + 0.01, 0.08, d + 0.01)), capMat);
-    cap.position.y = tall - 0.04;
-    group.add(body, cap);
-    const details = new THREE.Group();
-    group.add(details);
-    root.add(group);
-    return { group, outward: new THREE.Vector2(...outward), details, tall, short, amount: 1 };
-  };
-  const back = wall((minX + maxX) / 2, minZ - thick / 2, maxX - minX + thick * 2, thick, [0, -1]);
-  const left = wall(minX - thick / 2, (minZ + maxZ) / 2, thick, maxZ - minZ, [-1, 0]);
-  const right = wall(maxX + thick / 2, (minZ + maxZ) / 2, thick, maxZ - minZ, [1, 0]);
-  const front = wall((minX + maxX) / 2, maxZ + thick / 2, maxX - minX + thick * 2, thick, [0, 1]);
-
-  // Windows along the back wall (left of the wing) and the left wall; glass is unlit-bright.
-  const glass = kit.own(new THREE.MeshBasicMaterial({ color: '#c8e2fa', toneMapped: false }));
-  const frameMat = kit.own(new THREE.MeshStandardMaterial({ color: '#eceff2', roughness: 0.8 }));
-  const windowAt = (parent: THREE.Object3D, x: number, y: number, z: number, rotY: number) => {
-    const w = new THREE.Group();
-    w.position.set(x, y, z);
-    w.rotation.y = rotY;
-    const pane = new THREE.Mesh(kit.own(new THREE.PlaneGeometry(1.5, 1.3)), glass);
-    pane.position.z = thick / 2 + 0.045;
-    const frame = new THREE.Mesh(kit.own(new THREE.BoxGeometry(1.64, 1.44, 0.06)), frameMat);
-    frame.position.z = thick / 2 - 0.02;
-    const bar = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.05, 1.3, 0.07)), frameMat);
-    bar.position.z = thick / 2 + 0.05;
-    w.add(frame, pane, bar);
-    parent.add(w);
-  };
-  // Back wall group's local +z points into the office (the wall box is centred on minZ - thick/2).
-  const backWindows = Math.max(3, Math.floor((layout.corridorX - 1.2) / 2.6));
-  for (let i = 0; i < backWindows; i++) windowAt(back.details, -(maxX - minX) / 2 + 1.8 + i * 2.6, 1.55, 0, 0);
-  const leftWindows = Math.max(2, Math.floor((maxZ - 2) / 3.2));
-  for (let i = 0; i < leftWindows; i++)
-    windowAt(left.details, 0, 1.55, -(maxZ - minZ) / 2 + 2.2 + i * 3.2, Math.PI / 2);
-  void right;
-  void front;
-  return [back, left, right, front];
+function entrance(b: Batch, glass: Batch, door: number, z: number) {
+  // Two sliding glass leaves in dark frames, push bars, a threshold and a canopy.
+  for (const side of [-1, 1]) {
+    const cx = door + side * 0.55;
+    const f = '#2f343b';
+    b.box(1.05, 0.06, 0.06, f, cx, 0, z + 0.02);
+    b.box(1.05, 0.06, 0.06, f, cx, 2.34, z + 0.02);
+    b.box(0.06, 2.4, 0.06, f, cx - 0.5, 0, z + 0.02);
+    b.box(0.06, 2.4, 0.06, f, cx + 0.5, 0, z + 0.02);
+    b.box(0.03, 0.55, 0.05, '#aeb5be', door + side * 0.12, 0.85, z + 0.07);
+    glass.box(1.0, 2.3, 0.025, '#e6f3fb', cx, 0.04, z + 0.02);
+  }
+  b.box(0.04, 2.4, 0.07, '#2f343b', door, 0, z + 0.02);
+  b.box(2.3, 0.04, 0.3, '#59606a', door, 0, z + 0.1);
+  // Canopy on two slim posts.
+  b.box(4.4, 0.16, 1.7, FRAME_WHITE, door, 2.62, z + 0.95);
+  b.box(4.4, 0.05, 0.05, '#2f343b', door, 2.62, z + 1.8);
+  for (const dx of [-2.05, 2.05]) b.box(0.07, 2.62, 0.07, FRAME_WHITE, door + dx, 0, z + 1.7);
 }
 
-function statusBoard(kit: Kit, layout: OfficeLayout, parent: THREE.Object3D): (s: BoardSummary) => void {
+function entranceSign(kit: Kit, root: THREE.Group, door: number, z: number) {
+  const tex = textTexture(kit, 1024, 120, (ctx, w, h) => {
+    ctx.fillStyle = '#f5f6f8';
+    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = '#2b3037';
+    ctx.font = '700 54px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    (ctx as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = '10px';
+    ctx.fillText('QUANT RESEARCH OFFICE', w / 2, h / 2 + 3);
+  });
+  const sign = new THREE.Mesh(
+    kit.own(new THREE.PlaneGeometry(4.2, 0.49)),
+    kit.own(new THREE.MeshBasicMaterial({ map: tex, toneMapped: false })),
+  );
+  sign.position.set(door, 2.7, z + 1.84);
+  root.add(sign);
+}
+
+function statusTotem(kit: Kit, root: THREE.Group, x: number, z: number): (s: BoardSummary) => void {
   const canvas = document.createElement('canvas');
   canvas.width = 768;
   canvas.height = 288;
@@ -449,18 +617,27 @@ function statusBoard(kit: Kit, layout: OfficeLayout, parent: THREE.Object3D): (s
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = 4;
   const mat = kit.own(new THREE.MeshBasicMaterial({ map: texture, toneMapped: false }));
-  const frame = new THREE.Mesh(
-    kit.own(new THREE.BoxGeometry(2.96, 1.14, 0.1)),
-    kit.own(new THREE.MeshStandardMaterial({ color: '#2c3138' })),
-  );
-  const screen = new THREE.Mesh(kit.own(new THREE.PlaneGeometry(2.8, 1.03)), mat);
+  const frameMat = kit.own(new THREE.MeshStandardMaterial({ color: '#2c3138' }));
   const group = new THREE.Group();
-  const { minX, maxX } = layout.bounds;
-  group.position.set(layout.wing.x0 + 6.9 - (minX + maxX) / 2, 1.7, 0.18);
-  frame.position.z = 0.03;
-  screen.position.z = 0.09;
-  group.add(frame, screen);
-  parent.add(group);
+  group.position.set(x, 0, z);
+  group.rotation.y = Math.PI / 4;
+  const frame = new THREE.Mesh(kit.own(new THREE.BoxGeometry(2.5, 0.96, 0.08)), frameMat);
+  frame.position.y = 1.75;
+  const front = new THREE.Mesh(kit.own(new THREE.PlaneGeometry(2.4, 0.9)), mat);
+  front.position.set(0, 1.75, 0.045);
+  const back = new THREE.Mesh(front.geometry, mat);
+  back.position.set(0, 1.75, -0.045);
+  back.rotation.y = Math.PI;
+  const postGeometry = kit.own(new THREE.BoxGeometry(0.06, 1.3, 0.06));
+  for (const dx of [-1.0, 1.0]) {
+    const post = new THREE.Mesh(postGeometry, frameMat);
+    post.position.set(dx, 0.65, 0);
+    group.add(post);
+  }
+  const base = new THREE.Mesh(kit.own(new THREE.BoxGeometry(2.4, 0.05, 0.5)), frameMat);
+  base.position.y = 0.025;
+  group.add(frame, front, back, base);
+  root.add(group);
   return summary => {
     ctx.fillStyle = '#121a1f';
     ctx.fillRect(0, 0, 768, 288);
@@ -469,13 +646,13 @@ function statusBoard(kit: Kit, layout: OfficeLayout, parent: THREE.Object3D): (s
     (ctx as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = '6px';
     ctx.fillText('QUANT / RESEARCH LAB', 36, 56);
     (ctx as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = '0px';
-    const row = (label: string, value: number, color: string, x: number) => {
+    const row = (label: string, value: number, color: string, x0: number) => {
       ctx.fillStyle = color;
       ctx.font = '700 84px ui-monospace, Consolas, monospace';
-      ctx.fillText(String(value), x, 170);
+      ctx.fillText(String(value), x0, 170);
       ctx.fillStyle = '#93a3a1';
       ctx.font = '500 24px ui-monospace, Consolas, monospace';
-      ctx.fillText(label, x, 214);
+      ctx.fillText(label, x0, 214);
     };
     row('WORKING', summary.working, '#5fd4b8', 36);
     row('IDLE', summary.idle, '#9fb0ae', 280);

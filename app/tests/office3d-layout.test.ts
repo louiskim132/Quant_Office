@@ -14,6 +14,8 @@ import {
   type OfficeLayout,
   type Place,
 } from '../src/renderer/office3d/layout';
+import { assignRooms, remainingAllowance, shouldRest } from '../src/renderer/office3d/visuals';
+import type { AccountConnection } from '../src/shared/types';
 
 const layoutOf = (director = 1, pm = 4, worker = 1, tables = 2, tableSeats = 6) =>
   buildLayout({ director, pm, worker, tables, tableSeats });
@@ -53,7 +55,7 @@ test('desk rows wrap at MAX_COLS and rows never overlap', () => {
   for (let i = 1; i < rows.length; i++) assert.ok(rows[i] - rows[i - 1] >= 2.9, 'rows leave room for chair + aisle');
 });
 
-test('the floor grows with the team and always fits every desk, table and the corridor', () => {
+test('the floor grows with the team and always fits every desk, room and the corridor', () => {
   const small = layoutOf(1, 1, 1);
   const large = layoutOf(1, 4, 30, 5, 12);
   assert.ok(large.bounds.maxZ > small.bounds.maxZ);
@@ -62,39 +64,55 @@ test('the floor grows with the team and always fits every desk, table and the co
       assert.ok(d.x < layout.corridorX && d.seat.z < layout.bounds.maxZ);
       assert.ok(d.aisleZ > d.seat.z, 'the aisle is on the chair side of the desk');
     }
-    for (const t of layout.tables) {
-      assert.ok(t.x - t.radius > layout.corridorX);
-      assert.ok(t.x + t.radius < layout.bounds.maxX && t.z + t.radius < layout.bounds.maxZ);
+    for (const r of layout.rooms) {
+      assert.ok(r.x0 >= layout.wing.x0 && r.x1 <= layout.bounds.maxX && r.z1 < layout.rest.z0);
+      for (const s of r.seats) assert.ok(s.seat.x > r.x0 && s.seat.x < r.x1 && s.seat.z > r.z0 && s.seat.z < r.z1);
     }
+    assert.ok(layout.rest.z1 === layout.bounds.maxZ && layout.rest.x1 === layout.bounds.maxX);
   }
 });
 
-test('meeting tables: at least two, chairs clamp, every chair faces the table centre', () => {
-  assert.equal(layoutOf(1, 1, 1, 0, 0).tables.length, MIN_TABLES);
+test('meeting rooms: at least two, chairs clamp, every chair faces the table', () => {
+  assert.equal(layoutOf(1, 1, 1, 0, 0).rooms.length, MIN_TABLES);
   assert.equal(clampTableSeats(1), MIN_TABLE_SEATS);
   assert.equal(clampTableSeats(7), 8);
   assert.equal(clampTableSeats(99), MAX_TABLE_SEATS);
   assert.equal(tableSeatDemand([3, 9, 5]), 10);
   assert.equal(tableSeatDemand([]), MIN_TABLE_SEATS);
   const layout = layoutOf(1, 1, 1, 3, 10);
-  assert.equal(layout.tables.length, 3);
-  for (const table of layout.tables) {
-    assert.equal(table.seats.length, 10);
-    for (const s of table.seats) {
-      const toCentre = Math.atan2(table.x - s.seat.x, table.z - s.seat.z);
-      assert.ok(Math.abs(Math.atan2(Math.sin(toCentre - s.yaw), Math.cos(toCentre - s.yaw))) < 1e-9);
+  assert.equal(layout.rooms.length, 3);
+  for (const room of layout.rooms) {
+    assert.equal(room.seats.length, 10);
+    for (const s of room.seats) {
+      const facing = { x: Math.sin(s.yaw), z: Math.cos(s.yaw) };
+      const toTable = { x: room.x - s.seat.x, z: room.z - s.seat.z };
+      assert.ok(facing.x * toTable.x + facing.z * toTable.z > 0, 'a chair faces toward the table');
     }
   }
 });
 
-const desk = (layout: OfficeLayout, i: number): Place => ({ kind: 'desk', desk: layout.desks[i] });
-const chair = (layout: OfficeLayout, t: number, s: number): Place => ({
-  kind: 'table',
-  table: layout.tables[t],
-  seat: s,
+test('the rest area fills in a fixed order and its spots are all reachable and distinct', () => {
+  const layout = layoutOf(1, 4, 6);
+  const { rest } = layout;
+  assert.ok(rest.spots.length >= 12);
+  assert.equal(new Set(rest.spots.map(s => `${s.seat.x}|${s.seat.z}`)).size, rest.spots.length);
+  assert.equal(rest.spots.filter(s => s.kind === 'play').length, 2, 'one ping-pong pair');
+  for (const spot of rest.spots) {
+    assert.deepEqual(spot.exit.at(-1), rest.gate, 'every spot ends on the corridor gate');
+    assert.ok(spot.seat.x > rest.x0 && spot.seat.x < rest.x1 && spot.seat.z > rest.z0 && spot.seat.z < rest.z1);
+  }
+  assert.equal(rest.spots[0].kind, 'sofa', 'the first person to rest takes a sofa');
 });
 
-/** A route may run along aisles, the corridor and table lanes/rings — never through a desk. */
+const desk = (layout: OfficeLayout, i: number): Place => ({ kind: 'desk', desk: layout.desks[i] });
+const chair = (layout: OfficeLayout, t: number, s: number): Place => ({
+  kind: 'room',
+  room: layout.rooms[t],
+  seat: s,
+});
+const lounge = (layout: OfficeLayout, spot: number): Place => ({ kind: 'rest', rest: layout.rest, spot });
+
+/** A route may run along aisles, the corridor and room lanes — never through a desk. */
 function crossesDesk(layout: OfficeLayout, a: { x: number; z: number }, b: { x: number; z: number }) {
   const steps = 40;
   for (let i = 0; i <= steps; i++) {
@@ -107,26 +125,41 @@ function crossesDesk(layout: OfficeLayout, a: { x: number; z: number }, b: { x: 
 
 test('routes start in the origin seat, end in the destination seat and never cross a desk', () => {
   const layout = layoutOf(1, 4, 6, 2, 8);
+  const destinations = [
+    chair(layout, 0, 0),
+    chair(layout, 0, 5),
+    chair(layout, 1, 3),
+    lounge(layout, 0),
+    lounge(layout, 3),
+  ];
   for (let i = 0; i < layout.desks.length; i++)
-    for (const [t, s] of [
-      [0, 0],
-      [0, 5],
-      [1, 3],
-    ] as const) {
+    for (const there of destinations) {
       for (const [from, to] of [
-        [desk(layout, i), chair(layout, t, s)],
-        [chair(layout, t, s), desk(layout, i)],
+        [desk(layout, i), there],
+        [there, desk(layout, i)],
       ]) {
         const route = routeBetween(layout, from, to);
-        const first = route.points[0];
-        const last = route.points.at(-1)!;
-        assert.deepEqual(first, placePose(from).pos);
-        assert.deepEqual(last, placePose(to).pos);
+        assert.deepEqual(route.points[0], placePose(from).pos);
+        assert.deepEqual(route.points.at(-1), placePose(to).pos);
         for (let k = 1; k < route.points.length; k++)
           assert.ok(!crossesDesk(layout, route.points[k - 1], route.points[k]), `desk ${i} leg ${k}`);
         assert.ok(route.length > 0 && Number.isFinite(route.length));
       }
     }
+});
+
+test('walking from a room goes out through its door, and a rest spot leaves by the rest door', () => {
+  const layout = layoutOf(1, 2, 2, 2, 8);
+  const room = layout.rooms[0];
+  const route = routeBetween(layout, chair(layout, 0, 1), desk(layout, 0));
+  assert.ok(
+    route.points.some(p => Math.abs(p.x - room.doorX) < 0.05 && Math.abs(p.z - room.z1) < 0.05),
+    'passes the door',
+  );
+  const out = routeBetween(layout, lounge(layout, 4), desk(layout, 0));
+  assert.ok(out.points.some(p => Math.abs(p.x - layout.rest.x0) < 0.05 && Math.abs(p.z - layout.rest.doorZ) < 0.05));
+  assert.equal(placePose(lounge(layout, 2)).pose, 'standing', 'ping-pong players stand');
+  assert.equal(placePose(lounge(layout, 0)).pose, 'seated');
 });
 
 test('desk to desk on one aisle slides along the aisle without visiting the corridor', () => {
@@ -140,7 +173,54 @@ test('samePlace tells identical seats from different ones', () => {
   const layout = layoutOf(1, 2, 2, 2, 6);
   assert.ok(samePlace(desk(layout, 0), desk(layout, 0)));
   assert.ok(!samePlace(desk(layout, 0), desk(layout, 1)));
+  assert.ok(samePlace(lounge(layout, 2), lounge(layout, 2)));
+  assert.ok(!samePlace(lounge(layout, 2), lounge(layout, 3)));
   assert.ok(samePlace(chair(layout, 1, 2), chair(layout, 1, 2)));
   assert.ok(!samePlace(chair(layout, 1, 2), chair(layout, 0, 2)));
   assert.ok(!samePlace(desk(layout, 0), chair(layout, 0, 0)));
+});
+
+test('resting follows the recorded allowance: below 5% left, not mid-task, not mid-meeting', () => {
+  const now = Date.parse('2026-10-01T12:00:00Z');
+  const connection = (remaining: number, over: Partial<AccountConnection> = {}): AccountConnection => ({
+    id: 'c',
+    provider: 'claude',
+    identity: 'me@example.com',
+    credentialContext: 'default',
+    state: 'SIGNED_IN',
+    allowance: [{ label: '5 hour', remainingPercent: remaining, resetsAt: now / 1000 + 3600 }],
+    note: '',
+    revision: 1,
+    firstSeenAt: '2026-10-01T10:00:00Z',
+    lastCheckedAt: '2026-10-01T11:30:00Z',
+    ...over,
+  });
+  const agent = { provider: 'claude' as const, account: 'me@example.com' };
+  assert.equal(remainingAllowance(agent, [connection(3)], now), 3);
+  assert.equal(
+    remainingAllowance(agent, [connection(40), connection(2, { lastCheckedAt: '2026-10-01T11:50:00Z' })], now),
+    2,
+    'the newest observation wins',
+  );
+  assert.equal(remainingAllowance(agent, [connection(3, { identity: 'other@example.com' })], now), null);
+  assert.equal(remainingAllowance(agent, [connection(3, { state: 'SIGNED_OUT' })], now), null);
+  assert.equal(
+    remainingAllowance(agent, [connection(3, { lastCheckedAt: '2026-09-30T00:00:00Z' })], now),
+    null,
+    'a stale observation is ignored',
+  );
+  const reset = { allowance: [{ label: 'w', remainingPercent: 3, resetsAt: now / 1000 - 5 }] };
+  assert.equal(
+    remainingAllowance(agent, [connection(3, reset)], now),
+    null,
+    'a window that has reset no longer counts',
+  );
+  assert.equal(remainingAllowance(agent, undefined, now), null);
+  assert.equal(shouldRest('idle', 4.9, false), true);
+  assert.equal(shouldRest('idle', 5, false), false, 'exactly 5% is not below 5%');
+  assert.equal(shouldRest('done', 0, false), true);
+  assert.equal(shouldRest('working', 1, false), false, 'a working agent stays at the desk');
+  assert.equal(shouldRest('idle', 1, true), false, 'a meeting keeps its people');
+  assert.equal(shouldRest('idle', null, false), false, 'no observation, no rest');
+  assert.deepEqual(assignRooms(['a', 'b'], ['b', 'c']), ['c', 'b'], 'a freed spot is reused, nobody else moves');
 });

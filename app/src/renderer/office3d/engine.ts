@@ -2,10 +2,11 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { Avatar, AvatarShared, type AvatarColors } from './avatar';
 import { Kit } from './kit';
-import { placePose, routeBetween, samePlace, type OfficeLayout, type Place, type Vec2 } from './layout';
+import { WALL_HEIGHT, placePose, routeBetween, samePlace, type OfficeLayout, type Place, type Vec2 } from './layout';
 import { buildWorld, type BoardSummary, type MonitorState, type Theme, type World } from './world';
 
-export type Location = { kind: 'desk'; index: number } | { kind: 'table'; index: number; seat: number };
+export type Location =
+  { kind: 'desk'; index: number } | { kind: 'room'; index: number; seat: number } | { kind: 'rest'; spot: number };
 export interface AgentVisual {
   id: string;
   colors: AvatarColors;
@@ -18,6 +19,8 @@ export interface AgentVisual {
   /** Seated figures type while working and talk while in a meeting. */
   typing: boolean;
   talking: boolean;
+  /** Resting in the lounge: the standing figure plays ping-pong, the seated one leans back. */
+  resting: boolean;
 }
 export interface EngineOptions {
   host: HTMLElement;
@@ -33,7 +36,8 @@ export interface EngineOptions {
 const WALK_SPEED = 2.3;
 const AZIMUTH = Math.PI / 4;
 const POLAR = THREE.MathUtils.degToRad(56);
-const TALL = 2.7;
+/** How much of the plaza and street is kept in frame around the building. */
+const FIT_PAD = 2.2;
 
 interface Walker {
   avatar: Avatar;
@@ -251,7 +255,7 @@ export class OfficeEngine {
     this.world = buildWorld(layout, this.kit, this.theme);
     this.scene.add(this.world.group);
     this.world.setBoard(this.board);
-    this.setBusyTables(this.busy);
+    this.setBusyRooms(this.busy);
     this.configureLight();
     this.teleport = true;
     this.fit(true);
@@ -283,7 +287,7 @@ export class OfficeEngine {
         const pose = placePose(place);
         avatar.root.position.set(pose.pos.x, 0, pose.pos.z);
         avatar.root.rotation.y = pose.yaw;
-        avatar.setPose('seated');
+        avatar.setPose(pose.pose);
         const halo = new THREE.Mesh(this.haloGeometry, this.haloMaterial(v.status));
         halo.rotation.x = -Math.PI / 2;
         halo.position.y = 0.025;
@@ -315,6 +319,8 @@ export class OfficeEngine {
       w.visual = v;
       w.avatar.typing = v.typing;
       w.avatar.talking = v.talking;
+      w.avatar.resting = v.resting;
+      w.avatar.playing = v.resting && placePose(w.place).pose === 'standing';
       w.halo.material = this.haloMaterial(v.status);
       w.halo.visible = v.status !== '--st-idle';
       seatedMonitors.set(v.home, v.monitor);
@@ -336,10 +342,11 @@ export class OfficeEngine {
     this.wake();
   }
 
-  setBusyTables(busy: ReadonlySet<number>) {
+  setBusyRooms(busy: ReadonlySet<number>) {
     this.busy = new Set(busy);
-    this.world?.tableDiscs.forEach(
-      (disc, i) => (disc.material = this.busy.has(i) ? this.world!.discMaterials.busy : this.world!.discMaterials.idle),
+    this.world?.roomFloors.forEach(
+      (floor, i) =>
+        (floor.material = this.busy.has(i) ? this.world!.floorMaterials.busy : this.world!.floorMaterials.idle),
     );
     this.dirty = true;
     this.wake();
@@ -444,8 +451,10 @@ export class OfficeEngine {
       const desk = layout.desks[loc.index];
       return desk ? { kind: 'desk', desk } : null;
     }
-    const table = layout.tables[loc.index];
-    return table ? { kind: 'table', table, seat: loc.seat } : null;
+    if (loc.kind === 'rest')
+      return layout.rest.spots[loc.spot] ? { kind: 'rest', rest: layout.rest, spot: loc.spot } : null;
+    const room = layout.rooms[loc.index];
+    return room ? { kind: 'room', room, seat: loc.seat } : null;
   }
 
   private seat(w: Walker, place: Place) {
@@ -456,7 +465,7 @@ export class OfficeEngine {
     w.avatar.root.position.set(pose.pos.x, 0, pose.pos.z);
     w.avatar.root.rotation.y = pose.yaw;
     w.yaw = pose.yaw;
-    w.avatar.setPose('seated');
+    w.avatar.setPose(pose.pose);
   }
 
   private startWalk(w: Walker, to: Place) {
@@ -486,8 +495,13 @@ export class OfficeEngine {
     cam.near = 1;
     cam.far = 90;
     cam.updateProjectionMatrix();
-    this.hemi.intensity = this.theme === 'dark' ? 1.05 : 1.2;
-    this.light.intensity = this.theme === 'dark' ? 2.0 : 2.15;
+    // The interior stays bright in both themes; only the sky outside shifts from day to dusk.
+    const day = this.theme === 'light';
+    this.hemi.color.set(day ? '#ffffff' : '#dbe4f5');
+    this.hemi.groundColor.set(day ? '#d9d6cf' : '#9aa0b4');
+    this.hemi.intensity = day ? 1.1 : 1.0;
+    this.light.color.set(day ? '#fff6e4' : '#ffe2b8');
+    this.light.intensity = day ? 1.7 : 1.5;
   }
 
   private resize() {
@@ -531,21 +545,27 @@ export class OfficeEngine {
       y0 = Infinity,
       y1 = -Infinity;
     const p = new THREE.Vector3();
-    for (const x of [minX - 0.3, maxX + 0.3])
-      for (const z of [minZ - 0.3, maxZ + 0.3])
-        for (const y of [0, TALL]) {
+    for (const x of [minX - FIT_PAD, maxX + FIT_PAD])
+      for (const z of [minZ - FIT_PAD, maxZ + FIT_PAD])
+        for (const y of [0, WALL_HEIGHT]) {
           p.set(x, y, z).applyMatrix4(inv);
           x0 = Math.min(x0, p.x);
           x1 = Math.max(x1, p.x);
           y0 = Math.min(y0, p.y);
           y1 = Math.max(y1, p.y);
         }
-    const margin = 0.93;
-    const zoom = Math.min(this.width / (x1 - x0), this.height / (y1 - y0)) * margin;
-    // Shift the target so the projected box is centred on screen.
+    const margin = 0.96;
+    // The chip row hangs over the top of the stage and the status line over the bottom: frame the
+    // office in the band between them so no desk starts underneath either.
+    const topInset = 62;
+    const bottomInset = 40;
+    const zoom =
+      Math.min(this.width / (x1 - x0), Math.max(1, this.height - topInset - bottomInset) / (y1 - y0)) * margin;
+    // Shift the target so the projected box is centred in that band.
+    const bandShift = (topInset - bottomInset) / 2 / zoom;
     const right = new THREE.Vector3().setFromMatrixColumn(probe.matrixWorld, 0);
     const up = new THREE.Vector3().setFromMatrixColumn(probe.matrixWorld, 1);
-    const shift = right.multiplyScalar((x0 + x1) / 2).add(up.multiplyScalar((y0 + y1) / 2));
+    const shift = right.multiplyScalar((x0 + x1) / 2).add(up.multiplyScalar((y0 + y1) / 2 + bandShift));
     target.add(shift);
     return { target, zoom };
   }
@@ -554,7 +574,7 @@ export class OfficeEngine {
     const goal = this.fitGoal();
     if (!goal) return;
     this.fitZoom = goal.zoom;
-    this.controls.minZoom = goal.zoom * 0.6;
+    this.controls.minZoom = goal.zoom * 0.5;
     this.controls.maxZoom = goal.zoom * 8;
     if (!snap) return;
     this.tween = null;
@@ -590,8 +610,8 @@ export class OfficeEngine {
     if (!this.layout) return;
     const { minX, maxX, minZ, maxZ } = this.layout.bounds;
     const t = this.controls.target;
-    const x = THREE.MathUtils.clamp(t.x, minX - 2, maxX + 2);
-    const z = THREE.MathUtils.clamp(t.z, minZ - 2, maxZ + 2);
+    const x = THREE.MathUtils.clamp(t.x, minX - 6, maxX + 6);
+    const z = THREE.MathUtils.clamp(t.z, minZ - 6, maxZ + 6);
     const y = THREE.MathUtils.clamp(t.y, -1, 3);
     if (x !== t.x || y !== t.y || z !== t.z) {
       const delta = new THREE.Vector3(x - t.x, y - t.y, z - t.z);
@@ -675,7 +695,10 @@ export class OfficeEngine {
     active = active || moving;
     const controlsMoved = this.controls.update(dt);
     active = active || controlsMoved;
-    const ambient = !this.reduced && [...this.walkers.values()].some(w => w.avatar.typing || w.avatar.talking);
+    const ambient =
+      !this.reduced &&
+      ([...this.walkers.values()].some(w => w.avatar.typing || w.avatar.talking || w.avatar.resting) ||
+        this.ballActive());
     const due = moving || active || this.dirty || (ambient && time - this.lastDraw > 66);
     if (due) {
       for (const w of this.walkers.values()) {
@@ -751,7 +774,8 @@ export class OfficeEngine {
         w.avatar.root.rotation.y = pose.yaw;
         w.yaw = pose.yaw;
         w.route = null;
-        w.avatar.setPose('seated');
+        w.avatar.setPose(pose.pose);
+        w.avatar.playing = w.visual.resting && pose.pose === 'standing';
         this.opts.labels.get(w.avatar.id)?.setAttribute('data-motion', 'seated');
         if (w.pending) {
           const next = w.pending;
@@ -773,22 +797,6 @@ export class OfficeEngine {
 
   private draw() {
     if (!this.world) return;
-    // Cut away the walls the camera is outside of, so rotating never hides the floor.
-    const off = this.camera.position.clone().sub(this.controls.target);
-    const len = Math.hypot(off.x, off.z) || 1;
-    const dir = new THREE.Vector2(off.x / len, off.z / len);
-    let easing = false;
-    for (const wall of this.world.walls) {
-      const near = dir.dot(wall.outward) > 0.2;
-      const goal = near ? wall.short / wall.tall : 1;
-      const next = this.reduced ? goal : wall.amount + (goal - wall.amount) * 0.25;
-      wall.amount = Math.abs(next - goal) < 0.005 ? goal : next;
-      if (wall.amount !== goal) easing = true;
-      wall.group.scale.y = wall.amount;
-      wall.details.visible = wall.amount > 0.92;
-    }
-    if (easing) this.dirty = true;
-
     const hovered = this.hovered ? this.walkers.get(this.hovered) : undefined;
     if (hovered) {
       this.hoverRing.position.set(hovered.avatar.root.position.x, 0.04, hovered.avatar.root.position.z);
@@ -801,6 +809,7 @@ export class OfficeEngine {
       const pulse = !this.reduced && (w.visual.status === '--st-working' || w.visual.status === '--st-needs');
       w.halo.scale.setScalar(pulse ? 1 + Math.sin(t * 2.4) * 0.07 : 1);
     }
+    this.moveBall();
     this.renderer.render(this.scene, this.camera);
     // What the camera shows, readable by assistive checks and acceptance tests (the canvas itself is opaque).
     const offset = this.camera.position.clone().sub(this.controls.target);
@@ -808,6 +817,29 @@ export class OfficeEngine {
     this.canvas.dataset.azimuth = String(Math.round((Math.atan2(offset.x, offset.z) * 180) / Math.PI));
     this.canvas.dataset.people = String(this.walkers.size);
     this.placeLabels();
+  }
+
+  /** Both ping-pong players are at the table: a ball keeps moving between them. */
+  private ballActive() {
+    if (this.reduced || !this.world) return false;
+    const at = [...this.walkers.values()].filter(
+      w => !w.route && w.place.kind === 'rest' && w.place.rest.spots[w.place.spot].kind === 'play',
+    );
+    return at.length >= 2;
+  }
+  private moveBall() {
+    const pong = this.world?.pingPong;
+    if (!pong) return;
+    const live = this.ballActive();
+    pong.ball.visible = live;
+    if (!live) return;
+    const t = performance.now() / 1000;
+    const k = Math.abs(((t * 0.9) % 2) - 1);
+    pong.ball.position.set(
+      pong.from.x + (pong.to.x - pong.from.x) * k,
+      pong.y + Math.abs(Math.sin(t * 0.9 * Math.PI * 2)) * 0.2,
+      pong.from.z + Math.sin(t * 1.3) * 0.2,
+    );
   }
 
   private labelWidths = new WeakMap<HTMLElement, number>();
@@ -861,9 +893,9 @@ export class OfficeEngine {
     }
     if (this.layout)
       for (const [index, el] of this.opts.tags) {
-        const table = this.layout.tables[index];
-        if (!table) continue;
-        v.set(table.x, 1.3, table.z);
+        const room = this.layout.rooms[index];
+        if (!room) continue;
+        v.set(room.x, 1.9, room.z);
         v.project(this.camera);
         el.style.transform = `translate3d(${((v.x * 0.5 + 0.5) * w).toFixed(1)}px, ${((-v.y * 0.5 + 0.5) * h).toFixed(1)}px, 0) translate(-50%, -100%)`;
       }

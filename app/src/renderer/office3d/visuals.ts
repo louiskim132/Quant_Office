@@ -1,4 +1,4 @@
-import type { Agent } from '../../shared/types';
+import type { Agent, AccountConnection } from '../../shared/types';
 import type { OfficeActivity } from '../../shared/activity';
 import type { StatusKey } from '../status';
 import type { Location } from './engine';
@@ -72,17 +72,56 @@ export function assignDesks(layout: OfficeLayout, team: readonly Pick<Agent, 'id
   return result;
 }
 
-/** One location per agent: their desk, or a chair at the table their meeting was given. */
+/** Below this share of an allowance an agent is sent to rest. */
+export const REST_BELOW_PERCENT = 5;
+/** An observation older than this says nothing about the allowance today. */
+const USAGE_FRESH_MS = 12 * 3600_000;
+
+/**
+ * The lowest remaining share of any allowance window that has not reset yet, for the account this
+ * agent runs under — or null when there is no recent observation. Only recorded sign-in
+ * observations are used; nothing is guessed.
+ */
+export function remainingAllowance(
+  agent: Pick<Agent, 'provider' | 'account'>,
+  connections: readonly AccountConnection[] | undefined,
+  now: number,
+): number | null {
+  const mine = (connections ?? []).filter(
+    c =>
+      c.provider === agent.provider &&
+      c.state === 'SIGNED_IN' &&
+      (!agent.account || !c.identity || c.identity.toLowerCase() === agent.account.toLowerCase()),
+  );
+  const latest = mine.sort((a, b) => Date.parse(b.lastCheckedAt) - Date.parse(a.lastCheckedAt))[0];
+  if (!latest || !(now - Date.parse(latest.lastCheckedAt) <= USAGE_FRESH_MS)) return null;
+  const live = latest.allowance.filter(w => w.resetsAt * 1000 > now);
+  return live.length ? Math.min(...live.map(w => w.remainingPercent)) : null;
+}
+
+/** Who rests: nearly out of allowance, and not in the middle of a meeting or a task. */
+export function shouldRest(status: StatusKey, remaining: number | null, inMeeting: boolean): boolean {
+  if (remaining === null || remaining >= REST_BELOW_PERCENT || inMeeting) return false;
+  return status !== 'working' && status !== 'needs';
+}
+
+/**
+ * One location per agent: the rest area when they are resting, a chair at the room their meeting
+ * was given, or their own desk.
+ */
 export function locate(
   agent: Pick<Agent, 'id'>,
   desks: ReadonlyMap<string, number>,
   activity: Pick<OfficeActivity, 'agentId' | 'kind' | 'meetingId'> | undefined,
   slots: readonly (string | null)[],
   seatInMeeting: ReadonlyMap<string, number>,
+  restSlots: readonly (string | null)[] = [],
 ): Location {
   if (activity?.kind === 'MEETING') {
-    const table = slots.indexOf(activity.meetingId ?? 'meeting');
-    if (table >= 0) return { kind: 'table', index: table, seat: seatInMeeting.get(agent.id) ?? 0 };
+    const room = slots.indexOf(activity.meetingId ?? 'meeting');
+    if (room >= 0) return { kind: 'room', index: room, seat: seatInMeeting.get(agent.id) ?? 0 };
   }
+  const spot = restSlots.indexOf(agent.id);
+  if (spot >= 0) return { kind: 'rest', spot };
   return { kind: 'desk', index: desks.get(agent.id) ?? 0 };
 }

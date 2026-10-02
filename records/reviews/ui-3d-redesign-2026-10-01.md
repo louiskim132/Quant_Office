@@ -119,3 +119,22 @@ Screens inspected with eyes (evidence folder): office dark/light at 1440 and 100
 - **Status line and §7 "Revert" were wrong about `App\`.** The work was committed as `c25f1ab`, and the packaged **test** build `9756CE1B…` (inspector fuse on) was mirrored into `Quant Office\App\`; the previous App is in `Archive\App-before-3d-office-20261001` (asar `7E7C7FE4…`). The integration replaces it with a release build; see the roadmap's newest §17 entry.
 - **Decision 5 is superseded.** "Subscription sign-in … needs saved API keys" described LR-16 v1. LR-16b (`e4494fe`) removed that requirement, so the hard-coded blocked step was false. In `070c297` the step is derived from isolated-host checks, the card has per-provider Sign in / Check buttons in its existing styles, and the setup confirmation no longer mentions API keys. No graphics changed.
 - **§6 hand-off is done:** `codex/revision-20261001` was committed and merged into this branch (`070c297`).
+
+## 9. Glass-building revision of the 3D office (2026-10-01, user feedback)
+
+Six requests after the first delivery, all in `app/src/renderer/office3d/` (`layout.ts`, `world.ts`, new `environment.ts`, `engine.ts`, `visuals.ts`, `avatar.ts`) and `office-stage.tsx`:
+
+| # | Request | What changed |
+|---|---|---|
+| 1 | Floor not a clean rectangle sideways | The building is one rectangle on a stepped slab; the old cut-away walls and their uneven edges are gone. Checked at 45° and at 0° (front-on): the footprint is a crisp rectangle. A coplanar slab/floor z-fight found on the way was fixed. |
+| 2 | Fixed, slightly taller walls | Every wall is 3.1 m (was 2.4 m far / 0.85 m cut-away near) and never changes with the camera. The engine's wall easing is removed. |
+| 3 | Transparent windows, screen-door entrance, real surroundings | Walls are glass curtain walls (white sill, header and posts, transparent glass) on all four sides, so nothing hides from any angle. The front has a double sliding glass door under a canopy with the office sign. Outside: paved plaza, entry path, road with cars and a bus, street lamps, cherry and green trees, a canal with a footbridge, and glass towers behind. Day for the light theme, dusk with lit windows for the dark theme. |
+| 4 | Bright, white-focused interior | White desks and walls, pale-oak floor, graphite and light-grey seating, a few colour accents. The interior is equally bright in both themes; only the outside changes. |
+| 5 | Isolated meeting rooms | Each meeting room is a glass room with black frames, a frosted band, a door, a long table with chairs on both sides and at the ends, and a whiteboard. People walk out through the door and along the aisle. |
+| 6 | Rest area where the purple carpet was | A glass rest area: kitchenette with stools, a ping-pong table (two players, ball in motion), sofas and armchairs, a rug, lamp and plants. An agent goes there when its recorded allowance is below 5%. |
+
+Rest rule, so it stays honest: it uses only recorded sign-in observations (`state.connections`) for the agent's provider and account, ignores observations older than 12 h and windows that have already reset, and sends someone to rest only when they are not working or waiting on you and not in a meeting. A working agent stays at its desk (its tag card still shows the allowance). Spots are stable while someone rests and fill in a fixed order (sofa, armchair, ping-pong pair, then the rest); 15 spots, beyond which people stay at their desks. Resting people walk to the rest area only on a change of location; reduced motion seats them at once.
+
+Also: the camera now frames the office in the band between the chip row and the status line, which fixed a desk hiding under a chip (caught by `ui-revision.desktop`).
+
+Verification: format and typecheck clean; unit suite 1,060 tests (1,059 pass, 0 fail, 1 existing skip) including new layout, routing, rest-order and allowance tests; dev-build desktop suites `office3d`, `ui-revision`, `desktop.e2e`, `office-chat`, `revision` pass on empty scratch data dirs. The rest area itself was inspected in the preview harness with a synthetic 3% allowance (there is no way to seed a real low allowance without a provider call). Evidence: `ui-3d-redesign-2026-10-01/after/office-glass-*.png`. Not run: packaged-build suites for this revision, screen reader, weak-GPU frame rates.
