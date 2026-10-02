@@ -2,7 +2,7 @@
 
 # UI redesign — execution log (2026-10-01)
 
-Status (latest, 2026-10-01 evening): **the campus revision (section 11) is pushed to `origin/main` and installed in `App\` as a release build.** Sections 1–10 describe the earlier steps as they stood at the time; section 11.6 corrects what they left unrecorded. Status of the first delivery: implemented locally and verified, not pushed.
+Status (latest, 2026-10-02): **section 12 (board, sharp text, full name, faster open, themed loading) is committed on the branch (`084a823`) and installed in `App\` as a release build; it is not pushed.** The campus revision (section 11) is on `origin/main`. Sections 1–10 describe the earlier steps as they stood at the time; section 11.6 corrects what they left unrecorded. Status of the first delivery: implemented locally and verified, not pushed.
 
 Worktree: `Quant Office\Worktrees\ui-3d-office-20261001` · branch `feat/ui-3d-office-20261001` · base `80cf088` (tip of `codex/revision-20261001`, itself on `origin/main` `beab1ce`).
 The sibling worktree `Worktrees\revision-20261001` was **not touched**: it carries another session's uncommitted LR-16b isolation edits (see "Hand-off to the isolation session").
@@ -208,3 +208,69 @@ Not run: `agents.e2e.ts` and `three-agent.live.ts` (live providers), CI (no PR, 
 ### 11.6 Record corrections
 
 - Sections 9 and 10 said nothing was pushed and that the glass build was not installed. In fact `origin/main` was pushed directly, with no PR or CI run: `beab1ce` → `c25f1ab` at 2026-10-01 18:42 UTC and `c25f1ab` → `f5f953f` at 2026-10-02 02:30 UTC (GitHub's activity log). The release build of `f5f953f` (asar `A1AD4D94…`, fuses off, containing the section 10 rail) was installed in `App\`, with `Archive\App-before-glass-office-20261001` (the `070c297` release, `2F1BD1DF…`) as its rollback. The roadmap had no entry for either; its new section 17 entry records them.
+
+## 12. Board, sharp text, full name and a faster open (2026-10-01/02, user feedback)
+
+The request, after the campus office: put the status board **behind** the director and move the director right so the two never overlap; the graphics turned **blurry** on a small zoom-in, so the board's letters could not be read; spell the building's name **in full** (not "QRO") and remove the small white letters below it; the app had become **slow to start**, so audit and optimise it; and the office's **loading screen** stayed blue for a while. During the work the user added that the letters still blurred and the office still took long to load (the installed App had not been rebuilt yet), and then asked for a loading screen in the theme's colours that says only "Loading…", instead of 1–2 s of blue, or a better idea.
+
+| # | Request | Delivered |
+|---|---|---|
+| 1 | Board behind the director, director moved right | The director's row now starts one desk slot to the right, and the board takes that first slot, set 1.6 m back toward the living wall and 0.2 m left, still turned 45° to the default camera. From that camera the board stands above and to the left of the director, clear of the director, their name tag and the zone sign. Unit-tested for 1, 3, 4 and 5 directors, including a screen-space overlap test from the default camera. The studio rug and tree follow the new footprint. |
+| 2 | Sharp at any zoom | Text is no longer a fixed-size texture. Each sign is a `TextSurface` that repaints at the resolution the current zoom needs (device pixels per metre = camera zoom × pixel ratio; up to 4,096 px wide, 160 ms after the zoom settles; 16× anisotropic filtering). That covers the board, the zone plaques, the floor lettering, the monitors and the building sign. The board was redrawn for it (header, three tiles WORKING / IDLE / MEETING with large numbers, and a "needs you" or "No alerts" line). The concrete texture doubled to 1,024² over 4 m. Shadows follow the view: the shadow camera is fitted to what is on screen, in 1.25× steps and snapped to whole texels so edges do not shimmer, so a 2,048² map is sharper close up than the old fixed 4,096² one. |
+| 3 | Full building name | The canopy plate reads **QUANT RESEARCH OFFICE** in brass with a dark edge (7.0 × 0.62 m, fitted to the plate). The small white fascia letters are gone. |
+| 4 | Faster start | See 12.1. Opening the store on a copy of the real workspace dropped from 1.17 s to 0.35–0.41 s (0.17–0.20 s once the integrity checkpoint has caught up). Building the 3D world dropped from 0.7–0.8 s to about 0.1 s. The page now appears about 1.0 s after launch (warm) instead of about 2.6 s, and the first office frame about 1.9–2.1 s after launch instead of about 2.7 s. |
+| 5 | Loading screen in the theme's colours | The window and its startup page open in the last theme used (warm dark or light), and the startup page says only "Loading…". The page paints before the 3D engine starts. Until the first office frame, the stage is a plain panel in the theme's colours with "Loading…" in the middle and nothing else, which fades out in 0.25 s (no fade under reduced motion). The blue sky shows only once the office is drawn. |
+
+### 12.1 What made the open slow, and what changed
+
+Measured with a startup probe: a Playwright-driven dev build on empty scratch `QRO_USER_DATA_DIR`s with six fixture agents (never dispatched), dusk theme, renderer CPU profiles over CDP, and `node --cpu-prof` for the store on a read-only copy of the workspace file (the app itself was never started on that copy).
+
+| Step | Cause | Change |
+|---|---|---|
+| Store open (`src/core/store.ts`) | Replaying events cloned the whole projection once per event (`structuredClone`). The background full-history check never finished: events written during startup changed the tip mid-scan, so the integrity checkpoint stayed where it was and every open replayed the same long tail. | Replays run in place (the commit path still clones). The background check resumes from where it stopped when the tip moves (up to 40 tries, 1.5 s apart), so the checkpoint reaches the tip. In the app, the background check starts 4 s after launch instead of competing with the first paint. On the workspace copy, the checkpoint moved to the tip (event 1,476). |
+| Startup log (`src/main/main.ts`) | No timings. | `main.log` gets one line per launch: `startup window=… store=… services=… reconcile=… page=…`. |
+| WebGL probe (`office-stage.tsx`) | A throwaway WebGL context on every open just to test support (about 0.12 s). | Removed. A GPU that refuses WebGL still makes the engine throw, and the page falls back to the classic floor as before. |
+| World building (`office3d/kit.ts`) | Every box, cylinder and rounded box was a separate three.js geometry, then merged (and welded) into one: 0.7–0.8 s. | Unit shapes are cached once and written straight into growable typed arrays with their transform; one indexed mesh per batch, as before. A new test (`tests/office3d-kit.test.ts`) requires the same vertices, normals and triangles as the three.js geometry for every shape and rotation. |
+| First frame (`office3d/engine.ts`) | Shader programs linked synchronously during the first draw and froze the page for about half a second. | Programs compile off the main thread (`compileAsync`, `KHR_parallel_shader_compile`) before the first draw, and fewer of them: materials that differed only in a flag share one program, and the transparent two-sided ones (rings, halos, the ball, floor lettering, the building sign) draw in one pass instead of a back-then-front pair. 11 programs on open. |
+| Paint order (`office-stage.tsx`) | The engine was built inside the page's first render, about 0.65 s of work, so nothing appeared until it was done. The stage's sky showed blue while the canvas was still empty. | The engine starts after the first paint, as two tasks (start the GPU, then lay out the floor), with a fallback timer for a window that paints no frames. The stage shows the theme-coloured "Loading…" panel until the engine reports its first frame (`onReady`). |
+| Window colour (`main.ts`, `main.tsx`, `scripts/build.mjs`) | The window and its startup page were always dark (`#101414`, "Opening your workspace…"), and the page's own colours were dark until the workspace was read, whatever the theme. | The main process keeps the last theme in a one-word file, `window-theme`, in the data folder (outside `workspace/`, so not part of backups), and the page keeps it in its local storage (`qro.theme`). Both follow the workspace setting. The window background is the page colour (`#171614` dark, `#f1f0e9` light), and the build writes `loading.html` and `loading-light.html`. |
+
+**Found while testing: a backup race (`src/core/store.ts`, `src/main/artifacts.ts`).** `desktop.e2e` failed once with "Backup lineage tip does not match its manifest.". A backup copies the database, then reads the stored objects, and only then wrote the last event's hash into the manifest. An event recorded in between, such as a startup account check, made the manifest name an event the copy did not have, so the backup's own round-trip check refused it. A user could have seen a backup fail for no visible reason shortly after launch. The faster page now reaches that window sooner, which exposed it. `store.backup()` now returns the copy's own last event, read in the same synchronous step as the copy, and both manifest formats use it. A new test in `tests/artifacts.test.ts` records an event right after the copy; it fails with exactly that error on the old code and passes now.
+
+What is left (warm, after the page has painted, on this laptop's integrated AMD GPU through ANGLE/Direct3D 11): about 0.2 s waiting for the GPU to finish the page's first paint, before the office's context can start; about 0.07 s for the room environment map; about 0.3 s laying out the floor; about 0.45 s compiling 11 programs; and about 0.2 s for the first draw. Two things were tried and dropped. Creating the context earlier only moved the 0.2 s wait. Warming WebGL from the startup page did not help, because WebGL's one-time setup is cheap here (40–60 ms). The next step would be to restructure the engine so the floor is laid out while the GPU is still busy (about 0.2 s). That was not done.
+
+### 12.2 Measurements
+
+Startup probe, warm (the same scratch folder relaunched), dusk, six agents, times from launch:
+
+| | Before (`7192eb2`) | After |
+|---|---|---|
+| Page painted | about 2.6 s (blocked by the engine) | about 1.0 s |
+| First office frame | about 2.7 s | about 1.9–2.1 s |
+| Between them | blue sky | the theme's "Loading…" panel |
+| First launch on a fresh folder (no caches) | 3.4–3.9 s to the office | about 2.7–2.8 s |
+| Store open, copy of the real workspace | 1,173 ms | 354–412 ms; 173–195 ms once the checkpoint has caught up |
+| Background full-history check | about 4 s of CPU, never conclusive | about 2.1–2.5 s in background slices, conclusive |
+
+The light (day) theme is about 0.1 s faster to the first frame; it has no interior point lights.
+
+### 12.3 Verification
+
+| Check | Result |
+|---|---|
+| `prettier --check`, `tsc --noEmit` | clean |
+| Unit suite | **1,073 tests: 1,072 pass, 0 fail, 1 existing skip** (+8: four batch-geometry tests in `tests/office3d-kit.test.ts`, two integrity-checkpoint tests, the board's screen-overlap test, and the backup-race test) |
+| Dev-build desktop suites, scratch `QRO_USER_DATA_DIR` | `office3d` (webgl=true), `ui-revision`, `desktop.e2e`, `office-chat`, `revision`, `pipeline-request` and `pipeline` all pass with the loading-screen changes. `desktop.e2e` failed once on the backup race (12.1). After that fix, which touches the main process only, `desktop.e2e` and the unit suite were run again and pass. |
+| Theme memory (scratch folder, dark workspace) | Three launches on a fresh folder with a dark workspace. **First:** opens light (`loading-light.html`, `#F1F0E9`), since nothing is remembered yet; turns `#171614` and saves `dark` once the workspace is read. **Second:** opens dark (`loading.html`, `#171614`); switching to Light in Settings saves `light` (file and local storage) and turns the window `#F1F0E9`. **Third:** opens light. |
+| Packaged **test** build | Built from `084a823` (asar SHA-256 `31695F621196DECF8124CAFF2BEBBA07FE0842AFF0C6D15148F10C2BABD27DEA`): `office3d` (webgl=true), `desktop.e2e`, `ui-revision` and `revision` all pass. |
+| Packaged **release** build and installed `App\` | Release build of `084a823`: the same asar, 95 files, with the RunAsNode, NodeOptions and NodeCliInspect fuses disabled. The App was not running. The previous App (the release of `7192eb2`, asar `BC1C8338…8B41`) was copied to `Archive\App-before-office-speed-20261002` (95 of 95 files hash-identical). The release was mirrored with `robocopy /MIR` (95 of 95 identical). Started on an empty scratch data folder: the "Quant Research Office" window opened, a workspace was created, and `main.log` was clean: `startup window=211ms store=227ms services=234ms reconcile=235ms page=377ms`. Only the processes the check started were closed. |
+| Eyes | Board behind-left of the director with no overlap, crisp at zoom 80 and 245; the sign reads in full and crisp at zoom 140; the loading panel in both themes. Screenshots `after/office-speed-01…05` (dusk with the board, day, sign at zoom 140, loading dark, loading light) |
+
+Not run: `agents.e2e.ts` and `three-agent.live.ts` (live providers), CI (no PR), a screen-reader pass, other GPUs.
+
+### 12.4 Risks and limits
+
+- The first launch after this update has no remembered theme yet, so it opens in the light colours and turns dark when the workspace is read if the workspace is dark. Every later launch opens in the right colours. The first launch also has no shader or code cache, so it is the slow case (about 2.8 s to the office).
+- The fitted shadow camera re-fits only in 1.25× steps, so a slow zoom can show a small, rare jump in shadow sharpness.
+- Chromium uses the integrated AMD GPU, not the RTX 3060; nothing here changes that.
+- The status board lost its old "beside the last director desk" slot; the layout test and the roadmap rule were updated to "behind and left of the director".
