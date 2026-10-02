@@ -636,11 +636,11 @@ function register() {
     return { ok: true };
   });
   handle('office:provider-key-state', async value => secrets.providerKeyState(providerSchema.parse(value)));
-  // LR-16 agent isolation: status is the credential's presence only — the renderer never sees the
+  // LR-16 agent isolation: status reflects durable required intent — the renderer never sees the
   // password, and the account itself is created/left behind by the consented elevated script.
   handle('office:agent-isolation-status', async value => {
     noInput(value);
-    return { configured: secrets.hasAgentCredential() };
+    return { configured: secrets.isolationRequired() };
   });
   handle('office:agent-isolation-login', async value => {
     const provider = providerSchema.parse(value);
@@ -1687,10 +1687,11 @@ function buildController(): AssignmentController {
   // pid dies, so a missed shutdown costs it at most one watchdog tick.
   agentHost?.shutdown();
   agentHost = undefined;
-  // LR-16: when the agent account credential exists, agent CLIs spawn through the QRO-Agent host
-  // instead of under the office account. `QRO_AGENT_ISOLATION=off` is the documented dev/test/CI
-  // escape hatch; with no credential the adapter self-spawns and records runAs 'self' either way.
-  if (secrets.hasAgentCredential() && process.env.QRO_AGENT_ISOLATION !== 'off')
+  // LR-16: durable isolation intent keeps agent CLIs on the QRO-Agent host route even if DPAPI
+  // cannot read the credential. The host then fails closed instead of falling back to self.
+  // `QRO_AGENT_ISOLATION=off` is the documented dev/test/CI
+  // escape hatch; without isolation intent the adapter self-spawns and records runAs 'self'.
+  if (secrets.isolationRequired() && process.env.QRO_AGENT_ISOLATION !== 'off')
     agentHost = qroAgentSpawn({
       secrets,
       agentsRoot: path.join(workspace(), 'local-sessions'),

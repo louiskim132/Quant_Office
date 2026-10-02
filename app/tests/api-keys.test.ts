@@ -74,7 +74,7 @@ test('with encrypted storage unavailable a save fails closed and writes nothing'
   assert.equal(existsSync(path.join(root, 'secrets.dat')), false, 'fail closed: no plaintext fallback');
 });
 
-test('a corrupt secrets.dat is renamed aside and read as empty, never crashing open', () => {
+test('a corrupt secrets.dat is preserved and credential mutations refuse to overwrite it', () => {
   const root = dir();
   const file = path.join(root, 'secrets.dat');
   writeFileSync(file, '%%% not the encrypted payload %%%', 'utf8');
@@ -82,9 +82,11 @@ test('a corrupt secrets.dat is renamed aside and read as empty, never crashing o
   const secrets = new Secrets(root, stubBox().box, line => lines.push(line));
   assert.equal(secrets.providerKey('claude'), null);
   assert.deepEqual(secrets.providerKeyState('claude'), { saved: false });
-  assert.equal(existsSync(file), false, 'the corrupt file was renamed aside');
+  assert.equal(readFileSync(file, 'utf8'), '%%% not the encrypted payload %%%');
+  assert.throws(() => secrets.saveProviderKey('claude', KEY), /could not be read/);
+  assert.throws(() => secrets.removeProviderKey('claude'), /could not be read/);
   const broken = readdirSync(root).filter(name => /^secrets\.broken-.+\.dat$/.test(name));
-  assert.equal(broken.length, 1, 'exactly one secrets.broken-<ISO-ts>.dat was left for inspection');
+  assert.equal(broken.length, 0, 'credentials remain at their original recovery path');
   assert.equal(lines.length, 1, 'the caller logged exactly one line');
 });
 
