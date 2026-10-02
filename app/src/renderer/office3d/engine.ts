@@ -200,7 +200,7 @@ export class OfficeEngine {
     this.controls.zoomToCursor = true;
     this.controls.rotateSpeed = 0.7;
     this.controls.zoomSpeed = 1.1;
-    this.controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
+    this.controls.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE };
     this.controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
     this.controls.addEventListener('start', () => {
       this.userMoved = true;
@@ -224,12 +224,13 @@ export class OfficeEngine {
     };
     listen(this.canvas, 'pointermove', e => this.onPointerMove(e));
     listen(this.canvas, 'pointerdown', e => {
+      if (e.button !== 0) return;
       this.down = { x: e.clientX, y: e.clientY, id: this.pick(e)?.id ?? null };
     });
     listen(this.canvas, 'pointerup', e => {
       const d = this.down;
       this.down = null;
-      if (!d || Math.hypot(e.clientX - d.x, e.clientY - d.y) > 5) return;
+      if (e.button !== 0 || !d || Math.hypot(e.clientX - d.x, e.clientY - d.y) > 5) return;
       const hit = this.pick(e);
       if (hit) this.opts.onPick(hit.id);
     });
@@ -366,8 +367,11 @@ export class OfficeEngine {
         this.walkers.set(v.id, w);
       } else if (!samePlace(w.place, place)) {
         if (this.teleport || this.reduced || !this.painted) this.seat(w, place);
-        else if (w.route) w.pending = place;
+        else if (w.route || w.pause > 0) w.pending = place;
         else this.startWalk(w, place);
+      } else {
+        w.pending = null;
+        w.pause = 0;
       }
       w.visual = v;
       w.avatar.typing = v.typing;
@@ -687,7 +691,6 @@ export class OfficeEngine {
   private onKey(e: KeyboardEvent, down: boolean) {
     if (e.target !== this.opts.host && e.target !== this.canvas) return;
     if (e.key === ' ') {
-      this.controls.mouseButtons.LEFT = down ? THREE.MOUSE.PAN : THREE.MOUSE.ROTATE;
       if (down) e.preventDefault();
       return;
     }
@@ -806,9 +809,12 @@ export class OfficeEngine {
         any = true;
       }
       if (w.pause > 0) {
-        w.pause -= dt;
+        w.pause = Math.max(0, w.pause - dt);
         any = true;
-        continue;
+        if (w.pause > 0) continue;
+      }
+      if (!w.route && w.pending) {
+        this.startWalk(w, w.pending);
       }
       if (!w.route) continue;
       any = true;
@@ -844,17 +850,7 @@ export class OfficeEngine {
         w.avatar.playing = w.visual.resting && pose.pose === 'standing';
         this.opts.labels.get(w.avatar.id)?.setAttribute('data-motion', 'seated');
         if (w.pending) {
-          const next = w.pending;
-          w.pending = null;
           w.pause = 0.35;
-          const queued = next;
-          setTimeout(() => {
-            const live = this.walkers.get(w.avatar.id);
-            if (live && !live.route && !this.disposed) {
-              this.startWalk(live, queued);
-              this.wake();
-            }
-          }, 350);
         }
       }
     }
@@ -883,6 +879,10 @@ export class OfficeEngine {
     const offset = this.camera.position.clone().sub(this.controls.target);
     this.canvas.dataset.zoom = this.camera.zoom.toFixed(1);
     this.canvas.dataset.azimuth = String(Math.round((Math.atan2(offset.x, offset.z) * 180) / Math.PI));
+    this.canvas.dataset.target = this.controls.target
+      .toArray()
+      .map(v => v.toFixed(3))
+      .join(',');
     this.canvas.dataset.people = String(this.walkers.size);
     if (this.opts.host.dataset.ready !== 'true') {
       this.opts.host.dataset.ready = 'true';
@@ -971,6 +971,7 @@ export class OfficeEngine {
   }
 
   private labelWidths = new WeakMap<HTMLElement, number>();
+  private labelHeights = new WeakMap<HTMLElement, number>();
 
   /**
    * Hang each name tag over its person, then thin out the crowd: tags are placed nearest-first and
@@ -981,7 +982,8 @@ export class OfficeEngine {
     const v = new THREE.Vector3();
     const w = this.width;
     const h = this.height;
-    const items: { id: string; el: HTMLElement; x: number; y: number; width: number; rank: number }[] = [];
+    const items: { id: string; el: HTMLElement; x: number; y: number; width: number; height: number; rank: number }[] =
+      [];
     // Reads first, writes after, so the layout engine runs once per frame.
     for (const [id, walker] of this.walkers) {
       const el = this.opts.labels.get(id);
@@ -993,22 +995,54 @@ export class OfficeEngine {
       );
       v.project(this.camera);
       const expanded = el.dataset.collapsed !== 'true' && this.showNames;
-      if (expanded || !this.labelWidths.has(el))
+      if (expanded || !this.labelWidths.has(el)) {
         this.labelWidths.set(el, Math.max(this.labelWidths.get(el) ?? 0, el.offsetWidth));
+        this.labelHeights.set(el, Math.max(this.labelHeights.get(el) ?? 28, el.offsetHeight));
+      }
       items.push({
         id,
         el,
         x: (v.x * 0.5 + 0.5) * w,
         y: (-v.y * 0.5 + 0.5) * h,
         width: this.labelWidths.get(el) ?? 90,
+        height: this.labelHeights.get(el) ?? 28,
         rank: id === this.hovered ? 3 : id === this.selected ? 2 : 0,
       });
     }
-    const placed: { x0: number; x1: number; y0: number; y1: number }[] = [];
+    type Box = { id: string; x0: number; x1: number; y0: number; y1: number };
+    const overlaps = (a: Box, b: Box) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
+    const sorted = [...items].sort((a, b) => b.rank - a.rank || b.y - a.y);
+    // Reserve a clickable dot for everyone before expanding any names over the crowd.
+    const dots: Box[] = [];
+    for (const item of [...items].sort((a, b) => b.y - a.y || a.id.localeCompare(b.id))) {
+      const anchorX = item.x;
+      let dot: Box;
+      do {
+        let free = false;
+        for (const dx of [0, -24, 24, -48, 48]) {
+          item.x = anchorX + dx;
+          dot = { id: item.id, x0: item.x - 11, x1: item.x + 11, y0: item.y - 22, y1: item.y };
+          if (!dots.some(p => overlaps(dot, p))) {
+            free = true;
+            break;
+          }
+        }
+        if (free) break;
+        item.y -= 24;
+      } while (true);
+      dots.push(dot!);
+    }
+    const placed: Box[] = [];
     const collapsed = new Set<string>();
-    for (const item of [...items].sort((a, b) => b.rank - a.rank || b.y - a.y)) {
-      const box = { x0: item.x - item.width / 2, x1: item.x + item.width / 2, y0: item.y - 30, y1: item.y };
-      const clash = placed.some(p => box.x0 < p.x1 && p.x0 < box.x1 && box.y0 < p.y1 && p.y0 < box.y1);
+    for (const item of sorted) {
+      const box = {
+        id: item.id,
+        x0: item.x - item.width / 2,
+        x1: item.x + item.width / 2,
+        y0: item.y - item.height,
+        y1: item.y,
+      };
+      const clash = [...placed, ...dots.filter(p => p.id !== item.id)].some(p => overlaps(box, p));
       if (clash && item.rank === 0) collapsed.add(item.id);
       else placed.push(box);
     }

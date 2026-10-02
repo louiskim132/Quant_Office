@@ -142,6 +142,8 @@ export interface LayoutInput {
   tables: number;
   /** Chairs per room (the largest meeting present, clamped). */
   tableSeats: number;
+  /** Highest occupied lounge slot, including stable gaps left by departing agents. */
+  restSeats?: number;
   /** No agents at all: four vacant worker desks, no director or PM row. */
   empty?: boolean;
 }
@@ -326,9 +328,11 @@ export function buildLayout(input: LayoutInput): OfficeLayout {
     });
   }
   const roomsBottom = ROOM_Z0 + rowCount * roomDepth + (rowCount - 1) * LANE + LANE;
-  const maxZ = Math.max(lastDeskZ + 4.2, roomsBottom + REST_DEPTH, 19.0);
+  const restCapacity = Math.max(17, input.director + input.pm + input.worker, input.restSeats ?? 0);
+  const restDepth = REST_DEPTH + (restCapacity > 17 ? 2.4 + Math.ceil((restCapacity - 17) / 6) * 1.5 : 0);
+  const maxZ = Math.max(lastDeskZ + 4.2, roomsBottom + restDepth, 19.0);
   const maxX = wingX0 + wingW + EAST_WALK;
-  const rest = buildRest(wingX0, maxX, maxZ, corridorX);
+  const rest = buildRest(wingX0, maxX, maxZ, corridorX, restCapacity, restDepth);
   const crossings = [
     ...new Set([...desks.map(d => d.aisleZ), ...rooms.map(r => r.laneZ), rest.doorZ].map(v => +v.toFixed(3))),
   ];
@@ -372,8 +376,8 @@ function streetPlants(corridorX: number, maxZ: number, crossings: readonly numbe
  * furniture. Seats keep well back from the front glass, where the roof edge would hide them from
  * the default camera.
  */
-function buildRest(x0: number, x1: number, maxZ: number, corridorX: number): RestArea {
-  const z0 = maxZ - REST_DEPTH;
+function buildRest(x0: number, x1: number, maxZ: number, corridorX: number, capacity: number, depth: number): RestArea {
+  const z0 = maxZ - depth;
   const doorZ = z0 + REST_LANE_V;
   const gate = { x: corridorX, z: doorZ };
   const e = x1 - x0 - REST_MIN_WIDTH;
@@ -441,6 +445,17 @@ function buildRest(x0: number, x1: number, maxZ: number, corridorX: number): Res
     stool(4),
     stool(5),
   ];
+  // Additional cafe rows keep every resting person visible with a clear route to the west aisle.
+  for (let i = 0; order.length < capacity; i++) {
+    const seat = at(1.3 + (i % 6) * 1.05, 11 + Math.floor(i / 6) * 1.5);
+    stools.push(seat);
+    order.push({
+      kind: 'stool',
+      seat,
+      yaw: Math.PI,
+      exit: [{ x: seat.x, z: seat.z + 0.6 }, { x: west, z: seat.z + 0.6 }, ...tail],
+    });
+  }
   const spots: RestSpot[] = order.map((raw, index) => ({
     index,
     kind: raw.kind,

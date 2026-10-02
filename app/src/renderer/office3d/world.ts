@@ -1141,10 +1141,10 @@ function roofEdge(b: Batch, glow: Batch, layout: OfficeLayout, dusk: boolean) {
   const o = 0.5;
   const y = WALL_HEIGHT - 0.36;
   const h = 0.36;
-  b.box(maxX + 2 * o, h, o, FASCIA, maxX / 2, y, -o / 2);
-  b.box(maxX + 2 * o, h, o, FASCIA, maxX / 2, y, maxZ + o / 2);
-  b.box(o, h, maxZ, FASCIA, -o / 2, y, maxZ / 2);
-  b.box(o, h, maxZ, FASCIA, maxX + o / 2, y, maxZ / 2);
+  b.box(maxX + 2 * o, h, o, '#ffffff', maxX / 2, y, -o / 2);
+  b.box(maxX + 2 * o, h, o, '#ffffff', maxX / 2, y, maxZ + o / 2);
+  b.box(o, h, maxZ, '#ffffff', -o / 2, y, maxZ / 2);
+  b.box(o, h, maxZ, '#ffffff', maxX + o / 2, y, maxZ / 2);
   // A thin darker drip edge reads as the slab's shadow line.
   b.box(maxX + 2 * o + 0.02, 0.05, 0.04, '#bdb7ad', maxX / 2, y, maxZ + o);
   b.box(0.04, 0.05, maxZ + 2 * o, '#bdb7ad', maxX + o, y, maxZ / 2);

@@ -29,9 +29,9 @@ for (const [role, name] of roster)
     name,
     role,
     team: 'Synthetic acceptance',
-    provider: 'openai',
-    model: 'fixture-unverified',
-    effort: 'default',
+    provider: 'devin',
+    model: 'swe-2',
+    effort: 'max',
     account: 'fixture@example.test',
     execution: 'HOSTED_SETUP_REQUIRED',
     createdAt: now,
@@ -67,13 +67,14 @@ try {
     // No usable GPU in this environment: the flat floor must have taken over, never a blank box.
     await page.locator('.sky-office').waitFor();
     assert.equal(await page.locator('[data-office-agent]').count(), 6);
+    assert.equal(await stage.locator('[data-office-agent][data-location="rest"]').count(), 6);
     checks.push('WebGL unavailable here: the classic floor took over with six people (3D steps not run)');
   } else {
     const canvas = stage.locator('canvas');
     await page.waitForFunction(() => document.querySelector('.office3d canvas')?.getAttribute('data-people') === '6');
     assert.equal(await page.locator('[data-office-agent]').count(), 6);
     for (const [, name] of roster) await page.getByRole('button', { name: new RegExp(`^${name} — `) }).waitFor();
-    checks.push('3D floor: six seated people, each a labelled name-tag button');
+    checks.push('3D floor: all six idle people in the rest area, each a labelled name-tag button');
 
     // Names switch: hide and show every name without touching a record.
     assert.equal(await stage.getAttribute('data-names'), 'on');
@@ -115,6 +116,7 @@ try {
     const read = async () => ({
       az: Number(await canvas.getAttribute('data-azimuth')),
       zoom: Number(await canvas.getAttribute('data-zoom')),
+      target: await canvas.getAttribute('data-target'),
     });
     const start = await read();
     // The rail has no rotate or full-screen buttons: dragging and the arrow keys turn the view.
@@ -126,6 +128,19 @@ try {
     await page.mouse.down();
     await page.mouse.move(shot.x + shot.width / 2 + 160, shot.y + shot.height / 2, { steps: 8 });
     await page.mouse.up();
+    await page.waitForFunction(
+      target => document.querySelector('.office3d canvas')?.getAttribute('data-target') !== target,
+      start.target,
+    );
+    assert.equal((await read()).az, start.az, 'left drag pans without rotating');
+    await stage.getByRole('button', { name: 'Reset view', exact: true }).click();
+    await page.waitForTimeout(800);
+    await stage.locator('.office3d-host').focus();
+    await page.keyboard.press('Space');
+    await page.mouse.move(shot.x + shot.width / 2, shot.y + shot.height / 2);
+    await page.mouse.down({ button: 'right' });
+    await page.mouse.move(shot.x + shot.width / 2 + 160, shot.y + shot.height / 2, { steps: 8 });
+    await page.mouse.up({ button: 'right' });
     await page.waitForFunction(
       az => Number(document.querySelector('.office3d canvas')?.getAttribute('data-azimuth')) !== az,
       start.az,
@@ -159,7 +174,9 @@ try {
       start.az,
     );
     await page.keyboard.press('0');
-    checks.push('Rotate, zoom (buttons and wheel), keyboard rotate and reset change and restore the camera');
+    checks.push(
+      'Left drag pans, right drag rotates (including after Space), wheel/buttons zoom and keyboard/reset work',
+    );
 
     // A person's chip locks the camera on them and opens their drawer; Escape closes it and returns focus.
     const zoomBefore = (await read()).zoom;
@@ -241,7 +258,7 @@ try {
         packaged: !!process.env.QRO_EXECUTABLE,
         webgl,
         providerCalls: 0,
-        roster: 'Test dir 1, Test PM A–D, Test worker 1 — fixture-unverified/default; no agents executed',
+        roster: 'Test dir 1, Test PM A–D, Test worker 1 — synthetic Devin SWE-2/max profiles; no agents executed',
         checks,
       },
       null,

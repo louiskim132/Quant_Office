@@ -181,6 +181,10 @@
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+.office3d .person-tag:hover,
+.office3d .person-tag:focus-visible {
+  z-index: 6000 !important;
+}
 .office3d .tag-bubble {
   max-width: 190px;
   padding: 2px 8px;

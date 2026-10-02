@@ -330,7 +330,7 @@ test('samePlace tells identical seats from different ones', () => {
   assert.ok(!samePlace(desk(layout, 0), chair(layout, 0, 0)));
 });
 
-test('resting follows the recorded allowance: below 5% left, not mid-task, not mid-meeting', () => {
+test('resting is the default and allowance at or below 5% overrides project attendance', () => {
   const now = Date.parse('2026-10-01T12:00:00Z');
   const connection = (remaining: number, over: Partial<AccountConnection> = {}): AccountConnection => ({
     id: 'c',
@@ -366,11 +366,26 @@ test('resting follows the recorded allowance: below 5% left, not mid-task, not m
     'a window that has reset no longer counts',
   );
   assert.equal(remainingAllowance(agent, undefined, now), null);
-  assert.equal(shouldRest('idle', 4.9, false), true);
-  assert.equal(shouldRest('idle', 5, false), false, 'exactly 5% is not below 5%');
-  assert.equal(shouldRest('done', 0, false), true);
-  assert.equal(shouldRest('working', 1, false), false, 'a working agent stays at the desk');
-  assert.equal(shouldRest('idle', 1, true), false, 'a meeting keeps its people');
-  assert.equal(shouldRest('idle', null, false), false, 'no observation, no rest');
+  assert.equal(shouldRest(true, 4.9), true);
+  assert.equal(shouldRest(true, 5), true);
+  assert.equal(shouldRest(true, 5.1), false);
+  assert.equal(shouldRest(true, 0), true);
+  assert.equal(shouldRest(false, 100), true);
+  assert.equal(shouldRest(false, null), true);
+  assert.equal(shouldRest(true, null), false);
   assert.deepEqual(assignRooms(['a', 'b'], ['b', 'c']), ['c', 'b'], 'a freed spot is reused, nobody else moves');
+});
+
+test('large idle rosters have distinct rest spots inside the lounge and routes to every desk', () => {
+  const layout = layoutOf(1, 4, 45);
+  assert.equal(layout.rest.spots.length, 50);
+  assert.equal(new Set(layout.rest.spots.map(s => `${s.seat.x}:${s.seat.z}`)).size, 50);
+  for (const spot of layout.rest.spots) {
+    assert.ok(spot.seat.z > layout.rest.z0 && spot.seat.z < layout.rest.z1);
+    const route = routeBetween(layout, lounge(layout, spot.index), desk(layout, spot.index));
+    assert.ok(route.points.every(p => Number.isFinite(p.x) && Number.isFinite(p.z)));
+    for (let k = 1; k < route.points.length; k++) assert.ok(!crossesDesk(layout, route.points[k - 1], route.points[k]));
+  }
+  const afterRemoval = buildLayout({ director: 0, pm: 0, worker: 7, tables: 2, tableSeats: 6, restSeats: 50 });
+  assert.equal(afterRemoval.rest.spots.length, 50, 'surviving people keep their high-numbered lounge spots');
 });

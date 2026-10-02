@@ -605,16 +605,17 @@ function campus(
   const bay = 3.6;
   const H = floors * fh;
   // The glazed volume, set back from the frame.
-  b.box(w - 0.7, H, d - 0.7, pal.glass, cx, y0, cz);
+  // Keep glazing below the roof slab so their top faces cannot fight for depth.
+  b.box(w - 0.7, H - 0.44, d - 0.7, pal.glass, cx, y0, cz);
   for (let f = 0; f <= floors; f++)
-    b.box(w, 0.42, d, f === floors ? pal.concreteDark : pal.concrete, cx, y0 + f * fh - (f ? 0.42 : 0), cz);
+    b.box(w, 0.42, d, f === floors ? '#ffffff' : pal.concrete, cx, y0 + f * fh - (f ? 0.42 : 0), cz);
   for (let x = x0; x <= x1 + 0.01; x += w / Math.max(1, Math.round(w / bay))) {
-    b.box(0.4, H, 0.4, pal.concrete, x, y0, z0);
-    b.box(0.4, H, 0.4, pal.concrete, x, y0, z1);
+    b.box(0.4, H - 0.42, 0.4, pal.concrete, x, y0, z0);
+    b.box(0.4, H - 0.42, 0.4, pal.concrete, x, y0, z1);
   }
   for (let z = z0; z <= z1 + 0.01; z += d / Math.max(1, Math.round(d / bay))) {
-    b.box(0.4, H, 0.4, pal.concrete, x0, y0, z);
-    b.box(0.4, H, 0.4, pal.concrete, x1, y0, z);
+    b.box(0.4, H - 0.42, 0.4, pal.concrete, x0, y0, z);
+    b.box(0.4, H - 0.42, 0.4, pal.concrete, x1, y0, z);
   }
   // Lit bays on the south and east faces at dusk; mullions on every face by day.
   const nx = Math.max(1, Math.round(w / bay));
@@ -673,7 +674,7 @@ function campus(
   }
   if (style === 'pavilion') {
     // A deep flat roof on round columns over a terrace.
-    b.box(w + 3, 0.5, d + 3, pal.concrete, cx, y0 + fh - 0.1, cz);
+    b.box(w + 3, 0.5, d + 3, '#ffffff', cx, y0 + fh - 0.1, cz);
     for (let x = x0 - 1.2; x <= x1 + 1.2; x += 4) b.cylinder(0.22, 0.22, fh - 0.1, pal.concrete, x, y0, z1 + 1.2, 12);
   }
   // Rooftop plant.
@@ -690,10 +691,10 @@ function campus(
     );
   for (let k = 0; k < 2; k++)
     b.cylinder(0.6, 0.6, 1.1, '#9aa0a6', x0 + 3 + rand() * (w - 6), top, z0 + 2 + rand() * (d - 4), 12);
-  b.box(w, 0.9, 0.2, pal.concrete, cx, top, z0);
-  b.box(w, 0.9, 0.2, pal.concrete, cx, top, z1);
-  b.box(0.2, 0.9, d, pal.concrete, x0, top, cz);
-  b.box(0.2, 0.9, d, pal.concrete, x1, top, cz);
+  b.box(w, 0.9, 0.2, '#ffffff', cx, top, z0);
+  b.box(w, 0.9, 0.2, '#ffffff', cx, top, z1);
+  b.box(0.2, 0.9, d, '#ffffff', x0, top, cz);
+  b.box(0.2, 0.9, d, '#ffffff', x1, top, cz);
 }
 
 function pick<T>(rand: Rand, list: readonly T[]): T {

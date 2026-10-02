@@ -1,4 +1,4 @@
-import type { Agent, AccountConnection } from '../../shared/types';
+import type { Agent, AccountConnection, AppState } from '../../shared/types';
 import type { OfficeActivity } from '../../shared/activity';
 import type { StatusKey } from '../status';
 import type { Location } from './engine';
@@ -72,7 +72,7 @@ export function assignDesks(layout: OfficeLayout, team: readonly Pick<Agent, 'id
   return result;
 }
 
-/** Below this share of an allowance an agent is sent to rest. */
+/** At or below this share of an allowance an agent stays at rest. */
 export const REST_BELOW_PERCENT = 5;
 /** An observation older than this says nothing about the allowance today. */
 const USAGE_FRESH_MS = 12 * 3600_000;
@@ -99,10 +99,31 @@ export function remainingAllowance(
   return live.length ? Math.min(...live.map(w => w.remainingPercent)) : null;
 }
 
-/** Who rests: nearly out of allowance, and not in the middle of a meeting or a task. */
-export function shouldRest(status: StatusKey, remaining: number | null, inMeeting: boolean): boolean {
-  if (remaining === null || remaining >= REST_BELOW_PERCENT || inMeeting) return false;
-  return status !== 'working' && status !== 'needs';
+/** Project attendance changes location only; it never invents a working status. */
+export function projectDeskAgents(
+  state: Pick<AppState, 'agents' | 'requests' | 'teams' | 'memberships' | 'assignments'>,
+  activity: readonly OfficeActivity[],
+): Set<string> {
+  const requests = (state.requests ?? []).filter(r => !r.removedAt && r.status !== 'CANCELED');
+  const running = activity.filter(a => a.kind === 'WORKING' || a.kind === 'MEETING');
+  const projects = new Set(requests.filter(r => running.some(a => a.requestId === r.id)).map(r => r.projectId));
+  const related = requests.filter(r => projects.has(r.projectId));
+  const teams = (state.teams ?? []).filter(
+    t => !t.archived && ((t.projectId !== null && projects.has(t.projectId)) || related.some(r => r.teamId === t.id)),
+  );
+  const ids = new Set(running.map(a => a.agentId));
+  for (const r of related) {
+    if (r.leadAgentId) ids.add(r.leadAgentId);
+    for (const id of r.participantIds ?? []) ids.add(id);
+  }
+  for (const m of state.memberships ?? []) if (!m.removedAt && teams.some(t => t.id === m.teamId)) ids.add(m.agentId);
+  for (const a of state.assignments ?? [])
+    if (projects.has(a.projectId) && related.some(r => r.id === a.requestId)) ids.add(a.agentId);
+  return ids;
+}
+
+export function shouldRest(projectRunning: boolean, remaining: number | null): boolean {
+  return (remaining !== null && remaining <= REST_BELOW_PERCENT) || !projectRunning;
 }
 
 /**
@@ -117,11 +138,11 @@ export function locate(
   seatInMeeting: ReadonlyMap<string, number>,
   restSlots: readonly (string | null)[] = [],
 ): Location {
+  const spot = restSlots.indexOf(agent.id);
+  if (spot >= 0) return { kind: 'rest', spot };
   if (activity?.kind === 'MEETING') {
     const room = slots.indexOf(activity.meetingId ?? 'meeting');
     if (room >= 0) return { kind: 'room', index: room, seat: seatInMeeting.get(agent.id) ?? 0 };
   }
-  const spot = restSlots.indexOf(agent.id);
-  if (spot >= 0) return { kind: 'rest', spot };
   return { kind: 'desk', index: desks.get(agent.id) ?? 0 };
 }

@@ -16,6 +16,7 @@ import {
   assignDesks,
   assignRooms,
   locate,
+  projectDeskAgents,
   remainingAllowance,
   shouldRest,
   stageLine,
@@ -68,6 +69,7 @@ export function OfficeLive({
         now={now}
         requests={state.requests}
         connections={state.connections}
+        deskAgents={projectDeskAgents(state, activity)}
         onAgent={onAgent}
         selectedId={selectedId}
         theme={state.settings.theme === 'light' ? 'light' : 'dark'}
@@ -88,6 +90,7 @@ export function Office3D({
   now,
   requests,
   connections,
+  deskAgents,
   onAgent,
   selectedId,
   theme,
@@ -103,6 +106,7 @@ export function Office3D({
   requests: AppState['requests'];
   /** Recorded sign-in observations; an agent nearly out of allowance rests in the lounge. */
   connections?: AccountConnection[];
+  deskAgents?: ReadonlySet<string>;
   onAgent: (id: string) => void;
   selectedId: string | null;
   /** From the saved settings, so the first build already uses the right palette. */
@@ -162,18 +166,19 @@ export function Office3D({
     const id = act.meetingId ?? 'meeting';
     meetingPeople.set(id, [...(meetingPeople.get(id) ?? []), a.id]);
   }
-  // Resting: nearly out of allowance and not mid-task or mid-meeting. Spots stay put while they rest.
+  // Rest by default; project attendance and allowance determine who leaves the lounge.
   const allowance = new Map(ordered.map(a => [a.id, remainingAllowance(a, connections, now)] as const));
   const restingIds = ordered
     .filter(a =>
       shouldRest(
-        views.get(a.id)!.status,
+        deskAgents?.has(a.id) ??
+          activity.some(x => x.agentId === a.id && (x.kind === 'WORKING' || x.kind === 'MEETING')),
         allowance.get(a.id) ?? null,
-        activity.some(x => x.agentId === a.id && x.kind === 'MEETING'),
       ),
     )
     .map(a => a.id);
   lounge.current = assignRooms(lounge.current, restingIds);
+  while (lounge.current.at(-1) === null) lounge.current.pop();
   const loungeSlots = lounge.current;
   const seatInMeeting = new Map<string, number>();
   for (const ids of meetingPeople.values()) ids.forEach((id, i) => seatInMeeting.set(id, i));
@@ -186,6 +191,7 @@ export function Office3D({
         worker: zones.workers.length,
         tables: roomSlots.length,
         tableSeats: tableSeatDemand([...meetingPeople.values()].map(p => p.length)),
+        restSeats: loungeSlots.length,
         empty: !team.length,
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -194,6 +200,7 @@ export function Office3D({
       zones.pms.length,
       zones.workers.length,
       roomSlots.length,
+      loungeSlots.length,
       tableSeatDemand([...meetingPeople.values()].map(p => p.length)),
       team.length === 0,
     ],
@@ -224,6 +231,8 @@ export function Office3D({
   const layoutKey = JSON.stringify([
     layout.desks.map(d => [d.zone, d.x, d.z]),
     layout.rooms.map(t => [t.x, t.z, t.seats.length]),
+    layout.rest.spots.length,
+    layout.bounds,
   ]);
   const roomName = (id: string) => (requests ?? []).find(r => r.id === id)?.name ?? 'Conversation in progress';
 
@@ -325,9 +334,10 @@ export function Office3D({
   }, [reducedMotion]);
 
   const locationOf = (agent: Agent) => {
+    if (loungeSlots.includes(agent.id)) return 'rest';
     const a = activity.find(x => x.agentId === agent.id);
     if (a?.kind === 'MEETING') return `room:${a.meetingId ?? 'meeting'}`;
-    return loungeSlots.includes(agent.id) ? 'rest' : 'seat';
+    return 'seat';
   };
   // The agents menu closes on Escape, on a click anywhere else, and once an agent is chosen.
   useEffect(() => {
@@ -411,7 +421,9 @@ export function Office3D({
                 <span className="tag-evidence">{view.evidence}</span>
                 {loungeSlots.includes(agent.id) && (
                   <span className="tag-evidence">
-                    Resting in the rest area — {Math.round(allowance.get(agent.id) ?? 0)}% of the allowance left
+                    Resting in the rest area
+                    {allowance.get(agent.id) !== null &&
+                      ` — ${Math.round(allowance.get(agent.id)!)}% of the allowance left`}
                   </span>
                 )}
                 {act?.kind === 'UNKNOWN' && <span className="tag-evidence">{act.detail}</span>}
@@ -553,21 +565,6 @@ export function Office3D({
       <div className="stage-status" role="status">
         <b className="stage-pulse" data-live={summary.working ? 'on' : 'off'} aria-hidden="true" />
         <span>{stageLine(summary)}</span>
-        <i className="stage-sep" aria-hidden="true" />
-        <small>
-          <span>
-            <b>drag:</b> rotate
-          </span>
-          <span>
-            <b>scroll:</b> zoom
-          </span>
-          <span>
-            <b>space + drag:</b> pan
-          </span>
-          <span>
-            <b>double-click:</b> focus
-          </span>
-        </small>
       </div>
       {chat && <div className="stage-chat-panel">{chat}</div>}
       <button
