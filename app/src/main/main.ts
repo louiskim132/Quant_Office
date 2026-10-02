@@ -656,6 +656,8 @@ function register() {
   });
   handle('office:agent-isolation-setup', async value => {
     noInput(value);
+    await exec?.stopAll();
+    await acp?.stopAll();
     await setupAgentIsolation({
       userData: app.getPath('userData'),
       secrets,
@@ -669,6 +671,8 @@ function register() {
   });
   handle('office:agent-isolation-remove', async value => {
     noInput(value);
+    await exec?.stopAll();
+    await acp?.stopAll();
     secrets.removeAgentUser();
     // Rebuild drops the isolated spawn surface; the Windows account itself is left in place by
     // design (removing it is the user's Windows admin action, never a silent office effect).

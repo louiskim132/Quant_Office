@@ -677,6 +677,46 @@ test('office shutdown terminates owned active children instead of abandoning the
   assert.equal(f.adapter.presence().length, 0);
 });
 
+test('a child error cannot let a repeated restore or shutdown forget a process that has not exited', async t => {
+  const f = fixture(t, { provider: 'openai' });
+  await submitted(f);
+  const child = f.calls[0].child;
+  const first = f.adapter.stopAll();
+  child.emitError(new Error('Synthetic kill/channel failure'));
+  await assert.rejects(first, /Synthetic kill/);
+  let stopped = false;
+  const retry = f.adapter.stopAll().then(() => {
+    stopped = true;
+  });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(child.kills.length, 2, 'retry still owns and attempts to stop the error-bearing child');
+  assert.equal(stopped, false);
+  f.adapter.disposeAll();
+  assert.equal(child.kills.length, 3, 'final shutdown retries an earlier unconfirmed kill');
+  child.emitExit(null, 'SIGTERM');
+  await retry;
+});
+
+test('terminal receipt settlement keeps running children owned for restoration', async t => {
+  const f = fixture(t, { provider: 'openai' });
+  await submitted(f);
+  f.adapter.settled({ ...f.job(), state: 'COMPLETED' });
+  assert.equal(f.adapter.presence().length, 0, 'settled jobs release observation resources');
+  const stopped = f.adapter.stopAll();
+  assert.equal(f.calls[0].child.kills.length, 1, 'the live child remains owned after settlement');
+  f.calls[0].child.emitExit();
+  await stopped;
+});
+
+test('a submit paused before spawn cannot resume after execution teardown', async t => {
+  const f = fixture(t, { provider: 'openai' });
+  const pending = f.adapter.submit(f.context);
+  await f.adapter.stopAll();
+  await assert.rejects(pending, /shutting down/);
+  assert.equal(f.calls.length, 0, 'teardown closes admission across asynchronous preflight');
+  await assert.rejects(f.adapter.submit(f.context), /shutting down/);
+});
+
 test('failures before any child could spawn throw NotLaunchedError; a spawn throw stays ordinary', async t => {
   // A dirty packet destination — prepareLocalPacket refuses before anything could spawn.
   const dirty = fixture(t);
