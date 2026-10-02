@@ -236,17 +236,13 @@ async function start() {
   mark('recovery');
   store = new OfficeStore(path.join(workspace, 'workspace.sqlite'), {
     includeHistoryInResults: false,
-    // The full-history check runs once the window is up; the open itself replays only the tail.
-    backgroundVerifyDelayMs: 4000,
-    onBackgroundVerifyError: error => {
-      writeLog(logDir(), 'ERROR', `integrity ${describeError(error)}`);
-      dialog.showErrorBox(
-        'Quant Research Office integrity check failed',
-        'The workspace history check running in the background found a problem. Do not trust this session — quit and restore from a backup. Details are in the log folder (Help → Open logs folder).',
-      );
-    },
   });
   mark('store');
+  // Keep the loading window responsive, but admit no services, reconciliation or IPC until the
+  // complete historical chain and receipts have passed. Tail-only startup is not execution authority.
+  await store.verifyInBackground();
+  store.assertHealthy();
+  mark('integrity');
   rememberTheme(store.snapshot({ history: false }).settings.theme);
   // The page is built in the workspace's theme, so its first paint matches before the page has a
   // theme of its own stored.
@@ -411,6 +407,7 @@ function register() {
         )
           throw new Error('Request is not from the trusted desktop window.');
         if (workspaceLocked) throw new Error('The workspace is being restored. Wait for restoration to finish.');
+        if (channel !== 'office:restore') store.assertHealthy();
         // Restore itself owns the lock. Every other handler, including account observations and reads,
         // holds admission until its asynchronous continuation has finished using this workspace.
         if (channel !== 'office:restore') {
@@ -1644,6 +1641,8 @@ function register() {
           store = new OfficeStore(path.join(workspaceDirectory(root), 'workspace.sqlite'), {
             includeHistoryInResults: false,
           });
+          await store.verifyInBackground();
+          store.assertHealthy();
           artifacts = new ArtifactService(store, workspaceDirectory(root));
           evidence = new EvidenceService(store, workspaceDirectory(root));
           controller = buildController();
