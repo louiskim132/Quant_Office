@@ -2,17 +2,24 @@
 import { _electron as electron } from 'playwright';
 import { mkdirSync, writeFileSync, existsSync, readFileSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
+import type { OfficeAPI } from '../src/shared/types.js';
+import { dispatchAcceptance } from './isolation-dispatch-acceptance.js';
+// dispatch requires .qro-isolation-acceptance.json at root:
+// {"version":1,"purpose":"SYNTHETIC_ISOLATION_ACCEPTANCE"}. Profiles must already be signed in,
+// bound through the official UI, and use the standard Test dir/PM/worker names. A dispatch action
+// is explicit authorization for synthetic provider calls: {"op":"dispatch","provider":"openai"}.
+// No dispatch runs automatically at startup or while waiting for official sign-ins.
 const root = path.resolve(process.argv[2]);
 mkdirSync(root, { recursive: true });
 const data = path.join(root, 'userData'),
   action = path.join(root, 'action.json');
 const { ELECTRON_RUN_AS_NODE: _node, QRO_AGENT_ISOLATION: _isolation, ...env } = process.env;
-const app = await electron.launch({
+let app = await electron.launch({
   executablePath: path.join(root, 'app', 'Quant Research Office.exe'),
   args: [],
   env: { ...env, QRO_USER_DATA_DIR: data },
 });
-const page = await app.firstWindow();
+let page = await app.firstWindow();
 await page.getByRole('heading', { name: 'The office', exact: true }).waitFor();
 await page.getByRole('button', { name: 'Settings', exact: true }).click();
 await app.evaluate(({ BrowserWindow }) => {
@@ -26,6 +33,46 @@ writeFileSync(
 );
 if (!status.configured) await page.getByRole('button', { name: 'Set up agent isolation', exact: true }).click();
 let processing = false;
+let restarting = false;
+let closed: () => void;
+const finished = new Promise<void>(resolve => {
+  closed = resolve;
+});
+const onClose = () => {
+  if (!restarting) {
+    clearInterval(timer);
+    closed();
+  }
+};
+const api = () =>
+  new Proxy({} as OfficeAPI, {
+    get:
+      (_target, method: string) =>
+      async (...args: unknown[]) =>
+        page.evaluate(
+          async ({ method, args }) => {
+            const bridge = window.office as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
+            return bridge[method](...args);
+          },
+          { method, args },
+        ),
+  });
+const restart = async () => {
+  restarting = true;
+  try {
+    await app.close();
+    app = await electron.launch({
+      executablePath: path.join(root, 'app', 'Quant Research Office.exe'),
+      args: [],
+      env: { ...env, QRO_USER_DATA_DIR: data },
+    });
+    page = await app.firstWindow();
+    await page.getByRole('heading', { name: 'The office', exact: true }).waitFor();
+    app.on('close', onClose);
+  } finally {
+    restarting = false;
+  }
+};
 const timer = setInterval(() => {
   if (processing || !existsSync(action)) return;
   processing = true;
@@ -49,6 +96,10 @@ const timer = setInterval(() => {
     }
     if (input.op === 'login' && ['devin', 'claude', 'openai'].includes(input.provider))
       await page.evaluate(p => window.office.agentIsolationLogin(p), input.provider);
+    if (input.op === 'dispatch') {
+      if (!['devin', 'claude', 'openai'].includes(input.provider)) throw new Error('Unknown dispatch provider.');
+      await dispatchAcceptance({ root, provider: input.provider, agentName: input.agentName, api, restart });
+    }
     if (input.op === 'close') await app.close();
   })()
     .catch(error => writeFileSync(path.join(root, 'action-error.txt'), String(error)))
@@ -56,5 +107,5 @@ const timer = setInterval(() => {
       processing = false;
     });
 }, 500);
-app.on('close', () => clearInterval(timer));
-await new Promise<void>(resolve => app.on('close', () => resolve()));
+app.on('close', onClose);
+await finished;
