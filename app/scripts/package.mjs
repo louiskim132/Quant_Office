@@ -5,9 +5,10 @@
 process.noAsar = true;
 import { packager } from '@electron/packager';
 import { flipFuses, FuseVersion, FuseV1Options } from '@electron/fuses';
-import { mkdir, cp, readFile, writeFile } from 'node:fs/promises';
+import { cp, readFile, writeFile } from 'node:fs/promises';
 import { resolve, relative, isAbsolute } from 'node:path';
 import { createRequire } from 'node:module';
+import { resetGeneratedDirectory } from './staging.mjs';
 const require = createRequire(import.meta.url);
 
 const root = resolve(import.meta.dirname, '..');
@@ -19,7 +20,7 @@ for (const target of [stage, out]) {
     throw new Error('Packaging target escaped application workspace.');
 }
 const pkg = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'));
-await mkdir(stage, { recursive: true });
+await resetGeneratedDirectory(root, stage);
 await cp(resolve(root, 'dist/main'), resolve(stage, 'dist/main'), { recursive: true });
 await cp(resolve(root, 'dist/renderer'), resolve(stage, 'dist/renderer'), { recursive: true });
 await cp(resolve(root, 'dist/assets'), resolve(stage, 'dist/assets'), { recursive: true });
