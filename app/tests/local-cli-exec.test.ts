@@ -622,6 +622,31 @@ test('Codex structured tool items stream as TOOL events before a receipt; prose 
   assert.equal(observed.state, 'UNKNOWN', 'streaming does not invent a terminal receipt');
 });
 
+test('Claude tool use and result frames stream before a receipt without classifying ordinary messages as tools', async t => {
+  const f = fixture(t, { provider: 'claude' });
+  const { bound } = await submitted(f);
+  const frames = [
+    { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Read', id: 'synthetic-tool' }] } },
+    {
+      type: 'user',
+      message: { content: [{ type: 'tool_result', tool_use_id: 'synthetic-tool', content: 'fixture' }] },
+    },
+    { type: 'assistant', message: { content: [{ type: 'text', text: 'tool_use is ordinary prose here' }] } },
+  ];
+  const bytes = frames.map(frame => JSON.stringify(frame)).join('\n') + '\n';
+  f.calls[0].child.stdout.write(bytes.slice(0, 35));
+  f.calls[0].child.stdout.write(bytes.slice(35));
+  f.calls[0].child.stderr.write(JSON.stringify(frames[0]) + '\n');
+  const observed = await f.adapter.observe(f.job(), bound);
+  assert.deepEqual(
+    observed.events!.map(e => e.kind),
+    ['TOOL', 'TOOL', 'MESSAGE', 'MESSAGE'],
+  );
+  assert.equal(observed.state, 'UNKNOWN', 'streaming does not substitute for a verified receipt');
+  assert.ok(observed.events!.every(e => e.evidence === 'PROVIDER_REPORTED'));
+  assert.equal((await f.adapter.observe(f.job(), bound)).events?.length ?? 0, 0, 'each frame drains only once');
+});
+
 test('failures before any child could spawn throw NotLaunchedError; a spawn throw stays ordinary', async t => {
   // A dirty packet destination — prepareLocalPacket refuses before anything could spawn.
   const dirty = fixture(t);
