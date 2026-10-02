@@ -1624,6 +1624,12 @@ function register() {
           return { canceled: true, count: 0, message: '', state: store.snapshot({ history: false }) };
         }
         subscriptions.cancel();
+        // Stop every old-workspace execution surface before its database is closed. Restored
+        // verification may take time or fail; neither case may leave old agents running.
+        exec?.disposeAll();
+        acp?.disposeAll();
+        agentHost?.shutdown();
+        agentHost = undefined;
         store.close();
         try {
           await commitRestore(root, prepared.transactionId);
