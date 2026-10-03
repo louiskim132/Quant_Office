@@ -809,28 +809,14 @@ export function AgentIsolation({ isolation }: { isolation: ReturnType<typeof use
     [error, setError] = useState(''),
     [notice, setNotice] = useState(''),
     [signins, setSignins] = useState<Partial<Record<Provider, { account?: string; at: string }>>>({});
-  /** Official sign-in as QRO-Agent (opens its own window), or a fresh check through the isolated host. */
-  async function agentSubscription(provider: Provider, login: boolean) {
+  /** Official sign-in as QRO-Agent; it opens its own window and is confirmed by the next isolation check. */
+  async function agentLogin(provider: Provider) {
     setBusy('verify');
     setError('');
     setNotice('');
     try {
-      if (login) {
-        await window.office.agentIsolationLogin(provider);
-        setNotice(`Finish the ${providerCopy[provider].name} sign-in in the QRO-Agent window, then check it here.`);
-      } else {
-        const connection = await window.office.connectionStatus(provider);
-        const at = new Date().toISOString();
-        setSignins(prev => ({
-          ...prev,
-          [provider]: { account: connection.connected ? connection.account : undefined, at },
-        }));
-        if (connection.connected && connection.account)
-          setNotice(
-            `${providerCopy[provider].name} verified for QRO-Agent as ${connection.account}. Prepare new work to use it.`,
-          );
-        else setError(connection.note || `${providerCopy[provider].name} is not signed in for QRO-Agent.`);
-      }
+      await window.office.agentIsolationLogin(provider);
+      setNotice(`Finish the ${providerCopy[provider].name} sign-in in the QRO-Agent window, then check isolation.`);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -852,6 +838,7 @@ export function AgentIsolation({ isolation }: { isolation: ReturnType<typeof use
       setBusy('');
     }
   }
+  /** One check for everything: the isolation boundary, then each provider's sign-in through the isolated host. */
   async function verify() {
     setBusy('verify');
     setError('');
@@ -862,11 +849,26 @@ export function AgentIsolation({ isolation }: { isolation: ReturnType<typeof use
       const failed = Object.entries(result.checks)
         .filter(([, ok]) => !ok)
         .map(([name]) => name);
+      const at = new Date().toISOString();
+      const accounts = await Promise.all(
+        SIGNIN_PROVIDERS.map(async provider => {
+          try {
+            const connection = await window.office.connectionStatus(provider);
+            return [provider, connection.connected ? connection.account : undefined] as const;
+          } catch {
+            return [provider, undefined] as const;
+          }
+        }),
+      );
+      setSignins(Object.fromEntries(accounts.map(([provider, account]) => [provider, { account, at }])));
+      const signedIn = accounts.filter(([, account]) => account).length;
+      const summary = `${signedIn} of ${SIGNIN_PROVIDERS.length} providers signed in.`;
       if (result.passed)
         setNotice(
-          `Isolation check passed: all ${Object.keys(result.checks).length} checks. Evidence saved to ${result.evidencePath}`,
+          `Isolation check passed: all ${Object.keys(result.checks).length} checks. ${summary} Evidence saved to ${result.evidencePath}`,
         );
-      else setError(`Isolation check failed: ${failed.join(', ')}. Evidence saved to ${result.evidencePath}`);
+      else
+        setError(`Isolation check failed: ${failed.join(', ')}. ${summary} Evidence saved to ${result.evidencePath}`);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -1015,7 +1017,7 @@ export function AgentIsolation({ isolation }: { isolation: ReturnType<typeof use
                       className="secondary"
                       disabled={!!busy}
                       aria-label={`Sign in ${provider} for agent account`}
-                      onClick={() => void agentSubscription(provider, true)}
+                      onClick={() => void agentLogin(provider)}
                     >
                       Sign in {providerCopy[provider].name}
                     </button>
@@ -1043,14 +1045,6 @@ export function AgentIsolation({ isolation }: { isolation: ReturnType<typeof use
                                 : 'Not checked'}
                             {signins[provider] && <small>Checked {formatDateTime(signins[provider]!.at)}</small>}
                           </span>
-                          <button
-                            className="text-button"
-                            disabled={!!busy}
-                            aria-label={`Check ${provider} agent subscription`}
-                            onClick={() => void agentSubscription(provider, false)}
-                          >
-                            Check
-                          </button>
                         </div>
                       </td>
                     </tr>

@@ -968,7 +968,7 @@ export class Subscriptions {
     let connection = await this.status(provider);
     if (!connection.connected) {
       if (this.isolated)
-        throw new Error('Sign in through Settings → Agent isolation, then check the agent subscription here.');
+        throw new Error('Sign in through Settings → Agent isolation, then click Check isolation.');
       if (provider === 'openai') {
         const result = await this.client().request('account/login/start', { type: 'chatgpt' });
         this.loginId = result.loginId;
