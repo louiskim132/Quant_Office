@@ -109,3 +109,17 @@ Environment: VirtualBox 7.2.20 on the Windows 11 Home host (Windows hypervisor t
 Limitations: files arrived through a VirtualBox shared folder, so no Mark-of-the-Web — **SmartScreen/unsigned-download warning not exercised**. Chromium logs `GetGpuDriverOverlayInfo: Failed to retrieve video device` in the VM (virtual GPU, harmless). QRO-Agent per-machine isolation not exercised in the VM. A user-created shortcut is left dangling after uninstall (expected for portable; doc says remove shortcuts).
 
 Gate 2 (clean Windows) is **met for the unsigned portable ZIP**, except the SmartScreen download path. The signed-installer gate (C11) is unchanged.
+
+## Unsigned installer acceptance in the clean VM (2026-10-03)
+
+Decision: the user chose an **unsigned Inno Setup installer** over the portable ZIP; signing is deferred (see ROADMAP C11 decision). Script and log: [clean-vm-2026-10-02/installer-test.ps1](clean-vm-2026-10-02/installer-test.ps1).
+
+| Check | Result |
+|---|---|
+| Downloaded-file path (Zone 3 mark) | SmartScreen "Windows protected your PC" → More info → Run anyway; UAC shows **Unknown publisher** (expected, unsigned) |
+| Install `1fb488b`, upgrade to `2069c3b`, roll back to `1fb488b` | PASS: byte inventory, source commit, install folder not user-writable, Installed apps entry, Start menu shortcut; project preserved across all three |
+| Install of `43b2f06` (Version tab, folder check, uninstall fix) | PASS, same checks |
+| Uninstall | PASS: folder, Installed apps entry and shortcut removed; 0 services, 0 tasks; workspace preserved. First run left an empty install folder; fixed with `[UninstallDelete]` and re-verified |
+| First launch after install/upgrade | 10 s+, later launches fast; attributed to Defender's first scan of new unsigned files plus first-run caches (to be measured on hardware) |
+
+Found and fixed during the run: the verifier now accepts exactly Inno's `unins000.exe/.dat` in an installed copy; Create project requires a folder (red-outlined field). Follow-up: the installer gained a menu (Update/Reinstall, Roll back to kept versions, Uninstall) so no step needs a command line; its own VM pass is recorded below when done.

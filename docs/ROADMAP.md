@@ -840,6 +840,8 @@ CI, `bench-store.ts 1000` under 3 s to open. Launch: LR-15, LR-16 and the legal 
 the deferred D-3 items, a signed installer tested on a clean Windows machine, and the section 11
 row moved to VERIFIED_LOCAL.
 
+**Decision 2026-10-03 (user):** the distribution is an **unsigned Inno Setup installer**; code signing is deferred (no free signing route fits a private-origin project: SignPath needs an OSI-licensed public repo, Azure Artifact Signing is paid and US/Canada only). The installer replaces "a signed installer" in this criterion. Users see SmartScreen "Windows protected your PC" and an "Unknown publisher" UAC prompt; release notes must say so and give the SHA-256. Clean-VM acceptance: [records/reviews/publication-readiness-2026-10-02.md](../records/reviews/publication-readiness-2026-10-02.md).
+
 ### C12 — Post-C11 revision and UI revision — local follow-up verified 2026-10-01; external gates open
 
 Sources, kept outside Git in `Quant Office\Docs\Reviews\`: the revision plan `revision-plan-2026-09-29.md` with its execution log `revision-plan-2026-09-29-execution.md`, and the UI plan `ui-revision-plan-2026-09-29.md` with its execution log `ui-revision-execution-2026-09-29.md` (evidence in `ui-revision-2026-09-29\after-final\`). Those files hold the step-by-step packet texts and measurements; this section holds the status. When a packet is handed to a worker that cannot see local folders, the organizer pastes its text here first, as C11 did.
