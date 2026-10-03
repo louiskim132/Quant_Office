@@ -232,6 +232,41 @@ begin
     Confirm := False;
 end;
 
+{ Any copy of the office still running, for any user, keeps its files locked. }
+function OfficeRunning: Boolean;
+var
+  Locator, Service, Found: Variant;
+begin
+  Result := False;
+  try
+    Locator := CreateOleObject('WbemScripting.SWbemLocator');
+    Service := Locator.ConnectServer('.', 'root\CIMV2');
+    Found := Service.ExecQuery('SELECT ProcessId FROM Win32_Process WHERE Name = ''Quant Research Office.exe''');
+    Result := Found.Count > 0;
+  except
+    Result := False;
+  end;
+end;
+
+{ Asks until the office is closed; False when the user gives up. }
+function OfficeClosed: Boolean;
+begin
+  Result := True;
+  while OfficeRunning do
+    if MsgBox('Quant Research Office is still open. Close it (save your work first), then click Retry.' + #13#10 +
+      'Click Cancel to stop without uninstalling.', mbInformation, MB_RETRYCANCEL) <> IDRETRY then
+    begin
+      Result := False;
+      Exit;
+    end;
+end;
+
+{ Also guards uninstalling from Settings > Apps, which does not pass through the menu. }
+function InitializeUninstall: Boolean;
+begin
+  Result := UninstallSilent or OfficeClosed;
+end;
+
 procedure RunUninstaller;
 var
   Command: String;
@@ -242,6 +277,8 @@ begin
     MsgBox('The uninstaller was not found. Use Settings > Apps > Installed apps instead.', mbError, MB_OK);
     Exit;
   end;
+  if not OfficeClosed then
+    Exit;
   { The uninstaller asks for confirmation itself; the menu closes once it is done. }
   Exec(RemoveQuotes(Command), '', '', SW_SHOW, ewWaitUntilTerminated, Code);
   FinishNow;
