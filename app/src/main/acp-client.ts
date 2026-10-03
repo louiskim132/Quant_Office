@@ -156,7 +156,7 @@ export class AcpClient {
   async initialize(): Promise<any> {
     const result = await this.request('initialize', {
       protocolVersion: 1,
-      clientInfo: { name: 'quant-research-office', version: '0.5.0' },
+      clientInfo: { name: 'quant-research-office', version: '0.0.1' },
       clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
     });
     if (result?.protocolVersion !== 1) throw new Error('Unsupported ACP protocol version.');
