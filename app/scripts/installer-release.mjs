@@ -38,6 +38,10 @@ export async function createInstaller(root, outputDir, commit) {
     join(root, 'qro-release.json'),
     JSON.stringify({ format: 'QRO_PORTABLE_V1', signed: false, sourceCommit: commit, files }, null, 2) + '\n',
   );
+  // The commit date in UTC, the same instant the app shows as Released; the installer compares these to tell update from rollback.
+  const releasedAt = new Date(
+    execFileSync('git', ['show', '-s', '--format=%cI', commit], { cwd: here, encoding: 'utf8' }).trim(),
+  ).toISOString();
   const { version } = JSON.parse(await readFile(join(here, '..', 'package.json'), 'utf8'));
   const base = `qro-${commit}-win-x64-setup`;
   const output = join(outputDir, `${base}.exe`);
@@ -50,6 +54,7 @@ export async function createInstaller(root, outputDir, commit) {
       `/DSourceDir=${root}`,
       `/DAppVersion=${version}`,
       `/DSourceCommit=${commit}`,
+      `/DReleasedAt=${releasedAt}`,
       `/DOutputDir=${outputDir}`,
       `/DOutputBase=${base}`,
       join(here, '..', 'installer', 'qro.iss'),
@@ -61,6 +66,7 @@ export async function createInstaller(root, outputDir, commit) {
   return {
     sourceCommit: commit,
     version,
+    releasedAt,
     signed: false,
     files: files.length,
     bytes: bytes.length,
