@@ -88,3 +88,24 @@ Each dispatch report must have `accepted: true`; failure/NOT_RUN is not acceptan
 For clean Windows acceptance, use an independently provisioned clean Windows machine/VM and the exact hardened ZIP plus trusted verifier. Compare the ZIP digest, extract to a new folder, run `verify-portable.ps1`, launch/restart, create a synthetic project, perform manual version-folder update/rollback, and delete only the binary folder while preserving the data. Record OS/build, standard-user behavior, exact artifact hashes and results; test readable per-machine runtime and QRO-Agent setup separately if that mode is claimed. [PORTABLE-RELEASE.md](../../docs/PORTABLE-RELEASE.md) provides commands and the required observations.
 
 **Policy distinction:** the existing C11 exit criterion calls for a **signed installer on a clean Windows machine**. The user's free-work authorization reopens technical preparation; it does not explicitly waive that criterion. This unsigned portable candidate is a prepared alternative, not completion of the signed-installer gate. Either satisfy that gate with a trusted identity/installer supplied through an eligible free resource, or obtain an explicit user decision changing the declared distribution scope. Never label the unsigned ZIP a signed release.
+
+## Clean Windows VM acceptance (2026-10-02, evening)
+
+Environment: VirtualBox 7.2.20 on the Windows 11 Home host (Windows hypervisor turned off so AMD-V runs natively). Guest: fresh Windows 11 Home build 26300 from the Microsoft ISO (SHA-256 matched Microsoft's published English x64 hash), Guest Additions only, local **standard (non-admin)** account `tester`, no Node, Git, Claude, Codex or Devin CLI. Snapshot `clean-baseline` holds that state. Script and raw log: [clean-vm-2026-10-02/](clean-vm-2026-10-02/).
+
+| Check | Result |
+|---|---|
+| ZIP SHA-256, old `1fb488b` and new `80df107` | PASS, both match build-machine digests |
+| `verify-portable.ps1` full inventory, both versions | PASS |
+| New `app.asar` SHA-256 | `183F29C7…8007C`, identical to the build |
+| Authenticode | NotSigned (expected) |
+| First launch on clean profile, standard user | PASS, workspace created |
+| Restart persistence (project survives close/reopen) | PASS |
+| Manual update old → new, project preserved | PASS |
+| Rollback to retained old folder, project preserved | PASS |
+| Uninstall (delete version folders) | PASS: 0 folders, 0 services, 0 scheduled tasks; workspace under `%APPDATA%\Quant Research Office` preserved |
+| Missing-CLI behavior | Connections cards show "Not checked"; clicking Sign in gives "Claude Code is not installed or could not be found. Install the official tool, then use Locate sign-in tool…". Clear, but only after a click (polish item). |
+
+Limitations: files arrived through a VirtualBox shared folder, so no Mark-of-the-Web — **SmartScreen/unsigned-download warning not exercised**. Chromium logs `GetGpuDriverOverlayInfo: Failed to retrieve video device` in the VM (virtual GPU, harmless). QRO-Agent per-machine isolation not exercised in the VM. A user-created shortcut is left dangling after uninstall (expected for portable; doc says remove shortcuts).
+
+Gate 2 (clean Windows) is **met for the unsigned portable ZIP**, except the SmartScreen download path. The signed-installer gate (C11) is unchanged.
