@@ -50,3 +50,7 @@ Name: "{autodesktop}\Quant Research Office"; Filename: "{app}\Quant Research Off
 
 [Run]
 Filename: "{app}\Quant Research Office.exe"; Description: "{cm:LaunchProgram,Quant Research Office}"; Flags: nowait postinstall skipifsilent runasoriginaluser
+
+[UninstallDelete]
+; Only administrators can write here, so anything left in the install folder belongs to this app; remove it all.
+Type: filesandordirs; Name: "{app}"
