@@ -123,3 +123,5 @@ Decision: the user chose an **unsigned Inno Setup installer** over the portable 
 | First launch after install/upgrade | 10 s+, later launches fast; attributed to Defender's first scan of new unsigned files plus first-run caches (to be measured on hardware) |
 
 Found and fixed during the run: the verifier now accepts exactly Inno's `unins000.exe/.dat` in an installed copy; Create project requires a folder (red-outlined field). Follow-up: the installer gained a menu (Update/Reinstall, Roll back to kept versions, Uninstall) so no step needs a command line; its own VM pass is recorded below when done.
+
+**Installer menu, clean VM (2026-10-03):** user-run with A = `0e37b3e`, B = `32d2735`, by double-click only. Fresh install of A without a menu; B offered Update and listed A for rollback; update A to B, roll back B to A via the menu (kept installer, digest-checked); Settings > Version showed the expected build after each change. PASS as reported by the user.
