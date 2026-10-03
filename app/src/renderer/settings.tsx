@@ -405,28 +405,30 @@ function VersionPane({ info }: { info: AppInfo | null }) {
         />
         <Row title="Released" hint="When this build's source was finalised." control={<span>{released}</span>} />
       </div>
-      <div className="settings-check-row">
-        <button className="primary" disabled={!!busy} aria-busy={busy === 'check'} onClick={() => void check()}>
-          {busy === 'check' ? 'Checking...' : 'Check update'}
-        </button>
-        <p role="status">
-          {result?.status === 'none'
-            ? 'No release has been published yet.'
-            : result
-              ? `Latest release: ${result.latestVersion || 'unnamed'}, released ${formatDateTime(result.latestPublishedAt)}`
-              : ''}
-        </p>
-      </div>
-      {result?.status === 'latest' && <p className="notice">Your version is latest!</p>}
-      <div className="button-row">
-        <button
-          className="secondary"
-          disabled={!!busy || result?.status !== 'available'}
-          aria-busy={busy === 'update'}
-          onClick={() => void update()}
-        >
-          {busy === 'update' ? 'Updating...' : 'Update'}
-        </button>
+      <div className="version-actions">
+        <div className="settings-check-row">
+          <button className="primary" disabled={!!busy} aria-busy={busy === 'check'} onClick={() => void check()}>
+            {busy === 'check' ? 'Checking...' : 'Check update'}
+          </button>
+          <p role="status">
+            {result?.status === 'none'
+              ? 'No release has been published yet.'
+              : result
+                ? `Latest release: ${result.latestVersion || 'unnamed'}, released ${formatDateTime(result.latestPublishedAt)}`
+                : ''}
+          </p>
+        </div>
+        {result?.status === 'latest' && <p className="notice">Your version is latest!</p>}
+        <div className="button-row">
+          <button
+            className="secondary"
+            disabled={!!busy || result?.status !== 'available'}
+            aria-busy={busy === 'update'}
+            onClick={() => void update()}
+          >
+            {busy === 'update' ? 'Updating...' : 'Update'}
+          </button>
+        </div>
       </div>
       {result?.status === 'available' && !notice && (
         <p className="muted">

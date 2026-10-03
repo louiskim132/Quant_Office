@@ -478,3 +478,13 @@
     flex-wrap: wrap;
   }
 }
+.version-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 20px;
+}
+.version-actions .settings-check-row {
+  margin: 0;
+}
