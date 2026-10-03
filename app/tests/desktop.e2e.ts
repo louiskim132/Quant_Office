@@ -264,6 +264,8 @@ try {
       'command',
       'exportProject',
       'getInfo',
+      'checkForUpdate',
+      'installUpdate',
       'getState',
       'migrateLegacyRecords',
       'historyPage',

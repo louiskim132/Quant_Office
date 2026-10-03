@@ -10,10 +10,11 @@ import {
   Minus,
   Palette,
   Plug,
+  RefreshCw,
   ShieldCheck,
   X,
 } from 'lucide-react';
-import type { AppInfo, AppState, Command, Connection, Provider } from '../shared/types';
+import type { AppInfo, AppState, Command, Connection, Provider, UpdateCheckResult } from '../shared/types';
 import { providerReadiness, currentConnection } from '../shared/readiness';
 import { TRANSPORT_PROBE_CONTAINMENT } from '../shared/transport';
 import { Dot, Segmented, Switch, type Tone } from './components';
@@ -33,7 +34,7 @@ import './settings.css';
 
 type CommandInput = Command extends infer C ? (C extends Command ? Omit<C, 'idempotencyKey'> : never) : never;
 export type SettingsSection =
-  'connections' | 'isolation' | 'notifications' | 'appearance' | 'controls' | 'data' | 'about';
+  'connections' | 'isolation' | 'notifications' | 'appearance' | 'controls' | 'data' | 'version' | 'about';
 
 const PROVIDERS: Provider[] = ['claude', 'openai', 'devin'];
 const providerCopy: Record<Provider, { name: string; plan: string; glyph: string }> = {
@@ -151,6 +152,7 @@ export function SettingsPage({
     { id: 'appearance', label: 'Appearance', icon: Palette },
     { id: 'controls', label: 'Controls', icon: Keyboard },
     { id: 'data', label: 'Data & recovery', icon: Database },
+    { id: 'version', label: 'Version', icon: RefreshCw },
     { id: 'about', label: 'About', icon: Info },
   ];
   return (
@@ -333,6 +335,7 @@ export function SettingsPage({
             </div>
           </Pane>
         )}
+        {section === 'version' && <VersionPane info={info} />}
         {section === 'about' && (
           <Pane title="About" lead={`Quant Research Office · desktop ${info?.version ?? ''}`.trim()}>
             <div className="boundary-grid">
@@ -356,6 +359,88 @@ export function SettingsPage({
         )}
       </div>
     </div>
+  );
+}
+
+/** Settings > Version: this build's identity, a release check and the one-click update. */
+function VersionPane({ info }: { info: AppInfo | null }) {
+  const [busy, setBusy] = useState<'' | 'check' | 'update'>(''),
+    [result, setResult] = useState<UpdateCheckResult | null>(null),
+    [notice, setNotice] = useState(''),
+    [error, setError] = useState('');
+  async function check() {
+    setBusy('check');
+    setError('');
+    setNotice('');
+    try {
+      setResult(await window.office.checkForUpdate());
+    } catch (e) {
+      setResult(null);
+      setError((e as Error).message);
+    } finally {
+      setBusy('');
+    }
+  }
+  async function update() {
+    setBusy('update');
+    setError('');
+    setNotice('Downloading and checking the update...');
+    try {
+      await window.office.installUpdate();
+      setNotice('The installer has started. The office will close so it can finish.');
+    } catch (e) {
+      setNotice('');
+      setError((e as Error).message);
+      setBusy('');
+    }
+  }
+  const released = info?.releasedAt ? formatDateTime(info.releasedAt) : 'Development build';
+  return (
+    <Pane title="Version" lead="Which release you are running, and whether a newer one is out.">
+      <div className="settings-group">
+        <Row
+          title="Your version"
+          hint={info?.commit ? `Build ${info.commit.slice(0, 7)}` : ''}
+          control={<strong>{info?.version ?? '...'}</strong>}
+        />
+        <Row title="Released" hint="When this build's source was finalised." control={<span>{released}</span>} />
+      </div>
+      <div className="settings-check-row">
+        <button className="primary" disabled={!!busy} aria-busy={busy === 'check'} onClick={() => void check()}>
+          {busy === 'check' ? 'Checking...' : 'Check update'}
+        </button>
+        <p role="status">
+          {result?.status === 'none'
+            ? 'No release has been published yet.'
+            : result
+              ? `Latest release: ${result.latestVersion || 'unnamed'}, released ${formatDateTime(result.latestPublishedAt)}`
+              : ''}
+        </p>
+      </div>
+      {result?.status === 'latest' && <p className="notice">Your version is latest!</p>}
+      <div className="button-row">
+        <button
+          className="secondary"
+          disabled={!!busy || result?.status !== 'available'}
+          aria-busy={busy === 'update'}
+          onClick={() => void update()}
+        >
+          {busy === 'update' ? 'Updating...' : 'Update'}
+        </button>
+      </div>
+      {result?.status === 'available' && !notice && (
+        <p className="muted">
+          Update downloads the new installer, checks it against the published digest, then closes the office and
+          installs it. Your workspace is kept.
+        </p>
+      )}
+      {notice && <p className="notice">{notice}</p>}
+      {error && (
+        <p className="notice error" role="alert">
+          {error}
+        </p>
+      )}
+    </Pane>
   );
 }
 

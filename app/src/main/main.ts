@@ -65,6 +65,8 @@ import { runAgentIsolationAcceptance } from './agent-isolation-acceptance.js';
 import { launchIsolatedLogin } from './agent-isolation-login.js';
 import type { Connection, Provider } from '../shared/types.js';
 import { describeError, writeLog } from './diagnostics.js';
+import { BUILD_INFO } from './build-info.js';
+import { checkForUpdate, downloadInstaller, type LatestRelease } from './updates.js';
 let subscriptions: Subscriptions;
 /** The local secrets store — userData root, outside the workspace, so restores never touch it. */
 let secrets: Secrets;
@@ -1162,7 +1164,38 @@ function register() {
       packaged: app.isPackaged,
       transportModule: transport.available,
       transportDetail: transport.detail,
+      commit: BUILD_INFO.commit,
+      releasedAt: BUILD_INFO.releasedAt,
     };
+  });
+  // Settings > Version. The install step only uses the release found by the latest check, so the
+  // renderer never chooses what is downloaded or run.
+  let pendingUpdate: LatestRelease | null = null;
+  handle('office:check-update', async value => {
+    noInput(value);
+    pendingUpdate = null;
+    const result = await checkForUpdate(BUILD_INFO);
+    if (result.status === 'none') return { status: 'none' };
+    if (result.status === 'available') pendingUpdate = result.latest;
+    return {
+      status: result.status,
+      latestVersion: result.latest.version,
+      latestPublishedAt: result.latest.publishedAt,
+    };
+  });
+  handle('office:install-update', async value => {
+    noInput(value);
+    if (!app.isPackaged) throw new Error('Updates install only from a packaged build.');
+    if (!pendingUpdate) throw new Error('Check for an update first.');
+    const installer = await downloadInstaller(
+      pendingUpdate,
+      path.join(app.getPath('temp'), 'quant-research-office-update'),
+    );
+    const failure = await shell.openPath(installer);
+    if (failure) throw new Error(`Could not start the installer: ${failure}`);
+    writeLog(logDir(), 'INFO', `update installer started commit=${pendingUpdate.commit}`);
+    // The installer closes any remaining window itself; quitting first releases the program files.
+    setTimeout(() => app.quit(), 500);
   });
   handle('office:command', async value => {
     if (transferBusy) throw new Error('Wait for the file operation to finish.');
