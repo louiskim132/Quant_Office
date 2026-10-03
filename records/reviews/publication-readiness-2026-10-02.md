@@ -125,3 +125,5 @@ Decision: the user chose an **unsigned Inno Setup installer** over the portable 
 Found and fixed during the run: the verifier now accepts exactly Inno's `unins000.exe/.dat` in an installed copy; Create project requires a folder (red-outlined field). Follow-up: the installer gained a menu (Update/Reinstall, Roll back to kept versions, Uninstall) so no step needs a command line; its own VM pass is recorded below when done.
 
 **Installer menu, clean VM (2026-10-03):** user-run with A = `0e37b3e`, B = `32d2735`, by double-click only. Fresh install of A without a menu; B offered Update and listed A for rollback; update A to B, roll back B to A via the menu (kept installer, digest-checked); Settings > Version showed the expected build after each change. PASS as reported by the user.
+
+**Close-before-uninstall, clean VM (2026-10-03):** with the office open, Uninstall (menu and Settings > Apps) now asks to close it and retries until closed or cancelled; after closing, the uninstall removed the install folder, kept versions, Installed apps entry and shortcut and kept the workspace. PASS as reported by the user (build `7c52025`).
