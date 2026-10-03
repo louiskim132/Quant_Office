@@ -11,4 +11,13 @@ For each answer, preserve the provider, plan, sign-in mode, reviewed terms/versi
 
 D-3 remains deferred under U8 until legal review is resolved and the user reopens it. Prepared release sequence: select a per-machine installer/runtime location usable by QRO-Agent; obtain the signing identity; define a customer-readable release/update host and rollback policy; build and sign exact artifacts; install/update/uninstall in a clean Windows VM; scan the final package for workspace data, credentials and developer identifiers. No certificate, hosting, signed installer, update service or clean-machine acceptance was acquired or claimed here.
 
+**2026-10-02 scope update:** the user explicitly reopened free D-3 technical preparation
+and excluded legal review from this work. The preceding deferral is historical; legal
+review does not defer the now-authorized local build/package repairs, unsigned portable
+artifact tooling, hashes/inventory verification, or manual update/rollback/uninstall
+instructions. See [the portable release procedure](../../docs/PORTABLE-RELEASE.md).
+Trusted signing, actual publication and clean Windows VM acceptance remain separate
+uncompleted gates; the portable candidate does not claim any of them. No purchase,
+provider sign-in, installed App replacement, or public release is performed by this lane.
+
 L3 stays settled: GitHub Free, N4 triggers and the procedural exact-head merge gate. X4 stays optional: the stale/dirty Git anchor was not reset. X5 is prepared: the current installed App was copied to `Quant Office/Archive/App-before-revision-20261001`; its asar matches `7E7C7FE471D15530F04B8AFF44CC624F348F45AAA7FC6D5B1EA7AD9237212C44`. Any later installed mirror must use an integrated release, confirm the app is closed and record its hash. This revision is a local candidate, not an installed release.

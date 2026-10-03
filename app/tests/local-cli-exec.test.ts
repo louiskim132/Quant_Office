@@ -622,6 +622,101 @@ test('Codex structured tool items stream as TOOL events before a receipt; prose 
   assert.equal(observed.state, 'UNKNOWN', 'streaming does not invent a terminal receipt');
 });
 
+test('Claude tool use and result frames stream before a receipt without classifying ordinary messages as tools', async t => {
+  const f = fixture(t, { provider: 'claude' });
+  const { bound } = await submitted(f);
+  const frames = [
+    { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Read', id: 'synthetic-tool' }] } },
+    {
+      type: 'user',
+      message: { content: [{ type: 'tool_result', tool_use_id: 'synthetic-tool', content: 'fixture' }] },
+    },
+    { type: 'assistant', message: { content: [{ type: 'text', text: 'tool_use is ordinary prose here' }] } },
+  ];
+  const bytes = frames.map(frame => JSON.stringify(frame)).join('\n') + '\n';
+  f.calls[0].child.stdout.write(bytes.slice(0, 35));
+  f.calls[0].child.stdout.write(bytes.slice(35));
+  f.calls[0].child.stderr.write(JSON.stringify(frames[0]) + '\n');
+  const observed = await f.adapter.observe(f.job(), bound);
+  assert.deepEqual(
+    observed.events!.map(e => e.kind),
+    ['TOOL', 'TOOL', 'MESSAGE', 'MESSAGE'],
+  );
+  assert.equal(observed.state, 'UNKNOWN', 'streaming does not substitute for a verified receipt');
+  assert.ok(observed.events!.every(e => e.evidence === 'PROVIDER_REPORTED'));
+  assert.equal((await f.adapter.observe(f.job(), bound)).events?.length ?? 0, 0, 'each frame drains only once');
+});
+
+test('workspace teardown waits for owned agents to exit and refuses a failed termination', async t => {
+  const f = fixture(t, { provider: 'openai' });
+  await submitted(f);
+  let stopped = false;
+  const shutdown = f.adapter.stopAll().then(() => {
+    stopped = true;
+  });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.calls[0].child.kills.length, 1);
+  assert.equal(stopped, false, 'sending kill is not confirmation that the process stopped');
+  f.calls[0].child.emitExit(null, 'SIGTERM');
+  await shutdown;
+  assert.equal(f.adapter.presence().length, 0);
+
+  const refused = fixture(t, { provider: 'openai' });
+  await submitted(refused);
+  refused.calls[0].child.kill = () => false;
+  await assert.rejects(refused.adapter.stopAll(), /could not be stopped/);
+  assert.equal(refused.adapter.presence().length, 1, 'failed stop retains the owned record');
+  assert.equal(refused.adapter.presence()[0].alive, true, 'a failed stop cannot claim termination');
+});
+
+test('office shutdown terminates owned active children instead of abandoning their bookkeeping', async t => {
+  const f = fixture(t, { provider: 'openai' });
+  await submitted(f);
+  f.adapter.disposeAll();
+  assert.equal(f.calls[0].child.kills.length, 1);
+  assert.equal(f.adapter.presence().length, 0);
+});
+
+test('a child error cannot let a repeated restore or shutdown forget a process that has not exited', async t => {
+  const f = fixture(t, { provider: 'openai' });
+  await submitted(f);
+  const child = f.calls[0].child;
+  const first = f.adapter.stopAll();
+  child.emitError(new Error('Synthetic kill/channel failure'));
+  await assert.rejects(first, /Synthetic kill/);
+  let stopped = false;
+  const retry = f.adapter.stopAll().then(() => {
+    stopped = true;
+  });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(child.kills.length, 2, 'retry still owns and attempts to stop the error-bearing child');
+  assert.equal(stopped, false);
+  f.adapter.disposeAll();
+  assert.equal(child.kills.length, 3, 'final shutdown retries an earlier unconfirmed kill');
+  child.emitExit(null, 'SIGTERM');
+  await retry;
+});
+
+test('terminal receipt settlement keeps running children owned for restoration', async t => {
+  const f = fixture(t, { provider: 'openai' });
+  await submitted(f);
+  f.adapter.settled({ ...f.job(), state: 'COMPLETED' });
+  assert.equal(f.adapter.presence().length, 0, 'settled jobs release observation resources');
+  const stopped = f.adapter.stopAll();
+  assert.equal(f.calls[0].child.kills.length, 1, 'the live child remains owned after settlement');
+  f.calls[0].child.emitExit();
+  await stopped;
+});
+
+test('a submit paused before spawn cannot resume after execution teardown', async t => {
+  const f = fixture(t, { provider: 'openai' });
+  const pending = f.adapter.submit(f.context);
+  await f.adapter.stopAll();
+  await assert.rejects(pending, /shutting down/);
+  assert.equal(f.calls.length, 0, 'teardown closes admission across asynchronous preflight');
+  await assert.rejects(f.adapter.submit(f.context), /shutting down/);
+});
+
 test('failures before any child could spawn throw NotLaunchedError; a spawn throw stays ordinary', async t => {
   // A dirty packet destination — prepareLocalPacket refuses before anything could spawn.
   const dirty = fixture(t);

@@ -1310,6 +1310,16 @@ body {
   min-width: 0;
   color: var(--subtle);
 }
+.browse-field.invalid,
+.browse-field.invalid:hover {
+  border: 2px solid #e5484d;
+  box-shadow: 0 0 0 3px rgba(229, 72, 77, 0.25);
+}
+.browse-field.invalid svg,
+.browse-field.invalid .browse-field-empty {
+  color: #ff6b6f;
+  font-weight: 600;
+}
 .browse-field-hint {
   font-size: 9px;
   color: var(--subtle);

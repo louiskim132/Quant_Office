@@ -525,8 +525,15 @@ export function qroAgentSpawn(deps: QroAgentSpawnDeps): QroAgentSpawn {
 
   function ensureHost(): Promise<void> {
     if (hostState.kind === 'starting') return hostState.ready;
-    if (hostState.kind === 'idle') hostState = { kind: 'starting', ready: startHost() };
-    return hostState.kind === 'starting' ? hostState.ready : Promise.resolve();
+    if (hostState.kind === 'idle') {
+      // Install the starting state before launching: startHost can fail synchronously when the
+      // credential is unreadable. Assigning afterward would erase that failure and its reason.
+      const starting = { kind: 'starting' as const, ready: Promise.resolve() };
+      hostState = starting;
+      starting.ready = startHost();
+      return starting.ready;
+    }
+    return Promise.resolve();
   }
 
   /**

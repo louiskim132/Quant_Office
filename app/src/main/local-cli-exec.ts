@@ -1,4 +1,4 @@
-import { execFile, spawn } from 'node:child_process';
+import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, realpathSync, watch, type FSWatcher } from 'node:fs';
 import path from 'node:path';
@@ -172,7 +172,7 @@ const TASKKILL = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 
  * the run limit, because TerminateProcess stops only the direct child. The isolated host
  * (agent-host.cjs) kills trees the same way. Elsewhere kill() is the plain signal.
  */
-export function spawnTreeKillable(command: string, args: string[], options: CliSpawnOptions): CliChild {
+export function spawnTreeKillable(command: string, args: string[], options: CliSpawnOptions): ChildProcess {
   const child = spawn(command, args, {
     cwd: options.cwd,
     env: options.env,
@@ -279,6 +279,9 @@ export class LocalCliExecAdapter implements ProviderAdapter {
    * informational, never as ownership.
    */
   private readonly registry = new Map<string, SpawnRecord>();
+  // Settlement releases observation resources, but cannot erase ownership before process exit.
+  private readonly ownedChildren = new Map<string, SpawnRecord>();
+  private stopping = false;
   /** Serializes claude launches so consecutive spawns are at least claudeSpawnGapMs apart. */
   private claudeLaunches: Promise<void> = Promise.resolve();
   private lastClaudeLaunchAt = 0;
@@ -449,6 +452,7 @@ export class LocalCliExecAdapter implements ProviderAdapter {
   }
 
   async submit(context: SubmitContext): Promise<SubmitResult> {
+    if (this.stopping) throw new NotLaunchedError('This office execution surface is shutting down.');
     if (this.route === 'LOCAL_ACP' && context.localSession?.provider !== 'devin')
       throw new NotLaunchedError('The installed ACP route supports Devin only.');
     const binding = context.localSession;
@@ -552,6 +556,8 @@ export class LocalCliExecAdapter implements ProviderAdapter {
     if (binding.provider === 'claude' && this.claudeSpawnGapMs > 0) await this.claudeLaunchSlot();
     let child: CliChild;
     try {
+      // Probes and Claude spacing yield; teardown may have started while this submit was waiting.
+      if (this.stopping) throw new NotLaunchedError('This office execution surface is shutting down.');
       // When agent isolation is configured the agent host (QRO-Agent) performs the spawn; the
       // child surface is identical — stdio rides the ACL'd channel files instead of pipes.
       child = (this.spawnAs ?? this.spawnChild)(executable, command.args, {
@@ -613,6 +619,7 @@ export class LocalCliExecAdapter implements ProviderAdapter {
       lastOutputAt: null,
     };
     this.registry.set(binding.jobId, record);
+    this.ownedChildren.set(binding.jobId, record);
     this.announcePresence();
     // A receipt or cancel ack landing in the packet directory is itself the observation trigger —
     // the office never polls. A failed watch degrades to the exit trigger and manual observe,
@@ -629,6 +636,7 @@ export class LocalCliExecAdapter implements ProviderAdapter {
     child.stderr?.on('data', chunk => this.pushChunk(record, 'stderr', String(chunk)));
     child.on('exit', (code, signal) => {
       record.exit = { code, signal, at: this.now() };
+      this.ownedChildren.delete(record.jobId);
       if (record.pendingOut) {
         this.pushLine(record, 'stdout', record.pendingOut);
         record.pendingOut = '';
@@ -736,8 +744,59 @@ export class LocalCliExecAdapter implements ProviderAdapter {
     }
   }
 
-  /** Releases all spawn bookkeeping — the office calls this when it goes away. */
+  /** Stops owned execution before a restore replaces the filesystem the children use. */
+  async stopAll(): Promise<void> {
+    this.stopping = true;
+    await Promise.all(
+      [...this.ownedChildren.values()]
+        .filter(record => !record.exit)
+        .map(
+          record =>
+            new Promise<void>((resolve, reject) => {
+              const timer = setTimeout(() => {
+                record.officeKill = null;
+                reject(new Error('An active agent did not stop; workspace restoration was refused.'));
+              }, 10000);
+              record.child.on('exit', () => {
+                clearTimeout(timer);
+                resolve();
+              });
+              record.child.on('error', error => {
+                clearTimeout(timer);
+                record.officeKill = null;
+                reject(error);
+              });
+              record.officeKill = 'workspace restore';
+              try {
+                if (!record.child.kill()) {
+                  clearTimeout(timer);
+                  record.officeKill = null;
+                  reject(new Error('An active agent could not be stopped; workspace restoration was refused.'));
+                }
+              } catch (error) {
+                clearTimeout(timer);
+                record.officeKill = null;
+                reject(error);
+              }
+            }),
+        ),
+    );
+    this.disposeAll();
+  }
+
+  /** Terminates owned children and releases bookkeeping when the office or controller goes away. */
   disposeAll(): void {
+    this.stopping = true;
+    for (const record of this.ownedChildren.values()) {
+      if (!record.exit) {
+        record.officeKill = 'office shutdown';
+        try {
+          record.child.kill();
+        } catch {
+          /* OS shutdown may already have removed the process. */
+        }
+      }
+    }
     for (const jobId of [...this.registry.keys()]) this.dispose(jobId);
   }
 

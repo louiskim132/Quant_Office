@@ -1138,7 +1138,12 @@ export interface AppInfo {
   packaged: boolean;
   transportModule: boolean;
   transportDetail: string;
+  /** Source commit and release date stamped at build time; empty in development runs. */
+  commit: string;
+  releasedAt: string;
 }
+export type UpdateCheckResult =
+  { status: 'none' } | { status: 'latest' | 'available'; latestVersion: string; latestPublishedAt: string };
 export interface OfficeAPI {
   chooseProjectFolder(): Promise<string | null>;
   /** Choose files to share. Returns paths relative to the given project folder; anything outside it is refused. */
@@ -1258,6 +1263,10 @@ export interface OfficeAPI {
   }>;
   exportResearch(input: { branchId: string }): Promise<FileActionResult>;
   getInfo(): Promise<AppInfo>;
+  /** Ask the project's release page for the newest installer. */
+  checkForUpdate(): Promise<UpdateCheckResult>;
+  /** Download the newer installer found by the last check, verify its digest, start it and close the office. */
+  installUpdate(): Promise<void>;
   /** Create one real, tiny cloud session to find out whether this account can submit at all. */
   verifyCloudTransport(input: {
     provider: Provider;

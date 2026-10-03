@@ -49,11 +49,15 @@ try {
   await page.getByRole('heading', { name: 'The office', exact: true }).waitFor();
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await rail.getByRole('button', { name: /^Agent isolation/ }).click();
-  await page.getByText('Sign in each provider as QRO-Agent, then check it', { exact: true }).waitFor();
+  await page
+    .getByText('Agent isolation is set up. New agent launches now run as the QRO-Agent account.', { exact: true })
+    .waitFor();
+  assert.equal(await page.locator('.iso-providers').getByText('Not checked', { exact: true }).count(), 3);
   for (const provider of ['devin', 'claude', 'openai']) {
     await page.getByRole('button', { name: `Sign in ${provider} for agent account`, exact: true }).waitFor();
-    await page.getByRole('button', { name: `Check ${provider} agent subscription`, exact: true }).waitFor();
+    assert.equal(await page.getByRole('button', { name: `Check ${provider} agent subscription` }).count(), 0);
   }
+  assert.equal(await page.getByRole('button', { name: /^Check/ }).count(), 1, 'one Check isolation button only');
   await page.getByRole('button', { name: 'Sign in devin for agent account', exact: true }).click();
   await page.getByText(/Set up agent isolation first/).waitFor();
   assert.deepEqual(errors, []);

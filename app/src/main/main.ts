@@ -65,6 +65,8 @@ import { runAgentIsolationAcceptance } from './agent-isolation-acceptance.js';
 import { launchIsolatedLogin } from './agent-isolation-login.js';
 import type { Connection, Provider } from '../shared/types.js';
 import { describeError, writeLog } from './diagnostics.js';
+import { BUILD_INFO } from './build-info.js';
+import { checkForUpdate, downloadInstaller, type LatestRelease } from './updates.js';
 let subscriptions: Subscriptions;
 /** The local secrets store — userData root, outside the workspace, so restores never touch it. */
 let secrets: Secrets;
@@ -236,15 +238,6 @@ async function start() {
   mark('recovery');
   store = new OfficeStore(path.join(workspace, 'workspace.sqlite'), {
     includeHistoryInResults: false,
-    // The full-history check runs once the window is up; the open itself replays only the tail.
-    backgroundVerifyDelayMs: 4000,
-    onBackgroundVerifyError: error => {
-      writeLog(logDir(), 'ERROR', `integrity ${describeError(error)}`);
-      dialog.showErrorBox(
-        'Quant Research Office integrity check failed',
-        'The workspace history check running in the background found a problem. Do not trust this session — quit and restore from a backup. Details are in the log folder (Help → Open logs folder).',
-      );
-    },
   });
   mark('store');
   rememberTheme(store.snapshot({ history: false }).settings.theme);
@@ -262,6 +255,12 @@ async function start() {
       shown = Math.round(performance.now() - began);
       win?.show();
     });
+  // Keep the themed loading window visible and responsive, but admit no services, reconciliation
+  // or IPC until the full historical chain and receipts pass. Tail-only open is not launch authority.
+  await loading;
+  await store.verifyInBackground();
+  store.assertHealthy();
+  mark('integrity');
   artifacts = new ArtifactService(store, workspace);
   evidence = new EvidenceService(store, workspace);
   // secrets.dat lives at the userData root — a sibling of workspace/, never inside it.
@@ -411,6 +410,7 @@ function register() {
         )
           throw new Error('Request is not from the trusted desktop window.');
         if (workspaceLocked) throw new Error('The workspace is being restored. Wait for restoration to finish.');
+        if (channel !== 'office:restore') store.assertHealthy();
         // Restore itself owns the lock. Every other handler, including account observations and reads,
         // holds admission until its asynchronous continuation has finished using this workspace.
         if (channel !== 'office:restore') {
@@ -638,11 +638,11 @@ function register() {
     return { ok: true };
   });
   handle('office:provider-key-state', async value => secrets.providerKeyState(providerSchema.parse(value)));
-  // LR-16 agent isolation: status is the credential's presence only — the renderer never sees the
+  // LR-16 agent isolation: status reflects durable required intent — the renderer never sees the
   // password, and the account itself is created/left behind by the consented elevated script.
   handle('office:agent-isolation-status', async value => {
     noInput(value);
-    return { configured: secrets.hasAgentCredential() };
+    return { configured: secrets.isolationRequired() };
   });
   handle('office:agent-isolation-login', async value => {
     const provider = providerSchema.parse(value);
@@ -658,23 +658,33 @@ function register() {
   });
   handle('office:agent-isolation-setup', async value => {
     noInput(value);
-    await setupAgentIsolation({
-      userData: app.getPath('userData'),
-      secrets,
-      toolPath: provider => subscriptions.toolPath(provider),
-      log: line => writeLog(logDir(), 'WARN', line),
-    });
-    // The credential just landed — rebuild so the exec adapter picks up the isolated spawn surface.
-    controller = buildController();
+    await exec?.stopAll();
+    await acp?.stopAll();
+    try {
+      await setupAgentIsolation({
+        userData: app.getPath('userData'),
+        secrets,
+        toolPath: provider => subscriptions.toolPath(provider),
+        log: line => writeLog(logDir(), 'WARN', line),
+      });
+    } finally {
+      // Cancelled elevation and failed credential writes must also replace the stopped adapters.
+      // Rebuild from actual persisted intent, never assume setup succeeded.
+      controller = buildController();
+    }
     changed();
     return { ok: true };
   });
   handle('office:agent-isolation-remove', async value => {
     noInput(value);
-    secrets.removeAgentUser();
-    // Rebuild drops the isolated spawn surface; the Windows account itself is left in place by
-    // design (removing it is the user's Windows admin action, never a silent office effect).
-    controller = buildController();
+    await exec?.stopAll();
+    await acp?.stopAll();
+    try {
+      secrets.removeAgentUser();
+    } finally {
+      // A failed disable keeps its persisted mode and receives fresh execution adapters too.
+      controller = buildController();
+    }
     changed();
     return { ok: true };
   });
@@ -1154,7 +1164,38 @@ function register() {
       packaged: app.isPackaged,
       transportModule: transport.available,
       transportDetail: transport.detail,
+      commit: BUILD_INFO.commit,
+      releasedAt: BUILD_INFO.releasedAt,
     };
+  });
+  // Settings > Version. The install step only uses the release found by the latest check, so the
+  // renderer never chooses what is downloaded or run.
+  let pendingUpdate: LatestRelease | null = null;
+  handle('office:check-update', async value => {
+    noInput(value);
+    pendingUpdate = null;
+    const result = await checkForUpdate(BUILD_INFO);
+    if (result.status === 'none') return { status: 'none' };
+    if (result.status === 'available') pendingUpdate = result.latest;
+    return {
+      status: result.status,
+      latestVersion: result.latest.version,
+      latestPublishedAt: result.latest.publishedAt,
+    };
+  });
+  handle('office:install-update', async value => {
+    noInput(value);
+    if (!app.isPackaged) throw new Error('Updates install only from a packaged build.');
+    if (!pendingUpdate) throw new Error('Check for an update first.');
+    const installer = await downloadInstaller(
+      pendingUpdate,
+      path.join(app.getPath('temp'), 'quant-research-office-update'),
+    );
+    const failure = await shell.openPath(installer);
+    if (failure) throw new Error(`Could not start the installer: ${failure}`);
+    writeLog(logDir(), 'INFO', `update installer started commit=${pendingUpdate.commit}`);
+    // The installer closes any remaining window itself; quitting first releases the program files.
+    setTimeout(() => app.quit(), 500);
   });
   handle('office:command', async value => {
     if (transferBusy) throw new Error('Wait for the file operation to finish.');
@@ -1626,6 +1667,12 @@ function register() {
           return { canceled: true, count: 0, message: '', state: store.snapshot({ history: false }) };
         }
         subscriptions.cancel();
+        // Stop every old-workspace execution surface before its database is closed. Restored
+        // verification may take time or fail; neither case may leave old agents running.
+        await exec?.stopAll();
+        await acp?.stopAll();
+        agentHost?.shutdown();
+        agentHost = undefined;
         store.close();
         try {
           await commitRestore(root, prepared.transactionId);
@@ -1644,6 +1691,8 @@ function register() {
           store = new OfficeStore(path.join(workspaceDirectory(root), 'workspace.sqlite'), {
             includeHistoryInResults: false,
           });
+          await store.verifyInBackground();
+          store.assertHealthy();
           artifacts = new ArtifactService(store, workspaceDirectory(root));
           evidence = new EvidenceService(store, workspaceDirectory(root));
           controller = buildController();
@@ -1687,10 +1736,12 @@ function buildController(): AssignmentController {
   // pid dies, so a missed shutdown costs it at most one watchdog tick.
   agentHost?.shutdown();
   agentHost = undefined;
-  // LR-16: when the agent account credential exists, agent CLIs spawn through the QRO-Agent host
-  // instead of under the office account. `QRO_AGENT_ISOLATION=off` is the documented dev/test/CI
-  // escape hatch; with no credential the adapter self-spawns and records runAs 'self' either way.
-  if (secrets.hasAgentCredential() && process.env.QRO_AGENT_ISOLATION !== 'off')
+  // LR-16: durable isolation intent keeps agent CLIs on the QRO-Agent host route even if DPAPI
+  // cannot read the credential. The host then fails closed instead of falling back to self.
+  // The environment escape hatch is for unpackaged developer runs only. Shipped apps require the
+  // explicit Settings disable action to change persisted intent, so inherited test env cannot
+  // silently undo configured isolation. Without intent the adapter records runAs 'self'.
+  if (secrets.isolationRequired() && (app.isPackaged || process.env.QRO_AGENT_ISOLATION !== 'off'))
     agentHost = qroAgentSpawn({
       secrets,
       agentsRoot: path.join(workspace(), 'local-sessions'),

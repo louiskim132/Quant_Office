@@ -44,6 +44,15 @@ try {
   await modal
     .getByLabel('Research mandate')
     .fill('Compare out-of-sample volatility estimates without changing the protected region.');
+  // A project needs a folder on this device: creating without one is refused with a visible error.
+  await modal.getByRole('button', { name: 'Create project', exact: true }).click();
+  await modal.locator('.browse-field.invalid').getByText('Choose a project folder to create the project').waitFor();
+  const projectFolder = await mkdtemp(path.join(tmpdir(), 'qro-project-'));
+  await application!.evaluate(({ dialog }, dir) => {
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [dir] });
+  }, projectFolder);
+  await modal.locator('.browse-field').click();
+  await modal.getByText(projectFolder, { exact: true }).waitFor();
   await modal.getByRole('button', { name: 'Create project', exact: true }).click();
   await modal.waitFor({ state: 'hidden' });
   await page.getByRole('button', { name: 'Office', exact: true }).click();
@@ -264,6 +273,8 @@ try {
       'command',
       'exportProject',
       'getInfo',
+      'checkForUpdate',
+      'installUpdate',
       'getState',
       'migrateLegacyRecords',
       'historyPage',

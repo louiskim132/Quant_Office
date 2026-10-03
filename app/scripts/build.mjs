@@ -1,9 +1,25 @@
 import { build } from 'esbuild';
 import { copyFile, mkdir, writeFile, readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { PNG } from 'pngjs';
+import { resetGeneratedDirectory } from './staging.mjs';
 
 const root = resolve(import.meta.dirname, '..');
+// Release identity for Settings > Version: the source commit and its commit date, so the same
+// commit always builds the same stamp.
+const git = args => {
+  try {
+    return execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
+  } catch {
+    return '';
+  }
+};
+const buildInfo = {
+  __QRO_COMMIT__: JSON.stringify(git(['rev-parse', 'HEAD'])),
+  __QRO_RELEASED_AT__: JSON.stringify(git(['log', '-1', '--format=%cI'])),
+};
+await resetGeneratedDirectory(root, resolve(root, 'dist'));
 await mkdir(resolve(root, 'dist/renderer'), { recursive: true });
 await mkdir(resolve(root, 'dist/main'), { recursive: true });
 await mkdir(resolve(root, 'dist/assets'), { recursive: true });
@@ -17,6 +33,7 @@ await Promise.all([
     format: 'cjs',
     external: ['electron', 'node:*', 'node-pty'],
     sourcemap: false,
+    define: buildInfo,
   }),
   build({
     entryPoints: [resolve(root, 'src/main/preload.ts')],

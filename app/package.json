@@ -1,7 +1,7 @@
 {
   "name": "quant-research-office",
   "productName": "Quant Research Office",
-  "version": "0.5.0",
+  "version": "0.0.1",
   "description": "A private desktop workspace for provider-hosted quant research teams.",
   "private": true,
   "type": "module",

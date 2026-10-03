@@ -359,6 +359,23 @@ test('secrets: the agent credential round-trips through the stub SecretBox', () 
   }
 });
 
+test('required isolation with unreadable credentials refuses the default host launch after restart', async t => {
+  const dir = root(t);
+  new Secrets(dir, stubBox()).saveAgentUser(AGENT_USERNAME, 'synthetic-password');
+  const secrets = new Secrets(dir, stubBox(false));
+  assert.equal(secrets.isolationRequired(), true);
+  assert.equal(secrets.agentCredential(), null);
+  const agentsRoot = path.join(dir, 'workspace', 'local-sessions');
+  const sessionDir = path.join(agentsRoot, 'session-a');
+  mkdirSync(sessionDir, { recursive: true });
+  const spawnAs = qroAgentSpawn({ secrets, agentsRoot, hostSource: HOST_SOURCE });
+  t.after(() => spawnAs.shutdown());
+  const child = spawnAs(process.execPath, ['-e', 'throw new Error("must never execute")'], OPTS(sessionDir));
+  const result = await settle(collect(child).settled, 'unreadable credential refusal', agentsRoot);
+  if (result.kind !== 'error') assert.fail(`expected isolation refusal, got exit ${result.code}`);
+  assert.match(result.error.message, /no agent account credential is saved/);
+});
+
 test('buildAclPlan produces the exact icacls argument vectors', () => {
   const plan = buildAclPlan({
     username: 'QRO-Agent',

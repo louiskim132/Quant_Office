@@ -65,7 +65,7 @@ export async function launchIsolatedLogin(input: {
           ]),
       "  if ($exit -ne 0) { $again = Read-Host 'Sign-in did not finish. Press Enter to try again here, or type Q to stop' }",
       "} while ($exit -ne 0 -and $again -ne 'q')",
-      "Read-Host 'Close this window, then check the agent subscription in QRO'",
+      "Read-Host 'Close this window, then click Check isolation in QRO'",
     ].join('\r\n'),
     'utf8',
   );

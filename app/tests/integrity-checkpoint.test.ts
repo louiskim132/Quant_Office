@@ -171,6 +171,45 @@ test('a tampered prefix row passes the fast open but fails the background verify
   // The prefix event's missing receipt is only found by a full scan: the tail replay opens cleanly.
   holder.store = new OfficeStore(file);
   await assert.rejects(holder.store.verifyInBackground(), /receipt integrity/);
+  const before = tip(file);
+  assert.throws(
+    () =>
+      holder.store!.execute({
+        type: 'project.create',
+        idempotencyKey: randomUUID(),
+        name: 'Blocked',
+        mandate: 'm',
+        budgetCents: 0,
+      }),
+    /integrity check failed/,
+  );
+  assert.throws(() => holder.store!.recordAccountObservation(observation(2)), /integrity check failed/);
+  assert.throws(() => holder.store!.assertHealthy(), /integrity check failed/);
+  assert.deepEqual(tip(file), before, 'no event is appended after verification fails');
+  assert.equal(holder.store.snapshot().projects.length, 1, 'read access remains available for recovery');
+});
+
+test('a mutation cannot race the delayed full verification of a corrupt checkpoint prefix', async t => {
+  const { file, holder } = fixture(t);
+  holder.store = new OfficeStore(file);
+  holder.store.execute({
+    type: 'project.create',
+    idempotencyKey: randomUUID(),
+    name: 'Original',
+    mandate: 'm',
+    budgetCents: 0,
+  });
+  holder.store.recordAccountObservation(observation(0));
+  await holder.store.verifyInBackground();
+  holder.store.close();
+  const db = new DatabaseSync(file);
+  db.exec('DELETE FROM commands');
+  db.close();
+  holder.store = new OfficeStore(file, { backgroundVerifyDelayMs: 150 });
+  const before = tip(file);
+  assert.throws(() => holder.store!.recordAccountObservation(observation(1)), /receipt integrity/);
+  await assert.rejects(holder.store.verifyInBackground(), /receipt integrity/);
+  assert.deepEqual(tip(file), before);
 });
 
 test('downgrade accepts a v6 workspace', async t => {

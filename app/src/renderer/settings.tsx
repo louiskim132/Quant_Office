@@ -10,10 +10,11 @@ import {
   Minus,
   Palette,
   Plug,
+  RefreshCw,
   ShieldCheck,
   X,
 } from 'lucide-react';
-import type { AppInfo, AppState, Command, Connection, Provider } from '../shared/types';
+import type { AppInfo, AppState, Command, Connection, Provider, UpdateCheckResult } from '../shared/types';
 import { providerReadiness, currentConnection } from '../shared/readiness';
 import { TRANSPORT_PROBE_CONTAINMENT } from '../shared/transport';
 import { Dot, Segmented, Switch, type Tone } from './components';
@@ -33,7 +34,7 @@ import './settings.css';
 
 type CommandInput = Command extends infer C ? (C extends Command ? Omit<C, 'idempotencyKey'> : never) : never;
 export type SettingsSection =
-  'connections' | 'isolation' | 'notifications' | 'appearance' | 'controls' | 'data' | 'about';
+  'connections' | 'isolation' | 'notifications' | 'appearance' | 'controls' | 'data' | 'version' | 'about';
 
 const PROVIDERS: Provider[] = ['claude', 'openai', 'devin'];
 const providerCopy: Record<Provider, { name: string; plan: string; glyph: string }> = {
@@ -151,6 +152,7 @@ export function SettingsPage({
     { id: 'appearance', label: 'Appearance', icon: Palette },
     { id: 'controls', label: 'Controls', icon: Keyboard },
     { id: 'data', label: 'Data & recovery', icon: Database },
+    { id: 'version', label: 'Version', icon: RefreshCw },
     { id: 'about', label: 'About', icon: Info },
   ];
   return (
@@ -333,6 +335,7 @@ export function SettingsPage({
             </div>
           </Pane>
         )}
+        {section === 'version' && <VersionPane info={info} />}
         {section === 'about' && (
           <Pane title="About" lead={`Quant Research Office · desktop ${info?.version ?? ''}`.trim()}>
             <div className="boundary-grid">
@@ -356,6 +359,90 @@ export function SettingsPage({
         )}
       </div>
     </div>
+  );
+}
+
+/** Settings > Version: this build's identity, a release check and the one-click update. */
+function VersionPane({ info }: { info: AppInfo | null }) {
+  const [busy, setBusy] = useState<'' | 'check' | 'update'>(''),
+    [result, setResult] = useState<UpdateCheckResult | null>(null),
+    [notice, setNotice] = useState(''),
+    [error, setError] = useState('');
+  async function check() {
+    setBusy('check');
+    setError('');
+    setNotice('');
+    try {
+      setResult(await window.office.checkForUpdate());
+    } catch (e) {
+      setResult(null);
+      setError((e as Error).message);
+    } finally {
+      setBusy('');
+    }
+  }
+  async function update() {
+    setBusy('update');
+    setError('');
+    setNotice('Downloading and checking the update...');
+    try {
+      await window.office.installUpdate();
+      setNotice('The installer has started. The office will close so it can finish.');
+    } catch (e) {
+      setNotice('');
+      setError((e as Error).message);
+      setBusy('');
+    }
+  }
+  const released = info?.releasedAt ? formatDateTime(info.releasedAt) : 'Development build';
+  return (
+    <Pane title="Version" lead="Which release you are running, and whether a newer one is out.">
+      <div className="settings-group">
+        <Row
+          title="Your version"
+          hint={info?.commit ? `Build ${info.commit.slice(0, 7)}` : ''}
+          control={<strong>{info?.version ?? '...'}</strong>}
+        />
+        <Row title="Released" hint="When this build's source was finalised." control={<span>{released}</span>} />
+      </div>
+      <div className="version-actions">
+        <div className="settings-check-row">
+          <button className="primary" disabled={!!busy} aria-busy={busy === 'check'} onClick={() => void check()}>
+            {busy === 'check' ? 'Checking...' : 'Check update'}
+          </button>
+          <p role="status">
+            {result?.status === 'none'
+              ? 'No release has been published yet.'
+              : result
+                ? `Latest release: ${result.latestVersion || 'unnamed'}, released ${formatDateTime(result.latestPublishedAt)}`
+                : ''}
+          </p>
+        </div>
+        {result?.status === 'latest' && <p className="notice">Your version is latest!</p>}
+        <div className="button-row">
+          <button
+            className="secondary"
+            disabled={!!busy || result?.status !== 'available'}
+            aria-busy={busy === 'update'}
+            onClick={() => void update()}
+          >
+            {busy === 'update' ? 'Updating...' : 'Update'}
+          </button>
+        </div>
+      </div>
+      {result?.status === 'available' && !notice && (
+        <p className="muted">
+          Update downloads the new installer, checks it against the published digest, then closes the office and
+          installs it. Your workspace is kept.
+        </p>
+      )}
+      {notice && <p className="notice">{notice}</p>}
+      {error && (
+        <p className="notice error" role="alert">
+          {error}
+        </p>
+      )}
+    </Pane>
   );
 }
 
@@ -809,28 +896,14 @@ export function AgentIsolation({ isolation }: { isolation: ReturnType<typeof use
     [error, setError] = useState(''),
     [notice, setNotice] = useState(''),
     [signins, setSignins] = useState<Partial<Record<Provider, { account?: string; at: string }>>>({});
-  /** Official sign-in as QRO-Agent (opens its own window), or a fresh check through the isolated host. */
-  async function agentSubscription(provider: Provider, login: boolean) {
+  /** Official sign-in as QRO-Agent; it opens its own window and is confirmed by the next isolation check. */
+  async function agentLogin(provider: Provider) {
     setBusy('verify');
     setError('');
     setNotice('');
     try {
-      if (login) {
-        await window.office.agentIsolationLogin(provider);
-        setNotice(`Finish the ${providerCopy[provider].name} sign-in in the QRO-Agent window, then check it here.`);
-      } else {
-        const connection = await window.office.connectionStatus(provider);
-        const at = new Date().toISOString();
-        setSignins(prev => ({
-          ...prev,
-          [provider]: { account: connection.connected ? connection.account : undefined, at },
-        }));
-        if (connection.connected && connection.account)
-          setNotice(
-            `${providerCopy[provider].name} verified for QRO-Agent as ${connection.account}. Prepare new work to use it.`,
-          );
-        else setError(connection.note || `${providerCopy[provider].name} is not signed in for QRO-Agent.`);
-      }
+      await window.office.agentIsolationLogin(provider);
+      setNotice(`Finish the ${providerCopy[provider].name} sign-in in the QRO-Agent window, then check isolation.`);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -852,6 +925,7 @@ export function AgentIsolation({ isolation }: { isolation: ReturnType<typeof use
       setBusy('');
     }
   }
+  /** One check for everything: the isolation boundary, then each provider's sign-in through the isolated host. */
   async function verify() {
     setBusy('verify');
     setError('');
@@ -862,11 +936,26 @@ export function AgentIsolation({ isolation }: { isolation: ReturnType<typeof use
       const failed = Object.entries(result.checks)
         .filter(([, ok]) => !ok)
         .map(([name]) => name);
+      const at = new Date().toISOString();
+      const accounts = await Promise.all(
+        SIGNIN_PROVIDERS.map(async provider => {
+          try {
+            const connection = await window.office.connectionStatus(provider);
+            return [provider, connection.connected ? connection.account : undefined] as const;
+          } catch {
+            return [provider, undefined] as const;
+          }
+        }),
+      );
+      setSignins(Object.fromEntries(accounts.map(([provider, account]) => [provider, { account, at }])));
+      const signedIn = accounts.filter(([, account]) => account).length;
+      const summary = `${signedIn} of ${SIGNIN_PROVIDERS.length} providers signed in.`;
       if (result.passed)
         setNotice(
-          `Isolation check passed: all ${Object.keys(result.checks).length} checks. Evidence saved to ${result.evidencePath}`,
+          `Isolation check passed: all ${Object.keys(result.checks).length} checks. ${summary} Evidence saved to ${result.evidencePath}`,
         );
-      else setError(`Isolation check failed: ${failed.join(', ')}. Evidence saved to ${result.evidencePath}`);
+      else
+        setError(`Isolation check failed: ${failed.join(', ')}. ${summary} Evidence saved to ${result.evidencePath}`);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -1015,7 +1104,7 @@ export function AgentIsolation({ isolation }: { isolation: ReturnType<typeof use
                       className="secondary"
                       disabled={!!busy}
                       aria-label={`Sign in ${provider} for agent account`}
-                      onClick={() => void agentSubscription(provider, true)}
+                      onClick={() => void agentLogin(provider)}
                     >
                       Sign in {providerCopy[provider].name}
                     </button>
@@ -1043,14 +1132,6 @@ export function AgentIsolation({ isolation }: { isolation: ReturnType<typeof use
                                 : 'Not checked'}
                             {signins[provider] && <small>Checked {formatDateTime(signins[provider]!.at)}</small>}
                           </span>
-                          <button
-                            className="text-button"
-                            disabled={!!busy}
-                            aria-label={`Check ${provider} agent subscription`}
-                            onClick={() => void agentSubscription(provider, false)}
-                          >
-                            Check
-                          </button>
                         </div>
                       </td>
                     </tr>

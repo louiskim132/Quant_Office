@@ -1705,6 +1705,8 @@ export class OfficeStore {
   private projectionText: string | null = null;
   private closed = false;
   private needsBackgroundVerify = false;
+  private integrityFailure: unknown;
+  private verification: Promise<void> | undefined;
   private researchIndexReady = false;
   private readonly researchAdmission: ResearchAdmission;
   private readonly includeHistoryInResults: boolean;
@@ -1878,6 +1880,20 @@ export class OfficeStore {
 
   private assertOpen(): void {
     if (this.closed) throw new Error('Workspace is closed');
+  }
+  /** Admission for mutations and execution: an unchecked checkpoint is never write authority. */
+  assertHealthy(): void {
+    this.assertOpen();
+    if (this.integrityFailure) throw new Error('Workspace integrity check failed; quit and restore a verified backup.');
+    if (this.needsBackgroundVerify) {
+      try {
+        this.verifyIntegrity();
+        this.needsBackgroundVerify = false;
+      } catch (error) {
+        this.integrityFailure = error;
+        throw error;
+      }
+    }
   }
   /** Maintains the derived read indexes for one event. Never a source of truth. */
   private indexEvent(event: StoredEvent): void {
@@ -2160,7 +2176,20 @@ export class OfficeStore {
    * the checkpoint to the tip it captured before scanning. Resolves without verifying when the
    * store is closed mid-run — closing during a background pass is normal.
    */
-  async verifyInBackground(): Promise<void> {
+  verifyInBackground(): Promise<void> {
+    if (this.integrityFailure) return Promise.reject(this.integrityFailure);
+    if (this.verification) return this.verification;
+    this.verification = this.verifyHistoryInBackground()
+      .catch(error => {
+        this.integrityFailure = error;
+        throw error;
+      })
+      .finally(() => {
+        this.verification = undefined;
+      });
+    return this.verification;
+  }
+  private async verifyHistoryInBackground(): Promise<void> {
     let scan = await this.scanHistoryInPages();
     for (let attempt = 0; scan; attempt++) {
       // The scan verified events through its tip, but the aggregate reads below see live tables. If a
@@ -2171,6 +2200,7 @@ export class OfficeStore {
       );
       if (currentTip === scan.tip) {
         this.finishHistoryScan(scan);
+        this.needsBackgroundVerify = false;
         return;
       }
       // Opening the office itself appends events (each provider's account check lands within seconds),
@@ -4997,7 +5027,7 @@ export class OfficeStore {
   }
 
   private transaction(operation: () => void): AppState {
-    this.assertOpen();
+    this.assertHealthy();
     this.db.exec('BEGIN IMMEDIATE');
     try {
       operation();

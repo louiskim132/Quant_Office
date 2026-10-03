@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { subscriptionEnvironment } from './subscriptions.js';
 import type { Provider } from '../shared/types.js';
@@ -84,7 +84,9 @@ function parseFile(parsed: unknown): SecretsFile {
  */
 export class Secrets {
   private readonly file: string;
+  private readonly isolationFile: string;
   private unavailableLogged = false;
+  private unreadableLogged = false;
   constructor(
     root: string,
     private readonly box: SecretBox = electronSecretBox(),
@@ -92,35 +94,76 @@ export class Secrets {
     private readonly now: () => string = () => new Date().toISOString(),
   ) {
     this.file = path.join(root, 'secrets.dat');
+    this.isolationFile = path.join(root, 'agent-isolation.json');
   }
   /**
-   * The decrypted payload, or the empty state when the file is absent. An undecryptable or
-   * corrupt file is renamed aside to `secrets.broken-<ISO-ts>.dat` once, logged once, and read as
-   * empty — secrets never crash open. A box that reports unavailable leaves the file alone: it
-   * may be perfectly readable on the next launch, so nothing is renamed.
+   * Unreadable credentials remain byte-for-byte in place for recovery. Reads may report missing
+   * keys, but mutations must refuse rather than overwrite other keys with an empty payload.
    */
-  private read(): SecretsFile {
+  private read(forWrite = false): SecretsFile {
     if (!existsSync(this.file)) return EMPTY;
     if (!this.box.available()) {
       if (!this.unavailableLogged) {
         this.unavailableLogged = true;
         this.log?.('secrets: encrypted storage is unavailable; saved keys are not readable this session');
       }
+      if (forWrite) throw new Error('Windows encrypted storage is unavailable; the key was not saved.');
       return EMPTY;
     }
     try {
       const blob = Buffer.from(readFileSync(this.file, 'utf8').trim(), 'base64');
       return parseFile(JSON.parse(this.box.decrypt(blob)));
     } catch {
-      const broken = `secrets.broken-${this.now().replaceAll(':', '-')}.dat`;
-      try {
-        renameSync(this.file, path.join(path.dirname(this.file), broken));
-      } catch {
-        /* a failed rename still leaves the file unreadable, which is the honest empty state */
+      if (!this.unreadableLogged) {
+        this.unreadableLogged = true;
+        this.log?.('secrets: secrets.dat could not be decrypted or parsed; preserved for recovery');
       }
-      this.log?.(`secrets: secrets.dat could not be decrypted or parsed; renamed to ${broken}`);
+      if (forWrite)
+        throw new Error('Saved credentials could not be read; restore encrypted storage before changing keys.');
       return EMPTY;
     }
+  }
+  private writeIsolationRequired(required: boolean): void {
+    mkdirSync(path.dirname(this.isolationFile), { recursive: true });
+    const tmp = `${this.isolationFile}.tmp`;
+    writeFileSync(tmp, JSON.stringify({ version: 1, required }), 'utf8');
+    renameSync(tmp, this.isolationFile);
+  }
+  /**
+   * Dispatch intent is independent of DPAPI availability. Existing readable credentials migrate
+   * on first use. Unreadable legacy files (including old quarantined files) conservatively require
+   * isolation until the user explicitly disables it; they must never authorize self execution.
+   */
+  isolationRequired(): boolean {
+    try {
+      const state = JSON.parse(readFileSync(this.isolationFile, 'utf8'));
+      if (state.version === 1 && typeof state.required === 'boolean') return state.required;
+      return true;
+    } catch (error) {
+      // Only actual absence permits legacy migration. Access errors cannot authorize a downgrade.
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return true;
+    }
+    let required = false;
+    try {
+      try {
+        statSync(this.file);
+        required = Boolean(this.read(true).agentUser);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') required = true;
+      }
+      if (!required && existsSync(path.dirname(this.file)))
+        required = readdirSync(path.dirname(this.file)).some(name => /^secrets\.broken-.+\.dat$/.test(name));
+    } catch {
+      required = true;
+    }
+    if (required) {
+      try {
+        this.writeIsolationRequired(true);
+      } catch {
+        // Still require the isolated route in this session; the legacy bytes survive restart.
+      }
+    }
+    return required;
   }
   /** Writes are atomic-ish: encrypt to secrets.dat.tmp, then rename over secrets.dat. */
   private write(payload: SecretsFile): void {
@@ -133,25 +176,26 @@ export class Secrets {
   }
   // Returns plaintext — callers may hand it to process env only; never log, persist, serialize or send it.
   providerKey(provider: Provider): string | null {
-    return this.read().providers[provider]?.key ?? null;
+    return this.read(true).providers[provider]?.key ?? null;
   }
   saveProviderKey(provider: Provider, key: string): void {
     if (!key) throw new Error('An empty key was not saved.');
-    const current = this.read();
+    const current = this.read(true);
     this.write({ ...current, providers: { ...current.providers, [provider]: { key, savedAt: this.now() } } });
   }
   removeProviderKey(provider: Provider): void {
-    const current = this.read();
+    const current = this.read(true);
     if (!(provider in current.providers)) return;
     const providers = { ...current.providers };
     delete providers[provider];
     this.write({ ...current, providers });
   }
   providerKeyState(provider: Provider): { saved: boolean; savedAt?: string } {
-    const entry = this.read().providers[provider];
+    // This also chooses the subscription observation mode; unreadability must never mean absent.
+    const entry = this.read(true).providers[provider];
     return entry ? { saved: true, savedAt: entry.savedAt } : { saved: false };
   }
-  /** The LR-16 low-privilege agent account credential — presence IS the isolation mode. */
+  /** Credential availability only. Dispatch must consult isolationRequired instead. */
   hasAgentCredential(): boolean {
     return Boolean(this.read().agentUser);
   }
@@ -165,7 +209,9 @@ export class Secrets {
    */
   saveAgentUser(user: string, password: string): void {
     if (!user || !password) throw new Error('An agent account name and password are required.');
-    const current = this.read();
+    const current = this.read(true);
+    // Persist intent first: a crash or failed encrypted write may block, but cannot downgrade.
+    this.writeIsolationRequired(true);
     this.write({ ...current, agentUser: { user, password, savedAt: this.now() } });
   }
   /**
@@ -174,11 +220,18 @@ export class Secrets {
    * never something this office does silently).
    */
   removeAgentUser(): void {
-    const current = this.read();
-    if (!current.agentUser) return;
-    const next = { ...current };
-    delete next.agentUser;
-    this.write(next);
+    let current: SecretsFile | undefined;
+    try {
+      current = this.read(true);
+    } catch {
+      // Explicit disable remains possible when DPAPI is unavailable. Preserve recovery bytes.
+    }
+    if (current?.agentUser) {
+      const next = { ...current };
+      delete next.agentUser;
+      this.write(next);
+    }
+    this.writeIsolationRequired(false);
   }
 }
 
