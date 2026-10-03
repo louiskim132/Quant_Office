@@ -307,6 +307,7 @@ function App() {
   /** The request whose detail panel is open on the Office page. */
   const [openRequestId, setOpenRequestId] = useState<string | null>(null);
   const [localFolder, setLocalFolder] = useState<string | null>(null);
+  const [folderMissing, setFolderMissing] = useState(false);
   const [requestMode, setRequestMode] = useState<WorkMode>('SINGLE');
   const [requestWorkType, setRequestWorkType] = useState<WorkType>('PLANNING');
   /** The project picked in the New request dialog — '' until the user changes the select. */
@@ -441,6 +442,7 @@ function App() {
   }
   useEffect(() => {
     setLocalFolder(null);
+    setFolderMissing(false);
   }, [modal]);
   // The location record is the scope the snapshot scan reads; the project field is the display copy.
   // Seeding the dialog from the record keeps Edit project showing the folder that is actually shared.
@@ -458,6 +460,11 @@ function App() {
         cloudWorkspace: String(form.get('cloudWorkspace') ?? ''),
       };
       if (!data.name) throw new Error('Give the project a name.');
+      if (!data.localFolder) {
+        // Flagged on the folder field itself, where the fix is, rather than in the form's error line.
+        setFolderMissing(true);
+        return;
+      }
       const next = await command(
         modal === 'edit-project' && project
           ? { type: 'project.update', projectId, ...data }
@@ -1158,12 +1165,16 @@ function App() {
                   Project folder on this device
                   <button
                     type="button"
-                    className="browse-field"
+                    className={folderMissing ? 'browse-field invalid' : 'browse-field'}
+                    aria-invalid={folderMissing || undefined}
                     onClick={() =>
                       void window.office
                         .chooseProjectFolder()
                         .then(folder => {
-                          if (folder) setLocalFolder(folder);
+                          if (folder) {
+                            setLocalFolder(folder);
+                            setFolderMissing(false);
+                          }
                         })
                         .catch(fail)
                     }
@@ -1174,7 +1185,9 @@ function App() {
                         {localFolder ?? savedScopeFolder}
                       </span>
                     ) : (
-                      <span className="browse-field-empty">Choose a folder…</span>
+                      <span className="browse-field-empty">
+                        {folderMissing ? 'Choose a project folder to create the project' : 'Choose a folder…'}
+                      </span>
                     )}
                     <span className="browse-field-hint">Browse</span>
                   </button>

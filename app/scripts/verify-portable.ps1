@@ -1,4 +1,4 @@
-param([Parameter(Mandatory = $true)][string]$PackageDirectory)
+param([Parameter(Mandatory = $true)][string]$PackageDirectory, [switch]$Installed)
 $ErrorActionPreference = 'Stop'
 $releaseRoot = (Resolve-Path -LiteralPath $PackageDirectory).Path.TrimEnd('\')
 if ((Get-Item -LiteralPath $releaseRoot).Attributes -band [IO.FileAttributes]::ReparsePoint) {
@@ -16,7 +16,10 @@ function Get-ReleaseFiles([string]$Directory) {
         else { $entry }
     }
 }
-$actualFiles = @(Get-ReleaseFiles $releaseRoot | Where-Object { $_.FullName -ne (Join-Path $releaseRoot 'qro-release.json') })
+# An installed copy also holds the Inno Setup uninstaller (unins000.exe/.dat) at its root, and nothing else extra.
+$extras = @(Join-Path $releaseRoot 'qro-release.json')
+if ($Installed) { $extras += (Join-Path $releaseRoot 'unins000.exe'), (Join-Path $releaseRoot 'unins000.dat') }
+$actualFiles = @(Get-ReleaseFiles $releaseRoot | Where-Object { $extras -notcontains $_.FullName })
 if ($actualFiles.Count -ne $releaseManifest.files.Count) { throw 'Portable inventory file count differs.' }
 $seenPaths = @{}
 foreach ($expected in $releaseManifest.files) {

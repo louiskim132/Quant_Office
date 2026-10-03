@@ -50,6 +50,12 @@ try {
   const projectDialog = page.getByRole('dialog', { name: 'Create a project' });
   await projectDialog.getByLabel('Project name').fill('Pipeline office');
   await projectDialog.getByLabel('Research mandate').fill('Exercise the pipeline request flow.');
+  const projectFolder = await mkdtemp(path.join(tmpdir(), 'qro-pipeline-project-'));
+  await application.evaluate(({ dialog }, dir) => {
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [dir] });
+  }, projectFolder);
+  await projectDialog.locator('.browse-field').click();
+  await projectDialog.getByText(projectFolder, { exact: true }).waitFor();
   await projectDialog.getByRole('button', { name: 'Create project', exact: true }).click();
   await projectDialog.waitFor({ state: 'hidden' });
   await page.getByRole('button', { name: 'Office', exact: true }).click();
