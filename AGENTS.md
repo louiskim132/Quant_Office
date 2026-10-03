@@ -24,6 +24,11 @@ Rules for every coding agent (Claude Code, Codex, Devin) working in this reposit
 - On integration the organizer appends a dated entry at the end of roadmap section 17 and updates the matching section 11 row. Date entries with the local date of the recorded commit (`git log -1 --date=short-local`), not UTC.
 - After an integrated change touching `app/`, the organizer rebuilds and repackages (`node scripts/build.mjs && node scripts/package.mjs` from `app`), confirms the installed app is closed, mirrors the release into `Quant Office\App\` (the taskbar pin's target), and records the SHA-256 of `App\resources\app.asar` in the entry.
 
+- **Basic packet.** Every round that changes the product or its status ends by updating these three records, in the same change or the integration PR:
+  1. **Revision log:** what was done, with commits and actual test results. In Git, a `records/reviews/<topic>-<date>.md` record; outside Git, a row in `Quant Office\Docs\Logs\README.md` pointing at it.
+  2. **Roadmap:** a dated entry at the end of `docs/ROADMAP.md` section 17 and the matching section 11 row; outside Git, the open-gates table in `Quant Office\Docs\Roadmap\README.md`.
+  3. **Bug and flaw log:** `docs/BUG-LOG.md`. Add every bug, flaw or rough edge found, including ones fixed in the same round, and update the status of the ones fixed.
+
 ## Desktop batch
 
 - In a configured batch, do not infer work from chat or the roadmap. Session 8 publishes with `node tools/desktop.mjs publish`; Sessions 1–7 act only on the packet `node tools/desktop.mjs start` returns and submit with `finish` or `block`. Only Session 8 accepts, rejects, reopens, updates the roadmap and closes the round. The operating manual is `docs/DESKTOP-SESSIONS.md`.
